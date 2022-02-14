@@ -26,4 +26,3 @@ Run the code
 source WRemnants/setup.sh
 python WRemnants/scripts/histmakers/mw_with_mu_eta_pt.py
 ```
-test
