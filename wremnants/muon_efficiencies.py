@@ -11,10 +11,9 @@ data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 def make_muon_efficiency_helpers(filename = data_dir + "/testMuonSF/scaleFactorProduct_28Oct2021_nodz_dxybs_genMatchDR01.root", era = None, is_w_like = False, max_pt = np.inf):
 
-    if era == "GToH":
-        era = "GtoH"
-    elif era == "BToF":
-        era = "BtoF"
+    eradict = { "2016PreVFP" : "BtoF",
+                "2016PostVFP" : "GtoH" }
+    eratag = eradict[era]
 
     axis_eta_eff = None
     axis_pt_eff = None
@@ -43,12 +42,12 @@ def make_muon_efficiency_helpers(filename = data_dir + "/testMuonSF/scaleFactorP
     for charge, charge_tag in charges.items():
         for eff_type, eff_type_tag in eff_types.items():
             for nom_syst, nom_syst_tag in nom_systs.items():
-                hist_name = f"fullSF2D_{nom_syst_tag}_{eff_type_tag}{charge_tag}_{era}"
+                hist_name = f"fullSF2D_{nom_syst_tag}_{eff_type_tag}{charge_tag}_{eratag}"
                 hist_root = fin.Get(hist_name)
                 #print(ROOT.AddressOf(hist_root))
                 # might not have a charge specific version
                 if not isinstance(hist_root, ROOT.TH1):
-                    hist_name = f"fullSF2D_{nom_syst_tag}_{eff_type_tag}_{era}"
+                    hist_name = f"fullSF2D_{nom_syst_tag}_{eff_type_tag}_{eratag}"
                     hist_root = fin.Get(hist_name)
 
                 hist_hist = narf.root_to_hist(hist_root, axis_names = ["SF eta", "SF pt"])
@@ -71,7 +70,7 @@ def make_muon_efficiency_helpers(filename = data_dir + "/testMuonSF/scaleFactorP
 
     # tracking and reco SFs
     for nom_syst, nom_syst_tag in nom_systs.items():
-        hist_name = f"fullSF2D_{nom_syst_tag}_trackingReco_{era}"
+        hist_name = f"fullSF2D_{nom_syst_tag}_trackingReco_{eratag}"
         hist_root = fin.Get(hist_name)
         hist_hist = narf.root_to_hist(hist_root, axis_names = ["SF eta", "SF pt"])
 

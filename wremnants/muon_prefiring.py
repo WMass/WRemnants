@@ -10,14 +10,16 @@ def make_muon_prefiring_helpers(filename = data_dir + "/testMuonSF/L1MuonPrefiri
 
     fin = ROOT.TFile.Open(filename);
 
-    if era == "H":
-        hparameters = fin.Get("L1prefiring_muonparam_2016H")
-    elif era != "GToH":
-        # BG should be like preVFP, but more data was used to derive corrections
-        #hMuonPrefiringNew[era] = *(dynamic_cast<TH2D*>(_file_prefiringNew.Get("L1prefiring_muonparam_2016preVFP")));
-        hparameters = fin.Get("L1prefiring_muonparam_2016BG")
-    else:
-        hparameters = fin.Get("L1prefiring_muonparam_2016postVFP")
+    eradict = { "2016H" : "2016H",
+               #"2016PreVFP", "2016preVFP",
+               # BG should be like preVFP, but more data was used to derive corrections
+               "2016PreVFP" : "2016BG"  ,
+               "2016PostVFP" : "2016postVFP"
+               }
+
+    eratag = eradict[era]
+
+    hparameters = fin.Get(f"L1prefiring_muonparam_{eratag}")
 
     netabins = hparameters.GetXaxis().GetNbins()
 

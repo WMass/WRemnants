@@ -3,8 +3,7 @@ import pathlib
 import hist
 import narf
 import numpy as np
-
-ROOT.gInterpreter.Declare('#include "theory_corrections.h"')
+from .correctionsTensor_helper import makeCorrectionsTensor
 
 data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
@@ -25,6 +24,4 @@ def makeScetlibCorrHelper(filename=f"{data_dir}/N3LLCorrections/inclusive_Wp_pT.
     corrh[:,hist.overflow,...] = 1.
     corrh[...,hist.overflow,:] = 1.
 
-    corrhConv = narf.hist_to_pyroot_boost(corrh, tensor_rank=1)
-    helper = ROOT.wrem.ScetlibCorrectionsHelper[type(corrhConv).__cpp_name__](ROOT.std.move(corrhConv))
-    return helper
+    return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper3D, tensor_rank=1)

@@ -25,11 +25,11 @@ import logging
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts]) 
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
 
-era = "GToH"
+era = "2016PostVFP"
 
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = wremnants.make_muon_prefiring_helpers(era = era)
 scetlibCorr_helper = wremnants.makeScetlibCorrHelper()
-print(scetlibCorr_helper)
+qcdScaleByHelicity_helper = wremnants.makeQCDScaleByHelicityHelper()
 
 #assert(0)
 
@@ -48,7 +48,12 @@ axis_passIso = hist.axis.Boolean(name = "passIso")
 axis_passMT = hist.axis.Boolean(name = "passMT")
 
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passIso, axis_passMT]
-ptV_axis = hist.axis.Variable([0.0, 2.9, 4.7, 6.7, 9.0, 11.8, 15.3, 20.1, 27.2, 40.2, 13000.0], name="genPtV")
+
+#axis_yVgen = hist.axis.Variable([0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "yVgen")
+#axis_ptVgen = hist.axis.Variable([0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen")
+
+print(qcdScaleByHelicity_helper.tensor_axes)
+axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
 
 # extra axes which can be used to label tensor_axes
 
@@ -59,7 +64,10 @@ down_nom_up_axis = hist.axis.Regular(3, -1.5, 1.5, underflow=False, overflow=Fal
 
 muon_efficiency_helper, muon_efficiency_helper_stat, muon_efficiency_helper_syst = wremnants.make_muon_efficiency_helpers(era = era, max_pt = axis_pt.edges[-1])
 
+pileup_helper = wremnants.make_pileup_helper(era = era)
+
 def build_graph(df, dataset):
+    print("build graph")
     results = []
 
     if dataset.is_data:
@@ -104,9 +112,7 @@ def build_graph(df, dataset):
         results.append(nominal)
 
     else:
-        df = df.DefinePerSample("eraVFP", f"wrem::{era}")
-
-        df = df.Define("weight_pu", "wrem::puw_2016UL_era(Pileup_nTrueInt,eraVFP)")
+        df = df.Define("weight_pu", pileup_helper, ["Pileup_nTrueInt"])
         df = df.Define("weight_fullMuonSF_withTrackingReco", muon_efficiency_helper, ["goodMuons_pt0", "goodMuons_eta0", "goodMuons_charge0", "passIso"])
         df = df.Define("weight_newMuonPrefiringSF", muon_prefiring_helper, ["Muon_eta", "Muon_pt", "Muon_phi", "Muon_looseId"])
 
@@ -147,15 +153,21 @@ def build_graph(df, dataset):
             df = df.Define("ptVgen", "genV.pt()")
             df = df.Define("massVgen", "genV.mass()")
             df = df.Define("yVgen", "genV.Rapidity()")
+            df = df.Define("absYVgen", "genV.Rapidity()")
+            df = df.Define("genVcharge", "std::copysign(1.0, GenPart_pdgId[prefsrLeps[0]] + GenPart_pdgId[prefsrLeps[1]])")
 
-            df = df.Define("scetlibWeight_tensor", scetlibCorr_helper, ["massVgen", "yVgen", "ptVgen"])
-            scetlibUnc = df.HistoBoost("scetlibUnc", nominal_axes, [*nominal_cols, "scetlibWeight_tensor"])
+            df = df.Define("scetlibWeight_tensor", scetlibCorr_helper, ["massVgen", "yVgen", "ptVgen", "nominal_weight"])
+            scetlibUnc = df.HistoBoost("scetlibUnc", nominal_axes, [*nominal_cols, "scetlibWeight_tensor"], tensor_axes=scetlibCorr_helper.tensor_axes)
             results.append(scetlibUnc)
 
-            # TODO: Order this so the syst axes are better labeled
-            df = df.Define("scaleWeights_tensor", "auto res = wrem::vec_to_tensor_t<double, 9>(LHEScaleWeight); res = nominal_weight*res; return res;")
-            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[ptV_axis], [*nominal_cols, "ptVgen", "scaleWeights_tensor"])
+            df = df.Define("scaleWeights_tensor", "wrem::makeScaleTensor(LHEScaleWeight);")
+            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "scaleWeights_tensor"])
             results.append(scaleHist)
+
+            df = df.Define("csSineCosThetaPhi", "wrem::csSineCosThetaPhi(genl, genlanti)")
+            df = df.Define("helicityWeight_tensor", qcdScaleByHelicity_helper, ["absYVgen", "ptVgen", "genVcharge", "csSineCosThetaPhi", "scaleWeights_tensor", "nominal_weight"])
+            qcdScaleByHelicityUnc = df.HistoBoost("qcdScaleByHelicity", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "helicityWeight_tensor"], tensor_axes=qcdScaleByHelicity_helper.tensor_axes)
+            results.append(qcdScaleByHelicityUnc)
 
             # slice 101 elements starting from 0 and clip values at += 10.0
             df = df.Define("pdfWeights_tensor", "auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, 101>(LHEPdfWeight), 10.); res = nominal_weight*res; return res;")
@@ -180,7 +192,7 @@ def build_graph(df, dataset):
                     results.append(massWeight)
 
                 netabins = 4
-                df = df.Define("muonScaleDummy4Bins2e4", f"dummyScaleFromMassWeights<{netabins}, {nweights}>(massWeight_tensor, goodMuons_eta0, 2.e-4, {str(isW).lower()})")
+                df = df.Define("muonScaleDummy4Bins2e4", f"wrem::dummyScaleFromMassWeights<{netabins}, {nweights}>(massWeight_tensor, goodMuons_eta0, 2.e-4, {str(isW).lower()})")
                 scale_etabins_axis = hist.axis.Regular(4, -2.4, 2.4, name="scaleEtaSlice", underflow=False, overflow=False)
                 dummyMuonScaleSyst = df.HistoBoost("muonScaleSyst", nominal_axes, [*nominal_cols, "muonScaleDummy4Bins2e4"], 
                     tensor_axes=[down_up_axis, scale_etabins_axis])

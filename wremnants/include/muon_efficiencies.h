@@ -53,31 +53,37 @@ public:
     auto const eff_type_idx_iso_fail = with_trigger ? idx_antiiso_triggering_ : idx_antiiso_nontriggering_;
     auto const eff_type_idx_iso = pass_iso ? eff_type_idx_iso_pass : eff_type_idx_iso_fail;
 
-    auto const &cell_idip_trig = sf_idip_trig_iso_->at(eta_idx,
+    const double sf_idip_trig = sf_idip_trig_iso_->at(eta_idx,
                                                         pt_idx,
                                                         charge_idx,
                                                         eff_type_idx_idip_trig,
-                                                        idx_nom_);
+                                                        idx_nom_).value();
 
-    const double sf_idip_trig = cell_idip_trig.value();
-    const double err_idip_trig = std::sqrt(cell_idip_trig.variance());
+    const double sf_idip_trig_alt = sf_idip_trig_iso_->at(eta_idx,
+                                                        pt_idx,
+                                                        charge_idx,
+                                                        eff_type_idx_idip_trig,
+                                                        idx_alt_).value();
 
-    const double variation_factor_idip_trig = (sf_idip_trig + err_idip_trig)/sf_idip_trig;
+    const double variation_factor_idip_trig = sf_idip_trig_alt/sf_idip_trig;
 
     res(0) = variation_factor_idip_trig;
 
-    auto const &cell_iso = sf_idip_trig_iso_->at(eta_idx,
+    const double sf_iso = sf_idip_trig_iso_->at(eta_idx,
                                            pt_idx,
                                            charge_idx,
                                            eff_type_idx_iso,
-                                           idx_nom_);
+                                           idx_nom_).value();
 
-    const double sf_iso = cell_iso.value();
-    const double err_iso = std::sqrt(cell_iso.variance());
+    const double sf_iso_alt = sf_idip_trig_iso_->at(eta_idx,
+                                           pt_idx,
+                                           charge_idx,
+                                           eff_type_idx_iso,
+                                           idx_alt_).value();
 
     // anti-correlation between iso and anti-iso SF's is not exact, but an excellent
     // approximation
-    const double variation_factor_iso = pass_iso ? (sf_iso + err_iso)/sf_iso : (sf_iso - err_iso)/sf_iso;
+    const double variation_factor_iso = pass_iso ? sf_iso_alt/sf_iso : (sf_iso - (sf_iso_alt - sf_iso))/sf_iso;
 
     res(1) = variation_factor_iso;
 

@@ -1,5 +1,11 @@
+#ifndef WREMNANTS_MUONCORR_H
+#define WREMNANTS_MUONCORR_H
+
+
 #include <eigen3/Eigen/Dense>
 #include <eigen3/unsupported/Eigen/CXX11/Tensor>
+
+namespace wrem {
 
 double scaleWeight(double weight, double scale) {
     return std::exp(scale*std::log(std::abs(weight))*std::copysign(1., weight));
@@ -28,3 +34,7 @@ Eigen::TensorFixedSize<double, Eigen::Sizes<2, ETABINS>> dummyScaleFromMassWeigh
     outWeights(1, ieta) = scaleWeight(weights[centralIdx+step10MeV], scaleFac);
     return outWeights;
 }
+
+}
+
+#endif
