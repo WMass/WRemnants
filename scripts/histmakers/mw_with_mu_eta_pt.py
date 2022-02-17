@@ -39,6 +39,8 @@ zprocs = ["ZmumuPostVFP", "ZtautauPostVFP"]
 # standard regular axes
 axis_eta = hist.axis.Regular(48, -2.4, 2.4, name = "eta")
 axis_pt = hist.axis.Regular(29, 26., 55., name = "pt")
+axis_gen_eta = hist.axis.Regular(48, -2.4, 2.4, name = "gen_eta")
+axis_gen_pt = hist.axis.Regular(29, 26., 55., name = "gen_pt")
 
 # categorical axes in python bindings always have an overflow bin, so use a regular
 # axis for the charge
@@ -48,6 +50,7 @@ axis_passIso = hist.axis.Boolean(name = "passIso")
 axis_passMT = hist.axis.Boolean(name = "passMT")
 
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passIso, axis_passMT]
+gen_axes = [axis_gen_eta, axis_gen_pt]
 
 #axis_yVgen = hist.axis.Variable([0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "yVgen")
 #axis_ptVgen = hist.axis.Variable([0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen")
@@ -197,8 +200,14 @@ def build_graph(df, dataset):
                 dummyMuonScaleSyst = df.HistoBoost("muonScaleSyst", nominal_axes, [*nominal_cols, "muonScaleDummy4Bins2e4"], 
                     tensor_axes=[down_up_axis, scale_etabins_axis])
                 results.append(dummyMuonScaleSyst)
-
-
+            if dataset.name == 'WplusmunuPostVFP':
+                df.Define('ptPrefsrMuon', 'genlanti.pt()')
+                df.Define('etaPrefsrMuon', 'genlanti.eta()')
+            elif dataset.name == 'WminusmunuPostVFP':
+                df.Define('ptPrefsrMuon', 'genl.pt()')
+                df.Define('etaPrefsrMuon', 'genl.eta()')
+            gen_cols = ['etaPrefsrMuon', 'ptPrefsrMuon']
+            gen = df.HistoBoost("gen", gen_axes, [*gen_cols, "nominal_weight"])
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)
