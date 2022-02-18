@@ -201,13 +201,17 @@ def build_graph(df, dataset):
                     tensor_axes=[down_up_axis, scale_etabins_axis])
                 results.append(dummyMuonScaleSyst)
             if dataset.name == 'WplusmunuPostVFP':
-                df.Define('ptPrefsrMuon', 'genlanti.pt()')
-                df.Define('etaPrefsrMuon', 'genlanti.eta()')
+                df = df.Define('ptPrefsrMuon', 'genlanti.pt()')
+                df = df.Define('etaPrefsrMuon', 'genlanti.eta()')
+                print("gen info created")
             elif dataset.name == 'WminusmunuPostVFP':
-                df.Define('ptPrefsrMuon', 'genl.pt()')
-                df.Define('etaPrefsrMuon', 'genl.eta()')
-            gen_cols = ['etaPrefsrMuon', 'ptPrefsrMuon']
-            gen = df.HistoBoost("gen", gen_axes, [*gen_cols, "nominal_weight"])
+                df = df.Define('ptPrefsrMuon', 'genl.pt()')
+                df = df.Define('etaPrefsrMuon', 'genl.eta()')
+                print("gen info created")
+            if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP']:
+                gen_cols = ['etaPrefsrMuon', 'ptPrefsrMuon']
+                gen = df.HistoBoost("gen", gen_axes, [*gen_cols, "nominal_weight"])
+                print("gen info accessed")
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)
