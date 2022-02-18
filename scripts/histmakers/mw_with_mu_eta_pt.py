@@ -52,11 +52,9 @@ axis_passMT = hist.axis.Boolean(name = "passMT")
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passIso, axis_passMT]
 gen_axes = [axis_gen_eta, axis_gen_pt]
 
-#axis_yVgen = hist.axis.Variable([0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "yVgen")
-#axis_ptVgen = hist.axis.Variable([0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen")
-
 print(qcdScaleByHelicity_helper.tensor_axes)
 axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
+axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
 
 # extra axes which can be used to label tensor_axes
 
@@ -149,27 +147,18 @@ def build_graph(df, dataset):
         # n.b. this is the W analysis so mass weights shouldn't be propagated
         # on the Z samples (but can still use it for dummy muon scale)
         if dataset.name in wprocs or dataset.name in zprocs:
-            df = df.Define("prefsrLeps", "wrem::prefsrLeptons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_genPartIdxMother)")
-            df = df.Define("genl", "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[0]], GenPart_eta[prefsrLeps[0]], GenPart_phi[prefsrLeps[0]], GenPart_mass[prefsrLeps[0]])")
-            df = df.Define("genlanti", "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[1]], GenPart_eta[prefsrLeps[1]], GenPart_phi[prefsrLeps[1]], GenPart_mass[prefsrLeps[1]])")
-            df = df.Define("genV", "ROOT::Math::PxPyPzEVector(genl)+ROOT::Math::PxPyPzEVector(genlanti)")
-            df = df.Define("ptVgen", "genV.pt()")
-            df = df.Define("massVgen", "genV.mass()")
-            df = df.Define("yVgen", "genV.Rapidity()")
-            df = df.Define("absYVgen", "genV.Rapidity()")
-            df = df.Define("genVcharge", "std::copysign(1.0, GenPart_pdgId[prefsrLeps[0]] + GenPart_pdgId[prefsrLeps[1]])")
+
+            df = wremnants.define_prefsr_vars(df)
 
             df = df.Define("scetlibWeight_tensor", scetlibCorr_helper, ["massVgen", "yVgen", "ptVgen", "nominal_weight"])
             scetlibUnc = df.HistoBoost("scetlibUnc", nominal_axes, [*nominal_cols, "scetlibWeight_tensor"], tensor_axes=scetlibCorr_helper.tensor_axes)
             results.append(scetlibUnc)
 
-            df = df.Define("scaleWeights_tensor", "wrem::makeScaleTensor(LHEScaleWeight);")
-            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "scaleWeights_tensor"])
+            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "scaleWeights_tensor"], tensor_axes = wremnants.scale_tensor_axes)
             results.append(scaleHist)
 
-            df = df.Define("csSineCosThetaPhi", "wrem::csSineCosThetaPhi(genl, genlanti)")
-            df = df.Define("helicityWeight_tensor", qcdScaleByHelicity_helper, ["absYVgen", "ptVgen", "genVcharge", "csSineCosThetaPhi", "scaleWeights_tensor", "nominal_weight"])
-            qcdScaleByHelicityUnc = df.HistoBoost("qcdScaleByHelicity", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "helicityWeight_tensor"], tensor_axes=qcdScaleByHelicity_helper.tensor_axes)
+            df = df.Define("helicityWeight_tensor", qcdScaleByHelicity_helper, ["absYVgen", "ptVgen", "chargeVgen", "csSineCosThetaPhi", "scaleWeights_tensor", "nominal_weight"])
+            qcdScaleByHelicityUnc = df.HistoBoost("qcdScaleByHelicity", nominal_axes+[axis_ptVgen, axis_chargeVgen], [*nominal_cols, "ptVgen", "chargeVgen", "helicityWeight_tensor"], tensor_axes=qcdScaleByHelicity_helper.tensor_axes)
             results.append(qcdScaleByHelicityUnc)
 
             # slice 101 elements starting from 0 and clip values at += 10.0
@@ -219,6 +208,5 @@ resultdict = narf.build_and_run(datasets, build_graph)
 fname = "mw_with_mu_eta_pt.pkl.lz4"
 
 print("writing output")
-#with gzip.open(fname, "wb") as f:
 with lz4.frame.open(fname, "wb") as f:
-    pickle.dump(resultdict, f)
+    pickle.dump(resultdict, f, protocol = pickle.HIGHEST_PROTOCOL)

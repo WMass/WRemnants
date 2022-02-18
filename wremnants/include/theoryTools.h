@@ -104,6 +104,45 @@ scale_tensor_t makeScaleTensor(const Vec_f &scale_weights) {
 
 }
 
+using helicity_scale_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<9, 3, 3>>;
+
+helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, const scale_tensor_t &scale_tensor, double original_weight = 1.0) {
+
+  constexpr Eigen::Index nhelicity = 9;
+  constexpr Eigen::Index nmur = 3;
+  constexpr Eigen::Index nmuf = 3;
+
+  const double sinThetaCS = csvars.sintheta;
+  const double cosThetaCS = csvars.costheta;
+  const double sinPhiCS = csvars.sinphi;
+  const double cosPhiCS = csvars.cosphi;
+
+  const double sin2ThetaCS = 2.*sinThetaCS*cosThetaCS;
+  const double sin2PhiCS = 2.*sinPhiCS*cosPhiCS;
+  const double cos2ThetaCS = 1. - 2.*sinThetaCS*sinThetaCS;
+  const double cos2PhiCS= 1. - 2.*sinPhiCS*sinPhiCS;
+
+  // computing moments e.g. as used in arxiv:1708.00008 eq. 2.13
+  Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1, 1>> moments;
+  moments(0, 0, 0) = 1.;
+  moments(1, 0, 0) = cosThetaCS*cosThetaCS;
+  moments(2, 0, 0) = sin2ThetaCS*cosPhiCS;
+  moments(3, 0, 0) = sinThetaCS*sinThetaCS*cos2PhiCS;
+  moments(4, 0, 0) = sinThetaCS*cosPhiCS;
+  moments(5, 0, 0) = cosThetaCS;
+  moments(6, 0, 0) = sinThetaCS*sinThetaCS*sin2PhiCS;
+  moments(7, 0, 0) = sin2ThetaCS*sinPhiCS;
+  moments(8, 0, 0) = sinThetaCS*sinPhiCS;
+
+  constexpr std::array<Eigen::Index, 3> broadcastscales = { 1, nmur, nmuf };
+  constexpr std::array<Eigen::Index, 3> broadcasthelicities = { nhelicity, 1, 1 };
+  constexpr std::array<Eigen::Index, 3> reshapescale = { 1, nmur, nmuf };
+
+  return original_weight*scale_tensor.reshape(reshapescale).broadcast(broadcasthelicities)*moments.broadcast(broadcastscales);
+
+
+}
+
 } 
 
 #endif
