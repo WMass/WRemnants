@@ -206,6 +206,7 @@ def build_graph(df, dataset):
             if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP']:
                 gen_cols = ['etaPrefsrMuon', 'ptPrefsrMuon']
                 gen = df.HistoBoost("gen", gen_axes, [*gen_cols, "nominal_weight"])
+                results.append(gen)
                 print("gen info accessed")
     return results, weightsum
 
