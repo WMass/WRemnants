@@ -16,7 +16,13 @@ data_dir = f"{pathlib.Path(__file__).parent}/data/"
 # the input files for this, and the corresponding gen axis definitions
 # are produced from wremnants/scripts/histmakers/w_z_gen_dists.py
 
-def makeQCDScaleByHelicityHelper(filename=f"{data_dir}/angularCoefficients/w_coeffs.pkl.lz4"):
+def makeQCDScaleByHelicityHelper(is_w_like = False, filename=None):
+    if filename is None:
+        if is_w_like:
+            filename = f"{data_dir}/angularCoefficients/z_coeffs.pkl.lz4"
+        else:
+            filename = f"{data_dir}/angularCoefficients/w_coeffs.pkl.lz4"
+
     with lz4.frame.open(filename, "rb") as f:
         corrh = pickle.load(f)
 

@@ -24,4 +24,4 @@ def makeScetlibCorrHelper(filename=f"{data_dir}/N3LLCorrections/inclusive_Wp_pT.
     corrh[:,hist.overflow,...] = 1.
     corrh[...,hist.overflow,:] = 1.
 
-    return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper3D, tensor_rank=1)
+    return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper, tensor_rank=1)

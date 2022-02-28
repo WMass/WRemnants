@@ -191,7 +191,18 @@ public:
   // inherit constructor
   using base_t::base_t;
 
-  //TODO implement operator()
+  double operator() (float trig_pt, float trig_eta, int trig_charge,
+                     float nontrig_pt, float nontrig_eta, int nontrig_charge) {
+    constexpr bool with_trigger = true;
+    constexpr bool without_trigger = false;
+    constexpr bool pass_iso = true;
+
+    const double sftrig = base_t::scale_factor_product(trig_pt, trig_eta, trig_charge, pass_iso, with_trigger, base_t::idx_nom_);
+
+    const double sfnontrig = base_t::scale_factor_product(nontrig_pt, nontrig_eta, nontrig_charge, pass_iso, without_trigger, base_t::idx_nom_);
+
+    return sftrig*sfnontrig;
+  }
 
 
 
@@ -215,6 +226,32 @@ public:
 
 };
 
+// specialization for two-lepton case
+template<int NEtaBins, int NPtBins, typename HIST_IDIPTRIGISO, typename HIST_TRACKINGRECO>
+class muon_efficiency_helper_stat<true, NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO> : public muon_efficiency_helper_base<NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO> {
+
+public:
+
+  using base_t = muon_efficiency_helper_base<NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO>;
+  using tensor_t = typename base_t::stat_tensor_t;
+
+  muon_efficiency_helper_stat(const base_t &other) : base_t(other) {}
+
+  tensor_t operator() (float trig_pt, float trig_eta, int trig_charge,
+                     float nontrig_pt, float nontrig_eta, int nontrig_charge, double nominal_weight = 1.0) {
+    constexpr bool with_trigger = true;
+    constexpr bool without_trigger = false;
+    constexpr bool pass_iso = true;
+
+    const tensor_t variation_trig = base_t::sf_idip_trig_iso_stat_var(trig_pt, trig_eta, trig_charge, pass_iso, with_trigger);
+
+    const tensor_t variation_nontrig = base_t::sf_idip_trig_iso_stat_var(nontrig_pt, nontrig_eta, nontrig_charge, pass_iso, without_trigger);
+
+    return nominal_weight*variation_trig*variation_nontrig;
+  }
+
+};
+
 // base template for one lepton case
 template<bool do_other, int NEtaBins, int NPtBins, typename HIST_IDIPTRIGISO, typename HIST_TRACKINGRECO>
 class muon_efficiency_helper_syst : public muon_efficiency_helper_base<NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO> {
@@ -233,7 +270,31 @@ public:
 
 };
 
-//TODO remaining specializations for two-lepton case
+// specialization for two-lepton case
+template<int NEtaBins, int NPtBins, typename HIST_IDIPTRIGISO, typename HIST_TRACKINGRECO>
+class muon_efficiency_helper_syst<true, NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO> : public muon_efficiency_helper_base<NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO> {
+
+public:
+
+  using base_t = muon_efficiency_helper_base<NEtaBins, NPtBins, HIST_IDIPTRIGISO, HIST_TRACKINGRECO>;
+  using tensor_t = typename base_t::syst_tensor_t;
+
+  muon_efficiency_helper_syst(const base_t &other) : base_t(other) {}
+
+  tensor_t operator() (float trig_pt, float trig_eta, int trig_charge,
+                     float nontrig_pt, float nontrig_eta, int nontrig_charge, double nominal_weight = 1.0) {
+    constexpr bool with_trigger = true;
+    constexpr bool without_trigger = false;
+    constexpr bool pass_iso = true;
+
+    const tensor_t variation_trig = base_t::sf_idip_trig_iso_syst_var(trig_pt, trig_eta, trig_charge, pass_iso, with_trigger);
+
+    const tensor_t variation_nontrig = base_t::sf_idip_trig_iso_syst_var(nontrig_pt, nontrig_eta, nontrig_charge, pass_iso, without_trigger);
+
+    return nominal_weight*variation_trig*variation_nontrig;
+  }
+
+};
 
 
 }

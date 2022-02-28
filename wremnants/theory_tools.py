@@ -29,7 +29,8 @@ def define_prefsr_vars(df):
     df = df.Define("yVgen", "genV.Rapidity()")
     df = df.Define("absYVgen", "std::fabs(yVgen)")
     df = df.Define("chargeVgen", "GenPart_pdgId[prefsrLeps[0]] + GenPart_pdgId[prefsrLeps[1]]")
-    df = df.Define("scaleWeights_tensor", "wrem::makeScaleTensor(LHEScaleWeight);")
+    # convert vector of scale weights to 3x3 tensor and clip weights to |weight|<10.
+    df = df.Define("scaleWeights_tensor", "wrem::makeScaleTensor(LHEScaleWeight, 10.);")
     df = df.Define("csSineCosThetaPhi", "wrem::csSineCosThetaPhi(genl, genlanti)")
 
     return df

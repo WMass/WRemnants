@@ -42,7 +42,7 @@ struct CSVars {
 
 };
 
-CSVars csSineCosThetaPhi(PtEtaPhiMVector& lplus, PtEtaPhiMVector& lminus) {
+CSVars csSineCosThetaPhi(const PtEtaPhiMVector& lplus, const PtEtaPhiMVector& lminus) {
     PxPyPzEVector lplusv(lplus);
     PxPyPzEVector dilepton = lplusv + PxPyPzEVector(lminus);
     const int zsign = std::copysign(1.0, dilepton.z());
@@ -64,8 +64,8 @@ CSVars csSineCosThetaPhi(PtEtaPhiMVector& lplus, PtEtaPhiMVector& lminus) {
     auto csCross = cross(csFrame, lplusboost);
     double sintheta = csCross.R()/(csFrame.R()*lplusboost.R());
 
-    double sinphi = dot(csYaxis, lplusboost);
-    double cosphi = dot(csXaxis, lplusboost);
+    double sinphi = dot(csYaxis, lplusboost)/sintheta;
+    double cosphi = dot(csXaxis, lplusboost)/sintheta;
 
     CSVars angles = {sintheta, costheta, sinphi, cosphi};
     return angles;

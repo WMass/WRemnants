@@ -21,11 +21,14 @@ import wremnants
 import hist
 import lz4.frame
 import logging
+import math
 
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts])
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
 
-axis_massZgen = hist.axis.Regular(12, 60., 120., name="massZgen")
+axis_massWgen = hist.axis.Variable([0., math.inf], name="massVgen")
+
+axis_massZgen = hist.axis.Regular(12, 60., 120., name="massVgen")
 
 axis_absYVgen = hist.axis.Variable(
     [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "absYVgen"
@@ -33,8 +36,12 @@ axis_absYVgen = hist.axis.Variable(
 axis_ptVgen = hist.axis.Variable(
     [0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen"
 )
-axis_chargeVgen = hist.axis.Regular(
+axis_chargeWgen = hist.axis.Regular(
     2, -2, 2, name="chargeVgen", underflow=False, overflow=False
+)
+
+axis_chargeZgen = hist.axis.Integer(
+    0, 1, name="chargeVgen", underflow=False, overflow=False
 )
 
 wprocs = ["WplusmunuPostVFP", "WminusmunuPostVFP", "WminustaunuPostVFP", "WplustaunuPostVFP"]
@@ -53,11 +60,11 @@ def build_graph(df, dataset):
     df = wremnants.define_prefsr_vars(df)
 
     if dataset.name in zprocs:
-        nominal_axes = [axis_massZgen, axis_absYVgen, axis_ptVgen]
-        nominal_cols = ["massVgen", "absYVgen", "ptVgen"]
+        nominal_axes = [axis_massZgen, axis_absYVgen, axis_ptVgen, axis_chargeZgen]
     else:
-        nominal_axes = [axis_absYVgen, axis_ptVgen, axis_chargeVgen]
-        nominal_cols = ["absYVgen", "ptVgen", "chargeVgen"]
+        nominal_axes = [axis_massWgen, axis_absYVgen, axis_ptVgen, axis_chargeWgen]
+
+    nominal_cols = ["massVgen", "absYVgen", "ptVgen", "chargeVgen"]
 
     nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, nominal_cols)
     results.append(nominal_gen)
