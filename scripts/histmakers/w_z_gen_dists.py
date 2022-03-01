@@ -3,7 +3,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
 parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=-1)
-parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default=["Wplus", "Wminus", "Zmumu", "Ztautau"])
+parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default = ["Wplus", "Wminus", "Zmumu", "Ztautau", "data"])
 args = parser.parse_args()
 
 import ROOT
@@ -55,12 +55,12 @@ def build_graph(df, dataset):
     print("build graph")
     print(dataset.name)
     results = []
-
-    df = df.Define("weight", "std::copysign(1.0, genWeight)")
-
+    
+    if dataset.is_data:
+        df = df.DefinePerSample("weight", "1.0")
+    else:
+        df = df.Define("weight", "std::copysign(1.0, genWeight)")
     weightsum = df.SumAndCount("weight")
-
-    df = wremnants.define_prefsr_vars(df)
 
     if dataset.name in zprocs:
         nominal_axes = [axis_massZgen, axis_absYVgen, axis_ptVgen, axis_chargeZgen]
@@ -69,9 +69,11 @@ def build_graph(df, dataset):
 
     nominal_cols = ["massVgen", "absYVgen", "ptVgen", "chargeVgen"]
 
-    df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhi, scaleWeights_tensor, weight)")
-    helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes])
-    results.append(helicity_moments_scale)
+    if not dataset.is_data:
+        df = wremnants.define_prefsr_vars(df)
+        df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhi, scaleWeights_tensor, weight)")
+        helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes])
+        results.append(helicity_moments_scale)
 
     if dataset.name == 'WplusmunuPostVFP':
         df = df.Define('ptPrefsrMuon', 'genlanti.pt()')
@@ -82,12 +84,12 @@ def build_graph(df, dataset):
         df = df.Define('etaPrefsrMuon', 'genl.eta()')
         print("gen info created")
     if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP']:
-        cols_l_gen = ['etaPrefsrMuon', 'ptPrefsrMuon']
-        nominal_cols = [*nominal_cols, *cols_l_gen]
+        nominal_cols = [*nominal_cols, 'etaPrefsrMuon', 'ptPrefsrMuon']
         nominal_axes = [*nominal_axes, axis_l_eta_gen, axis_l_pt_gen]
         print("gen info accessed")
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "weight"])
-    results.append(nominal_gen)
+    if not dataset.is_data:
+        nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "weight"])
+        results.append(nominal_gen)
 
     return results, weightsum
 
@@ -104,7 +106,9 @@ print("computing angular coefficients")
 z_moments = None
 w_moments = None
 
-for key, val in resultdict.items():
+not_data = lambda x: "data" not in x[0]
+
+for key, val in filter(not_data, resultdict.items()):
     moments = val["output"]["helicity_moments_scale"]
     if key in zprocs:
         if z_moments is None:
