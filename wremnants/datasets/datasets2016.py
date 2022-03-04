@@ -32,6 +32,13 @@ def getDatasets(maxFiles=-1, filt=None):
         xsec = 1976.1,
     )
 
+    ZmmPostVFP_bugfix = narf.Dataset(name = "ZmumuPostVFP_bugfix",
+        filepaths = makeFilelist(
+            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/DYJetsToMuMu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/220125_235229/000*/*.root"], maxFiles),
+        is_data = False,
+        xsec = 1976.1,
+    )
+
     BR_TAUToMU = 0.1739
     BR_TAUToE = 0.1782
     ZttPostVFP = narf.Dataset(name = "ZtautauPostVFP",
@@ -92,7 +99,7 @@ def getDatasets(maxFiles=-1, filt=None):
             xsec = 75.8,
     )
 
-    allPostVFP = [dataPostVFP, WpmunuPostVFP, WmmunuPostVFP, WptaunuPostVFP, WmtaunuPostVFP, ZmmPostVFP, 
+    allPostVFP = [dataPostVFP, WpmunuPostVFP, WmmunuPostVFP, WptaunuPostVFP, WmtaunuPostVFP, ZmmPostVFP, ZmmPostVFP_bugfix,
         ZttPostVFP, ttbarlnuPostVFP, ttbarlqPostVFP, wwPostVFP]
 
     if filt:

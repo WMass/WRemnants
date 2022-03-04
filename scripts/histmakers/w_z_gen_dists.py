@@ -79,11 +79,11 @@ def build_graph(df, dataset):
         df = df.Define('ptPrefsrMuon', 'genlanti.pt()')
         df = df.Define('etaPrefsrMuon', 'genlanti.eta()')
         print("gen info created")
-    elif dataset.name == 'WminusmunuPostVFP':
+    elif dataset.name == 'WminusmunuPostVFP' or 'ZmumuPostVFP' in dataset.name:
         df = df.Define('ptPrefsrMuon', 'genl.pt()')
         df = df.Define('etaPrefsrMuon', 'genl.eta()')
         print("gen info created")
-    if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP']:
+    if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP'] or 'ZmumuPostVFP' in dataset.name:
         nominal_cols = [*nominal_cols, 'etaPrefsrMuon', 'ptPrefsrMuon']
         nominal_axes = [*nominal_axes, axis_l_eta_gen, axis_l_pt_gen]
         print("gen info accessed")
