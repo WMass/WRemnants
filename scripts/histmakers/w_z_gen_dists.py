@@ -1,4 +1,6 @@
 import argparse
+import time
+time_start = time.time()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
@@ -26,6 +28,9 @@ import math
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts])
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
 
+for dataset in datasets:
+    print(dataset.name)
+
 axis_massWgen = hist.axis.Variable([0., math.inf], name="massVgen")
 
 axis_massZgen = hist.axis.Regular(12, 60., 120., name="massVgen")
@@ -47,11 +52,23 @@ axis_chargeZgen = hist.axis.Integer(
 axis_l_eta_gen = hist.axis.Regular(48, -2.4, 2.4, name = "prefsr_lepton_eta_gen")
 axis_l_pt_gen = hist.axis.Regular(29, 26., 55., name = "prefsr_lepton_pt_gen")
 axes_l_gen = [axis_l_eta_gen, axis_l_pt_gen]
-wprocs = ["WplusmunuPostVFP", "WminusmunuPostVFP", "WminustaunuPostVFP", "WplustaunuPostVFP"]
-zprocs = ["ZmumuPostVFP", "ZtautauPostVFP"]
+wprocs = [
+    "WplusmunuPostVFP", 
+    "WplusmunuPostVFP_bugfix",
+    "WminusmunuPostVFP",
+    "WminusmunuPostVFP_bugfix",
+    "WminustaunuPostVFP",
+    "WplustaunuPostVFP"
+]
+zprocs = ["ZmumuPostVFP", "ZmumuPostVFP_bugfix", "ZtautauPostVFP"]
 
+time_loading_finished = time.time()
+loading_time = time_loading_finished - time_start
+print("time it takes to load datasets: ", loading_time)
 
 def build_graph(df, dataset):
+    time_process_start = time.time()
+
     print("build graph")
     print(dataset.name)
     results = []
@@ -75,22 +92,24 @@ def build_graph(df, dataset):
         helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes])
         results.append(helicity_moments_scale)
 
-    if dataset.name == 'WplusmunuPostVFP':
+    if 'WplusmunuPostVFP' in dataset.name:
+        print("w process: ", dataset.name)
         df = df.Define('ptPrefsrMuon', 'genlanti.pt()')
         df = df.Define('etaPrefsrMuon', 'genlanti.eta()')
-        print("gen info created")
-    elif dataset.name == 'WminusmunuPostVFP' or 'ZmumuPostVFP' in dataset.name:
+    elif 'WminusmunuPostVFP' in dataset.name or 'ZmumuPostVFP' in dataset.name:
         df = df.Define('ptPrefsrMuon', 'genl.pt()')
         df = df.Define('etaPrefsrMuon', 'genl.eta()')
-        print("gen info created")
-    if dataset.name in ['WplusmunuPostVFP', 'WminusmunuPostVFP'] or 'ZmumuPostVFP' in dataset.name:
+    if any([mc in dataset.name for mc in ['WplusmunuPostVFP', 'WminusmunuPostVFP', 'ZmumuPostVFP']]):
         nominal_cols = [*nominal_cols, 'etaPrefsrMuon', 'ptPrefsrMuon']
         nominal_axes = [*nominal_axes, axis_l_eta_gen, axis_l_pt_gen]
-        print("gen info accessed")
+        print("mc process: ", dataset.name)
     if not dataset.is_data:
         nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "weight"])
         results.append(nominal_gen)
 
+    time_process_end = time.time()
+    process_time = time_process_end - time_process_start
+    print("Time it takes to process ", dataset.name, ": ", process_time)
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)

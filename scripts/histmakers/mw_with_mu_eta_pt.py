@@ -60,7 +60,6 @@ down_up_axis = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, na
 
 down_nom_up_axis = hist.axis.Regular(3, -1.5, 1.5, underflow=False, overflow=False, name = "downNomUpVar")
 
-
 muon_efficiency_helper, muon_efficiency_helper_stat, muon_efficiency_helper_syst = wremnants.make_muon_efficiency_helpers(era = era, max_pt = axis_pt.edges[-1])
 
 pileup_helper = wremnants.make_pileup_helper(era = era)

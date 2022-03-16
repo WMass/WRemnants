@@ -55,10 +55,24 @@ def getDatasets(maxFiles=-1, filt=None):
         is_data = False,
         xsec = 11572.19,
     )
+
+    WpmunuPostVFP_bugfix = narf.Dataset(name = "WplusmunuPostVFP_bugfix",
+        filepaths = makeFilelist(
+            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/WplusToMuNu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/220307_235720/000*/*.root"], maxFiles),
+        is_data = False,
+        xsec = 11572.19,
+    )
     
     WmmunuPostVFP = narf.Dataset(name = "WminusmunuPostVFP",
         filepaths = makeFilelist(
-                ["/scratch/shared/originalNANO_newWithAltPDF/WminusJetsToMuNu_postVFP/*/*.root"], maxFiles),
+            ["/scratch/shared/originalNANO_newWithAltPDF/WminusJetsToMuNu_postVFP/*/*.root"], maxFiles),
+            is_data = False,
+            xsec = 8562.66,
+    )
+
+    WmmunuPostVFP_bugfix = narf.Dataset(name = "WminusmunuPostVFP_bugfix",
+        filepaths = makeFilelist(
+            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/WminusToMuNu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/220307_235846/000*/*.root"], maxFiles),
             is_data = False,
             xsec = 8562.66,
     )
@@ -99,8 +113,20 @@ def getDatasets(maxFiles=-1, filt=None):
             xsec = 75.8,
     )
 
-    allPostVFP = [dataPostVFP, WpmunuPostVFP, WmmunuPostVFP, WptaunuPostVFP, WmtaunuPostVFP, ZmmPostVFP, ZmmPostVFP_bugfix,
-        ZttPostVFP, ttbarlnuPostVFP, ttbarlqPostVFP, wwPostVFP]
+    allPostVFP = [
+        dataPostVFP,
+        WpmunuPostVFP,
+        WmmunuPostVFP,
+        WpmunuPostVFP_bugfix,
+        WmmunuPostVFP_bugfix,
+        WptaunuPostVFP,
+        WmtaunuPostVFP,
+        ZmmPostVFP,
+        ZmmPostVFP_bugfix,
+        ZttPostVFP,
+        ttbarlnuPostVFP,
+        ttbarlqPostVFP,
+        wwPostVFP]
 
     if filt:
         print("Filtering")
