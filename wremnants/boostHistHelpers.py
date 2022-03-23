@@ -1,6 +1,7 @@
 import hist
 import boost_histogram as bh
 import numpy as np
+from functools import reduce
 
 def valsAndVariances(h1, h2, allowBroadcast):
     if not allowBroadcast and len(h1.axes) != len(h2.axes):
@@ -24,10 +25,9 @@ def divideHists(h1, h2, cutoff=1, allowBroadcast=True):
    
     # To get the broadcast shape right
     outh = h1 if not allowBroadcast else broadcastOutHist(h1, h2)
-    out = np.ones_like(h2vals)
     # By the argument that 0/0 = 1
-    out[np.abs(h1vals-h2vals) < cutoff] = 1.
-    val = np.divide(h1vals, h2vals, out=out, where=(h2vals>cutoff) & (h1vals>cutoff))
+    out = np.ones_like(h2vals)
+    val = np.divide(h1vals, h2vals, out=out, where=(np.abs(h2vals)>cutoff) & (np.abs(h1vals)>cutoff))
     relvars = relVariances(h1vals, h2vals, h1vars, h2vars)
     var = val*sum(relVariances(h1vals, h2vals, h1vars, h2vars))
     var *= val
@@ -61,6 +61,9 @@ def addHists(h1, h2, allowBroadcast=True):
     newh = hist.Hist(*outh.axes, storage=hist.storage.Weight(),
             data=np.stack((h1vals+h2vals, h1vars+h2vars), axis=-1))
     return newh
+
+def sumHists(hists):
+    return reduce(addHists)
 
 def mirrorHist(hvar, hnom, cutoff=1):
     div = divideHists(hnom, hvar, cutoff)

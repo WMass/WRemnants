@@ -108,7 +108,7 @@ def makePlotWithRatioToRef(hists, labels, colors, xlabel="", ylabel="Events/bin"
     
     if len(hists) > 1:
         hep.histplot(
-                [hh.divideHists(h, hists[0]) for h in hists[1:]],
+                [hh.divideHists(h, hists[0], cutoff=1e-5) for h in hists[1:]],
             histtype="step",
             color=colors[1:],
             label=labels[1:],

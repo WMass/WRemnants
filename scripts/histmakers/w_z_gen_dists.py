@@ -1,9 +1,19 @@
 import argparse
+import narf
+import wremnants
+import pickle
+import gzip
+from wremnants import theory_tools
+import hist
+import lz4.frame
+import logging
+import math
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
 parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=-1)
 parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default=["Wplus", "Wminus", "Zmumu", "Ztautau"])
+parser.add_argument("--pdfs", type=str, nargs="*", default=["nnpdf31"], choices=theory_tools.pdfMap.keys(), help="PDF sets to produce error hists for")
 args = parser.parse_args()
 
 import ROOT
@@ -12,17 +22,6 @@ if not args.nThreads:
     ROOT.ROOT.EnableImplicitMT()
 elif args.nThreads != 1:
     ROOT.ROOT.EnableImplicitMT(args.nThreads)
-
-import pickle
-import gzip
-
-import narf
-import wremnants
-from wremnants import theory_tools
-import hist
-import lz4.frame
-import logging
-import math
 
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts])
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
@@ -58,7 +57,7 @@ def build_graph(df, dataset):
 
     weightsum = df.SumAndCount("nominal_weight")
 
-    df = wremnants.define_prefsr_vars(df)
+    df = theory_tools.define_prefsr_vars(df)
     df = theory_tools.define_scale_tensor(df)
 
     if dataset.name in zprocs:
@@ -67,6 +66,9 @@ def build_graph(df, dataset):
         nominal_axes = [axis_massWgen, axis_absYVgen, axis_ptVgen, axis_chargeWgen]
 
     nominal_cols = ["massVgen", "absYVgen", "ptVgen", "chargeVgen"]
+    results.append(theory_tools.make_scale_hist(df, nominal_axes, nominal_cols))
+    for pdf in args.pdfs:
+        results.extend(theory_tools.define_and_make_pdf_hists(df, nominal_axes, nominal_cols, pdfset=pdf))
 
     nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"])
     results.append(nominal_gen)

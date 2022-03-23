@@ -19,6 +19,12 @@ axis_muFfact = hist.axis.Variable(
 
 scale_tensor_axes = (axis_muRfact, axis_muFfact)
 
+pdfMap = {"nnpdf31" : {
+            "name" : "pdfNNPDF31",
+            "branch" : "LHEPdfWeight",
+            },
+        }
+
 def define_prefsr_vars(df):
     df = df.Define("prefsrLeps", "wrem::prefsrLeptons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_genPartIdxMother)")
     df = df.Define("genl", "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[0]], GenPart_eta[prefsrLeps[0]], GenPart_phi[prefsrLeps[0]], GenPart_mass[prefsrLeps[0]])")
@@ -38,6 +44,27 @@ def define_scale_tensor(df):
     df = df.Define("scaleWeights_tensor_wnom", "auto res = scaleWeights_tensor; res = nominal_weight*res; return res;")
 
     return df
+
+def make_scale_hist(df, axes, cols):
+    scaleHist = df.HistoBoost("qcdScale", axes, [*cols, "scaleWeights_tensor_wnom"], tensor_axes=scale_tensor_axes)
+    return scaleHist
+
+def define_and_make_pdf_hists(df, axes, cols, pdfset="nnpdf31"):
+    # slice 101 elements starting from 0 and clip values at += 10.0
+    pdfName = pdfMap[pdfset]["name"]
+    pdfBranch = pdfMap[pdfset]["branch"]
+    tensorName = f"{pdfName}Weights_tensor"
+    tensorASName = f"{pdfName}ASWeights_tensor"
+
+    df = df.Define(tensorName, f"auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, 101>({pdfBranch}), 10.); res = nominal_weight*res; return res;")
+    pdfHist= df.HistoBoost(pdfName, axes, [*cols, tensorName])
+
+    # slice 2 elements starting from 101
+    df = df.Define(tensorASName, f"auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, 2>({pdfBranch}, 101), 10.); res = nominal_weight*res; return res;")
+    alphaSHist = df.HistoBoost(f"alphaS002{pdfName}", axes, [*cols, tensorASName])
+
+    return pdfHist, alphaSHist
+
 
 def define_scetlib_corr(df, weight_expr, helper):
     df = df.Define("nominal_weight_uncorr", weight_expr)
@@ -94,12 +121,14 @@ def qcdScaleNames():
     return ["_".join(["QCDscale", s]) if s != "" else s for s in shifts]
 
 def massWeightNames(matches=None, wlike=False):
-    central=10
+    central=11
     nweights=21
     names = [f"massShift{int(abs(central-i)*10)}MeV{'Down' if i < central else 'Up'}" for i in range(nweights)]
+    
     if wlike:
-        # These are the Z width variations
-        names.extend(["", ""])
+        # This is the PDG uncertainty
+        names.extend(["massShift2p1MeVDown", "massShift2p1MeVUp"])
+
     # If name is "" it won't be stored
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
 
