@@ -52,15 +52,26 @@ axis_chargeZgen = hist.axis.Integer(
 axis_l_eta_gen = hist.axis.Regular(48, -2.4, 2.4, name = "prefsr_lepton_eta_gen")
 axis_l_pt_gen = hist.axis.Regular(29, 26., 55., name = "prefsr_lepton_pt_gen")
 axes_l_gen = [axis_l_eta_gen, axis_l_pt_gen]
-wprocs = [
+
+wprocs_bugged = [
     "WplusmunuPostVFP", 
-    "WplusmunuPostVFP_bugfix",
     "WminusmunuPostVFP",
-    "WminusmunuPostVFP_bugfix",
     "WminustaunuPostVFP",
     "WplustaunuPostVFP"
 ]
-zprocs = ["ZmumuPostVFP", "ZmumuPostVFP_bugfix", "ZtautauPostVFP"]
+wprocs_bugfix = [
+    "WplusmunuPostVFP_bugfix", 
+    "WminusmunuPostVFP_bugfix",
+]
+wprocs = [*wprocs_bugged, *wprocs_bugfix]
+wprocs_bugged_to_check = [ # mu only for making comparison plots between bugged and bugfix samples
+    "WplusmunuPostVFP", 
+    "WminusmunuPostVFP",
+]
+zprocs_bugged = ["ZmumuPostVFP", "ZtautauPostVFP"]
+zprocs_bugfix = ["ZmumuPostVFP_bugfix"]
+zprocs = [*zprocs_bugged, *zprocs_bugfix]
+zprocs_bugged_to_check = ["ZmumuPostVFP"]
 
 time_loading_finished = time.time()
 loading_time = time_loading_finished - time_start
@@ -122,29 +133,53 @@ with lz4.frame.open(fname, "wb") as f:
 
 print("computing angular coefficients")
 
-z_moments = None
-w_moments = None
+z_moments_bugged = None
+z_moments_bugfix = None
+w_moments_bugged = None
+w_moments_bugfix = None
 
 not_data = lambda x: "data" not in x[0]
 
 for key, val in filter(not_data, resultdict.items()):
     moments = val["output"]["helicity_moments_scale"]
-    if key in zprocs:
-        if z_moments is None:
-            z_moments = moments
+    if key in zprocs_bugged_to_check:
+        if z_moments_bugged is None:
+            z_moments_bugged = moments
+            print("the integral of ", key, "is ", moments.sum())
         else:
-            z_moments += moments
-    elif key in wprocs:
-        if w_moments is None:
-            w_moments = moments
+            # gen level kinematics, stack tau to mu channel to increase stats
+            z_moments_bugged += moments
+            print("the integral of ", key, "is ", moments.sum())
+    elif key in wprocs_bugged_to_check:
+        if w_moments_bugged is None:
+            w_moments_bugged = moments
         else:
-            w_moments += moments
+            w_moments_bugged += moments
+    elif key in zprocs_bugfix:
+        if z_moments_bugfix is None:
+            z_moments_bugfix = moments
+        else:
+            z_moments_bugfix += moments
+    elif key in wprocs_bugfix:
+        if w_moments_bugfix is None:
+            w_moments_bugfix = moments
+        else:
+            w_moments_bugfix += moments
 
-z_coeffs = wremnants.moments_to_angular_coeffs(z_moments)
-w_coeffs = wremnants.moments_to_angular_coeffs(w_moments)
+z_coeffs_bugged = wremnants.moments_to_angular_coeffs(z_moments_bugged)
+w_coeffs_bugged = wremnants.moments_to_angular_coeffs(w_moments_bugged)
+z_coeffs_bugfix = wremnants.moments_to_angular_coeffs(z_moments_bugfix)
+w_coeffs_bugfix = wremnants.moments_to_angular_coeffs(w_moments_bugfix)
 
-with lz4.frame.open("z_coeffs.pkl.lz4", "wb") as f:
-    pickle.dump(z_coeffs, f, protocol = pickle.HIGHEST_PROTOCOL)
 
-with lz4.frame.open("w_coeffs.pkl.lz4", "wb") as f:
-    pickle.dump(w_coeffs, f, protocol = pickle.HIGHEST_PROTOCOL)
+with lz4.frame.open("z_coeffs_bugged.pkl.lz4", "wb") as f:
+    pickle.dump(z_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("w_coeffs_bugged.pkl.lz4", "wb") as f:
+    pickle.dump(w_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("z_coeffs_bugfix.pkl.lz4", "wb") as f:
+    pickle.dump(z_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("w_coeffs_bugfix.pkl.lz4", "wb") as f:
+    pickle.dump(w_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)

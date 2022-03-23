@@ -34,7 +34,7 @@ def getDatasets(maxFiles=-1, filt=None):
 
     ZmmPostVFP_bugfix = narf.Dataset(name = "ZmumuPostVFP_bugfix",
         filepaths = makeFilelist(
-            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/DYJetsToMuMu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/220125_235229/000*/*.root"], maxFiles),
+            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/DYJetsToMuMu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/*/*/*.root"], maxFiles),
         is_data = False,
         xsec = 1976.1,
     )

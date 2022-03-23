@@ -47,12 +47,13 @@ def moments_to_angular_coeffs(hist_moments_scales):
     norm_vals = np.where( vals==0., 1., vals)
 
     # e.g. from arxiv:1708.00008 eq. 2.13
+    # x[1:] corresponds to A_0, ... , A_7
     offsets = np.array([0., 4., 0., 0., 0., 0., 0., 0., 0.])
     scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
 
     # for broadcasting
-    offsets = offsets[:, np.newaxis, np.newaxis]
-    scales = scales[:, np.newaxis, np.newaxis]
+    offsets = offsets[:, np.newaxis]
+    scales = scales[:, np.newaxis]
 
     view = hist_moments_scales.view(flow=True)
 
