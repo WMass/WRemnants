@@ -91,10 +91,16 @@ def makeStackPlotWithRatio(histInfo, stackedProcs, label="nominal", unstacked=No
     addLegend(ax1, extra_text)
     return fig
 
-def makePlotWithRatioToRef(hists, labels, colors, xlabel="", ylabel="Events/bin", 
-                rrange=[0.9, 1.1], ymax=None, xlim=None, binwnorm=None):
-
-    fig, ax1, ax2 = figureWithRatio(hists[0], xlabel, ylabel, [0, ymax] if ymax else None, "Data/Pred.", rrange, xlim=xlim)
+def makePlotWithRatioToRef(hists, labels, colors, xlabel="", ylabel="Events/bin", rlabel="bugfix/bugged",
+                rrange=[0.9, 1.1], ymax=None, xlim=None, binwnorm=None, baseline=None, autorrange=None):
+    if baseline:
+        ratio_plots_starting_idx = 0
+    else:
+        ratio_plots_starting_idx = 1
+    ratio_hists = [hh.divideHists(h, hists[0], cutoff=0.00001) for h in hists[ratio_plots_starting_idx:]]
+#    if autorrange:
+#        rrange = [min([x.values().min() for x in ratio_hists]), max(
+    fig, ax1, ax2 = figureWithRatio(hists[0], xlabel, ylabel, [0, ymax] if ymax else None, rlabel, rrange, xlim=xlim)
     
     hep.histplot(
         hists,
@@ -108,7 +114,7 @@ def makePlotWithRatioToRef(hists, labels, colors, xlabel="", ylabel="Events/bin"
     
     if len(hists) > 1:
         hep.histplot(
-                [hh.divideHists(h, hists[0], cutoff=1e-5) for h in hists[1:]],
+            ratio_hists,
             histtype="step",
             color=colors[1:],
             label=labels[1:],
