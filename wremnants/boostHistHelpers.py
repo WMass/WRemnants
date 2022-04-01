@@ -25,6 +25,7 @@ def divideHists(h1, h2, cutoff=1, allowBroadcast=True):
     # To get the broadcast shape right
     outh = h1 if not allowBroadcast else broadcastOutHist(h1, h2)
     # By the argument that 0/0 = 1
+    out = np.ones_like(h2vals)
     out[np.abs(h2vals) < cutoff] = 1.
     val = np.divide(h1vals, h2vals, out=out, where=((np.abs(h2vals)>cutoff) & (np.abs(h1vals)>cutoff)))
     relvars = relVariances(h1vals, h2vals, h1vars, h2vars)

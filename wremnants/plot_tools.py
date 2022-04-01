@@ -30,7 +30,7 @@ def figureWithRatio(href, xlabel, ylabel, ylim, rlabel, rrange, xlim=None):
         ax1.autoscale(axis='y')
     return fig,ax1,ax2
 
-def addLegend(ax, extra_text=None):
+def addLegend(ax, ncols = 1, extra_text=None):
     has_extra_text = extra_text is not None
     handles, labels = ax.get_legend_handles_labels()
     
@@ -42,12 +42,12 @@ def addLegend(ax, extra_text=None):
     #TODO: The goal is to leave the data in order, but it should be less hacky
     handles[:] = reversed(handles)
     labels[:] = reversed(labels)
-    if len(handles) % 2:
+    if len(handles) % 2 and ncols == 2:
         handles.insert(math.floor(len(handles)/2), patches.Patch(color='none', label = ' '))
         labels.insert(math.floor(len(labels)/2), ' ')
     #handles= reversed(handles)
     #labels= reversed(labels)
-    ax.legend(handles=handles, labels=labels, prop={'size' : 20*(0.7 if shape == 1 else 1.3)}, ncol=2, loc='upper right')
+    ax.legend(handles=handles, labels=labels, prop={'size' : 20*(0.7 if shape == 1 else 1.3)}, ncol=ncols, loc='upper right')
 
 def makeStackPlotWithRatio(histInfo, stackedProcs, label="nominal", unstacked=None, xlabel="", ylabel="Events/bin", 
                 rrange=[0.9, 1.1], ymax=None, xlim=None, binwnorm=None, select={}, action=None, extra_text=None):
@@ -114,10 +114,10 @@ def makePlotWithRatioToRef(hists, labels, colors, xlabel="", ylabel="Events/bin"
     
     if len(hists) > 1:
         hep.histplot(
-            ratio_hists,
+                ratio_hists,
             histtype="step",
-            color=colors[1:],
-            label=labels[1:],
+            color=colors[ratio_plots_starting_idx:],
+            label=labels[ratio_plots_starting_idx:],
             yerr=False,
             stack=False,
             ax=ax2,
