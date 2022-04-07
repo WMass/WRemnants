@@ -14,6 +14,7 @@ parser.add_argument("-i", "--inputFile", type=str, required=True)
 parser.add_argument("--qcdScale", choices=["byHelicityPt", "byPt", "integrated"], default="byHelicityPt", 
         help="Decorrelation for QCDscale (additionally always by charge)")
 parser.add_argument("--wlike", action='store_true', help="Run W-like analysis of mZ")
+parser.add_argument("--pdf", type=str, default="nnpdf31", choices=theory_tools.pdfMap.keys(), help="PDF to use")
 args = parser.parse_args()
 
 if not os.path.isdir(args.outfolder):
@@ -39,22 +40,24 @@ print("Single Vmu samples", single_vmu_samples)
 print("signal samples", signal_samples)
 print("single_c_fake_samples", single_v_and_fake_samples)
 
-cardTool.addSystematic("pdfNNPDF31", 
+pdfName = theory_tools.pdfMap[args.pdf]["name"]
+cardTool.addSystematic(pdfName, 
     processes=single_v_and_fake_samples,
     mirror=True,
-    group="pdfNNPDF31",
+    group=pdfName,
     systAxes=["tensor_axis_0"],
-    labelsByAxis=["pdf{i}NNPDF31"],
+    labelsByAxis=[pdfName.replace("pdf", "pdf{i}")],
     # Needs to be a tuple, since for multiple axis it would be (ax1, ax2, ax3)...
     # -1 means all possible values of the mirror axis
     skipEntries=[(0, -1)],
 )
-cardTool.addSystematic("alphaS002NNPDF31", 
+
+cardTool.addSystematic(f"alphaS002{pdfName}", 
     processes=single_v_and_fake_samples,
     mirror=False,
-    group="pdfNNPDF31",
+    group=pdfName,
     systAxes=["tensor_axis_0"],
-    outNames=["alphaS002NNPDF31Up", "alphaS002NNPDF31Down"],
+    outNames=[pdfName+"AlphaSUp", pdfName+"AlphaSDown"],
     scale=0.75,
 )
 for name,num in zip(["effSystIsoTnP", "effStatTnP",], [2, 624*4]):

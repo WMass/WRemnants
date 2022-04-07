@@ -39,6 +39,8 @@ zprocs = ["ZmumuPostVFP", "ZtautauPostVFP"]
 # standard regular axes
 axis_eta = hist.axis.Regular(48, -2.4, 2.4, name = "eta")
 axis_pt = hist.axis.Regular(29, 26., 55., name = "pt")
+axis_gen_eta = hist.axis.Regular(48, -2.4, 2.4, name = "gen_eta")
+axis_gen_pt = hist.axis.Regular(29, 26., 55., name = "gen_pt")
 
 # categorical axes in python bindings always have an overflow bin, so use a regular
 # axis for the charge
@@ -48,6 +50,7 @@ axis_passIso = hist.axis.Boolean(name = "passIso")
 axis_passMT = hist.axis.Boolean(name = "passMT")
 
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passIso, axis_passMT]
+gen_axes = [axis_gen_eta, axis_gen_pt]
 
 axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
 axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
@@ -57,7 +60,6 @@ axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
 down_up_axis = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "downUpVar")
 
 down_nom_up_axis = hist.axis.Regular(3, -1.5, 1.5, underflow=False, overflow=False, name = "downNomUpVar")
-
 
 muon_efficiency_helper, muon_efficiency_helper_stat, muon_efficiency_helper_syst = wremnants.make_muon_efficiency_helpers(era = era, max_pt = axis_pt.edges[-1])
 
@@ -179,8 +181,7 @@ def build_graph(df, dataset):
         if isW or isZ:
 
             df = theory_tools.define_scale_tensor(df)
-            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "scaleWeights_tensor_wnom"], tensor_axes = wremnants.scale_tensor_axes)
-            results.append(scaleHist)
+            results.append(theory_tools.make_scale_hist(df, [*nominal_axes, axis_ptVgen], [*nominal_cols, "ptVgen"]))
 
             # currently SCETLIB corrections are applicable to W-only, and helicity-split scales are only valid for one of W or Z at a time
             # TODO make this work for both simultaneously as needed
@@ -190,17 +191,7 @@ def build_graph(df, dataset):
                 qcdScaleByHelicityUnc = df.HistoBoost("qcdScaleByHelicity", nominal_axes+[axis_ptVgen, axis_chargeVgen], [*nominal_cols, "ptVgen", "chargeVgen", "helicityWeight_tensor"], tensor_axes=qcdScaleByHelicity_helper.tensor_axes)
                 results.append(qcdScaleByHelicityUnc)
 
-            # slice 101 elements starting from 0 and clip values at += 10.0
-            df = df.Define("pdfWeights_tensor", "auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, 101>(LHEPdfWeight), 10.); res = nominal_weight*res; return res;")
-
-            pdfNNPDF31 = df.HistoBoost("pdfNNPDF31", nominal_axes, [*nominal_cols, "pdfWeights_tensor"])
-            results.append(pdfNNPDF31)
-
-            # slice 2 elements starting from 101
-            df = df.Define("pdfWeightsAS_tensor", "auto res = wrem::vec_to_tensor_t<double, 2>(LHEPdfWeight, 101); res = nominal_weight*res; return res;")
-
-            alphaS002NNPDF31 = df.HistoBoost("alphaS002NNPDF31", nominal_axes, [*nominal_cols, "pdfWeightsAS_tensor"])
-            results.append(alphaS002NNPDF31)
+            results.extend(theory_tools.define_and_make_pdf_hists(df, nominal_axes, nominal_cols))
 
             nweights = 21 if isW else 23
             df = df.Define("massWeight_tensor", f"wrem::vec_to_tensor_t<double, {nweights}>(MEParamWeight)")
@@ -226,6 +217,9 @@ def build_graph(df, dataset):
                         tensor_axes=[down_up_axis, scale_etabins_axis])
 
                 results.append(dummyMuonScaleSyst)
+#                gen = df.HistoBoost("gen", gen_axes, [*gen_cols, "nominal_weight"])
+#                results.append(gen)
+#                print("gen info accessed")
 
             df = df.Define("Muon_cvhbsMomCov", "wrem::splitNestedRVec(Muon_cvhbsMomCov_Vals, Muon_cvhbsMomCov_Counts)")
 

@@ -1,18 +1,4 @@
 import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
-parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=-1)
-parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default=None)
-args = parser.parse_args()
-
-import ROOT
-ROOT.gInterpreter.ProcessLine(".O3")
-if not args.nThreads:
-    ROOT.ROOT.EnableImplicitMT()
-elif args.nThreads != 1:
-    ROOT.ROOT.EnableImplicitMT(args.nThreads)
-
 import pickle
 import gzip
 
@@ -23,6 +9,21 @@ import lz4.frame
 import logging
 import math
 from wremnants import theory_tools
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
+parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=-1)
+parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default=None)
+parser.add_argument("--muScaleMag", type=float, default=1e-4, help="Magnitude of dummy muon scale uncertainty")
+parser.add_argument("--muScaleBins", type=int, default=1, help="Number of bins for muon scale uncertainty")
+args = parser.parse_args()
+
+import ROOT
+ROOT.gInterpreter.ProcessLine(".O3")
+if not args.nThreads:
+    ROOT.ROOT.EnableImplicitMT()
+elif args.nThreads != 1:
+    ROOT.ROOT.EnableImplicitMT(args.nThreads)
 
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts]) 
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
@@ -233,26 +234,14 @@ def build_graph(df, dataset):
                 helper=scetlibCorrZ_helper if isZ else scetlibCorrW_helper))
 
             df = theory_tools.define_scale_tensor(df)
-
-            scaleHist = df.HistoBoost("qcdScale", nominal_axes+[axis_ptVgen], [*nominal_cols, "ptVgen", "scaleWeights_tensor"], tensor_axes = wremnants.scale_tensor_axes)
-            results.append(scaleHist)
+            results.append(theory_tools.make_scale_hist(df, [*nominal_axes, axis_ptVgen], [*nominal_cols, "ptVgen"]))
 
             if isZ:
                 df = df.Define("helicityWeight_tensor", qcdScaleByHelicity_helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", "csSineCosThetaPhi", "scaleWeights_tensor", "nominal_weight"])
                 qcdScaleByHelicityUnc = df.HistoBoost("qcdScaleByHelicity", nominal_axes+[axis_ptVgen, axis_chargeVgen], [*nominal_cols, "ptVgen", "chargeVgen", "helicityWeight_tensor"], tensor_axes=qcdScaleByHelicity_helper.tensor_axes)
                 results.append(qcdScaleByHelicityUnc)
 
-            # slice 101 elements starting from 0 and clip values at += 10.0
-            df = df.Define("pdfWeights_tensor", "auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, 101>(LHEPdfWeight), 10.); res = nominal_weight*res; return res;")
-
-            pdfNNPDF31 = df.HistoBoost("pdfNNPDF31", nominal_axes, [*nominal_cols, "pdfWeights_tensor"])
-            results.append(pdfNNPDF31)
-
-            # slice 2 elements starting from 101
-            df = df.Define("pdfWeightsAS_tensor", "auto res = wrem::vec_to_tensor_t<double, 2>(LHEPdfWeight, 101); res = nominal_weight*res; return res;")
-
-            alphaS002NNPDF31 = df.HistoBoost("alphaS002NNPDF31", nominal_axes, [*nominal_cols, "pdfWeightsAS_tensor"])
-            results.append(alphaS002NNPDF31)
+            results.extend(theory_tools.define_and_make_pdf_hists(df, nominal_axes, nominal_cols))
 
             nweights = 21 if isW else 23
             df = df.Define("massWeight_tensor", f"auto res = wrem::vec_to_tensor_t<double, {nweights}>(MEParamWeight); res = nominal_weight*res; return res;")
@@ -264,10 +253,9 @@ def build_graph(df, dataset):
 
             # Don't think it makes sense to apply the mass weights to scale leptons from tau decays
             if not "tau" in dataset.name:
-                netabins = 4
-                df = df.Define("muonScaleDummy4Bins2e4", f"wrem::dummyScaleFromMassWeights<{netabins}, {nweights}>(nominal_weight, massWeight_tensor, TrigMuon_eta, 2.e-4, {str(isW).lower()})")
-                scale_etabins_axis = hist.axis.Regular(netabins, -2.4, 2.4, name="scaleEtaSlice", underflow=False, overflow=False)
-                dummyMuonScaleSyst = df.HistoBoost("muonScaleSyst", nominal_axes, [*nominal_cols, "muonScaleDummy4Bins2e4"], 
+                df = df.Define("muonScaleDummy", f"wrem::dummyScaleFromMassWeights<{args.muScaleBins}, {nweights}>(nominal_weight, massWeight_tensor, TrigMuon_eta, {args.muScaleMag}, {str(isW).lower()})")
+                scale_etabins_axis = hist.axis.Regular(args.muScaleBins, -2.4, 2.4, name="scaleEtaSlice", underflow=False, overflow=False)
+                dummyMuonScaleSyst = df.HistoBoost("muonScaleSyst", nominal_axes, [*nominal_cols, "muonScaleDummy"], 
                     tensor_axes=[down_up_axis, scale_etabins_axis])
                 results.append(dummyMuonScaleSyst)
 
