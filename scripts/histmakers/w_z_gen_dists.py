@@ -1,11 +1,10 @@
 import argparse
-import time
-time_start = time.time()
-
+from wremnants import theory_tools
 parser = argparse.ArgumentParser()
 parser.add_argument("--nThreads", type=int, help="number of threads", default=None)
 parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=-1)
-parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default = ["Wplus", "Wminus", "Zmumu", "Ztautau", "data"])
+parser.add_argument("--filterProcs", type=str, nargs="*", help="Only run over processes matched by (subset) of name", default=["Wplus", "Wminus", "Zmumu", "Ztautau","data"])
+parser.add_argument("--pdfs", type=str, nargs="*", default=["nnpdf31"], choices=theory_tools.pdfMap.keys(), help="PDF sets to produce error hists for")
 args = parser.parse_args()
 
 import ROOT
@@ -15,11 +14,12 @@ if not args.nThreads:
 elif args.nThreads != 1:
     ROOT.ROOT.EnableImplicitMT(args.nThreads)
 
-import pickle
-import gzip
-
+import time
+time_start = time.time()
 import narf
 import wremnants
+import pickle
+import gzip
 import hist
 import lz4.frame
 import logging
@@ -39,8 +39,11 @@ axis_absYVgen = hist.axis.Variable(
     [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "absYVgen"
 )
 axis_ptVgen = hist.axis.Variable(
-    [0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen"
+    list(range(41))+[45, 50, 55, 60, 75, 100], name = "ptVgen"
 )
+
+#axis_ptVgen = hist.axis.Regular(120, 0., 120., name="ptVgen")
+
 axis_chargeWgen = hist.axis.Regular(
     2, -2, 2, name="chargeVgen", underflow=False, overflow=False
 )
@@ -62,6 +65,7 @@ wprocs_bugged = [
 wprocs_bugfix = [
     "WplusmunuPostVFP_bugfix", 
     "WminusmunuPostVFP_bugfix",
+    "WminusmunuPostVFP_bugfix_slc7",
 ]
 wprocs = [*wprocs_bugged, *wprocs_bugfix]
 wprocs_bugged_to_check = [ # mu only for making comparison plots between bugged and bugfix samples
@@ -90,17 +94,22 @@ def build_graph(df, dataset):
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
     weightsum = df.SumAndCount("weight")
 
+
     if dataset.name in zprocs:
         nominal_axes = [axis_massZgen, axis_absYVgen, axis_ptVgen, axis_chargeZgen]
     else:
         nominal_axes = [axis_massWgen, axis_absYVgen, axis_ptVgen, axis_chargeWgen]
 
     nominal_cols = ["massVgen", "absYVgen", "ptVgen", "chargeVgen"]
+    #results.append(theory_tools.make_scale_hist(df, nominal_axes, nominal_cols))
+#    for pdf in args.pdfs:
+#        results.extend(theory_tools.define_and_make_pdf_hists(df, nominal_axes, nominal_cols, pdfset=pdf))
 
     if not dataset.is_data:
         df = wremnants.define_prefsr_vars(df)
         df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhi, scaleWeights_tensor, weight)")
         helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes])
+
         results.append(helicity_moments_scale)
 
     if 'WplusmunuPostVFP' in dataset.name:
@@ -121,16 +130,18 @@ def build_graph(df, dataset):
     time_process_end = time.time()
     process_time = time_process_end - time_process_start
     print("Time it takes to process ", dataset.name, ": ", process_time)
+
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)
 
-fname = "w_z_gen_dists.pkl.lz4"
+fname = "w_z_gen_dists_slc7.pkl.lz4"
 
 print("writing output")
 with lz4.frame.open(fname, "wb") as f:
     pickle.dump(resultdict, f, protocol = pickle.HIGHEST_PROTOCOL)
 
+'''
 print("computing angular coefficients")
 
 z_moments_bugged = None
@@ -171,7 +182,6 @@ w_coeffs_bugged = wremnants.moments_to_angular_coeffs(w_moments_bugged)
 z_coeffs_bugfix = wremnants.moments_to_angular_coeffs(z_moments_bugfix)
 w_coeffs_bugfix = wremnants.moments_to_angular_coeffs(w_moments_bugfix)
 
-
 with lz4.frame.open("z_coeffs_bugged.pkl.lz4", "wb") as f:
     pickle.dump(z_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
 
@@ -182,4 +192,16 @@ with lz4.frame.open("z_coeffs_bugfix.pkl.lz4", "wb") as f:
     pickle.dump(z_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
 
 with lz4.frame.open("w_coeffs_bugfix.pkl.lz4", "wb") as f:
+
+with lz4.frame.open("z_coeffs_bugged_fine_bin.pkl.lz4", "wb") as f:
+    pickle.dump(z_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("w_coeffs_bugged_fine_bin.pkl.lz4", "wb") as f:
+    pickle.dump(w_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("z_coeffs_bugfix_fine_bin.pkl.lz4", "wb") as f:
+    pickle.dump(z_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
+
+with lz4.frame.open("w_coeffs_bugfix_fine_bin.pkl.lz4", "wb") as f:
     pickle.dump(w_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
+'''

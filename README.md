@@ -2,9 +2,9 @@
 
 ## Instructions:
 
-Activate the singularity image (before getting the code or running it)
+Activate the singularity image (to be done every time before running code)
 ```bash
-singularity run /scratch/singularity/pythonrootarchdevrolling # needs to be on lxplus8s10
+singularity run /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:latest
 ```
     
 Get the code (after forking from the central WMass repository)

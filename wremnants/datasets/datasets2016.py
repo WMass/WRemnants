@@ -16,9 +16,9 @@ def makeFilelist(paths, maxFiles=-1, eos=False):
 
 def getDatasets(maxFiles=-1, filt=None):
     dataPostVFP = narf.Dataset(name = "dataPostVFP",
-        filepaths = makeFilelist(["/scratch/shared/originalNANO/NanoV8Data_Mar2021/Run2016F_postVFP/*",
-            "/scratch/shared/originalNANO/NanoV8Data_Mar2021/Run2016G/*",
-            "/scratch/shared/originalNANO/NanoV8Data_Mar2021/Run2016H/*",
+        filepaths = makeFilelist(["/scratch/shared/NanoAOD/TrackRefitv1/SingleMuon/Run2016F_postVFP_220223_222034/*/*.root",
+            "/scratch/shared/NanoAOD/TrackRefitv1/SingleMuon/Run2016G_220223_222128/*/*.root",
+            "/scratch/shared/NanoAOD/TrackRefitv1/SingleMuon/Run2016H_220223_222223/*/*.root",
         ], maxFiles),
         is_data = True,
         lumi_csv = lumicsv,
@@ -27,7 +27,7 @@ def getDatasets(maxFiles=-1, filt=None):
 
     ZmmPostVFP = narf.Dataset(name = "ZmumuPostVFP",
         filepaths = makeFilelist(
-            ["/scratch/shared/NanoAOD/DYJetsToMuMu_M-50_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/MCPostVFPWeightFix/211114_184608/000*/*.root"], maxFiles),
+            ["/scratch/shared/NanoAOD/TrackRefitv1/DYJetsToMuMu_M-50_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
         is_data = False,
         xsec = 1976.1,
     )
@@ -43,15 +43,15 @@ def getDatasets(maxFiles=-1, filt=None):
     BR_TAUToE = 0.1782
     ZttPostVFP = narf.Dataset(name = "ZtautauPostVFP",
         filepaths = makeFilelist(
-            ["/scratch/shared/originalNANO/DYJetsToTauTau_postVFP/*/*.root"], maxFiles),
+            ["/scratch/shared/NanoAOD/TrackRefitv1/DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
         is_data = False,
         # At least one tau->e or mu decay, so everything that's not all other decays
-        xsec = ZmmPostVFP.xsec*(1.-(1.-(BR_TAUToMU+BR_TAUToE)**2)),
+        xsec = ZmmPostVFP.xsec*(1.-(1. - BR_TAUToMU - BR_TAUToE)**2),
     )
 
     WpmunuPostVFP = narf.Dataset(name = "WplusmunuPostVFP",
         filepaths = makeFilelist(
-            ["/scratch/shared/originalNANO_newWithAltPDF/WplusJetsToMuNu_postVFP/*/*.root"], maxFiles),
+            ["/scratch/shared/NanoAOD/TrackRefitv1/WplusJetsToMuNu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
         is_data = False,
         xsec = 11572.19,
     )
@@ -65,7 +65,7 @@ def getDatasets(maxFiles=-1, filt=None):
     
     WmmunuPostVFP = narf.Dataset(name = "WminusmunuPostVFP",
         filepaths = makeFilelist(
-            ["/scratch/shared/originalNANO_newWithAltPDF/WminusJetsToMuNu_postVFP/*/*.root"], maxFiles),
+            ["/scratch/shared/NanoAOD/TrackRefitv1/WminusJetsToMuNu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
             is_data = False,
             xsec = 8562.66,
     )
@@ -77,16 +77,23 @@ def getDatasets(maxFiles=-1, filt=None):
             xsec = 8562.66,
     )
 
+    WmmunuPostVFP_bugfix_slc7 = narf.Dataset(name = "WminusmunuPostVFP_bugfix_slc7",
+        filepaths = makeFilelist(
+            ["/eos/cms/store/cmst3/group/wmass/w-mass-13TeV/NanoGen/WminusToMuNu_svn3900_BugFix_TuneCP5_13TeV-powheg-MiNNLO-pythia8-photos/RunIISummer15wmLHEGS/220405_221010/000*/*.root"], maxFiles),
+            is_data = False,
+            xsec = 8562.66,
+    )
+
     WptaunuPostVFP = narf.Dataset(name = "WplustaunuPostVFP",
         filepaths = makeFilelist(
-                ["/scratch/shared/originalNANO_newWithAltPDF/WplusJetsToTauNu_postVFP/*/*.root"], maxFiles),
+                ["/scratch/shared/NanoAOD/TrackRefitv1/WplusJetsToTauNu_TauToMu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
             is_data = False,
             xsec = BR_TAUToMU*WpmunuPostVFP.xsec,
     )
 
     WmtaunuPostVFP = narf.Dataset(name = "WminustaunuPostVFP",
         filepaths = makeFilelist(
-                ["/scratch/shared/originalNANO_newWithAltPDF/WminusJetsToTauNu_postVFP/*/*.root"], maxFiles),
+                ["/scratch/shared/NanoAOD/TrackRefitv1/WminusJetsToTauNu_TauToMu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"], maxFiles),
             is_data = False,
             xsec = BR_TAUToMU*WmmunuPostVFP.xsec,
     )
@@ -119,6 +126,7 @@ def getDatasets(maxFiles=-1, filt=None):
         WmmunuPostVFP,
         WpmunuPostVFP_bugfix,
         WmmunuPostVFP_bugfix,
+        WmmunuPostVFP_bugfix_slc7,
         WptaunuPostVFP,
         WmtaunuPostVFP,
         ZmmPostVFP,
@@ -129,7 +137,6 @@ def getDatasets(maxFiles=-1, filt=None):
         wwPostVFP]
 
     if filt:
-        print("Filtering")
         return list(filter(filt, allPostVFP))
 
     return allPostVFP

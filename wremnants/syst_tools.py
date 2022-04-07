@@ -1,7 +1,7 @@
 import hist
 import numpy as np
 
-def scale_helicity_hist_to_variations(scale_hist):
+def scale_helicity_hist_to_variations(scale_hist, sum_helicity=False, sum_ptV=False):
 
     s = hist.tag.Slicer()
     # select nominal QCD scales, but keep the sliced axis at size 1 for broadcasting
@@ -10,7 +10,13 @@ def scale_helicity_hist_to_variations(scale_hist):
     # select nominal QCD scales and project down to nominal axes
     nom_hist = nom_scale_hist[{"ptVgen" : s[::hist.sum], "chargeVgen" : s[::hist.sum], "helicity" : s[::hist.sum], "muRfact" : s[1.j], "muFfact" : s[1.j] }]
 
+    if sum_helicity:
+        scale_hist = scale_hist[{"helicity" : s[::hist.sum]}]
+        nom_scale_hist = nom_scale_hist[{"helicity" : s[::hist.sum]}]
 
+    if sum_ptV:
+        scale_hist = scale_hist[{"ptVgen" : s[::hist.sum]}]
+        nom_scale_hist = nom_scale_hist[{"ptVgen" : s[::hist.sum]}]
 
     # difference between a given scale and the nominal, plus the sum
     # this emulates the "weight if idx else nominal" logic and corresponds to the decorrelated
@@ -20,7 +26,11 @@ def scale_helicity_hist_to_variations(scale_hist):
     else:
         out_name = scale_hist.name + "_variations"
 
-    scale_variation_hist = hist.Hist(*scale_hist.axes, storage = scale_hist._storage_type(), name = out_name,
-                data = scale_hist.view(flow=True) - nom_scale_hist.view(flow=True) + nom_hist.view(flow=True)[..., np.newaxis, np.newaxis, np.newaxis, np.newaxis, np.newaxis])
+    expd = scale_hist.ndim - nom_hist.ndim
+    expandnom = np.expand_dims(nom_hist.view(flow=True), [-expd+i for i in range(expd)])
+    systhist = scale_hist.view(flow=True) - nom_scale_hist.view(flow=True) + expandnom
+
+    scale_variation_hist = hist.Hist(*scale_hist.axes, storage = scale_hist._storage_type(), 
+                name = out_name, data = systhist)
 
     return scale_variation_hist
