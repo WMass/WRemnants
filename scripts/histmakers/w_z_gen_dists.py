@@ -37,7 +37,7 @@ axis_massWgen = hist.axis.Variable([0., math.inf], name="massVgen")
 axis_massZgen = hist.axis.Regular(12, 60., 120., name="massVgen")
 
 axis_absYVgen = hist.axis.Variable(
-    [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 10], name = "absYVgen"
+    [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 5, 10], name = "absYVgen"
 )
 axis_ptVgen = hist.axis.Variable(
 #    [0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptVgen"
@@ -57,27 +57,13 @@ axis_l_eta_gen = hist.axis.Regular(48, -2.4, 2.4, name = "prefsr_lepton_eta_gen"
 axis_l_pt_gen = hist.axis.Regular(29, 26., 55., name = "prefsr_lepton_pt_gen")
 axes_l_gen = [axis_l_eta_gen, axis_l_pt_gen]
 
-wprocs_bugged = [
+wprocs = [
     "WplusmunuPostVFP", 
     "WminusmunuPostVFP",
     "WminustaunuPostVFP",
     "WplustaunuPostVFP"
 ]
-wprocs_bugfix = [
-    "Wplusmunu_bugfix", 
-    "Wminusmunu_bugfix_newprod",
-    "Wplusmunu_bugfix",
-    "Wplusmunu_bugfix_reweight_h2",
-]
-wprocs = [*wprocs_bugged, *wprocs_bugfix]
-wprocs_bugged_to_check = [ # mu only for making comparison plots between bugged and bugfix samples
-    "WplusmunuPostVFP", 
-    "WminusmunuPostVFP",
-]
-zprocs_bugged = ["ZmumuPostVFP", "ZtautauPostVFP"]
-zprocs_bugfix = ["ZmumuPostVFP_bugfix", "ZmumuPostVFP_bugfix_slc7"]
-zprocs = [*zprocs_bugged, *zprocs_bugfix]
-zprocs_bugged_to_check = ["ZmumuPostVFP"]
+zprocs = ["ZmumuPostVFP", "ZtautauPostVFP"]
 
 def build_graph(df, dataset):
     print("build graph")
@@ -149,53 +135,21 @@ with lz4.frame.open(fname, "wb") as f:
 
 print("computing angular coefficients")
 
-z_moments_bugged = None
-z_moments_bugfix = None
-w_moments_bugged = None
-w_moments_bugfix = None
+z_moments = None
+w_moments = None
 
-if args.skipAngularCoeffs:
-    exit(0)
-
-# TODO: This should be cleaned up
 for key, val in resultdict.items():
     moments = val["output"]["helicity_moments_scale"]
-    if key in zprocs_bugged_to_check:
-        if z_moments_bugged is None:
-            z_moments_bugged = moments
+    if key in zprocs:
+        if z_moments is None:
+            z_moments = moments
         else:
-            # gen level kinematics, stack tau to mu channel to increase stats
-            z_moments_bugged += moments
-    elif key in wprocs_bugged_to_check:
-        if w_moments_bugged is None:
-            w_moments_bugged = moments
+            z_moments += moments
+    elif key in wprocs:
+        if w_moments is None:
+            w_moments = moments
         else:
-            w_moments_bugged += moments
-    elif key in zprocs_bugfix:
-        if z_moments_bugfix is None:
-            z_moments_bugfix = moments
-        else:
-            z_moments_bugfix += moments
-    elif key in wprocs_bugfix:
-        if w_moments_bugfix is None:
-            w_moments_bugfix = moments
-        else:
-            w_moments_bugfix += moments
+            w_moments += moments
 
-
-if z_moments_bugged:
-    z_coeffs_bugged = wremnants.moments_to_angular_coeffs(z_moments_bugged)
-    with lz4.frame.open("z_coeffs_bugged.pkl.lz4", "wb") as f:
-        pickle.dump(z_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
-if w_moments_bugged:
-    w_coeffs_bugged = wremnants.moments_to_angular_coeffs(w_moments_bugged)
-    with lz4.frame.open("w_coeffs_bugged.pkl.lz4", "wb") as f:
-        pickle.dump(w_coeffs_bugged, f, protocol = pickle.HIGHEST_PROTOCOL)
-if w_moments_bugfix:
-    w_coeffs_bugfix = wremnants.moments_to_angular_coeffs(w_moments_bugfix)
-    with lz4.frame.open("w_coeffs_bugfix.pkl.lz4", "wb") as f:
-        pickle.dump(w_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
-if z_moments_bugfix:
-    z_coeffs_bugfix = wremnants.moments_to_angular_coeffs(z_moments_bugfix)
-    with lz4.frame.open("z_coeffs_bugfix.pkl.lz4", "wb") as f:
-        pickle.dump(z_coeffs_bugfix, f, protocol = pickle.HIGHEST_PROTOCOL)
+z_coeffs = wremnants.moments_to_angular_coeffs(z_moments)
+w_coeffs = wremnants.moments_to_angular_coeffs(w_moments)

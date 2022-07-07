@@ -37,7 +37,7 @@ public:
     //    return nominal_weight*get_tensor(x, y, z);
     //}
 
-    tensor_t operator() (int x1, double x2, double x3, double x4, double nominal_weight = 1.0) {
+    tensor_t operator() (double x1, double x2, double x3, int x4, double nominal_weight) {
         return nominal_weight*get_tensor(x1, x2, x3, x4);
     }
 private:

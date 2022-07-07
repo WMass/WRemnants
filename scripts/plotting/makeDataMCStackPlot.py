@@ -16,7 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("infile", help="Output file of the analysis stage, containing ND boost histograms")
 parser.add_argument("--wlike", action='store_true', help="Make W like plots")
 parser.add_argument("-n", "--baseName", type=str, help="Histogram name in the file (e.g., 'nominal')", default="nominal")
-parser.add_argument("--hists", type=str, nargs='+', help="List of histograms to plot")
+parser.add_argument("--hists", type=str, nargs='+', required=True, help="List of histograms to plot")
 parser.add_argument("-c", "--channel", type=str, choices=["plus", "minus", "all"], default="all", help="Select channel to plot")
 parser.add_argument("-p", "--outpath", type=str, default=os.path.expanduser("~/www/WMassAnalysis"), help="Base path for output")
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
@@ -25,8 +25,8 @@ parser.add_argument("--ymax", type=float, help="Max value for y axis (if not spe
 
 subparsers = parser.add_subparsers()
 variation = subparsers.add_parser("variation", help="Arguments for adding variation hists")
-variation.add_argument("--varName", type=str, help="Name of variation hist")
-variation.add_argument("--varLabel", type=str, nargs='+', help="Label(s) of variation hist for plotting")
+variation.add_argument("--varName", type=str, required=True, help="Name of variation hist")
+variation.add_argument("--varLabel", type=str, nargs='+', required=True, help="Label(s) of variation hist for plotting")
 variation.add_argument("--selectAxis", type=str, help="If you need to select a variation axis")
 variation.add_argument("--selectEntries", type=int, help="entries to read from the selected axis")
 
@@ -46,7 +46,9 @@ groups.loadHistsForDatagroups(args.baseName, syst="")
 exclude = ["Data"]
 
 if addVariation:
-    groups.loadHistsForDatagroups("", syst=args.varName)
+    print("Here")
+    groups.loadHistsForDatagroups(args.baseName, syst=args.varName)
+    print("Done")
     groups.addSummedProc(args.baseName, name=args.varName, label=args.varLabel[0])
     if not args.selectAxis:
         exclude.append(args.varName)
@@ -86,7 +88,7 @@ xlabels = {
 for h in args.hists:
     action = sel.unrolledHist if "unrolled" in h else lambda x: x.project(h)
     if addVariation:
-        unstacked.insert(0, args.varName)
+        exclude.insert(0, args.varName)
     fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ymax=args.ymax, action=action, unstacked=exclude, 
             xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select) 
     outfile = "/".join([outpath, f"{h}_{args.channel}.pdf"])

@@ -111,19 +111,31 @@ def clipNegativeVals(h):
 def makeAbsHist(h, axis_name):
     ax = h.axes[axis_name]
     axidx = list(h.axes).index(ax)
-    abs_ax = hist.axis.Variable(ax.edges[ax.index(0.):], name=axis_name)
+    abs_ax = hist.axis.Variable(ax.edges[ax.index(0.):], name=f"abs{axis_name}")
     hnew = hist.Hist(*h.axes[:axidx], abs_ax, *h.axes[axidx+1:], storage=hist.storage.Weight())
     
     s = hist.tag.Slicer()
     hnew[...] = h[{axis_name : s[ax.index(0):]}].view() + np.flip(h[{axis_name : s[:ax.index(0)]}].view(), axis=axidx)
     return hnew
 
-def makeAbsHist(h, axis_name):
+def rebinHist(h, axis_name, edges):
     ax = h.axes[axis_name]
-    axidx = list(h.axes).index(ax)
-    abs_ax = hist.axis.Variable(ax.edges[ax.index(0.):], name=axis_name)
-    hnew = hist.Hist(*h.axes[:axidx], abs_ax, *h.axes[axidx+1:], storage=hist.storage.Weight())
+    ax_idx = [a.name for a in h.axes].index(axis_name)
+    if not all([x in ax.edges for x in edges]):
+        raise ValueError(f"Cannot rebin histogram due to incompatible eduges for axis '{ax.name}'\n"
+                            f"Edges of histogram are {ax.edges}, requested rebinning to {edges}")
+        
+    new_ax = hist.axis.Variable(edges, name=ax.name, overflow=ax.traits.overflow, underflow=ax.traits.underflow)
+    axes = list(h.axes)
+    axes[ax_idx] = new_ax
     
-    s = hist.tag.Slicer()
-    hnew[...] = h[{axis_name : s[ax.index(0):]}].view() + np.flip(h[{axis_name : s[:ax.index(0)]}].view(), axis=axidx)
+    hnew = hist.Hist(*axes, name=h.name, storage=h._storage_type())
+    sum_edges = edges if edges[-1] != ax.edges[-1] else edges[:-1]
+    # Take is used because reduceat sums i:len(array) for the last entry, in the case
+    # where the final bin isn't the same between the initial and rebinned histogram, you
+    # want to drop this value
+    hnew.values()[...] = np.add.reduceat(h.values(), h.axes[axis_name].index(sum_edges), 
+            axis=ax_idx).take(indices=range(new_ax.size), axis=ax_idx)
+    hnew.variances()[...] = np.add.reduceat(h.variances(), h.axes[axis_name].index(sum_edges), 
+            axis=ax_idx).take(indices=range(new_ax.size), axis=ax_idx)
     return hnew

@@ -79,6 +79,7 @@ def makeStackPlotWithRatio(
     if unstacked:
         if type(unstacked) == str: unstacked = unstacked.split(",")
         for proc in unstacked:
+            print("Proc is", proc, "hists are", histInfo[proc].keys())
             unstack = action(histInfo[proc][histName][select])
             hep.histplot(
                 unstack,
@@ -102,7 +103,7 @@ def makeStackPlotWithRatio(
     return fig
 
 def makePlotWithRatioToRef(
-    hists, labels, colors, xlabel="", ylabel="Events/bin", rlabel="bugfix/bugged",
+    hists, labels, colors, xlabel="", ylabel="Events/bin", rlabel="x/nominal",
     rrange=[0.9, 1.1], ymax=None, xlim=None, nlegcols=2, binwnorm=None, alpha=1.,
     baseline=True, data=False, autorrange=None, grid = False
 ):
@@ -110,8 +111,6 @@ def makePlotWithRatioToRef(
     ratio_hists = [hh.divideHists(h, hists[0], cutoff=0.00001) for h in hists[not baseline:]]
     fig, ax1, ax2 = figureWithRatio(hists[0], xlabel, ylabel, [0, ymax] if ymax else None, rlabel, rrange, xlim=xlim, grid_on_ratio_plot = grid)
     
-    print("WE ARE HERE!")
-
     hep.histplot(
         hists[:len(hists) - data],
         histtype="step",

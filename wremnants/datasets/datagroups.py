@@ -231,6 +231,8 @@ class datagroups2016(datagroups):
             return baseName
         if (baseName == "" or baseName == "x") and syst:
             return syst
+        if syst[:len(baseName)] == baseName:
+            return syst
         return "_".join([baseName,syst])
     
     def readHist(self, baseName, proc, syst, scaleOp=None, forceNonzero=True):

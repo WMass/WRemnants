@@ -159,6 +159,7 @@ def define_and_make_pdf_hists(df, axes, cols, dataset, pdfset="nnpdf31", storeUn
     entries = pdfInfo["entries"] if storeUnc else 1
 
     df = df.Define(tensorName, f"auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, {entries}>({pdfBranch}), 10.); res = nominal_weight/nominal_pdf_cen*res; return res;")
+    #df = df.Define(tensorName, f"auto res = wrem::clip_tensor(wrem::vec_to_tensor_t<double, {entries}>({pdfBranch}), 10.); res = nominal_weight*res; return res;")
 
 
     df = df.Define(tensorASName, "Eigen::TensorFixedSize<double, Eigen::Sizes<2>> res; "
@@ -178,7 +179,7 @@ def pdf_central_weight(dataset, pdfset):
     return f"{pdfBranch}[0]"
 
 def define_scetlib_corr(df, weight_expr, helper, corr_type):
-    modify_central_weight = corr_type in ["altHist", "altHistNoUnc"]
+    modify_central_weight = corr_type not in ["altHist", "altHistNoUnc"]
 
     if modify_central_weight:
         df = df.Define("nominal_weight_uncorr", weight_expr)
@@ -186,7 +187,7 @@ def define_scetlib_corr(df, weight_expr, helper, corr_type):
         df = df.Define("nominal_weight", weight_expr)
         df = df.Alias("nominal_weight_uncorr", "nominal_weight")
 
-    df = df.Define("scetlibWeight_tensor", helper, ["chargeVgen", "massVgen", "yVgen", "ptVgen", "nominal_weight_uncorr"])
+    df = df.Define("scetlibWeight_tensor", helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", "nominal_weight_uncorr"])
     df = df.Define("scetlibCentralWeight", "scetlibWeight_tensor(0)")
 
     if modify_central_weight:
@@ -194,13 +195,14 @@ def define_scetlib_corr(df, weight_expr, helper, corr_type):
     return df
 
 def make_scetlibCorr_hists(df, name, axes, cols, helper, corr_type):
-    modify_central_weight = corr_type in ["altHist", "altHistNoUnc"]
+    modify_central_weight = corr_type not in ["altHist", "altHistNoUnc"]
     skipUncertainties = corr_type in ["noUnc", "altHistNoUnc"]
 
     res = []
     if modify_central_weight:
         nominal_uncorr = df.HistoBoost(f"{name}_uncorr", axes, [*cols, "nominal_weight_uncorr"])
         res.append(nominal_uncorr)
+        res.append(df.HistoBoost("weight_uncorr", [hist.axis.Regular(100, -2, 2)], ["nominal_weight_uncorr"]))
 
     if skipUncertainties:
         nominal = df.HistoBoost("scetlibCorr", axes, [*cols, "scetlibCentralWeight"])
