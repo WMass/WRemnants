@@ -1,3 +1,4 @@
+import pathlib
 import mplhep as hep
 import matplotlib.pyplot as plt
 from matplotlib import patches
@@ -6,6 +7,11 @@ from wremnants import histselections as sel
 import math
 import numpy as np
 import re
+import os
+import logging
+import shutil
+import sys
+import datetime
 
 hep.style.use(hep.style.ROOT)
 
@@ -79,7 +85,6 @@ def makeStackPlotWithRatio(
     if unstacked:
         if type(unstacked) == str: unstacked = unstacked.split(",")
         for proc in unstacked:
-            print("Proc is", proc, "hists are", histInfo[proc].keys())
             unstack = action(histInfo[proc][histName][select])
             hep.histplot(
                 unstack,
@@ -158,3 +163,35 @@ def makePlotWithRatioToRef(
 
     addLegend(ax1, nlegcols)
     return fig
+
+def make_plot_dir(outpath, outfolder):
+    full_outpath = "/".join([outpath, outfolder])
+    if not os.path.isdir(outpath):
+        raise IOError(f"The path {outpath} doesn't not exist. You should create it (and possibly link it to your web area)")
+        
+    if not os.path.isdir(full_outpath):
+        logging.info(f"Creating folder {full_outpath}")
+        os.makedirs(full_outpath)
+
+    return full_outpath
+
+def save_pdf_and_png(outdir, basename):
+    fname = f"{outdir}/{basename}.pdf"
+    plt.savefig(fname, bbox_inches='tight')
+    plt.savefig(fname.replace("pdf", "png"), bbox_inches='tight')
+    logging.info(f"Wrote file(s) {fname}(.png)")
+
+def write_index_and_log(outpath, logname, indexname="index.php", template_dir=f"{pathlib.Path(__file__).parent}/Templates"):
+    if not os.path.isfile(f"{outpath}/{indexname}"):
+        shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexname}")
+
+    logdir = f"{outpath}/logs"
+    if not os.path.isdir(logdir):
+        os.mkdir(logdir)
+
+    with open(f"{logdir}/{logname}.log", "w") as logf:
+        meta_info = '-'*80 + '\n' + \
+            'Script called at %s\n' % datetime.datetime.now() + \
+            'The command was: %s\n' % ' '.join(sys.argv) + \
+            '-'*80 + '\n'
+        logf.write(meta_info)

@@ -8,7 +8,6 @@
 
 namespace wrem {
     
-TFile *recoil_fits_Z_param = new TFile("wremnants/data/lowPU/recoil_fits_Z_param_refit.root", "READ");
 //TFile *recoil_fits_Z_param_refit = new TFile("wremnants/data/lowPU/recoil_fits_Z_param_refit.root", "READ");
 //TFile *recoil_fits_Z = new TFile("wremnants/data/lowPU/recoil_fits_Z.root", "READ");
 //TFile *recoil_fits_Z = new TFile("wremnants/data/lowPU/recoil_fits_Z.root", "READ");
@@ -17,52 +16,25 @@ std::map<std::string, TH1D*> recoil_hists_param;
     
 std::vector<float> qTbins;
 
-void recoil_init(char* name) {
+void recoil_init(char* name, char* paramFile) {
+    TFile recoil_fits_Z_param(paramFile, "READ");
+    TFile recoil_fits_Z(name, "READ");
     
-    TH3D *h3;
-    TH1D *h1;
-    
-    
-    TFile *recoil_fits_Z = new TFile(name, "READ");
-    
-    /*
-    for(TKey *key: ROOT::RangeStaticCast<TKey*>(*recoil_fits_Z->GetListOfKeys())) {
-        
-        auto *h = recoil_fits_Z->Get(key->GetName());
-        if(strncmp(key->GetClassName(), "TH3D", 4) == 0) {
-            cout << "Load recoil histo " << key->GetName() << endl;
-            h3 = (TH3D*)(recoil_fits_Z->Get(key->GetName()));
-            recoil_hists.insert({key->GetName(), h3});
+    for (const std::string component : {"para", "perp"}) {
+        for (const std::string type : {"data", "mc"}) {
+            std::string label = component+"_"+type;
+
+            auto* h3 = static_cast<TH3D*>(recoil_fits_Z.Get(label.c_str()));
+            auto* h3clone = static_cast<TH3D*>(h3->Clone());
+            h3clone->SetDirectory(0);
+            recoil_hists[h3clone->GetName()] = h3clone;
+
+            auto* h1 = static_cast<TH1D*>(recoil_fits_Z_param.Get(label.c_str()));
+            auto* h1clone = static_cast<TH1D*>(h1->Clone());
+            h1clone->SetDirectory(0);
+            recoil_hists_param[h1clone->GetName()] = h1clone;
         }
     }
-    
-    */
-    
-
- 
-    h3 = (TH3D*)recoil_fits_Z->Get("para_mc");
-    recoil_hists.insert({h3->GetName(), h3});
-    
-    h3 = (TH3D*)recoil_fits_Z->Get("perp_mc");
-    recoil_hists.insert({h3->GetName(), h3});
-    
-    h3 = (TH3D*)recoil_fits_Z->Get("para_data");
-    recoil_hists.insert({h3->GetName(), h3});
-    
-    h3 = (TH3D*)recoil_fits_Z->Get("perp_data");
-    recoil_hists.insert({h3->GetName(), h3});
-
-    h1 = (TH1D*)recoil_fits_Z_param->Get("para_mc");
-    recoil_hists_param.insert({h1->GetName(), h1});
-    
-    h1 = (TH1D*)recoil_fits_Z_param->Get("perp_mc");
-    recoil_hists_param.insert({h1->GetName(), h1});
-    
-    h1 = (TH1D*)recoil_fits_Z_param->Get("para_data");
-    recoil_hists_param.insert({h1->GetName(), h1});
-    
-    h1 = (TH1D*)recoil_fits_Z_param->Get("perp_data");
-    recoil_hists_param.insert({h1->GetName(), h1});
 
 }
 

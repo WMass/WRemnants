@@ -139,3 +139,65 @@ def rebinHist(h, axis_name, edges):
     hnew.variances()[...] = np.add.reduceat(h.variances(), h.axes[axis_name].index(sum_edges), 
             axis=ax_idx).take(indices=range(new_ax.size), axis=ax_idx)
     return hnew
+
+def mergeAxes(ax1, ax2):
+    if ax1.edges[0] < ax2.edges[0]:
+        tmp = ax1
+        ax1 = ax2
+        ax2 = tmp
+
+    if ax1.edges[-1] == ax2.edges[-1]:
+        return ax1
+
+    merge_idx = list(ax2.edges).index(ax1.edges[-1])+1
+    if merge_idx < 1 or merge_idx > ax2.size:
+        raise ValueError("Can't merge axes unless there is a common point of intersection!"
+            f"The edges were {ax1.edges}, and {ax2.edges}")
+
+    new_edges = np.concatenate((ax1.edges,ax2.edges[merge_idx:]))
+    return hist.axis.Variable(new_edges, name=ax1.name)
+
+def findCommonBinning(hists, axis_idx):
+    if len(hists) < 2:
+        raise ValueError("Can only find common binning between > 1 hists")
+
+    orig_axes = [h.axes[axis_idx] for h in hists]
+    common_edges = set(orig_axes[0].edges)
+    for ax in orig_axes[1:]:
+        common_edges.intersection_update(ax.edges)
+
+    return list(sorted(common_edges))
+
+def rebinHistsToCommon(hists, axis_idx, keep_full_range=False):
+    orig_axes = [h.axes[axis_idx] for h in hists]
+    new_edges = findCommonBinning(hists, axis_idx)
+    rebinned_hists = [rebinHist(h, ax.name, new_edges) for h,ax in zip(hists, orig_axes)]
+
+    # TODO: This assumes that the range extension only happens in one direction,
+    # specifically, that the longer range hist has higher values
+    if keep_full_range:
+        full_hists = []
+        hists_by_max = sorted(hists, key=lambda x: x.axes[axis_idx].edges[-1])
+        new_ax = rebinned_hists[0].axes[axis_idx]
+        for h in hists_by_max:
+            new_ax = mergeAxes(new_ax, h.axes[axis_idx])
+
+        for h,rebinh in zip(hists, rebinned_hists):
+            axes = list(rebinh.axes)
+            axes[axis_idx] = new_ax
+            newh = hist.Hist(*axes, name=rebinh.name, storage=h._storage_type())
+            merge_idx = new_ax.index(rebinh.axes[axis_idx].edges[-1])
+            # TODO: true the overflow/underflow properly
+            low_vals = rebinh.view()
+            vals = np.append(low_vals, np.take(h.view(), range(merge_idx, h.axes[axis_idx].size), axis_idx))
+            zero_pad_shape = list(newh.shape)
+            zero_pad_shape[axis_idx] -= vals.shape[axis_idx]
+            vals = np.append(vals, np.full(zero_pad_shape, hist.accumulators.WeightedSum(0, 0)))
+            newh[...] = vals
+            full_hists.append(newh)
+
+        new_edges = findCommonBinning(full_hists, axis_idx)
+        rebinned_hists = [rebinHist(h, h.axes[axis_idx].name, new_edges) for h in full_hists]
+
+    return rebinned_hists
+    

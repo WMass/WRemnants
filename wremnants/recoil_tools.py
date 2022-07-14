@@ -5,6 +5,9 @@ import copy
 import logging
 import sys
 import decimal
+from wremnants.common import data_dir
+
+ROOT.gInterpreter.Declare('#include "lowpu_recoil.h"')
 
 def drange(x, y, jump):
     while x < y:
@@ -19,7 +22,7 @@ class Recoil:
         if type_ == "highPU":
         
             self.recoil_qTbins = list(drange(0, 30, 0.5)) + list(range(30, 60, 2)) + list(range(60, 100, 5)) + list(range(100, 210, 10)) + [10000]
-            rInput_binned = "wremnants/data/recoil_fits_Z.root"
+            rInput_binned = f"{data_dir}/recoil_fits_Z.root"
             rInput_parametric = ""
     
         elif type_ == "lowPU":
@@ -27,7 +30,7 @@ class Recoil:
             self.recoil_qTbins = list(drange(0, 30, 0.5)) + list(range(30, 60, 2)) + list(range(60, 100, 5)) + list(range(100, 210, 10)) + [10000]
             self.recoil_qTbins = list(range(0, 50, 5)) + list(range(50, 100, 10)) + list(range(100, 200, 25)) + [10000]
             print(self.recoil_qTbins)
-            rInput_binned = "wremnants/data/lowPU/recoil_fits_Z.root"
+            rInput_binned = f"{data_dir}/lowPU/recoil_fits_Z.root"
             rInput_parametric = ""
             
         else: sys.exit("Recoil highPU or lowPU")
@@ -38,7 +41,7 @@ class Recoil:
         setattr(ROOT.wrem, "qTbins", qTbins_vec)
         
         # load recoil hists
-        ROOT.wrem.recoil_init(rInput_binned)
+        ROOT.wrem.recoil_init(rInput_binned, f"{data_dir}/lowPU/recoil_fits_Z_param_refit.root")
         
         # define axes
         self.axis_MET_pt = hist.axis.Regular(300, 0, 300, name = "recoil_MET_pt", underflow=False)

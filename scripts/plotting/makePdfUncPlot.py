@@ -57,13 +57,7 @@ xlabels = {
 # TODO
 #if args.together:
 
-outpath = "/".join([args.outpath, args.outfolder])
-if not os.path.isdir(args.outpath):
-	raise IOError(f"The path {args.outpath} doesn't not exist. You should create it (and possibly link it to your web area)")
-	
-if not os.path.isdir(outpath):
-	logging.info(f"Creating folder outpath")
-	os.makedirs(outpath)
+outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
 
 for name,color,labels,hists in zip(args.pdfs,colors, names, uncHists):
     # This is the reference
@@ -73,11 +67,6 @@ for name,color,labels,hists in zip(args.pdfs,colors, names, uncHists):
     plot_labels = [*names[0], *labels]
     fig = plot_tools.makePlotWithRatioToRef(hists1D, colors=plot_cols, labels=plot_labels, alpha=0.7,
             rrange=args.rrange, ylabel="$\sigma$/bin", xlabel=xlabels[args.obs], rlabel=f"x/{args.pdfs[0].upper()}", binwnorm=1.0, nlegcols=1)
-    plt.savefig("/".join([outpath, f"{name}Hist_{args.obs}_{args.channel}.pdf"]), bbox_inches='tight')
-    plt.savefig("/".join([outpath, f"{name}Hist_{args.obs}_{args.channel}.png"]), bbox_inches='tight')
+    plot_tools.save_pdf_and_png(outdir, f"{name}Hist_{args.obs}_{args.channel}")
     
-indexname = "index.php"
-if not os.path.isfile(f"{outpath}/{indexname}"):
-    shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexname}")
-
-
+plot_tools.write_html_index(outdir)

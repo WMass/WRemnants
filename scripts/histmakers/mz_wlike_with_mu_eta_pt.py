@@ -254,8 +254,12 @@ def build_graph(df, dataset):
     df = df.Filter("massZ >= 60. && massZ < 120.")
 
     #TODO improve this to include muon mass?
-    #df = df.Define("transverseMass", "wrem::mt_wlike_nano(TrigMuon_pt, TrigMuon_phi, NonTrigMuon_pt, NonTrigMuon_phi, MET_corr_rec_pt, MET_corr_rec_phi)")
-    df = df.Define("transverseMass", "wrem::mt_wlike_nano(TrigMuon_pt, TrigMuon_phi, NonTrigMuon_pt, NonTrigMuon_phi, MET_pt, MET_phi)")
+    met_vars = ("MET_pt", "MET_phi")
+    if not args.no_recoil:
+        df = df.Define("transverseMass_uncorr", f"wrem::mt_wlike_nano(TrigMuon_pt, TrigMuon_phi, NonTrigMuon_pt, NonTrigMuon_phi, {', '.join(met_vars)})")
+        met_vars = (x.replace("MET", "MET_corr_rec") for x in met_vars)
+
+    df = df.Define("transverseMass", f"wrem::mt_wlike_nano(TrigMuon_pt, TrigMuon_phi, NonTrigMuon_pt, NonTrigMuon_phi, {', '.join(met_vars)})")
 
     df = df.Filter("transverseMass >= 40.")
 

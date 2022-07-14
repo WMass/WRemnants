@@ -7,8 +7,7 @@ import lz4.frame
 import pickle
 from .correctionsTensor_helper import makeCorrectionsTensor
 from wremnants import boostHistHelpers as hh
-
-data_dir = f"{pathlib.Path(__file__).parent}/data/"
+from wremnants.common import data_dir
 
 def make_corr_helper_fromnp(filename=f"{data_dir}/N3LLCorrections/inclusive_{{process}}_pT.npz", isW=True):
     if isW:
@@ -44,11 +43,10 @@ def make_corr_helper_fromnp(filename=f"{data_dir}/N3LLCorrections/inclusive_{{pr
     return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper, tensor_rank=1)
 
 def make_corr_helper(filename=f"{data_dir}/N3LLCorrections/inclusive_pT_y_m.pkl.lz4", isW=True):
+    print("Filename", filename)
     with lz4.frame.open(filename) as f:
         corr = pickle.load(f)
-        corrh = corr[f"inclusive_{'W' if isW else 'Z'}_pT_y_m"]
-
-    print("Shape is", corrh.shape)
+        corrh = corr['W' if isW else 'Z']["inclusive_pT_y_m_ratio"]
 
     return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper, tensor_rank=1)
 
