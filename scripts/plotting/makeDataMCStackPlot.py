@@ -22,6 +22,7 @@ parser.add_argument("-p", "--outpath", type=str, default=os.path.expanduser("~/w
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
 parser.add_argument("-r", "--rrange", type=float, nargs=2, default=[0.9, 1.1], help="y range for ratio plot")
 parser.add_argument("--ymax", type=float, help="Max value for y axis (if not specified, range set automatically)")
+parser.add_argument("-a", "--name_append", type=str, help="Name to append to file name")
 
 subparsers = parser.add_subparsers()
 variation = subparsers.add_parser("variation", help="Arguments for adding variation hists")
@@ -40,15 +41,15 @@ if addVariation and (args.selectAxis or args.selectEntries):
     if len(args.varlabel) != 1 and (len(args.varLabel) != len(args.selectAxis) or len(args.varLabel) != len(args.selectEntries)):
         raise ValueError("Must specify the same number of args for --selectAxis, --selectEntires, and --varLabel")
 
+outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
+
 groups = datagroups2016(args.infile, wlike=args.wlike)
 groups.loadHistsForDatagroups(args.baseName, syst="")
 
 exclude = ["Data"]
 
 if addVariation:
-    print("Here")
     groups.loadHistsForDatagroups(args.baseName, syst=args.varName)
-    print("Done")
     groups.addSummedProc(args.baseName, name=args.varName, label=args.varLabel[0])
     if not args.selectAxis:
         exclude.append(args.varName)
@@ -91,11 +92,6 @@ for h in args.hists:
         exclude.insert(0, args.varName)
     fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ymax=args.ymax, action=action, unstacked=exclude, 
             xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select) 
-    outfile = "/".join([outpath, f"{h}_{args.channel}.pdf"])
-    plt.savefig(outfile, bbox_inches='tight')
-    plt.savefig(outfile.replace("pdf", "png"), bbox_inches='tight')
-    logging.info(f"Wrote file {outfile}")
-    
-indexname = "index.php"
-if not os.path.isfile(f"{outpath}/{indexname}"):
-    shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexname}")
+    outfile = f"{h}_{args.channel}"+ (f"_{args.name_append}" if args.name_append else "")
+    plot_tools.save_pdf_and_png(outdir, outfile)
+    plot_tools.write_index_and_log(outdir, outfile)
