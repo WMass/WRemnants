@@ -146,15 +146,24 @@ def mergeAxes(ax1, ax2):
         ax1 = ax2
         ax2 = tmp
 
-    if ax1.edges[-1] == ax2.edges[-1]:
+    if np.array_equal(ax1.edges, ax2.edges):
         return ax1
 
-    merge_idx = list(ax2.edges).index(ax1.edges[-1])+1
+    ax1_edges = ax1.edges
+    ax1_merge_idx = len(ax1.edges)
+    while ax1_edges[ax1_merge_idx-1] not in ax2.edges:
+        ax1_merge_idx -= 1
+
+    ax1_edges = ax1_edges[:ax1_merge_idx]
+    if not ax1_edges.size:
+        raise ValueError("Didn't find any common edges in two axes, can't merge")
+
+    merge_idx = list(ax2.edges).index(ax1_edges[-1])+1
     if merge_idx < 1 or merge_idx > ax2.size:
         raise ValueError("Can't merge axes unless there is a common point of intersection!"
             f"The edges were {ax1.edges}, and {ax2.edges}")
 
-    new_edges = np.concatenate((ax1.edges,ax2.edges[merge_idx:]))
+    new_edges = np.concatenate((ax1_edges, ax2.edges[merge_idx:]))
     return hist.axis.Variable(new_edges, name=ax1.name)
 
 def findCommonBinning(hists, axis_idx):
@@ -189,7 +198,8 @@ def rebinHistsToCommon(hists, axis_idx, keep_full_range=False):
             merge_idx = new_ax.index(rebinh.axes[axis_idx].edges[-1])
             # TODO: true the overflow/underflow properly
             low_vals = rebinh.view()
-            vals = np.append(low_vals, np.take(h.view(), range(merge_idx, h.axes[axis_idx].size), axis_idx))
+            max_idx = min(h.axes[axis_idx].size, h.axes[axis_idx].index(newh.axes[axis_idx].edges[-1]))
+            vals = np.append(low_vals, np.take(h.view(), range(merge_idx, max_idx), axis_idx))
             zero_pad_shape = list(newh.shape)
             zero_pad_shape[axis_idx] -= vals.shape[axis_idx]
             vals = np.append(vals, np.full(zero_pad_shape, hist.accumulators.WeightedSum(0, 0)))

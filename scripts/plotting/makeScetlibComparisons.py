@@ -62,9 +62,9 @@ lookup = {
 }
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-s", "--scetlib_files", type=str, nargs='+', help="SCETlib input files (.pkl format)")
-parser.add_argument("-m", "--minnlo_files", type=str, nargs='+', help="minnlo input files (.pkl format)")
-parser.add_argument("-mr", "--matrix_radish_files", type=str, nargs='+', help="MATRIX+RadISH input files (.pkl format)")
+parser.add_argument("-s", "--scetlib_files", default=[], type=str, nargs='+', help="SCETlib input files (.pkl format)")
+parser.add_argument("-m", "--minnlo_files", default=[], type=str, nargs='+', help="minnlo input files (.pkl format)")
+parser.add_argument("-mr", "--matrix_radish_files", default=[], type=str, nargs='+', help="MATRIX+RadISH input files (.pkl format)")
 parser.add_argument("-n", "--hist_name", type=str, choices=lookup["minnlo"].keys(), help="minnlo input files (.pkl format)", required=True)
 parser.add_argument("-p", "--proc", type=str, choices=lookup["minnlo"]["dirs"].keys(), help="Process", required=True)
 parser.add_argument("-r", "--rrange", type=float, nargs=2, default=[0.9, 1.1], help="y range for ratio plot")
@@ -72,6 +72,8 @@ parser.add_argument("--ymax", type=float, help="Max value for y axis (if not spe
 parser.add_argument("-o", "--outpath", type=str, default=os.path.expanduser("~/www/WMassAnalysis"), help="Base path for output")
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
 parser.add_argument("-a", "--name_append", type=str, help="Name to append to file name")
+parser.add_argument("--ratio_ref", type=str, default="minnlo", choices=["minnlo", "scetlib", "matrix_radish"], help="Reference hist for ratio")
+parser.add_argument("--keep_full_range", action='store_true', help="Store the full range of all hists, even if it exceeds other hist ranges")
 args = parser.parse_args()
 
 cmap = cm.get_cmap("tab10")
@@ -164,7 +166,7 @@ for generator, label in generators_info:
 
 outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
 
-all_hists = hh.rebinHistsToCommon(all_hists, axis_idx=0, keep_full_range=True)
+all_hists = hh.rebinHistsToCommon(all_hists, axis_idx=0, keep_full_range=args.keep_full_range)
 
 fig = plot_tools.makePlotWithRatioToRef(all_hists, colors=all_colors, labels=all_labels, alpha=0.7, ymax=args.ymax,
         rrange=args.rrange, ylabel="$\sigma$/bin", xlabel=xlabels[args.hist_name], rlabel=f"x/MiNNLO", binwnorm=1.0, nlegcols=1)
