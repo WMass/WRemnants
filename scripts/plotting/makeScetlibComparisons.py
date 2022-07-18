@@ -43,12 +43,17 @@ lookup = {
     "matrix_radish" : {
         "dirs" : {
             "z" : ["DYm50_matrix__radish"],
-            "wp" : (),
+            #"z" : [],
+            "wp" :[],
             "wm" :["wmmunu_matrix_radish"],
         },
         "ptV" : {
-            "z": {"hist" : "ptZ_lhe_mm",
-                "axis" : "xaxis"},
+            "z": {
+                "hist" : "ptZ_lhe_mm",
+                #"hist" : "RadISH_observable_binning1_N3LL",
+                "axis" : "xaxis",
+                #"scale" : 1/1000.
+            },
             "wm" : {"hist" : "ptW_prefsr_mn",
                     "axis" : "xaxis",
                     "scale" : 1/1000.},
@@ -138,9 +143,15 @@ all_hists = []
 all_labels = []
 all_colors = []
 
-for label, generator, base_color in zip(("MiNNLO", "SCETlib", "MATRIX+RadISH"), 
-                    ("minnlo", "scetlib", "matrix_radish"),
-                    ("red", "purple", "green")):
+generators_info = [
+	("minnlo", "MiNNLO (NNLO+PS)"), 
+	("scetlib", "SCETlib (N$^{3}$LL)"),
+	("matrix_radish", "MATRIX+RadISH (NNLO+N$^{3}$LL)"),
+]
+
+generators_info.insert(0, generators_info.pop([x[0] for x in generators_info].index(args.ratio_ref)))
+
+for generator, label in generators_info:
     files = getattr(args, f"{generator}_files")
     if files:
         info = lookup[generator]
