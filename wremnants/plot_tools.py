@@ -65,7 +65,8 @@ def addLegend(ax, ncols=2, extra_text=None):
 def makeStackPlotWithRatio(
     histInfo, stackedProcs, histName="nominal", unstacked=None, 
     xlabel="", ylabel="Events/bin", rlabel = "Data/Pred.", rrange=[0.9, 1.1], ymax=None, xlim=None, nlegcols=2,
-    binwnorm=None, select={},  action = (lambda x: x), extra_text=None, grid = False, plot_title = None
+    binwnorm=None, select={},  action = (lambda x: x), extra_text=None, grid = False, plot_title = None,
+    ratio_to_data=False,
 ):
     stack = [action(histInfo[k][histName][select]) for k in stackedProcs if histInfo[k][histName]]
     colors = [histInfo[k]["color"] for k in stackedProcs if histInfo[k][histName]]
@@ -83,6 +84,18 @@ def makeStackPlotWithRatio(
     )
     
     if unstacked:
+        data_hist = None
+        if "Data" in histInfo and ratio_to_data:
+            data_hist = action(histInfo["Data"][histName][select])
+            hep.histplot(
+                hh.divideHists(sum(stack), data_hist, cutoff=0.01),
+                histtype="step",
+                color=histInfo[stackedProcs[0]]["color"],
+                label=histInfo[stackedProcs[0]]["label"],
+                yerr=False,
+                ax=ax2
+            )
+
         if type(unstacked) == str: unstacked = unstacked.split(",")
         for proc in unstacked:
             unstack = action(histInfo[proc][histName][select])
@@ -95,12 +108,13 @@ def makeStackPlotWithRatio(
                 ax=ax1,
                 binwnorm=binwnorm,
             )
+            ratio_ref = data_hist if data_hist else sum(stack) 
             hep.histplot(
-                hh.divideHists(unstack, sum(stack), cutoff=0.01),
-                histtype="errorbar" if (proc == "Data" or re.search("^pdf.*_sum", proc)) else "step",
+                hh.divideHists(unstack, ratio_ref, cutoff=0.01),
+                histtype="errorbar" if proc == "Data" and not data_hist else "step",
                 color=histInfo[proc]["color"],
                 label=histInfo[proc]["label"],
-                yerr=True if proc == "Data" else False,
+                yerr=True if (proc == "Data" and not data_hist) else False,
                 ax=ax2
             )
 

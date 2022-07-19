@@ -63,7 +63,7 @@ def make_scetlib_minnlo_corr(minnlo_hist, scetlib_hist):
     corrh[:,:,hist.overflow,...] = np.ones_like(corrh[:,:,0,...])
     return corrh
 
-def read_scetlib_hist(path, pt_axis=None, add_nonsing=True, flip_y_sign=False, charge=None):
+def read_scetlib_hist(path, pt_axis=None, nonsing="auto", flip_y_sign=False, charge=None):
     f = np.load(path, allow_pickle=True)
     var_axis = hist.axis.Integer(f["bins"][0][0], f["bins"][0][-1], name="vars", flow=False)
     mass_axis = hist.axis.Variable(f["bins"][1], name="mass")
@@ -94,8 +94,10 @@ def read_scetlib_hist(path, pt_axis=None, add_nonsing=True, flip_y_sign=False, c
     else:
         scetlibh[...,charge_axis.index(charge),:] = vals
 
-    if add_nonsing:
-        nonsing = read_scetlib_hist(path.replace(".npz", "_nons.npz"), pt_axis, False, 
+    if nonsing:
+        if nonsing == "auto":
+            nonsing = path.replace(".npz", "_nons.npz")
+        nonsing = read_scetlib_hist(nonsing, pt_axis, False, 
                         flip_y_sign=flip_y_sign, charge=charge)
         scetlibh = scetlibh + nonsing
     

@@ -213,6 +213,15 @@ def make_scetlibCorr_hists(df, name, axes, cols, helper, corr_type):
 
     return res
 
+def scale_angular_moments(hist_moments_scales):
+    # e.g. from arxiv:1708.00008 eq. 2.13, note A_0 is NOT the const term!
+    scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
+
+    hel_idx = hist_moments_scales.axes.name.index("helicity")
+    scaled_vals = np.moveaxis(hist_moments_scales.view(flow=True), hel_idx, -1)
+    hist_moments_scales[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
+    return hist_moments_scales
+
 def moments_to_angular_coeffs(hist_moments_scales):
     s = hist.tag.Slicer()
 
@@ -220,28 +229,19 @@ def moments_to_angular_coeffs(hist_moments_scales):
     hist_moments_scales_m1 = hist_moments_scales[{"helicity" : s[-1j:-1j+1]}]
 
     vals = hist_moments_scales_m1.values(flow=True)
-
+    vals = np.moveaxis(vals, hel_idx, -1)
     # replace zero values to avoid warnings
     norm_vals = np.where( vals==0., 1., vals)
 
     # e.g. from arxiv:1708.00008 eq. 2.13, note A_0 is NOT the const term!
     offsets = np.array([0., 4., 0., 0., 0., 0., 0., 0., 0.])
-    scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
 
-    # for broadcasting
-    hel_ax_idx = list(hist_moments_scales.axes).index(hist_moments_scales.axes["helicity"])
-    ntrailing_ax = hist_moments_scales.ndim - hel_ax_idx - 1
-    if ntrailing_ax:
-        new_axes = tuple(range(offsets.ndim, offsets.ndim+ntrailing_ax))
-        offsets = np.expand_dims(offsets, axis=new_axes)
-        scales = np.expand_dims(scales, axis=new_axes)
-
-    view = hist_moments_scales.view(flow=True)
-
-    coeffs = scales*view / norm_vals + offsets
+    # broadcasting happens right to left, so move to rightmost then move back
+    hel_idx = hist_moments_scales.axes.name.index("helicity")
+    coeffs = np.moveaxis(scale_angular_moments(hist_moments_scale, True).view(flow=True), hel_idx, -1) / norm_vals + offsets
 
     # replace values in zero-xsec regions (otherwise A0 is spuriously set to 4.0 from offset)
-    coeffs = np.where(vals == 0., 0.*view, coeffs)
+    coeffs = np.moveaxis(np.where(vals == 0., np.zeros_like(coeffs), coeffs), -1, hel_idx)
 
     hist_coeffs_scales = hist.Hist(*hist_moments_scales.axes, storage = hist_moments_scales._storage_type(), name = "hist_coeffs_scales",
         data = coeffs

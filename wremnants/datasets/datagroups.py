@@ -33,6 +33,9 @@ class datagroups(object):
             
         self.nominalName = "nominal"
 
+    def setNominalName(self, name):
+        self.nominalName = name
+
     def processScaleFactor(self, proc):
         if proc.is_data:
             return 1

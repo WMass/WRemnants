@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO)
 parser = argparse.ArgumentParser()
 parser.add_argument("infile", help="Output file of the analysis stage, containing ND boost histograms")
 parser.add_argument("--wlike", action='store_true', help="Make W like plots")
+parser.add_argument("--ratio_to_data", action='store_true', help="Use data as denominator in ratio")
 parser.add_argument("-n", "--baseName", type=str, help="Histogram name in the file (e.g., 'nominal')", default="nominal")
 parser.add_argument("--hists", type=str, nargs='+', required=True, help="List of histograms to plot")
 parser.add_argument("-c", "--channel", type=str, choices=["plus", "minus", "all"], default="all", help="Select channel to plot")
@@ -22,6 +23,7 @@ parser.add_argument("-p", "--outpath", type=str, default=os.path.expanduser("~/w
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
 parser.add_argument("-r", "--rrange", type=float, nargs=2, default=[0.9, 1.1], help="y range for ratio plot")
 parser.add_argument("--ymax", type=float, help="Max value for y axis (if not specified, range set automatically)")
+parser.add_argument("--xrange", type=float, nargs=2, help="min and max for x axis")
 parser.add_argument("-a", "--name_append", type=str, help="Name to append to file name")
 
 subparsers = parser.add_subparsers()
@@ -44,6 +46,8 @@ if addVariation and (args.selectAxis or args.selectEntries):
 outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
 
 groups = datagroups2016(args.infile, wlike=args.wlike)
+if args.baseName != "nominal":
+    groups.setNominalName(args.baseName.rsplit("_", 1)[0])
 groups.loadHistsForDatagroups(args.baseName, syst="")
 
 exclude = ["Data"]
@@ -76,22 +80,21 @@ if not os.path.isdir(outpath):
 
 xlabels = {
     "pt" : r"p$_{T}^{\ell}$ (GeV)",
-    "eta" : r"\eta^{\ell}$",
+    "eta" : r"$\eta^{\ell}$",
     "unrolled" : r"(p$_{T}^{\ell}$, $\eta^{\ell}$) bin",
+    "ptll" : r"p$_{\mathrm{T}}^{\ell\ell}$",
+    "yll" : r"y$^{\ell\ell}$",
+    "mll" : r"m$_{\ell\ell}$",
+    "costhetastarll" : r"$\cos{\phi^{\star}_{\ell\ell}}$",
+    "phistarll" : r"$\phi^{\star}_{\ell\ell}$",
 }
-
-#scales = {
-#    "pt" : 9e6 if not args.wlike else 2e6,
-#    "eta" : 5e6 if not args.wlike else 2e5,
-#    "unrolled" : 1.8e5 if not args.wlike else 1.5e4,
-#}
 
 for h in args.hists:
     action = sel.unrolledHist if "unrolled" in h else lambda x: x.project(h)
-    if addVariation:
-        exclude.insert(0, args.varName)
     fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ymax=args.ymax, action=action, unstacked=exclude, 
-            xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select) 
+            xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select, binwnorm=1.0,
+            ratio_to_data=args.ratio_to_data, rlabel="Pred./Data" if args.ratio_to_data else "Data/Pred.",
+            xlim=args.xrange) 
     outfile = f"{h}_{args.channel}"+ (f"_{args.name_append}" if args.name_append else "")
     plot_tools.save_pdf_and_png(outdir, outfile)
     plot_tools.write_index_and_log(outdir, outfile)
