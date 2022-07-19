@@ -7,21 +7,35 @@ import os
 import shutil
 import logging
 import pathlib
+import hist
 
 template_dir = f"{pathlib.Path(__file__).parent}/Template"
 
 logging.basicConfig(level=logging.INFO)
+
+xlabels = {
+    "pt" : r"p$_{T}^{\ell}$ (GeV)",
+    "eta" : r"$\eta^{\ell}$",
+    "unrolled" : r"(p$_{T}^{\ell}$, $\eta^{\ell}$) bin",
+    "ptll" : r"p$_{\mathrm{T}}^{\ell\ell}$",
+    "yll" : r"y$^{\ell\ell}$",
+    "mll" : r"m$_{\ell\ell}$",
+    "costhetastarll" : r"$\cos{\phi^{\star}_{\ell\ell}}$",
+    "phistarll" : r"$\phi^{\star}_{\ell\ell}$",
+    "recoil_MET_pt" : r"p$_{\mathrm{T}}^{miss}$ (recoil corr.)",
+}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("infile", help="Output file of the analysis stage, containing ND boost histograms")
 parser.add_argument("--wlike", action='store_true', help="Make W like plots")
 parser.add_argument("--ratio_to_data", action='store_true', help="Use data as denominator in ratio")
 parser.add_argument("-n", "--baseName", type=str, help="Histogram name in the file (e.g., 'nominal')", default="nominal")
-parser.add_argument("--hists", type=str, nargs='+', required=True, help="List of histograms to plot")
+parser.add_argument("--hists", type=str, nargs='+', required=True, choices=xlabels.keys(), help="List of histograms to plot")
 parser.add_argument("-c", "--channel", type=str, choices=["plus", "minus", "all"], default="all", help="Select channel to plot")
 parser.add_argument("-p", "--outpath", type=str, default=os.path.expanduser("~/www/WMassAnalysis"), help="Base path for output")
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
 parser.add_argument("-r", "--rrange", type=float, nargs=2, default=[0.9, 1.1], help="y range for ratio plot")
+parser.add_argument("--rebin", type=int, default=1, help="Rebin (for now must be an int)")
 parser.add_argument("--ymax", type=float, help="Max value for y axis (if not specified, range set automatically)")
 parser.add_argument("--xrange", type=float, nargs=2, help="min and max for x axis")
 parser.add_argument("-a", "--name_append", type=str, help="Name to append to file name")
@@ -70,27 +84,8 @@ histInfo = groups.getDatagroups()
 prednames = [x for x in histInfo.keys() if x not in exclude]
 select = {} if args.channel == "all" else {"select" : -1.j if args.channel == "minus" else 1.j}
 
-outpath = "/".join([args.outpath, args.outfolder])
-if not os.path.isdir(args.outpath):
-    raise IOError(f"The path {args.outpath} doesn't not exist. You should create it (and possibly link it to your web area)")
-    
-if not os.path.isdir(outpath):
-    logging.info(f"Creating folder outpath")
-    os.makedirs(outpath)
-
-xlabels = {
-    "pt" : r"p$_{T}^{\ell}$ (GeV)",
-    "eta" : r"$\eta^{\ell}$",
-    "unrolled" : r"(p$_{T}^{\ell}$, $\eta^{\ell}$) bin",
-    "ptll" : r"p$_{\mathrm{T}}^{\ell\ell}$",
-    "yll" : r"y$^{\ell\ell}$",
-    "mll" : r"m$_{\ell\ell}$",
-    "costhetastarll" : r"$\cos{\phi^{\star}_{\ell\ell}}$",
-    "phistarll" : r"$\phi^{\star}_{\ell\ell}$",
-}
-
 for h in args.hists:
-    action = sel.unrolledHist if "unrolled" in h else lambda x: x.project(h)
+    action = sel.unrolledHist if "unrolled" in h else lambda x: x.project(h)[::hist.rebin(args.rebin)]
     fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ymax=args.ymax, action=action, unstacked=exclude, 
             xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select, binwnorm=1.0,
             ratio_to_data=args.ratio_to_data, rlabel="Pred./Data" if args.ratio_to_data else "Data/Pred.",

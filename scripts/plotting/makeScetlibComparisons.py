@@ -141,6 +141,8 @@ def read_hists(proc, files, lookup, hist_name):
 if not args.scetlib_files and not args.minnlo_files:
     raise ValueError("Must specify at least one filename")
 
+outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
+
 all_hists = []
 all_labels = []
 all_colors = []
@@ -163,8 +165,6 @@ for generator, label in generators_info:
         all_labels.append(label)
         if len(hists) > 1:
             all_labels.extend([f"{label} (alt {i})" for i in range(1, len(hists[1:]+1))])
-
-outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
 
 all_hists = hh.rebinHistsToCommon(all_hists, axis_idx=0, keep_full_range=args.keep_full_range)
 
