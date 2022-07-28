@@ -1,8 +1,8 @@
 BR_TAUToMU = 0.1739
 BR_TAUToE = 0.1782
-xsec_ZmmPostVFP = 2001.9
-xsec_WpmunuPostVFP = 11765.9
-xsec_WmmunuPostVFP = 8703.87
+xsec_ZmmPostVFP = 1976.1
+xsec_WpmunuPostVFP = 11572.19
+xsec_WmmunuPostVFP = 8562.66
 
 dataDictV8 = {
     "dataPostVFP" : { 'name' :"dataPostVFP",
@@ -13,7 +13,7 @@ dataDictV8 = {
     },
     "ZmmPostVFP" : { 'name' :"ZmumuPostVFP",
                      'filepaths' : 
-                     ["/scratch/shared/NanoAOD/TrackRefitv2/DYJetsToMuMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/*/*/*/*.root"],
+                     ["/scratch/shared/NanoAOD/TrackRefitv1/DYJetsToMuMu_M-50_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"],
                      'xsec' : xsec_ZmmPostVFP,
     },
     
@@ -25,12 +25,12 @@ dataDictV8 = {
     },
     "WpmunuPostVFP" : { 'name' :"WplusmunuPostVFP",
                         'filepaths' : 
-                        ["/scratch/shared/NanoAOD/TrackRefitv2/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/*/*/*/*.root"],
+                        ["/scratch/shared/NanoAOD/TrackRefitv1/WplusJetsToMuNu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"],
                         'xsec' : xsec_WpmunuPostVFP,
     },
     "WmmunuPostVFP" : { 'name' :"WminusmunuPostVFP",
                         'filepaths' : 
-                        ["/scratch/shared/NanoAOD/TrackRefitv2/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/*/*/*/*.root"],
+                        ["/scratch/shared/NanoAOD/TrackRefitv1/WminusJetsToMuNu_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV8MCPostVFPWeightFix/*/*/*.root"],
                         'xsec' : xsec_WmmunuPostVFP,
     },
     "WptaunuPostVFP" : { 'name' :"WplustaunuPostVFP",

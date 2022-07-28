@@ -14,7 +14,7 @@ elif init.args.nThreads != 1:
     ROOT.ROOT.EnableImplicitMT(initargs.nThreads)
 import narf
 import wremnants
-from wremnants import theory_tools,syst_tools
+from wremnants import theory_tools,syst_tools,scetlib_corrections
 import hist
 import lz4.frame
 import logging
@@ -47,8 +47,8 @@ era = args.era
 noMuonCorr = args.noMuonCorr
 
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = wremnants.make_muon_prefiring_helpers(era = era)
-scetlibCorrZ_helper = wremnants.makeScetlibCorrHelper(isW=False)
-scetlibCorrW_helper = wremnants.makeScetlibCorrHelper(isW=True)
+scetlibCorrZ_helper = scetlib_corrections.make_corr_helper(isW=False)
+scetlibCorrW_helper = scetlib_corrections.make_corr_helper(isW=True)
 qcdScaleByHelicity_Zhelper = wremnants.makeQCDScaleByHelicityHelper(is_w_like = True)
 qcdScaleByHelicity_Whelper = wremnants.makeQCDScaleByHelicityHelper()
 

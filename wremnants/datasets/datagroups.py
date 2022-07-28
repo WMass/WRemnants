@@ -1,6 +1,7 @@
 from wremnants import boostHistHelpers as hh
 from wremnants import histselections as sel
 from wremnants.datasets import datasets2016
+from wremnants import boostHistHelpers as hh
 import logging
 import lz4.frame
 import pickle
@@ -25,7 +26,7 @@ class datagroups(object):
         if self.datasets and self.results:
             self.data = [x for x in self.datasets.values() if x.is_data]
             if self.data:
-                self.lumi = sum([self.results[x.name]["lumi"] for x in self.data if x.name in self.results])
+                self.lumi = hh.sumHists([self.results[x.name]["lumi"] for x in self.data if x.name in self.results])
         self.groups = {}
 
         if not self.lumi:
@@ -139,14 +140,15 @@ class datagroups(object):
     def processes(self):
         return self.groups.keys()
 
-    def addSummedProc(self, refname, name, label, color="red", exclude=["Data"]):
+    def addSummedProc(self, refname, name, label, color="red", exclude=["Data"], relabel=None):
         self.loadHistsForDatagroups(refname, syst=name)
         self.groups[name] = dict(
             label=label,
             color=color,
             members=[],
         )
-        self.groups[name][refname] = sum([self.groups[x][name] for x in self.groups.keys() if x not in exclude+[name]])
+        histname = refname if not relabel else relabel
+        self.groups[name][histname] = hh.sumHists([self.groups[x][name] for x in self.groups.keys() if x not in exclude+[name]])
 
     def copyWithAction(self, action, name, refproc, refname, label, color):
         self.groups[name] = dict(
@@ -154,8 +156,7 @@ class datagroups(object):
             color=color,
             members=[],
         )
-        self.groups[name][refname] = action(self.groups[refproc][refname])
-
+        self.groups[name][refname] = action(self.groups[refproc][refname]).copy()
 
 class datagroups2016(datagroups):
     def __init__(self, infile, combine=False, wlike=False, pseudodata_pdfset = None):
@@ -232,7 +233,7 @@ class datagroups2016(datagroups):
         # This is kind of hacky to deal with the different naming from combine
         if baseName != "x" and (syst == "" or syst == self.nominalName):
             return baseName
-        if (baseName == "" or baseName == "x") and syst:
+        if baseName in ["", "x", "nominal"] and syst:
             return syst
         if syst[:len(baseName)] == baseName:
             return syst

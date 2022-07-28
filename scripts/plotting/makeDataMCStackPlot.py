@@ -36,7 +36,7 @@ parser.add_argument("-p", "--outpath", type=str, default=os.path.expanduser("~/w
 parser.add_argument("-f", "--outfolder", type=str, default="test", help="Subfolder for output")
 parser.add_argument("-r", "--rrange", type=float, nargs=2, default=[0.9, 1.1], help="y range for ratio plot")
 parser.add_argument("--rebin", type=int, default=1, help="Rebin (for now must be an int)")
-parser.add_argument("--ymax", type=float, help="Max value for y axis (if not specified, range set automatically)")
+parser.add_argument("--ylim", type=float, nargs=2, help="Min and max values for y axis (if not specified, range set automatically)")
 parser.add_argument("--xrange", type=float, nargs=2, help="min and max for x axis")
 parser.add_argument("-a", "--name_append", type=str, help="Name to append to file name")
 
@@ -45,39 +45,45 @@ variation = subparsers.add_parser("variation", help="Arguments for adding variat
 variation.add_argument("--varName", type=str, required=True, help="Name of variation hist")
 variation.add_argument("--varLabel", type=str, nargs='+', required=True, help="Label(s) of variation hist for plotting")
 variation.add_argument("--selectAxis", type=str, help="If you need to select a variation axis")
-variation.add_argument("--selectEntries", type=int, help="entries to read from the selected axis")
+variation.add_argument("--selectEntries", type=int, nargs='+', help="entries to read from the selected axis")
 
 args = parser.parse_args()
 
-addVariation = hasattr(args, "varName") and args.varName
+addVariation = hasattr(args, "varName") and args.varName is not None
 
 if addVariation and (args.selectAxis or args.selectEntries):
     if not (args.selectAxis and args.selectEntries):
         raise ValueError("Must --selectAxis and --selectEntires together")
-    if len(args.varlabel) != 1 and (len(args.varLabel) != len(args.selectAxis) or len(args.varLabel) != len(args.selectEntries)):
-        raise ValueError("Must specify the same number of args for --selectAxis, --selectEntires, and --varLabel")
+    if len(args.varLabel) != 1 and len(args.varLabel) != len(args.selectEntries):
+        raise ValueError("Must specify the same number of args for --selectEntires, and --varLabel")
 
 outdir = plot_tools.make_plot_dir(args.outpath, args.outfolder)
 
 groups = datagroups2016(args.infile, wlike=args.wlike)
-if args.baseName != "nominal":
-    groups.setNominalName(args.baseName.rsplit("_", 1)[0])
+nominalName = args.baseName.rsplit("_", 1)[0]
+groups.setNominalName(nominalName)
 groups.loadHistsForDatagroups(args.baseName, syst="")
 
 exclude = ["Data"]
+unstack = exclude[:]
 
 if addVariation:
-    groups.loadHistsForDatagroups(args.baseName, syst=args.varName)
-    groups.addSummedProc(args.baseName, name=args.varName, label=args.varLabel[0])
+    logging.info(f"Adding variation {args.varName}")
+    groups.loadHistsForDatagroups(nominalName, syst=args.varName)
+    name = args.varName if args.varName != "" else nominalName
+    groups.addSummedProc(nominalName, name=name, label=args.varLabel[0], relabel=args.baseName)
+    exclude.append(name)
+
     if not args.selectAxis:
-        exclude.append(args.varName)
+        unstack.append(name)
     else:
-        for label,ax,entry in zip(args.varLabel, args.selectAxis, args.selectEntries):
+        for label,ax,entry in zip(args.varLabel, [args.selectAxis]*len(args.varLabel), args.selectEntries):
             select = lambda x: x[{ax : entry}]
-            name = args.varName+str(entry)
-            groups.copyWithAction(label, name=name, refproc=args.varName, 
-                label=label, color='green')
-            exclude.append(name)
+            varname = name+str(entry)
+            groups.copyWithAction(action=select, name=varname, refproc=name, 
+                refname=args.baseName, label=label, color='green')
+            exclude.append(varname)
+            unstack.append(varname)
 
 histInfo = groups.getDatagroups()
 
@@ -86,10 +92,10 @@ select = {} if args.channel == "all" else {"select" : -1.j if args.channel == "m
 
 for h in args.hists:
     action = sel.unrolledHist if "unrolled" in h else lambda x: x.project(h)[::hist.rebin(args.rebin)]
-    fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ymax=args.ymax, action=action, unstacked=exclude, 
+    fig = plot_tools.makeStackPlotWithRatio(histInfo, prednames, histName=args.baseName, ylim=args.ylim, action=action, unstacked=unstack, 
             xlabel=xlabels[h], ylabel="Events/bin", rrange=args.rrange, select=select, binwnorm=1.0,
             ratio_to_data=args.ratio_to_data, rlabel="Pred./Data" if args.ratio_to_data else "Data/Pred.",
             xlim=args.xrange) 
-    outfile = f"{h}_{args.channel}"+ (f"_{args.name_append}" if args.name_append else "")
+    outfile = f"{h}_{args.baseName}_{args.channel}"+ (f"_{args.name_append}" if args.name_append else "")
     plot_tools.save_pdf_and_png(outdir, outfile)
     plot_tools.write_index_and_log(outdir, outfile)

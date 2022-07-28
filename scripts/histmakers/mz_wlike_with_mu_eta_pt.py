@@ -39,15 +39,12 @@ parser.add_argument("--v8", action='store_true', help="Use NanoAODv8. Default is
 parser.add_argument("--eta", nargs=3, type=float, help="Eta binning as 'nbins min max' (only uniform for now)", default=[48,-2.4,2.4])
 parser.add_argument("--pt", nargs=3, type=float, help="Pt binning as 'nbins,min,max' (only uniform for now)", default=[29,26.,55.])
 parser.add_argument("--no_recoil", action='store_true', help="Don't apply recoild correction")
+parser.add_argument("--verbose", action='store_true', help="Noisy output")
 args = parser.parse_args()
 
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts])
-datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None)
-
-print('Use v8?', args.v8)
-
-if args.v8:
-    datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None, nanoVersion = "v8")
+datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None, 
+    nanoVersion="v8" if args.v8 else "v9")
 
 ROOT.gInterpreter.Declare('#include "lowpu_recoil.h"')
 
@@ -91,7 +88,7 @@ axis_mll = hist.axis.Regular(24, 60., 120., name = "mll")
 axis_yll = hist.axis.Regular(40, -4.0, 4.0, name = "yll")
 
 axis_ptll = hist.axis.Variable(
-    [0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100], name = "ptll"
+    [0, 2, 3, 4, 4.75, 5.5, 6.5, 8, 9, 10, 12, 14, 16, 18, 20, 23, 27, 32, 40, 55, 100, 150], name = "ptll"
 )
 
 axis_costhetastarll = hist.axis.Regular(20, -1., 1., name = "costhetastarll")

@@ -1,3 +1,4 @@
+import os
 import ROOT
 import pathlib
 import hist
@@ -108,3 +109,46 @@ def read_scetlib_hist(path, pt_axis=None, nonsing="auto", flip_y_sign=False, cha
 
     return scetlibh 
 
+def make_a4_coeff(a4_hist, ul_hist):
+    return hh.divideHists(a4_hist, ul_hist, cutoff=0.0001)
+
+def read_dyturbo_hist(filenames, path="", axis="pt"):
+    isfile = filter(lambda x: os.path.isfile(x), ["/".join([path, f]) for f in filenames])
+
+    if not isfile:
+        raise ValueError("Must pass in a valid file")
+
+    hists = [read_dyturbo_file(f, axis) for f in isfile]
+    return hh.sumHists(hists)
+
+# Ignoring the scale unc for now
+def read_matrixRadish_hist(filename, axname="pt"):
+    data = read_text_data(filename)
+    bins = list(set(data[:,0].flatten()))
+    
+    ax = hist.axis.Variable(bins, name=axname)
+    h = hist.Hist(ax, storage=hist.storage.Weight())
+
+    h[...] = data[:-1,1:3]
+    return h*1/1000
+    
+def read_text_data(filename):
+    data = []
+    for line in open(filename).readlines():
+        entry = line.split("#")[0]
+        entry_data = [float(i.strip()) for i in entry.split()]
+        if not entry_data:
+            continue
+        data.append(entry_data)
+    return np.array(data, dtype=float)
+
+def read_dyturbo_file(filename, axname="pt"):
+    data = read_text_data(filename)
+    # Last line is the total cross section
+    bins = list(set(data[:-1,:2].flatten()))
+    
+    ax = hist.axis.Variable(bins, name=axname)
+    h = hist.Hist(ax, storage=hist.storage.Weight())
+
+    h[...] = data[:-1,2:4]
+    return h*1/1000

@@ -218,9 +218,10 @@ def scale_angular_moments(hist_moments_scales):
     scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
 
     hel_idx = hist_moments_scales.axes.name.index("helicity")
-    scaled_vals = np.moveaxis(hist_moments_scales.view(flow=True), hel_idx, -1)
-    hist_moments_scales[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
-    return hist_moments_scales
+    scaled_vals = np.moveaxis(hist_moments_scales.view(flow=True), hel_idx, -1)*scales
+    hnew = hist.Hist(*hist_moments_scales.axes, storage=hist_moments_scales._storage_type())
+    hnew[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
+    return hnew
 
 def moments_to_angular_coeffs(hist_moments_scales):
     s = hist.tag.Slicer()
@@ -229,6 +230,7 @@ def moments_to_angular_coeffs(hist_moments_scales):
     hist_moments_scales_m1 = hist_moments_scales[{"helicity" : s[-1j:-1j+1]}]
 
     vals = hist_moments_scales_m1.values(flow=True)
+    hel_idx = hist_moments_scales.axes.name.index("helicity")
     vals = np.moveaxis(vals, hel_idx, -1)
     # replace zero values to avoid warnings
     norm_vals = np.where( vals==0., 1., vals)
@@ -238,7 +240,8 @@ def moments_to_angular_coeffs(hist_moments_scales):
 
     # broadcasting happens right to left, so move to rightmost then move back
     hel_idx = hist_moments_scales.axes.name.index("helicity")
-    coeffs = np.moveaxis(scale_angular_moments(hist_moments_scale, True).view(flow=True), hel_idx, -1) / norm_vals + offsets
+    coeffs = np.moveaxis(scale_angular_moments(hist_moments_scales).view(flow=True), hel_idx, -1) / norm_vals + offsets
+    print(coeffs.sum())
 
     # replace values in zero-xsec regions (otherwise A0 is spuriously set to 4.0 from offset)
     coeffs = np.moveaxis(np.where(vals == 0., np.zeros_like(coeffs), coeffs), -1, hel_idx)
@@ -246,7 +249,6 @@ def moments_to_angular_coeffs(hist_moments_scales):
     hist_coeffs_scales = hist.Hist(*hist_moments_scales.axes, storage = hist_moments_scales._storage_type(), name = "hist_coeffs_scales",
         data = coeffs
     )
-
 
     return hist_coeffs_scales
 
