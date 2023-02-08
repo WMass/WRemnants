@@ -205,6 +205,13 @@ def rebinHist(h, axis_name, edges):
         if ax.traits.underflow:
             edge_idx += 1
 
+    # Avoid out of range error if there is no overflow
+    # TODO: Understand if this is fully correct
+    if edge_idx[-1] >= ax.size+ax.traits.overflow+ax.traits.underflow:
+        edge_idx[-1] = ax.index(edges_eval[-1]-2*offset)
+        if edge_idx[-1] == edge_idx[-2]:
+            edge_idx = edge_idx[:-1]
+
     hnew.values(flow=flow)[...] = np.add.reduceat(h.values(flow=flow), edge_idx, 
             axis=ax_idx).take(indices=range(new_ax.size+underflow+overflow), axis=ax_idx)
     if hnew._storage_type() == hist.storage.Weight():

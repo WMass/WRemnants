@@ -112,6 +112,7 @@ def rebin_corr_hists(hists, ndim=-1, use_predefined_bins=False):
         # Inf whereas SCETlib has 13 TeV
         if all([h.axes[i].size == 1 for h in hists]):
             continue
+        print(i, [h.axes[i].name for h in hists])
         hists = hh.rebinHistsToCommon(hists, i)
     return hists
 

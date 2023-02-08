@@ -24,6 +24,7 @@ args = parser.parse_args()
 logger = common.setup_base_logger("make_theory_corr", args.debug)
 
 def read_corr(procName, generator, corr_file):
+    print(procName, generator)
     charge = 0 if procName[0] == "Z" else (1 if "Wplus" in procName else -1)
     if generator == "scetlib":
         nons = "auto"
@@ -40,7 +41,8 @@ def read_corr(procName, generator, corr_file):
             axnames = args.axes
             if not axnames:
                 axnames = ("y", "pt") if "2d" in corr_file else ("pt")
-            h = input_tools.read_dyturbo_hist(corr_file.split(":"), axes=axnames)
+            print(charge)
+            h = input_tools.read_dyturbo_hist(corr_file.split(":"), axes=axnames, charge=charge)
             if "y" in h.axes.name:
                 h = hh.makeAbsHist(h, "y")
 
@@ -76,6 +78,7 @@ elif args.proc == "w":
     filesByProc = { "WplusmunuPostVFP" : args.corr_files[plus_idx],
         "WminusmunuPostVFP" : args.corr_files[0 if plus_idx else 1]}
 
+print(filesByProc)
 minnloh = input_tools.read_all_and_scale(args.minnlo_file, list(filesByProc.keys()), ["nominal_gen"])[0]
 
 if "y" in minnloh.axes.name:
@@ -94,6 +97,9 @@ if add_taus:
     minnloh = 0.5*(minnloh + taush/(Z_TAU_TO_LEP_RATIO if args.proc == "z" else BR_TAUToMU))
 
 numh = hh.sumHists([read_corr(procName, args.generator, corr_file) for procName, corr_file in filesByProc.items()])
+
+print(numh)
+print(minnloh)
 
 corrh_unc  = theory_corrections.make_corr_from_ratio(minnloh, numh)
 corrh = hist.Hist(*corrh_unc.axes, name=corrh_unc.name, storage=hist.storage.Double(), data=corrh_unc.values(flow=True))

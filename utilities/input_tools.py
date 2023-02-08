@@ -106,7 +106,7 @@ def read_scetlib_hist(path, nonsing="auto", flip_y_sign=False, charge=None):
 
     return scetlibh 
 
-def read_dyturbo_hist(filenames, path="", axes=("y", "pt")):
+def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None):
     isfile = list(filter(lambda x: os.path.isfile(x), 
         [os.path.expanduser(os.path.join(path, f)) for f in filenames]))
 
@@ -117,7 +117,17 @@ def read_dyturbo_hist(filenames, path="", axes=("y", "pt")):
     if len(hists) > 1:
         hists = hh.rebinHistsToCommon(hists, 0)
 
-    return hh.sumHists(hists)
+    h = hh.sumHists(hists)
+
+    if charge is not None:
+        charge_args = (2, -2., 2.) if charge != 0 else (1, 0, 1) 
+        charge_axis = hist.axis.Regular(*charge_args, flow=False, name = "charge")
+        print(charge, charge_axis.index(charge))
+        hnew = hist.Hist(*h.axes, charge_axis, storage=h._storage_type())
+        hnew[...,charge_axis.index(charge)] = h.view(flow=True)
+        return hnew
+    else:
+        return h
 
 def expand_dyturbo_filenames(path, basename, varname, pieces=["n3ll_born", "n2ll_ct", "n2lo_vj"], append=None):
     return [os.path.join(path, "_".join(filter(None, [basename, piece, varname, append]))+".txt") for piece in pieces]

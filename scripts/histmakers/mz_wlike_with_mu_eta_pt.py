@@ -26,9 +26,6 @@ parser.add_argument("--smearing", action='store_true', help="Smear pT such that 
 f = next((x for x in parser._actions if x.dest == "pt"), None)
 if f:
     newPtDefault = [34,26.,60.]
-    logging.warning("")
-    logging.warning(f" >>> Modifying default of {f.dest} from {f.default} to {newPtDefault}")
-    logging.warning("")
     f.default = newPtDefault
     
 args = parser.parse_args()
@@ -39,9 +36,11 @@ else:
     logger = common.setup_color_logger(os.path.basename(__file__), args.verbose)
     
 filt = lambda x,filts=args.filterProcs: any([f in x.name for f in filts])
+
+logging.basicConfig(level=logging.INFO)
+
 datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles, filt=filt if args.filterProcs else None, 
     nanoVersion="v8" if args.v8 else "v9", base_path=args.data_path)
-
 era = args.era
 
 # custom template binning
