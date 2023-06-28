@@ -13,10 +13,14 @@ on:
   workflow_dispatch:
 
 env: 
-  MAX_FILES: 20
+  MAX_FILES: 10
   LUMI_SCALE: 760
   NTHREADS: 16
-  WEB_DIR: /home/c/cmsmwbot/www/WMassAnalysis/PRValidation
+  LOCAL_WEB_DIR: www/WMassAnalysis/PRValidation
+  EOS_DIR: /eos/user/c/cmsmwbot
+  OUTFILE_WMASS: "mw_with_mu_eta_pt.hdf5"
+  OUTFILE_DILEPTON: "mz_dilepton.hdf5"
+  OUTFILE_WLIKE: "mz_wlike_with_mu_eta_pt.hdf5"
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -45,117 +49,160 @@ jobs:
   #              repo: context.repo.repo,
   #              body: ${{env.MESSAGE}}
   #            })
+  setenv:
+    runs-on: [self-hosted, linux, x64]
+
+    outputs:
+      WREMNANTS_OUTDIR: ${{steps.export.outputs.WREMNANTS_OUTDIR}}
+      WEB_DIR: ${{steps.export.outputs.WEB_DIR}}
+      PLOT_DIR: ${{steps.export.outputs.PLOT_DIR}}
+      NTHREADS: ${{steps.export.outputs.NTHREADS}}
+      MAX_FILES: ${{steps.export.outputs.MAX_FILES}}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: setup scheduled
+        if: github.event.schedule != '0 3 * * 2,4,6'
+        run: echo PLOT_DIR=PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
+
+      - name: setup pr
+        if: github.event.schedule == '0 3 * * 2,4,6'
+        run: echo PLOT_DIR=ScheduledBuild_$(date +%Y_%m)_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
+
+      - name: setup nonpr
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "NTHREADS=64" >> $GITHUB_ENV
+          echo "MAX_FILES=-1" >> $GITHUB_ENV
+
+      - name: setup outdir
+        run: echo "WREMNANTS_OUTDIR=/tmp/${USER}/$(uuidgen)" >> $GITHUB_ENV
+
+      - name: setup webdir
+        # TODO: Get the local writing+copy to eos working
+        #run: echo "WEB_DIR=$WREMNANTS_OUTDIR/$LOCAL_WEB_DIR" >> $GITHUB_ENV
+        run: echo "WEB_DIR=$EOS_DIR/$LOCAL_WEB_DIR" >> $GITHUB_ENV
+
+      - name: create webdir
+        run: mkdir -p ${{env.WEB_DIR}}
+
+      - id: export
+        run: |
+          echo "PLOT_DIR=$PLOT_DIR/$(date +%Y_%m)" >> $GITHUB_OUTPUT
+          echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
+          echo "NTHREADS=$NTHREADS" >> $GITHUB_OUTPUT
+          echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
+          echo "WEB_DIR=$WEB_DIR" >> $GITHUB_OUTPUT
 
   w-analysis:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
+    needs: setenv
 
-    env:
-      OUTFILE: "mw_with_mu_eta_pt.hdf5"
-      OUTFILE_DILEPTON: "mz_dilepton.hdf5"
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}*2
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
-
-      - name: wmass setup folder
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
-
-      - name: wmass setup folder nightly
-        if: github.event.schedule == '0 3 * * 2,4,6'
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/ScheduledBuild_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
-
-      - name: wmass setup events
-        if: github.event_name != 'pull_request'
-        run: echo "NTHREADS=64" >> $GITHUB_ENV
-
-      - name: wmass setup events
-        if: github.event_name != 'pull_request'
-        run: echo "MAX_FILES=-1" >> $GITHUB_ENV
-
-      - name: wmass setup full lumi 
-        if: github.event_name != 'pull_request'
-        run: echo "LUMI_SCALE=1" >> $GITHUB_ENV
 
       - name: wmass setup lumi scale
         if: github.event_name == 'pull_request'
         run: echo "LUMI_SCALE=120" >> $GITHUB_ENV
 
-      - name: wmass setup max files
-        if: github.event_name == 'pull_request'
-        run: echo "MAX_FILES=100" >> $GITHUB_ENV
-
       - name: wmass analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --forceDefaultName
-
-      - name: dilepton analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py --axes ptll yll -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --forceDefaultName
-
-      - name: wmass plotting
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --hists pt eta pt-eta -p $WEB_DIR -f $PLOT_DIR -a W $OUTFILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
-
-      - name: wmass plot mt
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --rebin 2 --yscale 1.5 --baseName transverseMass --hists mt -p $WEB_DIR -f $PLOT_DIR $OUTFILE
-
-      - name: wmass plot MET
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --rebin 2 --yscale 1.5 --baseName MET --hists met -p $WEB_DIR -f $PLOT_DIR $OUTFILE 
-
-      - name: wmass plot massShift
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py -a massVariation --yscale 1.4 --hist pt --baseName nominal -r 0.98 1.02 -p $WEB_DIR -f $PLOT_DIR $OUTFILE variation --varName massWeight --selectEntries massShift100MeVUp massShift100MeVDown --varLabel massShift100MeVUp massShift100MeVDown --selectAxis massShift --color grey grey
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --verbose 4 --forceDefaultName -o $WREMNANTS_OUTDIR
 
       - name: wmass combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $OUTFILE --verbose 4 --lumiScale $LUMI_SCALE
-
-      - name: dilepton combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $OUTFILE_DILEPTON --fitvar ptll-yll --verbose 4 --lumiScale $LUMI_SCALE
-
-      - name: aggregate combine inputs
-        run: cp -p ZMassDilepton_ptll_yll/* WMass_pt_eta/
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: wmass combine fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass WMass_pt_eta WMass_plus.txt WMass_minus.txt ZMassDilepton_inclusive.txt
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ${WREMNANTS_OUTDIR}/WMass_pt_eta WMass_plus.txt WMass_minus.txt 
 
-      - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh WMass_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW.html
-
-
-  lowpu:
+  w-plotting:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:    
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
 
-      - name: lowpu setup events
-        if: github.event_name != 'pull_request'
-        run: echo "MAX_FILES=-1" >> $GITHUB_ENV
+      - name: test
+        run: echo "The web dir is $WEB_DIR plot dir is ${PLOT_DIR}"
 
-      - name: lowpu setup lumi scale
-        if: github.event_name != 'pull_request'
-        run: echo "LUMI_SCALE=1" >> $GITHUB_ENV
+      - name: wmass plotting
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --hists pt eta pt-eta -p $WEB_DIR -f $PLOT_DIR -a W $HIST_FILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
 
-      - name: lowpu setup threads
-        if: github.event_name != 'pull_request'
-        run: echo "NTHREADS=64" >> $GITHUB_ENV
+      - name: wmass plot mt
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --rebin 2 --yscale 1.5 --baseName transverseMass --hists mt -p $WEB_DIR -f $PLOT_DIR $HIST_FILE
+
+      - name: wmass plot MET
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --rebin 2 --yscale 1.5 --baseName MET --hists met -p $WEB_DIR -f $PLOT_DIR $HIST_FILE
+
+      - name: wmass plot massShift
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py -a massVariation --yscale 1.4 --hist pt --baseName nominal -r 0.98 1.02 -p $WEB_DIR -f $PLOT_DIR $HIST_FILE variation --varName massWeight --selectEntries massShift100MeVUp massShift100MeVDown --varLabel massShift100MeVUp massShift100MeVDown --selectAxis massShift --color grey grey
+
+      - name: wmass combine impacts
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/WMass_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW.html
+
+  lowpu:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: setenv
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:    
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/lowPU_mumu.hdf5" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: lowpu w analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_lowPU.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_lowPU.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 -o $WREMNANTS_OUTDIR
 
         #TODO: test low pu combine (and combined fit)
           #- name: lowpu w combine
           #  run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/setupLowPileupCombine.py -i lowPU_mu_maxFiles2.hdf5 --verbose 4
 
       - name: lowpu z analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_lowPU.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --forceDefaultName
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_lowPU.py -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --forceDefaultName
 
       - name: lowpu z combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupLowPU_Z.py -i lowPU_mumu.hdf5 --verbose 4 
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupLowPU_Z.py -i $HIST_FILE --verbose 4 -o $WREMNANTS_OUTDIR
 
           # FIXME: Remove from CI for now, to be added back in Jan's next PR
           #- name: lowpu z combine fit
@@ -166,123 +213,229 @@ jobs:
   wlike:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
+    needs: setenv
 
-    env:
-      OUTFILE: "mz_wlike_with_mu_eta_pt.hdf5"
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
 
-      - name: wlike setup folder
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
-
-      - name: wlike setup folder nightly
-        if: github.event.schedule == '0 3 * * 2,4,6'
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/ScheduledBuild_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
-
-      - name: wlike setup events
-        if: github.event_name != 'pull_request'
-        run: echo "MAX_FILES=-1" >> $GITHUB_ENV
-
-      - name: wlike setup lumi scale
-        if: github.event_name != 'pull_request'
-        run: echo "LUMI_SCALE=1" >> $GITHUB_ENV
-
-      - name: wlike setup threads
-        if: github.event_name != 'pull_request'
-        run: echo "NTHREADS=64" >> $GITHUB_ENV
-
       - name: wlike analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --theoryCorr scetlib_dyturbo --forceDefaultName --unfold
-
-      - name: wlike plotting
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists pt eta pt-eta -p $WEB_DIR -f $PLOT_DIR -a wlike $OUTFILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
-
-      - name: wlike plot mt
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --baseName transverseMass --rebin 2 --hists mt -p $WEB_DIR -f $PLOT_DIR -a wlike $OUTFILE 
-
-      - name: wlike plot MET
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --baseName MET --hists MET -p $WEB_DIR -f $PLOT_DIR -a wlike $OUTFILE 
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --forceDefaultName --unfold
 
       - name: wlike combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $OUTFILE --verbose 4 --lumiScale $LUMI_SCALE
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: wlike combine fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ZMassWLike_pt_eta ZMassWLike_plus.txt ZMassWLike_minus.txt 
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $WREMNANTS_OUTDIR/ZMassWLike_pt_eta ZMassWLike_plus.txt ZMassWLike_minus.txt 
 
       - name: wlike combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh ZMassWLike_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsWlike.html
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassWLike_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsWlike.html
+
+  wlike-plotting:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, wlike]
+
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
+      - name: wlike plotting
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists pt eta pt-eta -p $WEB_DIR -f $PLOT_DIR -a wlike $HIST_FILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
+
+      - name: wlike plot mt
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --baseName transverseMass --rebin 2 --hists mt -p $WEB_DIR -f $PLOT_DIR -a wlike $HIST_FILE
+
+      - name: wlike plot MET
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --baseName MET --hists MET -p $WEB_DIR -f $PLOT_DIR -a wlike $HIST_FILE
+
+  wlike-unfolding:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, wlike]
+
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: wlike combine unfolding setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $OUTFILE --verbose 4 --lumiScale $LUMI_SCALE --unfold --constrainMass --noEfficiencyUnc --minnloScaleUnc integrated
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE --unfold --noEfficiencyUnc --minnloScaleUnc integrated -o $WREMNANTS_OUTDIR
 
       - name: wlike combine unfolding fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfold ZMassWLike_pt_eta plus=ZMassWLike_plus.txt minus=ZMassWLike_minus.txt xnorm=ZMassWLike_inclusive_xnorm.txt
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfold $WREMNANTS_OUTDIR/ZMassWLike_pt_eta plus=ZMassWLike_plus.txt minus=ZMassWLike_minus.txt xnorm=ZMassWLike_inclusive_xnorm.txt
 
       - name: wlike combine unfolding results 
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_unfolded_results.sh ZMassWLike_pt_eta/fitresults_123456789.root $WEB_DIR $PLOT_DIR/
-
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_unfolded_results.sh $WREMNANTS_OUTDIR/ZMassWLike_pt_eta/fitresults_123456789.root $WEB_DIR $PLOT_DIR
 
 
   dilepton:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
+    needs: setenv
 
-    env:
-      OUTFILE: "mz_dilepton.hdf5"
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
 
-      - name: dilepton setup
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
-
-      - name: dilepton setup folder nightly
-        if: github.event.schedule == '0 3 * * 2,4,6'
-        run: echo PLOT_DIR=$(date +%Y_%m_%d)/ScheduledBuild_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
-
-      - name: dilepton setup threads
-        if: github.event_name != 'pull_request'
-        run: echo "NTHREADS=64" >> $GITHUB_ENV
-
-      - name: dilepton setup events
-        if: github.event_name != 'pull_request'
-        run: echo "MAX_FILES=-1" >> $GITHUB_ENV
-
       - name: dilepton analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4  --theoryCorr scetlib_dyturbo --axes ptll --forceDefaultName
-
-      - name: dilepton plotting ptll
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists ptll -p $WEB_DIR -f $PLOT_DIR -a z $OUTFILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
-
-      - name: dilepton plotting mll
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal_mll --hists mll -p $WEB_DIR -f $PLOT_DIR -a z $OUTFILE
-
-      - name: dilepton plotting yll
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal_yll --nominalRef nominal_yll --hists yll -p $WEB_DIR -f $PLOT_DIR -a z $OUTFILE
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --axes ptll yll --forceDefaultName -o $WREMNANTS_OUTDIR
 
       - name: dilepton combine ptll setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $OUTFILE --fitvar ptll --constrainMass --lumiScale $LUMI_SCALE
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: dilepton combine ptll fit
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ZMassDilepton_ptll ZMassDilepton_inclusive.txt 
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll ZMassDilepton_inclusive.txt 
+
+      # TODO: Needs a pending PR I think
+      # - name: dilepton combine impacts
+      #   run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresults_123456789.root $WEB_DIR/$PLOT_DIR pullsPtll.html
+
+  dilepton-plotting:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, dilepton]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
+      - name: test
+        run: echo "The web dir is $WEB_DIR plot dir is ${PLOT_DIR}"
+
+      - name: dilepton plotting ptll
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists ptll -p $WEB_DIR -f $PLOT_DIR -a z $HIST_FILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
+
+      - name: dilepton plotting mll
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal_mll --hists mll -p $WEB_DIR -f $PLOT_DIR -a z $HIST_FILE
+
+      - name: dilepton plotting yll
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal_yll --nominalRef nominal_yll --hists yll -p $WEB_DIR -f $PLOT_DIR -a z $HIST_FILE
 
   gen:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
+    needs: setenv
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
 
       - name: gen analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/w_z_gen_dists.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/w_z_gen_dists.py -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --verbose 4
+
+  combined-fit:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis, dilepton]
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "COMBINED_DIR=$WREMNANTS_OUTDIR/WMass_ZDilepton" >> $GITHUB_ENV
+
+      - name: aggregate combine inputs
+        run: |
+          mkdir $COMBINED_DIR
+          cp -p $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/* $COMBINED_DIR
+          cp -p $WREMNANTS_OUTDIR/WMass_pt_eta/* $COMBINED_DIR
+
+      - name: wmass combined fit 
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $COMBINED_DIR WMass_plus.txt WMass_minus.txt ZMassDilepton_inclusive.txt
+
+      - name: wmass combine impacts
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $COMBINED_DIR/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW_withZ.html
+
+  copy-clean:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis, lowpu, dilepton, wlike, gen, combined-fit, wlike-plotting, w-plotting, wlike-unfolding ]
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+
+      - name: clean
+        if: always() 
+        run: |
+          # TODO: Figure out how to get this working with permissions
+          #xrdcp -R -f $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR root://eoscms.cern.ch/$EOS_DIR/$LOCAL_WEB_DIR
+          echo "Removing temp directory $WREMNANTS_OUTDIR"
+          rm -r $WREMNANTS_OUTDIR

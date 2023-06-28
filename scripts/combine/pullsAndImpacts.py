@@ -60,7 +60,7 @@ def plotImpacts(df, pulls=False, POI='Wmass', normalize=False, oneSidedImpacts=F
 
     max_pull = np.max(df["abspull"])
     # Round up to nearest 0.5
-    pullrange = np.ceil(max_pull+1)
+    pullrange = np.ceil(max_pull*1.1+1)
     
     ndisplay = len(df)
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)',
@@ -199,7 +199,8 @@ def readFitInfoFromFile(rf,filename, group=False, sort=None, ascending=True, sta
     df['absimpact'] = np.abs(df['impact'])
     df['abspull'] = np.abs(df['pull'])
     if not group:
-        df.drop(df.loc[df['label']=='massShift100MeV'].index, inplace=True)
+        df.drop(df.loc[df['label']=='WmassShift100MeV'].index, inplace=True)
+        df.drop(df.loc[df['label']=='ZmassShift100MeV'].index, inplace=True)
     colors = np.full(len(df), '#377eb8')
     if not group:
         colors[df['impact'] > 0.] = '#e41a1c'
@@ -217,12 +218,12 @@ def parseArgs():
     parser.add_argument("-s", "--sort", default="absimpact", type=str, choices=["label", "abspull", "constraint", "absimpact"], help="Sort mode for nuisances")
     parser.add_argument("--stat", default=0.0, type=float, help="Overwrite stat. uncertainty with this value")
     parser.add_argument("-d", "--sortDescending", dest='ascending', action='store_false', help="Sort mode for nuisances")
-    parser.add_argument("-g", "--group", action='store_true', help="Show impacts of groups")
+    parser.add_argument("-m", "--mode", choices=["group", "ungrouped", "both"], default="both", help="Impact mode")
     parser.add_argument("--absolute", action='store_true', help="Not normalize impacts on cross sections and event numbers.")
     parser.add_argument("--debug", action='store_true', help="Print debug output")
     parser.add_argument("--oneSidedImpacts", action='store_true', help="Make impacts one-sided")
     parser.add_argument("--filters", nargs="*", type=str, help="Filter regexes to select nuisances by name")
-    parsers = parser.add_subparsers(dest='mode')
+    parsers = parser.add_subparsers(dest='output_mode')
     interactive = parsers.add_parser("interactive", help="Launch and interactive dash session")
     interactive.add_argument("-i", "--interface", default="localhost", help="The network interface to bind to.")
     output = parsers.add_parser("output", help="Produce plots as output (not interactive)")
@@ -261,12 +262,13 @@ groupsdataframe = pd.DataFrame()
 
 def producePlots(rtfile, args, POI='Wmass', normalize=False):
 
-    if not (args.group and args.mode == 'output'):
+    group = args.mode == "group"
+    if not (group and args.output_mode == 'output'):
         dataframe = readFitInfoFromFile(rtfile, args.inputFile, False, sort=args.sort, ascending=args.ascending, stat=args.stat/100., POI=POI, normalize=normalize)
-    elif args.group:
+    elif group:
         groupsdataframe = readFitInfoFromFile(rtfile, args.inputFile, True, sort=args.sort, ascending=args.ascending, stat=args.stat/100., POI=POI, normalize=normalize)
 
-    if args.mode == "interactive":
+    if args.output_mode == "interactive":
         app.layout = html.Div([
                 dcc.Input(
                     id="maxShow", type="number", placeholder="maxShow",
@@ -305,12 +307,12 @@ def producePlots(rtfile, args, POI='Wmass', normalize=False):
         )
 
         app.run_server(debug=True, port=3389, host=args.interface)
-    elif args.mode == 'output':
-        df = dataframe if not args.group else groupsdataframe
+    elif args.output_mode == 'output':
+        df = dataframe if not group else groupsdataframe
         df = df.sort_values(by=args.sort, ascending=args.ascending)
         if args.num and args.num < df.size:
             df = df[-args.num:]
-        fig = plotImpacts(df, pulls=not args.noPulls and not args.group, POI=POI, normalize=not args.absolute, oneSidedImpacts=args.oneSidedImpacts)
+        fig = plotImpacts(df, pulls=not args.noPulls and not group, POI=POI, normalize=not args.absolute, oneSidedImpacts=args.oneSidedImpacts)
 
         postfix = POI if POI and "mass" not in POI else None
         
@@ -334,7 +336,15 @@ if __name__ == '__main__':
     rtfile = uproot.open(args.inputFile)
     POIs = input_tools.getPOInames(rtfile)
     for POI in POIs:
+        do_both = args.mode == "both"
+        if args.mode == "both":
+            args.mode = "ungrouped"
         producePlots(rtfile, args, POI)
+        if do_both:
+            args.mode = "group"
+            outfile = os.path.splitext(args.outputFile)
+            args.outputFile = "".join([outfile[0]+"_group", outfile[1]])
+            producePlots(rtfile, args, POI)
     
     if POIs[0] and not (POIs[0]=="Wmass" and len(POIs) == 1):
         # masked channel
