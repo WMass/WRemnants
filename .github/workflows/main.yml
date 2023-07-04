@@ -14,7 +14,7 @@ on:
 
 env: 
   MAX_FILES: 10
-  LUMI_SCALE: 760
+  LUMI_SCALE: 1
   NTHREADS: 16
   LOCAL_WEB_DIR: www/WMassAnalysis/PRValidation
   EOS_DIR: /eos/user/c/cmsmwbot
@@ -64,11 +64,11 @@ jobs:
 
       - name: setup scheduled
         if: github.event.schedule != '0 3 * * 2,4,6'
-        run: echo PLOT_DIR=PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
+        run: echo PLOT_DIR=PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')/$(date +%Y_%m_%d) >> $GITHUB_ENV
 
       - name: setup pr
         if: github.event.schedule == '0 3 * * 2,4,6'
-        run: echo PLOT_DIR=ScheduledBuild_$(date +%Y_%m)_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
+        run: echo PLOT_DIR=ScheduledBuild_$(date +%Y_%m_%d)_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
 
       - name: setup nonpr
         if: github.event_name != 'pull_request'
@@ -105,11 +105,13 @@ jobs:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
           WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
-          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}*2
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
           MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
           echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
@@ -124,13 +126,16 @@ jobs:
         run: echo "LUMI_SCALE=120" >> $GITHUB_ENV
 
       - name: wmass analysis
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --verbose 4 --forceDefaultName -o $WREMNANTS_OUTDIR
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py -j $NTHREADS --maxFiles $((MAX_FILES)) --verbose 4 --forceDefaultName -o $WREMNANTS_OUTDIR
 
       - name: wmass combine setup
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: wmass combine fit 
         run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ${WREMNANTS_OUTDIR}/WMass_pt_eta WMass_plus.txt WMass_minus.txt 
+
+      - name: wmass combine impacts
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/WMass_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW.html
 
   w-plotting:
     # The type of runner that the job will run on
@@ -166,9 +171,6 @@ jobs:
 
       - name: wmass plot massShift
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py -a massVariation --yscale 1.4 --hist pt --baseName nominal -r 0.98 1.02 -p $WEB_DIR -f $PLOT_DIR $HIST_FILE variation --varName massWeight --selectEntries massShift100MeVUp massShift100MeVDown --varLabel massShift100MeVUp massShift100MeVDown --selectAxis massShift --color grey grey
-
-      - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/WMass_pt_eta/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW.html
 
   lowpu:
     # The type of runner that the job will run on
@@ -296,7 +298,7 @@ jobs:
           submodules: 'true'
 
       - name: wlike combine unfolding setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE --unfold --noEfficiencyUnc --minnloScaleUnc integrated -o $WREMNANTS_OUTDIR
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --verbose 4 --lumiScale $LUMI_SCALE --unfold --constrainMass --noEfficiencyUnc --minnloScaleUnc integrated -o $WREMNANTS_OUTDIR
 
       - name: wlike combine unfolding fit 
         run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfold $WREMNANTS_OUTDIR/ZMassWLike_pt_eta plus=ZMassWLike_plus.txt minus=ZMassWLike_minus.txt xnorm=ZMassWLike_inclusive_xnorm.txt
@@ -331,7 +333,7 @@ jobs:
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py -j $NTHREADS --maxFiles $MAX_FILES --verbose 4 --axes ptll yll --forceDefaultName -o $WREMNANTS_OUTDIR
 
       - name: dilepton combine ptll setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombineWMass.py -i $HIST_FILE --fitvar ptll-yll --constrainMass --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: dilepton combine ptll fit
         run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll ZMassDilepton_inclusive.txt 
@@ -394,6 +396,14 @@ jobs:
         with:
           submodules: 'true'
 
+
+      # As of now the gen output isn't used for anything, so there's no point in running more files
+      - name: setup nonpr
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "NTHREADS=8" >> $GITHUB_ENV
+          echo "MAX_FILES=10" >> $GITHUB_ENV
+
       - name: gen analysis
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/w_z_gen_dists.py -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --verbose 4
 
@@ -413,7 +423,7 @@ jobs:
 
       - name: aggregate combine inputs
         run: |
-          mkdir $COMBINED_DIR
+          mkdir -p $COMBINED_DIR
           cp -p $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/* $COMBINED_DIR
           cp -p $WREMNANTS_OUTDIR/WMass_pt_eta/* $COMBINED_DIR
 
@@ -426,6 +436,7 @@ jobs:
   copy-clean:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis, lowpu, dilepton, wlike, gen, combined-fit, wlike-plotting, w-plotting, wlike-unfolding ]
+    if: always() 
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -433,7 +444,6 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
 
       - name: clean
-        if: always() 
         run: |
           # TODO: Figure out how to get this working with permissions
           #xrdcp -R -f $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR root://eoscms.cern.ch/$EOS_DIR/$LOCAL_WEB_DIR

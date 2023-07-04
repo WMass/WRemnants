@@ -132,17 +132,20 @@ def syst_transform_map(base_hist, hist_name):
     return transforms
 
 def scale_helicity_hist_to_variations(scale_hist, sum_axes=[], rebinPtV=None):
-    
     s = hist.tag.Slicer()
+    axisNames = scale_hist.axes.name
+
+    sum_expr = {axis : s[::hist.sum] for axis in sum_axes if axis in axisNames}
+    scale_hist = scale_hist[sum_expr]
+    axisNames = scale_hist.axes.name
+    
     # select nominal QCD scales, but keep the sliced axis at size 1 for broadcasting
     nom_scale_hist = scale_hist[{"muRfact" : s[1.j:1.j+1], "muFfact" : s[1.j:1.j+1]}]
-    axisNames = scale_hist.axes.name
     # select nominal QCD scales and project down to nominal axes
     genAxes = ["ptVgen", "chargeVgen", "helicity"]
-    nom_hist = nom_scale_hist[{"muRfact" : s[1.j], "muFfact" : s[1.j] }]
-    for genAxis in genAxes:
-        if genAxis in axisNames:
-            nom_hist = nom_hist[{genAxis : s[::hist.sum]}]
+    nom_sel = {"muRfact" : s[1.j], "muFfact" : s[1.j] }
+    nom_sel.update({genAxis : s[::hist.sum] for genAxis in genAxes if genAxis in axisNames})
+    nom_hist = nom_scale_hist[nom_sel]
     
     hasHelicityAxis = "helicity" in axisNames
     hasPtAxis = "ptVgen" in axisNames
@@ -161,13 +164,6 @@ def scale_helicity_hist_to_variations(scale_hist, sum_axes=[], rebinPtV=None):
             scale_hist = scale_hist[{"ptVgen" : s[::hist.rebin(rebinPtV)]}]
             nom_scale_hist = nom_scale_hist[{"ptVgen" : s[::hist.rebin(rebinPtV)]}]
 
-    for axis in sum_axes:
-        if axis in axisNames:
-            scale_hist = scale_hist[{axis : s[::hist.sum]}]
-            nom_scale_hist = nom_scale_hist[{axis : s[::hist.sum]}]
-        else:
-            logger.warning(f"In scale_helicity_hist_to_variations: axis '{axis}' not found in histogram.")
-        
     # difference between a given scale and the nominal, plus the sum
     # this emulates the "weight if idx else nominal" logic and corresponds to the decorrelated
     # variations
@@ -177,10 +173,10 @@ def scale_helicity_hist_to_variations(scale_hist, sum_axes=[], rebinPtV=None):
         out_name = scale_hist.name + "_variations"
 
     expd = scale_hist.ndim - nom_hist.ndim
-    expandnom = np.expand_dims(nom_hist.view(flow=True), [-expd+i for i in range(expd)])
-    systhist = scale_hist.view(flow=True) - nom_scale_hist.view(flow=True) + expandnom
+    expandnom = np.expand_dims(nom_hist.values(flow=True), [-expd+i for i in range(expd)])
+    systhist = scale_hist.values(flow=True) - nom_scale_hist.values(flow=True) + expandnom
 
-    scale_variation_hist = hist.Hist(*scale_hist.axes, storage = scale_hist._storage_type(), 
+    scale_variation_hist = hist.Hist(*scale_hist.axes, 
                                      name = out_name, data = systhist)
 
     return scale_variation_hist 

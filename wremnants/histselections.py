@@ -21,7 +21,8 @@ def fakeHistABCD(h, low_PU=False):
     return hh.multiplyHists(
         hh.divideHists(h[{"passIso" : True, "passMT" : False}], 
             h[{"passIso" : False, "passMT" : False}],
-                cutoff=1
+                cutoff=1,
+                createNew=True,
             ),
                 #where=h[{"passIso" : False, "passMT" : True}].values(flow=True)>1),
         h[{"passIso" : False, "passMT" : True}], 

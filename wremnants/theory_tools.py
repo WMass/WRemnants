@@ -363,14 +363,17 @@ def make_theory_corr_hists(df, name, axes, cols, helpers, generators, modify_cen
 
     return res
 
-def scale_angular_moments(hist_moments_scales, sumW2=False):
+def scale_angular_moments(hist_moments_scales, sumW2=False, createNew=False):
     # e.g. from arxiv:1708.00008 eq. 2.13, note A_0 is NOT the const term!
     scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
 
     hel_idx = hist_moments_scales.axes.name.index("helicity")
     scaled_vals = np.moveaxis(hist_moments_scales.view(flow=True), hel_idx, -1)*scales
-    hnew = hist.Hist(*hist_moments_scales.axes, storage = hist.storage.Weight() if sumW2 else hist.storage.Double())
-    hnew[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
+    if createNew:
+        hnew = hist.Hist(*hist_moments_scales.axes, storage = hist.storage.Weight() if sumW2 else hist.storage.Double())
+    else:
+        hnew = hist_moments_scales
+    hnew.view(flow=True)[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
     return hnew
 
 def replace_by_neighbors(vals, replace):
@@ -380,8 +383,8 @@ def replace_by_neighbors(vals, replace):
     indices = ndimage.distance_transform_edt(replace, return_distances=False, return_indices=True)
     return vals[tuple(indices)]
 
-def moments_to_angular_coeffs(hist_moments_scales, cutoff=1e-5):
-    sumW2 = hist_moments_scales._storage_type() == hist.storage.Weight()
+def moments_to_angular_coeffs(hist_moments_scales, cutoff=1e-5, sumW2=False):
+    sumW2 = sumW2 and hist_moments_scales._storage_type == hist.storage.Weight
 
     if hist_moments_scales.empty():
        raise ValueError("Cannot make coefficients from empty hist")
