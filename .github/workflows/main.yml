@@ -89,7 +89,7 @@ jobs:
 
       - id: export
         run: |
-          echo "PLOT_DIR=$PLOT_DIR" >> $GITHUB_OUTPUT
+          echo "PLOT_DIR=$PLOT_DIR/$(date +%Y_%m)" >> $GITHUB_OUTPUT
           echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
           echo "NTHREADS=$NTHREADS" >> $GITHUB_OUTPUT
           echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
