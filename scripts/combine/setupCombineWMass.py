@@ -12,7 +12,7 @@ import math
 import time
 
 scriptdir = f"{pathlib.Path(__file__).parent}"
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/../../wremnants/data/"
 
 def make_parser(parser=None):
     if not parser:

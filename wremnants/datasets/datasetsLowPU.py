@@ -3,13 +3,13 @@ import os
 import pathlib
 import socket
 from wremnants.datasets.dataset_tools import filterProcs, excludeProcs, makeFilelist
-from utilities import logging, common
+from utilities import logging
 
 logger = logging.child_logger(__name__)
 
-lumijson = f"{common.data_dir}/lowPU/Cert_306896-307082_13TeV_PromptReco_Collisions17_JSON_LowPU_lowPU_suppressedHighPULS.txt"
-lumicsv_mu = f"{common.data_dir}/lowPU/bylsoutput_HLT_HIMu17_Full.csv"
-lumicsv_el = f"{common.data_dir}/lowPU/bylsoutput_HLT_HIEle20_Full.csv"
+lumijson = f"{pathlib.Path(__file__).parent.parent}/data/lowPU/Cert_306896-307082_13TeV_PromptReco_Collisions17_JSON_LowPU_lowPU_suppressedHighPULS.txt"
+lumicsv_mu = f"{pathlib.Path(__file__).parent.parent}/data/lowPU/bylsoutput_HLT_HIMu17_Full.csv"
+lumicsv_el = f"{pathlib.Path(__file__).parent.parent}/data/lowPU/bylsoutput_HLT_HIEle20_Full.csv"
 
 # https://twiki.cern.ch/twiki/bin/viewauth/CMS/StandardModelCrossSectionsat13TeV
 def getDatasets(maxFiles=-1, filt=None, excl=None, flavor="",base_path=None):

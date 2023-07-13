@@ -4,7 +4,7 @@ import argparse
 import logging
 
 wremnants_dir = f"{pathlib.Path(__file__).parent}/../wremnants"
-data_dir =  f"{pathlib.Path(__file__).parent}/../wremnants-data/data/"
+data_dir = f"{wremnants_dir}/data/"
 
 wprocs = ["WminusJetsToMuNu", "WminusJetsToENu", "WminusJetsToTauNu", "WplusJetsToMuNu", "WplusJetsToENu", "WplusJetsToTauNu"]
 zprocs = ["Zmumu", "Zee", "Ztautau"]

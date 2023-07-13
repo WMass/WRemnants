@@ -524,7 +524,7 @@ double RoccoR::kScaleAndSmearMCerror(int Q, double pt, double eta, double phi, i
 
 
 //RoccoR * rochester = new RoccoR("wremnants/data/lowPU/rochester/RoccoR2017.txt"); // https://gitlab.cern.ch/akhukhun/roccor
-RoccoR * rochester = new RoccoR("wremnants-data/data/lowPU/rochester/RoccoR_lowPU_v0.txt"); // v0 version for lowPU
+RoccoR * rochester = new RoccoR("wremnants/data/lowPU/rochester/RoccoR_lowPU_v0.txt"); // v0 version for lowPU
 
 Vec_f applyRochesterMC(Vec_f pt, Vec_f eta, Vec_f phi, Vec_f ch, Vec_i gen_idx, Vec_f gen_pt, Vec_i nTrackerLayers, int fluctuation=0) {
 

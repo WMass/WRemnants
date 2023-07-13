@@ -1,5 +1,5 @@
 import narf
-from utilities import logging, common
+from utilities import logging
 import subprocess
 import glob
 import pathlib
@@ -13,8 +13,8 @@ from wremnants.datasets.dataset_tools import filterProcs, excludeProcs, makeFile
 
 logger = logging.child_logger(__name__)
 
-lumicsv = f"{common.data_dir}/bylsoutput.csv"
-lumijson = f"{common.data_dir}/Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt"
+lumicsv = f"{pathlib.Path(__file__).parent.parent}/data/bylsoutput.csv"
+lumijson = f"{pathlib.Path(__file__).parent.parent}/data/Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt"
 
 def getDatasets(maxFiles=-1, filt=None, excl=None, mode=None, base_path=None, nanoVersion="v9", 
         data_tag="TrackFitV722_NanoProdv2", mc_tag="TrackFitV718_NanoProdv1"):

@@ -27,4 +27,4 @@ from .syst_tools import scale_helicity_hist_to_variations
 from .theory_tools import axis_helicity, scale_tensor_axes, define_prefsr_vars, moments_to_angular_coeffs
 from .muon_calibration import *
 
-data_dir = f"{pathlib.Path(__file__).parent}/../wremnants-data/data/"
+data_dir = f"{pathlib.Path(__file__).parent}/data/"

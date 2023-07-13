@@ -1,0 +1,238 @@
+{
+    "nGauss": 5,
+    "mean1": {
+        "func": "[0]",
+        "nParams": 1,
+        "p0": 0,
+        "p0_err": -1,
+        "p0_isCte": true,
+        "transform": false
+    },
+    "sigma1": {
+        "nParams": 2,
+        "func": "[0] + [1]*x",
+        "p0": 46.07217953907746,
+        "p0_err": [
+            null,
+            null
+        ],
+        "p1": 0.1593859493285606,
+        "p1_err": [
+            null,
+            null
+        ],
+        "transform": false
+    },
+    "norm1": {
+        "nParams": 1,
+        "func": "[0]",
+        "p0": 0.0002758971564954347,
+        "p0_err": [
+            null,
+            null
+        ],
+        "transform": false
+    },
+    "mean2": {
+        "func": "[0]",
+        "nParams": 1,
+        "p0": 0,
+        "p0_err": -1,
+        "p0_isCte": true,
+        "transform": false
+    },
+    "sigma2": {
+        "nParams": 6,
+        "func": "[0] + [1]*x + [2]*(2.*x*x-1.) + [3]*(4.*x*x*x-3*x) + [4]*(8.*x*x*x*x-8.*x*x+1.) + [5]*(16.*x*x*x*x*x-20.*x*x*x+5.*x)",
+        "p0": 27.08671441452418,
+        "p0_err": [
+            null,
+            null
+        ],
+        "p1": 7.7220376039286345,
+        "p1_err": [
+            null,
+            null
+        ],
+        "p2": 0.6253581328694418,
+        "p2_err": [
+            null,
+            null
+        ],
+        "p3": 0.16304144804320034,
+        "p3_err": [
+            null,
+            null
+        ],
+        "p4": 0.10682688059959648,
+        "p4_err": [
+            null,
+            null
+        ],
+        "p5": 0.0004778374101128653,
+        "p5_err": [
+            null,
+            null
+        ],
+        "transform": true
+    },
+    "norm2": {
+        "nParams": 1,
+        "func": "[0]",
+        "p0": 0.019746321569398543,
+        "p0_err": [
+            null,
+            null
+        ],
+        "transform": false
+    },
+    "mean3": {
+        "func": "[0]",
+        "nParams": 1,
+        "p0": 0,
+        "p0_err": -1,
+        "p0_isCte": true,
+        "transform": false
+    },
+    "sigma3": {
+        "nParams": 6,
+        "func": "[0] + [1]*x + [2]*(2.*x*x-1.) + [3]*(4.*x*x*x-3*x) + [4]*(8.*x*x*x*x-8.*x*x+1.) + [5]*(16.*x*x*x*x*x-20.*x*x*x+5.*x)",
+        "p0": 15.508876884536235,
+        "p0_err": [
+            null,
+            null
+        ],
+        "p1": 3.359281541620267,
+        "p1_err": [
+            null,
+            null
+        ],
+        "p2": -0.6339273481796375,
+        "p2_err": [
+            null,
+            null
+        ],
+        "p3": -0.0038517462203128336,
+        "p3_err": [
+            null,
+            null
+        ],
+        "p4": -0.01867545761536242,
+        "p4_err": [
+            null,
+            null
+        ],
+        "p5": -0.12396873228762859,
+        "p5_err": [
+            null,
+            null
+        ],
+        "transform": true
+    },
+    "norm3": {
+        "nParams": 1,
+        "func": "[0]",
+        "p0": 0.25656275638893244,
+        "p0_err": [
+            null,
+            null
+        ],
+        "transform": false
+    },
+    "mean4": {
+        "func": "[0]",
+        "nParams": 1,
+        "p0": 0,
+        "p0_err": -1,
+        "p0_isCte": true,
+        "transform": false
+    },
+    "sigma4": {
+        "nParams": 6,
+        "func": "[0] + [1]*x + [2]*(2.*x*x-1.) + [3]*(4.*x*x*x-3*x) + [4]*(8.*x*x*x*x-8.*x*x+1.) + [5]*(16.*x*x*x*x*x-20.*x*x*x+5.*x)",
+        "p0": 10.255668734440558,
+        "p0_err": [
+            null,
+            null
+        ],
+        "p1": 2.39922178111958,
+        "p1_err": [
+            null,
+            null
+        ],
+        "p2": -0.5268722293315937,
+        "p2_err": [
+            null,
+            null
+        ],
+        "p3": 0.00835514290232138,
+        "p3_err": [
+            null,
+            null
+        ],
+        "p4": -0.020491804514008206,
+        "p4_err": [
+            null,
+            null
+        ],
+        "p5": -0.023882837286403516,
+        "p5_err": [
+            null,
+            null
+        ],
+        "transform": true
+    },
+    "norm4": {
+        "nParams": 1,
+        "func": "[0]",
+        "p0": 0.545845595370517,
+        "p0_err": [
+            null,
+            null
+        ],
+        "transform": false
+    },
+    "mean5": {
+        "func": "[0]",
+        "nParams": 1,
+        "p0": 0,
+        "p0_err": -1,
+        "p0_isCte": true,
+        "transform": false
+    },
+    "sigma5": {
+        "nParams": 6,
+        "func": "[0] + [1]*x + [2]*(2.*x*x-1.) + [3]*(4.*x*x*x-3*x) + [4]*(8.*x*x*x*x-8.*x*x+1.) + [5]*(16.*x*x*x*x*x-20.*x*x*x+5.*x)",
+        "p0": 6.3590020061321875,
+        "p0_err": [
+            null,
+            null
+        ],
+        "p1": 1.3881445948250672,
+        "p1_err": [
+            null,
+            null
+        ],
+        "p2": -0.4139507637924082,
+        "p2_err": [
+            null,
+            null
+        ],
+        "p3": 0.11585691875398625,
+        "p3_err": [
+            null,
+            null
+        ],
+        "p4": 0.06719562339022002,
+        "p4_err": [
+            null,
+            null
+        ],
+        "p5": -0.012042828718670476,
+        "p5_err": [
+            null,
+            null
+        ],
+        "transform": true
+    }
+}

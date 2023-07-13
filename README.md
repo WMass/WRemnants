@@ -6,11 +6,6 @@ Activate the singularity image (to be done every time before running code)
 ```bash
 singularity run /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:latest
 ```
-
-Activate git Large File Storage (only need to do this once for a given user/home directory)
-```
-git lfs install
-```
     
 Get the code (after forking from the central WMass repository)
 ```bash

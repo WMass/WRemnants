@@ -13,7 +13,7 @@ from utilities import common
 narf.clingutils.Declare('#include "muon_efficiencies_binned.h"')
 narf.clingutils.Declare('#include "muon_efficiencies_binned_vqt_real.h"')
 
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 def make_muon_efficiency_helpers_binned_vqt_real(filename = data_dir + "/testMuonSF/allSmooth_GtoH.root",
                                                  era = None, is_w_like = False, max_pt = np.inf,

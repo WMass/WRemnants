@@ -10,7 +10,7 @@ logger = logging.child_logger(__name__)
 
 narf.clingutils.Declare('#include "pileup.h"')
 
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 eradict = { "2016B" : "B",
             "2016C" : "C",

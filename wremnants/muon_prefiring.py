@@ -2,11 +2,10 @@ import ROOT
 import pathlib
 import hist
 import narf.clingutils
-from utilities import common
 
 narf.clingutils.Declare('#include "muon_prefiring.h"')
 
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 def make_muon_prefiring_helpers(filename = data_dir + "/testMuonSF/L1MuonPrefiringParametriations_histograms.root", era = None):
 

@@ -9,7 +9,7 @@
 namespace wrem {
 
 
-TFile *_preFire = new TFile("wremnants-data/data/lowPU/prefire/All2017Gand2017HPrefiringMaps.root", "READ");
+TFile *_preFire = new TFile("wremnants/data/lowPU/prefire/All2017Gand2017HPrefiringMaps.root", "READ");
 TH2 * preFire_jet = (TH2F*)(_preFire->Get("L1prefiring_jetempt_2017H"));
 TH2 * preFire_photon = (TH2F*)(_preFire->Get("L1prefiring_photonpt_2017H"));
 

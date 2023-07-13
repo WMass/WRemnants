@@ -11,7 +11,7 @@ namespace wrem {
     
 
 // Muon SF
-TFile *_leptonSF = new TFile("wremnants-data/data/lowPU/efficiencies/2021-10-22_allSFs_nodz_dxybs_lowPU.root", "READ");
+TFile *_leptonSF = new TFile("wremnants/data/lowPU/efficiencies/2021-10-22_allSFs_nodz_dxybs_lowPU.root", "READ");
 TH2 * lepSF_mu_iso = (TH2F*)(_leptonSF->Get("mu_SF2D_nominal_iso_lowPU_both")); // already the ratio DATA/MC
 TH2 * lepSF_mu_idip = (TH2F*)(_leptonSF->Get("mu_SF2D_nominal_idip_lowPU_both")); // already the ratio DATA/MC
 TH2 * lepSF_mu_trg_DATA = (TH2F*)(_leptonSF->Get("mu_effData_trigger_lowPU_both")); // separate DATA/MC

@@ -16,7 +16,7 @@ logger = logging.child_logger(__name__)
 narf.clingutils.Declare('#include "muon_calibration.h"')
 narf.clingutils.Declare('#include "lowpu_utils.h"')
 
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 def make_muon_calibration_helpers(args,
         mc_filename=data_dir+"/calibration/correctionResults_v718_idealgeom_gensim.root", 

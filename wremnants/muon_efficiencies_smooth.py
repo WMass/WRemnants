@@ -16,7 +16,7 @@ logger = logging.child_logger(__name__)
 
 narf.clingutils.Declare('#include "muon_efficiencies_smooth.h"')
 
-data_dir = common.data_dir
+data_dir = f"{pathlib.Path(__file__).parent}/data/"
 
 def cloneAxis(ax, overflow=False, underflow=False, newName=None):
     axName = newName if newName else ax.name
