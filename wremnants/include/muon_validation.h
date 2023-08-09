@@ -32,11 +32,11 @@ public:
     }
 
     // for smearing weights derived from propagating uncs on A, e, M to uncs on qop
-
+    // the massWeights procedure doesn't work with multiple muons
     out_tensor_t operator() (
         float recoEta,
         int recoCharge,
-        double recoPt,
+        float recoPt,
         Eigen::TensorFixedSize<double, Eigen::Sizes<N_MASSWEIGHTS>> &weights,
         double nominal_weight = 1.0,
         bool isW = true
@@ -44,7 +44,6 @@ public:
         double scaleCut = 0.001;
         out_tensor_t res;
         res.setConstant(1.0);
-        //Eigen::TensorFixedSize<double, Eigen::Sizes<3, nUnc>> &params = get_tensor(recoEta); 
         const auto &params = get_tensor(recoEta);
 
         for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {

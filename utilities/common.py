@@ -135,7 +135,7 @@ def common_parser(for_reco_highPU=False):
             choices=["none", "trackfit_only", "lbl", "massfit", "lbl_massfit"], 
             help="Type of correction to apply to the muons in data")
         parser.add_argument("--muScaleBins", type=int, default=1, help="Number of bins for muon scale uncertainty")
-        parser.add_argument("--muonScaleVariation", choices=["smearingWeights", "massWeights", "manualShift"], default="smearingWeights",  help="method to generate muon scale variation histograms")
+        parser.add_argument("--muonScaleVariation", choices=["smearingWeightsGaus", "smearingWeightsSplines", "massWeights", "manualShift"], default="smearingWeightsSplines",  help="method to generate nominal muon scale variation histograms")
         parser.add_argument("--muonCorrMag", default=1.e-4, type=float, help="Magnitude of dummy muon momentum calibration uncertainty")
         parser.add_argument("--muonCorrEtaBins", default=1, type=int, help="Number of eta bins for dummy muon momentum calibration uncertainty")
         parser.add_argument("--excludeFlow", action='store_true', help="Excludes underflow and overflow bins in main axes")
@@ -144,7 +144,6 @@ def common_parser(for_reco_highPU=False):
         parser.add_argument("--unfolding", action='store_true', help="Add information needed for unfolding")
         parser.add_argument("--genLevel", type=str, default='postFSR', choices=["preFSR", "postFSR"], help="Generator level definition for unfolding")
         parser.add_argument("--genBins", type=int, nargs="+", default=[3, 2], help="Number of generator level bins")
-        parser.add_argument("--validateByMassWeights", action = "store_true", help = "validate the muon momentum scale shift weights by massweights")
         # options for efficiencies
         parser.add_argument("--trackerMuons", action='store_true', help="Use tracker muons instead of global muons (need appropriate scale factors too). This is obsolete")
         parser.add_argument("--binnedScaleFactors", action='store_true', help="Use binned scale factors (different helpers)")

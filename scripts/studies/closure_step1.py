@@ -14,8 +14,8 @@ logger = logging.setup_logger(__file__, 3, True)
 parser = argparse.ArgumentParser()
 parser.add_argument("--histmaker", type=str, help="histmaker to perform bias tests with", 
     default="mw_with_mu_eta_pt", choices=["mw_with_mu_eta_pt","mz_wlike_with_mu_eta_pt", "mz_dilepton"])
-parser.add_argument("-o", "--outfolder", type=str, default="/scratch/submit/cms/tyjyang/", help="Output folder")
-parser.add_argument("--combineOutFolder", type=str, default="./CombineStudies/nonClosure/", help='output folder for combine files')
+parser.add_argument("-o", "--outfolder", type=str, default="./hdf5Files/nonClosureCorl", help="Output folder")
+parser.add_argument("--combineOutFolder", type=str, default="./CombineStudies/nonClosureCorlSigOnly/", help='output folder for combine files')
 parser.add_argument("--defaultPostfix", type=str, default="scetlib_dyturboCorr", help='the postfix string added to the hdf5 file by default by the histmaker')
 parser.add_argument("-j", "--nThreads", type=int, default=192, help="number of threads to run the histmaker")
 parser.add_argument("--infoOnly", action="store_true", help="only print the commands without actually running them") 
@@ -27,10 +27,10 @@ datasets = [
     # ("default", "--smearing --bias-calibration parameterized"),
     # ("default", "--smearing --bias-calibration A"),
     # ("default", "--smearing --bias-calibration M"),
-    ("--smearing", "--smearing --biasCalibration parameterized"),
-    ("--smearing", "--smearing --biasCalibration binned"),
-    ("--smearing --nonClosureScheme binned-plus-M", "--smearing --biasCalibration parameterized"),
-    ("--smearing --nonClosureScheme binned-plus-M", "--smearing --biasCalibration binned")
+    ("--smearing --nonClosureScheme A-M-separated  --correlatedNonClosureNP", "--smearing --biasCalibration parameterized"),
+    ("--smearing --nonClosureScheme binned --correlatedNonClosureNP", "--smearing --biasCalibration binned"),
+    #("--smearing --nonClosureScheme binned-plus-M", "--smearing --biasCalibration parameterized"),
+    #("--smearing --nonClosureScheme binned-plus-M", "--smearing --biasCalibration binned")
     #("--smearing", "--smearing --biasCalibration binned"),
     #("--smearing", "--smearing --biasCalibration A"),
     #("--smearing", "--smearing --biasCalibration M"),
@@ -107,13 +107,15 @@ for nominal, pseudodata in datasets:
 
     if not os.path.isfile(file_nominal):
         # run histmaker for nominal
-        EXE(f"python3 scripts/histmakers/{histmaker}.py -j {args.nThreads} -o {args.outfolder} {options} {arg_nominal} -p {str_nominal}")
+        #EXE(f"python3 scripts/histmakers/{histmaker}.py -j {args.nThreads} -o {args.outfolder} {options} {arg_nominal} -p {str_nominal}")
+        print('.')
     else:
         logger.info(f"Found file for nominal {nominal}")
 
     if not os.path.isfile(file_pseudodata):
         # run histmaker for pseudodata
-        EXE(f"python3 scripts/histmakers/{histmaker}.py -j {args.nThreads} -o {args.outfolder} {options} {arg_pseudodata} -p {str_pseudodata}")
+        #EXE(f"python3 scripts/histmakers/{histmaker}.py -j {args.nThreads} -o {args.outfolder} {options} {arg_pseudodata} -p {str_pseudodata}")
+        print('.')
     else:
         logger.info(f"Found file for pseudodata {pseudodata}")
         
@@ -139,7 +141,8 @@ for nominal, pseudodata in datasets:
         #    logger.warning(f"The combine file for {dir_combine} already exists, continue with the next one!")
         #    continue
         #if "reduced" in dir_combine: continue
-        EXE(f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_nominal} --pseudoDataFile {file_pseudodata} --pseudoData nominal --muonScaleVariation smearingWeights {freeze_command}")
-dir_combine = f"{args.combineOutFolder}/sepImpact"
-if not os.path.isfile(f"{dir_combine}/WMassCombineInput.root"):
-    EXE(f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_sep_impact} --muonScaleVariation smearingWeights --sepImpactForNC")
+        file_nominal_comb = file_nominal.replace("correlatedNonClosureNP", "correlatedNonClosureNP_NonClosureCorl")
+        EXE(f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_nominal_comb} --pseudoDataFile {file_pseudodata} --pseudoData nominal --muonScaleVariation smearingWeights {freeze_command} --correlatedNonClosureNuisances --filterProcGroups Wmunu --excludeProcGroups Fake")
+#dir_combine = f"{args.combineOutFolder}/sepImpact"
+#if not os.path.isfile(f"{dir_combine}/WMassCombineInput.root"):
+#    EXE(f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_sep_impact} --muonScaleVariation smearingWeights --sepImpactForNC")
