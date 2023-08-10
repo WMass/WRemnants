@@ -26,9 +26,6 @@ datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles,
                                               excl=args.excludeProcs, 
                                               nanoVersion="v8" if args.v8 else "v9", base_path=args.dataPath)
 
-if args.validateByMassWeights:
-    raise NotImplementedError("Validation of muon scale hists. by massWeights are not implemented!")
-
 era = args.era
 
 # dilepton invariant mass cuts

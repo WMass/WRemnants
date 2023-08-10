@@ -82,10 +82,9 @@ def make_muon_efficiency_helpers_smooth(filename = data_dir + "/testMuonSF/allSm
 
     dict_SF3D = None
     if len(eff_types_3D):
-        fileSF3D = f"{data_dir}/testMuonSF/smoothSF3D_safeAntiSF_effiNoDphiCut_fixIsoAntitrigger.pkl.lz4"
+        fileSF3D = f"{data_dir}/testMuonSF/smoothSF3D_uTm30to100.pkl.lz4"
         if not os.path.isfile(fileSF3D):
-            logger.error(f"Couldn't read 3D SF file {fileSF3D}, make sure you have it.")
-            quit()
+            raise IOError(f"Couldn't read 3D SF file {fileSF3D}, make sure you have it.")
         logger.info(f"3D SF read from {fileSF3D}")
         with lz4.frame.open(fileSF3D) as f3D:
             dict_SF3D = pickle.load(f3D)
