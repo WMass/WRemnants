@@ -158,7 +158,7 @@ double prefireCorr(int fluctuation, Vec_f jet_pt, Vec_f jet_eta, Vec_f jet_phi, 
             } 
             else {
             
-                nonPrefiringProbaECAL = 0.;
+                // nonPrefiringProbaECAL = 0.;
             }
         }
         else {

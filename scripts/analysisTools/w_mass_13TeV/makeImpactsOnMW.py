@@ -13,6 +13,7 @@ import os, datetime, re, operator, math
 import argparse
 import shutil
 
+from utilities import logging
 from array import array
 from copy import *
 
@@ -30,36 +31,56 @@ utilities = utilitiesCMG.util()
 
 from scripts.analysisTools.plotUtils.utility import *
 
-def readNuisances(args, infile=None):
+def getBetterLabel(k, isWlike):
+    if k == "binByBinStat":
+        label = "MC_stat" if isWlike else "MCandFakes_stat"
+    elif k == "stat":
+        label = "data_stat"
+    else:
+        label = k
+    return label
+
+def readNuisances(args, infile=None, logger=None):
 
     if infile is None:
         infile = args.rootfile[0]
 
-    print(f"Starting with file {infile} ...")
+    if logger == None:
+        logger = logging.setup_logger(os.path.basename(__file__), 3)
 
-    massNuisanceName = "WmassShift{s}MeV".format(s=int(args.prefitUncertainty))
+    logger.info(f"Starting with file {infile} ...")
+
+    #massNuisanceName = "WmassShift{s}MeV".format(s=int(args.prefitUncertainty))
+    massNuisanceName = ".*massShift.*{s}MeV$".format(s=int(args.prefitUncertainty))
     #massNuisanceName = "massShift{s}MeV".format(s=int(args.prefitUncertainty))
     valuesAndErrors = utilities.getFromHessian(infile,params=[massNuisanceName])
-    totalUncertainty = valuesAndErrors[massNuisanceName][1] - valuesAndErrors[massNuisanceName][0]
+    if len(valuesAndErrors) == 1:
+        masskey = list(valuesAndErrors.keys())[0]
+        totalUncertainty = valuesAndErrors[masskey][1] - valuesAndErrors[masskey][0]
+    else:
+        error_msg = f"Found more parameters matching expected mass expression: {valuesAndErrors.keys()}"
+        raise IOError(error_msg)
+        #totalUncertainty = valuesAndErrors[massNuisanceName][1] - valuesAndErrors[massNuisanceName][0]
+
     if args.scaleToMeV:
         totalUncertainty *= args.prefitUncertainty
-        print("Total m%s uncertainty: %2.1f MeV" % (boson, totalUncertainty))
+        logger.info("Total m%s uncertainty: %2.2f MeV" % (boson, totalUncertainty))
     else:
-        print("Total m%s uncertainty: %2.3f (\% of prefit)" % (boson, totalUncertainty))
+        logger.info("Total m%s uncertainty: %2.3f (\% of prefit)" % (boson, totalUncertainty))
         
     group = 'group_' if len(args.nuisgroups) else ''
     th2name = 'nuisance_{group}impact_nois'.format(group=group)
     hessfile = ROOT.TFile(infile,'read')
     impMat = hessfile.Get(th2name)
-    if impMat==None:
-        print("ERROR: Cannot find the impact TH2 named ",th2name," in the input file. Maybe you didn't run --doImpacts?\nSkipping.")
-        sys.exit()
-
+    if impMat == None:
+        error_msg = f"Cannot find the impact TH2 named {th2name} in input file. Maybe you didn't run --doImpacts?"
+        raise IOError(error_msg)
+        
     matchKeep = re.compile(args.keepNuisgroups)
     if args.excludeNuisgroups:
         matchExclude = re.compile(args.excludeNuisgroups)
     
-    print("Histograms loaded successfully ...")
+    logger.info("Histograms loaded successfully ...")
     nuisGroup_nameVal = {}
     for iy in range(1,impMat.GetNbinsY()+1):
         label = impMat.GetYaxis().GetBinLabel(iy)
@@ -76,7 +97,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("rootfile", type=str, nargs=1)
-    parser.add_argument('-o','--outdir',     default='./',   type=str, help='output directory to save the matrix')    
+    parser.add_argument('-o','--outdir',     default='./makeImpactsOnMW/',   type=str, help='output directory to save the plot (not needed with --justPrint)')    
     parser.add_argument(     '--nuisgroups', default='ALL',   type=str, help='nuis groups for which you want to show the impacts (can pass comma-separated list to make all of them one after the other). Use full name, no regular expressions. By default, all are made')
     parser.add_argument(     '--keepNuisgroups', default='.*',   type=str, help='nuis groups for which you want to show the impacts, using regular expressions')
     parser.add_argument('-x', '--excludeNuisgroups', default=None,   type=str, help='Regular expression for nuisances to be excluded (note that it wins against --keepNuisgroups since evaluated before it')
@@ -96,8 +117,10 @@ if __name__ == "__main__":
     parser.add_argument(     '--setStatAlt', default=-1.0, type=float, help='If positive, use this value for stat of the file passed with compareFile, otherwise use the same as the other file')
     parser.add_argument(     '--legendEntries', nargs=2, type=str, help="Legend entries when comparing files", default=["Nominal", "Alternate"])
     parser.add_argument(     '--printAltVal', action='store_true', help='When comparing to a second file, also print the values for the alternative')
+    parser.add_argument(     '--justPrint', action='store_true', help='Print without plotting')
     args = parser.parse_args()
 
+    logger = logging.setup_logger(os.path.basename(__file__), 3)
     # palettes:
     # 69 + inverted, using TColor::InvertPalette(), kBeach
     # 70 + inverted, using TColor::InvertPalette(), kBlackBody
@@ -114,10 +137,6 @@ if __name__ == "__main__":
     # 56 kInvertedDarkBodyRadiator
     # 100 kSolar + inverted
 
-
-    # if len(args.nuis) and len(args.nuisgroups):
-    #     print('You can specify either single nuis (--nuis) or poi groups (--nuisgroups), not both!')
-    #     sys.exit()
     ROOT.TColor.CreateGradientColorTable(3,
                                          array ("d", [0.00, 0.50, 1.00]),
                                          ##array ("d", [1.00, 1.00, 0.00]),
@@ -144,20 +163,18 @@ if __name__ == "__main__":
                                              255,  0.95)
 
     boson = "Z" if args.isWlike else "W"
-
-    createPlotDirAndCopyPhp(args.outdir)
-
+    
     compare = True if len(args.compareFile) else False
     if not compare and args.printAltVal:
-        print("Warning: --printAltVal only works with --compareFile. Please try again")
-        quit()
+        error_msg = "--printAltVal only works with --compareFile. Please try again"
+        raise IOError(error_msg)
     
-    totalUncertainty_mW, nuisGroup_nameVal = readNuisances(args, args.rootfile[0])
+    totalUncertainty_mW, nuisGroup_nameVal = readNuisances(args, args.rootfile[0], logger=logger)
     if args.setStat > 0.0:
         nuisGroup_nameVal["stat"] = args.setStat
 
     if compare:
-        totalUncertainty_mW_alt, nuisGroup_nameVal_alt = readNuisances(args, args.compareFile)
+        totalUncertainty_mW_alt, nuisGroup_nameVal_alt = readNuisances(args, args.compareFile, logger=logger)
         if args.setStatAlt > 0.0:
             nuisGroup_nameVal_alt["stat"] = args.setStatAlt
 
@@ -165,7 +182,7 @@ if __name__ == "__main__":
 
     ROOT.gStyle.SetPaintTextFormat('2.1f' if args.scaleToMeV else '0.3f')
 
-    print("Creating output histogram ...")
+    logger.info("Creating output histogram ...")
     # add 1 more bin for total
     nbins = len(sortedGroups)
     if args.showTotal:
@@ -182,26 +199,22 @@ if __name__ == "__main__":
     #h1.GetYaxis().SetTitle("")
     for ik,k in enumerate(sortedGroups):
         bincontent = nuisGroup_nameVal[k] if not args.scaleToMeV else nuisGroup_nameVal[k] * args.prefitUncertainty
+        label = getBetterLabel(k, args.isWlike)
         if compare:
-            print(k)
-            #bincontentAlt = nuisGroup_nameVal_alt[k.replace("QCDscaleWPtHelicityMiNNLO","QCDscalePtHelicityMiNNLO")]
-            bincontentAlt = nuisGroup_nameVal_alt[k]
+            #print(k)
+            bincontentAlt = nuisGroup_nameVal_alt[k] if k in nuisGroup_nameVal_alt.keys() else 0.0
             if args.scaleToMeV: bincontentAlt *= args.prefitUncertainty
-            print("%s: %2.3f / %2.3f" % (k,bincontent, bincontentAlt))
+            logger.info("%s: %2.3f / %2.3f" % (label, bincontent, bincontentAlt))
         else:
-            print("%s: %2.3f" % (k,bincontent))
-        label = k
-        if k == "binByBinStat":
-            label = "MCandFakes_stat"
-        elif k == "stat":
-            label = "data_stat"
+            logger.info("%s: %2.3f" % (label, bincontent))
         h1.GetXaxis().SetBinLabel(ik+1, label)
         h1.SetBinContent(ik+1,bincontent)
         if compare:
-            #bincontentAlt = nuisGroup_nameVal_alt[k.replace("QCDscaleWPtHelicityMiNNLO","QCDscalePtHelicityMiNNLO")]
-            bincontentAlt = nuisGroup_nameVal_alt[k]
-            if args.scaleToMeV: bincontentAlt *= args.prefitUncertainty
             h2.SetBinContent(ik+1,bincontentAlt)
+
+    if args.justPrint:
+        quit()
+            
     if args.showTotal:
         h1.GetXaxis().SetBinLabel(nbins,"total")
         h1.SetBinContent(nbins,totalUncertainty_mW)
@@ -295,5 +308,6 @@ if __name__ == "__main__":
     if len(postfix) and  not postfix.startswith("_"):
         postfix = "_" + postfix
     smallBoson = "z" if args.isWlike else "w"
+    createPlotDirAndCopyPhp(args.outdir)
     for ext in ["pdf", "png"]:
         c1.SaveAs(f"{args.outdir}/impactsOnM{smallBoson}{postfix}.{ext}")

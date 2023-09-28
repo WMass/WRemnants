@@ -18,8 +18,7 @@ import hist
 import hist
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 
 
 def doOverlow(h):
@@ -938,7 +937,7 @@ if __name__ == "__main__":
         outDir = "/eos/user/j/jaeyserm/www/wmass/lowPU/W%s/plots_%s_%s/" % (flavor, charge, met)
         functions.prepareDir(outDir, remove=True)
         
-        groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+        groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met))
         
 
         if flavor == "mu":
@@ -960,7 +959,7 @@ if __name__ == "__main__":
     
         from wremnants import histselections as sel
         
-        groups = make_datagroups_2016("mw_with_mu_eta_pt_%s_nnpdf31.pkl.lz4" % met)
+        groups = Datagroups("mw_with_mu_eta_pt_%s_nnpdf31.pkl.lz4" % met)
         groups.groups.update({
             "EWK" : dict(
                     members = [groups.datasets[x] for x in ["WplustaunuPostVFP", "WminustaunuPostVFP", "ZmumuPostVFP", "ZtautauPostVFP", "ZZ2l2nuPostVFP", "WZPostVFP", "WWPostVFP"]],

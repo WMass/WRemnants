@@ -132,7 +132,7 @@ double qTweight(float qT) {
 
 
 
-Vec_f METLeptonCorrection(double MET_pt, double MET_phi, Vec_f lep_pt_uncorr, Vec_f lep_pt, Vec_f lep_phi) {
+Vec_d METLeptonCorrection(double MET_pt, double MET_phi, Vec_d lep_pt_uncorr, Vec_d lep_pt, Vec_d lep_phi) {
 
 	// correct MET for muon scale corrections (in lab frame pT-phi)
 	TVector2 lep1_raw(lep_pt_uncorr[0]*cos(lep_phi[0]), lep_pt_uncorr[0]*sin(lep_phi[0]));
@@ -145,7 +145,7 @@ Vec_f METLeptonCorrection(double MET_pt, double MET_phi, Vec_f lep_pt_uncorr, Ve
 	double MET_pt_corr = MET_corr.Mod();
     double MET_phi_corr = MET_corr.Phi_mpi_pi(MET_corr.Phi());
 	
-    Vec_f res(2, 0);
+    Vec_d res(2, 0);
     res[0] = MET_pt_corr;
     res[1] = MET_phi_corr;
     
@@ -158,15 +158,15 @@ Vec_f METLeptonCorrection(double MET_pt, double MET_phi, Vec_f lep_pt_uncorr, Ve
 }
 
 
-Vec_f METLeptonCorrection(double MET_pt, double MET_phi, double lep_pt_uncorr, double lep_pt, double lep_phi) {
+Vec_d METLeptonCorrection(double MET_pt, double MET_phi, double lep_pt_uncorr, double lep_pt, double lep_phi) {
 
-    Vec_f lep_pt_uncorr_(1, lep_pt_uncorr);
-    Vec_f lep_pt_(1, lep_pt);
-    Vec_f lep_phi_(1, lep_phi);
+    Vec_d lep_pt_uncorr_(1, lep_pt_uncorr);
+    Vec_d lep_pt_(1, lep_pt);
+    Vec_d lep_phi_(1, lep_phi);
 	return METLeptonCorrection(MET_pt, MET_phi, lep_pt_uncorr_, lep_pt_, lep_phi_);
 }
 
-Vec_f recoilComponents(double MET_pt, double MET_phi, double lep_pt, double lep_phi) {
+Vec_d recoilComponents(double MET_pt, double MET_phi, double lep_pt, double lep_phi) {
     
     // computes the hadronic recoil, defined as -(MET + V), V being the vector sum of the reco (di)lepton system in the lab frame
     double pUx  = MET_pt*cos(MET_phi) + lep_pt*cos(lep_phi); // recoil x in lab frame
@@ -175,7 +175,7 @@ Vec_f recoilComponents(double MET_pt, double MET_phi, double lep_pt, double lep_
 	double Ux	= - (pUx*cos(lep_phi) + pUy*sin(lep_phi));
 	double Uy	= - (- pUx*sin(lep_phi) + pUy*cos(lep_phi));    
 
-    Vec_f res(3, 0);
+    Vec_d res(3, 0);
     res[0] = pU;
     res[1] = Ux;
     res[2] = Uy;
@@ -186,7 +186,7 @@ Vec_f recoilComponents(double MET_pt, double MET_phi, double lep_pt, double lep_
 }
 
 
-Vec_f recoilComponentsGen(double MET_pt, double MET_phi, double lep_pt, double lep_phi, double gen_lep_phi) {
+Vec_d recoilComponentsGen(double MET_pt, double MET_phi, double lep_pt, double lep_phi, double gen_lep_phi) {
     
     // computes the hadronic recoil, defined as -(MET + V), V being the vector sum of the reco (di)lepton system in the lab frame
     // compute recoil as projection on the gen boson phi
@@ -196,7 +196,7 @@ Vec_f recoilComponentsGen(double MET_pt, double MET_phi, double lep_pt, double l
 	double Ux	= - (pUx*cos(gen_lep_phi) + pUy*sin(gen_lep_phi));
 	double Uy	= - (- pUx*sin(gen_lep_phi) + pUy*cos(gen_lep_phi));
 
-    Vec_f res(3, 0);
+    Vec_d res(3, 0);
     res[0] = pU;
     res[1] = Ux;
     res[2] = Uy;
@@ -204,7 +204,7 @@ Vec_f recoilComponentsGen(double MET_pt, double MET_phi, double lep_pt, double l
 	return res;
 }
 
-Vec_f METXYCorrection(double MET_pt, double MET_phi, int npv, int isData) {
+Vec_d METXYCorrection(double MET_pt, double MET_phi, int npv, int isData) {
     
     // preserve the MET magnitude??
 
@@ -213,7 +213,7 @@ Vec_f METXYCorrection(double MET_pt, double MET_phi, int npv, int isData) {
     double pUx = MET_pt*cos(MET_phi);
     double pUy = MET_pt*sin(MET_phi);
     
-    Vec_f res(2, 0);
+    Vec_d res(2, 0);
     res[0] = hypot(pUx, pUy);
     res[1] = atan2(pUy, pUx);
     
@@ -466,9 +466,9 @@ class GaussianSum {
 
 
 // recoil correction
-Vec_f recoilCorrectionBinned(double pU1, double pU2, double qTbinIdx, double qT, int corrType=0, int corrParam=1) {
+Vec_d recoilCorrectionBinned(double pU1, double pU2, double qTbinIdx, double qT, int corrType=0, int corrParam=1) {
     
-    Vec_f res(3, 0);
+    Vec_d res(3, 0);
     //cout << pU1 << " " << pU2 << " " << qTbinIdx << endl; 
     
     res[1] = pU1;
@@ -648,9 +648,9 @@ Vec_f recoilCorrectionBinned(double pU1, double pU2, double qTbinIdx, double qT,
 }
 
 
-Vec_f recoilCorrectionBinnedWtoZ(int q, double pU1, double pU2, double qTbinIdx, double qT, int corrType=0, int corrParam=1) {
+Vec_d recoilCorrectionBinnedWtoZ(int q, double pU1, double pU2, double qTbinIdx, double qT, int corrType=0, int corrParam=1) {
     
-    Vec_f res(3, 0);
+    Vec_d res(3, 0);
     //cout << pU1 << " " << pU2 << " " << qTbinIdx << endl; 
     
     res[1] = pU1;
@@ -807,9 +807,9 @@ GaussianSum constructParametricGauss(string tag, double qT, int syst=-1) {
 
 
 // recoil correction for Z (MC to DATA)
-Vec_f recoilCorrectionParametric(double para, double perp, double qT, string systTag="", int systIdx=-1) {
+Vec_d recoilCorrectionParametric(double para, double perp, double qT, string systTag="", int systIdx=-1) {
     
-    Vec_f res(3, 0);
+    Vec_d res(3, 0);
     //cout << pU1 << " " << pU2 << " " << qTbinIdx << endl; 
     
     res[1] = para;
@@ -875,9 +875,9 @@ Vec_recoil recoilCorrectionParametricUnc(double para, double perp, double qT, st
     /*
     if(tag == "target_para_bkg") {
         
-        Vec_f ret_up = recoilCorrectionParametric(para, perp, qT, "target_para_bkg", 0);
-        Vec_f ret_dw = recoilCorrectionParametric(para, perp, qT, "target_para_bkg", 1);
-        Vec_f ret_nom = recoilCorrectionParametric(para, perp, qT, "target_para");
+        Vec_d ret_up = recoilCorrectionParametric(para, perp, qT, "target_para_bkg", 0);
+        Vec_d ret_dw = recoilCorrectionParametric(para, perp, qT, "target_para_bkg", 1);
+        Vec_d ret_nom = recoilCorrectionParametric(para, perp, qT, "target_para");
         
         if(ret_nom[1] > 60) cout << "qT=" << qT << " para=" << para << " para_nom=" << ret_nom[1] << " para_up=" << ret_up[1] <<  "para_dw=" << ret_dw[1] << endl;
     }
@@ -887,7 +887,7 @@ Vec_recoil recoilCorrectionParametricUnc(double para, double perp, double qT, st
     int nSysts = recoil_unc_no[tag];
     Vec_recoil res(nSysts);
     for(int iSyst = 0; iSyst<nSysts; iSyst++) {
-        Vec_f ret = recoilCorrectionParametric(para, perp, qT, tag, iSyst);
+        Vec_d ret = recoilCorrectionParametric(para, perp, qT, tag, iSyst);
         res[iSyst].para = ret[1];
         res[iSyst].perp = ret[2];
     }
@@ -895,7 +895,7 @@ Vec_recoil recoilCorrectionParametricUnc(double para, double perp, double qT, st
 }
 
 
-Vec_f recoilCorrectionParametricUncWeights(double eval, double qT, string tag_nom, string tag_pert) {
+Vec_d recoilCorrectionParametricUncWeights(double eval, double qT, string tag_nom, string tag_pert) {
     
     GaussianSum nom;
     GaussianSum pert;
@@ -903,7 +903,7 @@ Vec_f recoilCorrectionParametricUncWeights(double eval, double qT, string tag_no
     if(qT > recoil_correction_qTmax) qT = recoil_correction_qTmax; // protection for high qT
     
     int nSysts = recoil_unc_no[tag_pert];
-    Vec_f res(nSysts);
+    Vec_d res(nSysts);
     nom = constructParametricGauss(tag_nom, qT);
     double nom_eval = nom.eval(eval);
     double w;
@@ -926,9 +926,9 @@ Vec_f recoilCorrectionParametricUncWeights(double eval, double qT, string tag_no
 
 
 
-Vec_f METCorrection(double MET_pt, double MET_phi, double rec_para, double rec_perp, double V_pt, double V_phi) {
+Vec_d METCorrection(double MET_pt, double MET_phi, double rec_para, double rec_perp, double V_pt, double V_phi) {
 
-    Vec_f res(2, 0);
+    Vec_d res(2, 0);
 
         
     double lMX = -V_pt*cos(V_phi) - rec_para*cos(V_phi) + rec_perp*sin(V_phi);
@@ -944,9 +944,9 @@ Vec_f METCorrection(double MET_pt, double MET_phi, double rec_para, double rec_p
 	return res;
 }
 
-Vec_f METCorrectionGen(double rec_para, double rec_perp, double lep_pt, double lep_phi, double V_phi) {
+Vec_d METCorrectionGen(double rec_para, double rec_perp, double lep_pt, double lep_phi, double V_phi) {
 
-    Vec_f res(2, 0);
+    Vec_d res(2, 0);
 
         
     double lMX = -lep_pt*cos(lep_phi) - rec_para*cos(V_phi) + rec_perp*sin(V_phi);
@@ -963,9 +963,9 @@ Vec_f METCorrectionGen(double rec_para, double rec_perp, double lep_pt, double l
 }
 
 /*
-Vec_f METCorrection_StatUnc(double MET_pt, double MET_phi, double rec_para, double rec_perp, double V_pt, double V_phi) {
+Vec_d METCorrection_StatUnc(double MET_pt, double MET_phi, double rec_para, double rec_perp, double V_pt, double V_phi) {
 
-    Vec_f res(2, 0);
+    Vec_d res(2, 0);
 
         
     double lMX = -V_pt*cos(V_phi) - rec_para*cos(V_phi) + rec_perp*sin(V_phi);
@@ -982,10 +982,10 @@ Vec_f METCorrection_StatUnc(double MET_pt, double MET_phi, double rec_para, doub
 
 
 
-Vec_f recoilCorrectionParametric_MET_pt_unc(Vec_recoil recoil, double V_pt, double V_phi) {
+Vec_d recoilCorrectionParametric_MET_pt_unc(Vec_recoil recoil, double V_pt, double V_phi) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) {
        
         double lMX = -V_pt*cos(V_phi) - recoil[iSyst].para*cos(V_phi) + recoil[iSyst].perp*sin(V_phi);
@@ -995,10 +995,10 @@ Vec_f recoilCorrectionParametric_MET_pt_unc(Vec_recoil recoil, double V_pt, doub
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_MET_phi_unc(Vec_recoil recoil, double V_pt, double V_phi) {
+Vec_d recoilCorrectionParametric_MET_phi_unc(Vec_recoil recoil, double V_pt, double V_phi) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) {
        
         double lMX = -V_pt*cos(V_phi) - recoil[iSyst].para*cos(V_phi) + recoil[iSyst].perp*sin(V_phi);
@@ -1008,42 +1008,42 @@ Vec_f recoilCorrectionParametric_MET_phi_unc(Vec_recoil recoil, double V_pt, dou
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_para_qT_unc(Vec_recoil recoil, double qT) {
+Vec_d recoilCorrectionParametric_para_qT_unc(Vec_recoil recoil, double qT) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) res[iSyst] = recoil[iSyst].para - qT;
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_para_unc(Vec_recoil recoil, double qT) {
+Vec_d recoilCorrectionParametric_para_unc(Vec_recoil recoil, double qT) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) res[iSyst] = recoil[iSyst].para;
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_perp_unc(Vec_recoil recoil, double qT) {
+Vec_d recoilCorrectionParametric_perp_unc(Vec_recoil recoil, double qT) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) res[iSyst] = recoil[iSyst].perp;
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_magn_unc(Vec_recoil recoil, double qT) {
+Vec_d recoilCorrectionParametric_magn_unc(Vec_recoil recoil, double qT) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) res[iSyst] = sqrt((recoil[iSyst].para-qT)*(recoil[iSyst].para-qT) + recoil[iSyst].perp*recoil[iSyst].perp);
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_mT_unc(Vec_f met_pt, Vec_f met_phi, float pt, float phi, float ptOther, float phiOther) {
+Vec_d recoilCorrectionParametric_mT_unc(Vec_d met_pt, Vec_d met_phi, float pt, float phi, float ptOther, float phiOther) {
     
     int nBins = met_pt.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) {
         
         TVector2 pl = TVector2();
@@ -1058,10 +1058,10 @@ Vec_f recoilCorrectionParametric_mT_unc(Vec_f met_pt, Vec_f met_phi, float pt, f
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_MET_pt_gen_unc(Vec_recoil recoil, double lep_pt, double lep_phi, double V_phi) {
+Vec_d recoilCorrectionParametric_MET_pt_gen_unc(Vec_recoil recoil, double lep_pt, double lep_phi, double V_phi) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) {
        
         double lMX = -lep_pt*cos(lep_phi) - recoil[iSyst].para*cos(V_phi) + recoil[iSyst].perp*sin(V_phi);
@@ -1071,10 +1071,10 @@ Vec_f recoilCorrectionParametric_MET_pt_gen_unc(Vec_recoil recoil, double lep_pt
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_MET_phi_gen_unc(Vec_recoil recoil, double lep_pt, double lep_phi, double V_phi) {
+Vec_d recoilCorrectionParametric_MET_phi_gen_unc(Vec_recoil recoil, double lep_pt, double lep_phi, double V_phi) {
     
     int nBins = recoil.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) {
        
         double lMX = -lep_pt*cos(lep_phi) - recoil[iSyst].para*cos(V_phi) + recoil[iSyst].perp*sin(V_phi);
@@ -1084,10 +1084,10 @@ Vec_f recoilCorrectionParametric_MET_phi_gen_unc(Vec_recoil recoil, double lep_p
 	return res;
 }
 
-Vec_f recoilCorrectionParametric_mT_2_unc(Vec_f met_pt, Vec_f met_phi, float pt, float phi) {
+Vec_d recoilCorrectionParametric_mT_2_unc(Vec_d met_pt, Vec_d met_phi, float pt, float phi) {
     
     int nBins = met_pt.size();
-    Vec_f res(nBins, -1e5);
+    Vec_d res(nBins, -1e5);
     for(int iSyst=0; iSyst<nBins; iSyst++) res[iSyst] = std::sqrt(2*pt*met_pt[iSyst]*(1-std::cos(phi-met_phi[iSyst])));
 	return res;
 }
@@ -1096,43 +1096,43 @@ Vec_f recoilCorrectionParametric_mT_2_unc(Vec_f met_pt, Vec_f met_phi, float pt,
 /*
 Binned recoil correction functions
 */
-Vec_f recoilCorrectionBinned_magn_StatUnc(Vec_f pU, int qTbinIdx) {
+Vec_d recoilCorrectionBinned_magn_StatUnc(Vec_d pU, int qTbinIdx) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     res[qTbinIdx] = pU[0];
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_para_StatUnc(Vec_f pU, int qTbinIdx) {
+Vec_d recoilCorrectionBinned_para_StatUnc(Vec_d pU, int qTbinIdx) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     res[qTbinIdx] = pU[1];
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_para_qT_StatUnc(Vec_f pU, int qTbinIdx, double qT) {
+Vec_d recoilCorrectionBinned_para_qT_StatUnc(Vec_d pU, int qTbinIdx, double qT) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5); // BE CAREFUL, SHOULD BE UNDERFOW
+    Vec_d res(nqTbins, -1e5); // BE CAREFUL, SHOULD BE UNDERFOW
     res[qTbinIdx] = pU[1] + qT;
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_perp_StatUnc(Vec_f pU, int qTbinIdx) {
+Vec_d recoilCorrectionBinned_perp_StatUnc(Vec_d pU, int qTbinIdx) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5); // // BE CAREFUL, SHOULD BE UNDERFOW
+    Vec_d res(nqTbins, -1e5); // // BE CAREFUL, SHOULD BE UNDERFOW
     res[qTbinIdx] = pU[2];
 	return res;
 }
 
 
-Vec_f recoilCorrectionBinned_MET_pt_StatUnc(Vec_f pU, int qTbinIdx, double MET_pt, double MET_phi, double V_pt, double V_phi) {
+Vec_d recoilCorrectionBinned_MET_pt_StatUnc(Vec_d pU, int qTbinIdx, double MET_pt, double MET_phi, double V_pt, double V_phi) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     
             
     double lMX = -V_pt*cos(V_phi) - pU[1]*cos(V_phi) + pU[2]*sin(V_phi);
@@ -1142,10 +1142,10 @@ Vec_f recoilCorrectionBinned_MET_pt_StatUnc(Vec_f pU, int qTbinIdx, double MET_p
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_MET_phi_StatUnc(Vec_f pU, int qTbinIdx, double MET_pt, double MET_phi, double V_pt, double V_phi) {
+Vec_d recoilCorrectionBinned_MET_phi_StatUnc(Vec_d pU, int qTbinIdx, double MET_pt, double MET_phi, double V_pt, double V_phi) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     
             
     double lMX = -V_pt*cos(V_phi) - pU[1]*cos(V_phi) + pU[2]*sin(V_phi);
@@ -1160,10 +1160,10 @@ Vec_f recoilCorrectionBinned_MET_phi_StatUnc(Vec_f pU, int qTbinIdx, double MET_
 
 
 
-Vec_f recoilCorrectionBinned_MET_pt_gen_StatUnc(Vec_f pU, int qTbinIdx, double lep_pt, double lep_phi, double V_phi) {
+Vec_d recoilCorrectionBinned_MET_pt_gen_StatUnc(Vec_d pU, int qTbinIdx, double lep_pt, double lep_phi, double V_phi) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     
             
     double lMX = -lep_pt*cos(lep_phi) - pU[1]*cos(V_phi) + pU[2]*sin(V_phi);
@@ -1173,10 +1173,10 @@ Vec_f recoilCorrectionBinned_MET_pt_gen_StatUnc(Vec_f pU, int qTbinIdx, double l
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_MET_phi_gen_StatUnc(Vec_f pU, int qTbinIdx, double lep_pt, double lep_phi, double V_phi) {
+Vec_d recoilCorrectionBinned_MET_phi_gen_StatUnc(Vec_d pU, int qTbinIdx, double lep_pt, double lep_phi, double V_phi) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     
             
     double lMX = -lep_pt*cos(lep_phi) - pU[1]*cos(V_phi) + pU[2]*sin(V_phi);
@@ -1189,10 +1189,10 @@ Vec_f recoilCorrectionBinned_MET_phi_gen_StatUnc(Vec_f pU, int qTbinIdx, double 
 
 
 
-Vec_f recoilCorrectionBinned_mt_StatUnc(Vec_f met_pt, Vec_f met_phi, int qTbinIdx, float pt, float phi, float ptOther, float phiOther) {
+Vec_d recoilCorrectionBinned_mt_StatUnc(Vec_d met_pt, Vec_d met_phi, int qTbinIdx, float pt, float phi, float ptOther, float phiOther) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
     
     TVector2 pl = TVector2();
     pl.SetMagPhi(ptOther,phiOther);
@@ -1206,10 +1206,10 @@ Vec_f recoilCorrectionBinned_mt_StatUnc(Vec_f met_pt, Vec_f met_phi, int qTbinId
 }
 
 
-Vec_f recoilCorrectionBinned_mt_2_StatUnc(Vec_f met_pt, Vec_f met_phi, int qTbinIdx, float pt, float phi) {
+Vec_d recoilCorrectionBinned_mt_2_StatUnc(Vec_d met_pt, Vec_d met_phi, int qTbinIdx, float pt, float phi) {
     
     int nqTbins = qTbins.size();
-    Vec_f res(nqTbins, -1e5);
+    Vec_d res(nqTbins, -1e5);
   
     res[qTbinIdx] = std::sqrt(2*pt*met_pt[qTbinIdx]*(1-std::cos(phi-met_phi[qTbinIdx])));;
 	return res;
@@ -1222,12 +1222,12 @@ Vec_f recoilCorrectionBinned_mt_2_StatUnc(Vec_f met_pt, Vec_f met_phi, int qTbin
 
 // recoil correction
 /*
-Vec_f recoilCorrectionBinned_StatUnc(double pU1, double pU2, double qTbinIdx, int corrType, int corrIdx) {
+Vec_d recoilCorrectionBinned_StatUnc(double pU1, double pU2, double qTbinIdx, int corrType, int corrIdx) {
     
     int nqTbins = qTbins.size();
 
-    Vec_f t(3, -1);
-    Vec_f res(nqTbins, -1); // per qT bin
+    Vec_d t(3, -1);
+    Vec_d res(nqTbins, -1); // per qT bin
     
     t = recoilCorrectionBinned(pU1, pU2, qTbinIdx, corrType, corrIdx);
     res[qTbinIdx] = t[0];
@@ -1240,7 +1240,7 @@ Vec_recoilType recoilCorrectionBinned_StatUnc(double pU1, double pU2, double qTb
     
     int nqTbins = qTbins.size();
 
-    Vec_f t(3, -1);
+    Vec_d t(3, -1);
     
     RecoilType tmp;
     tmp.pu1 = 0;
@@ -1255,10 +1255,10 @@ Vec_recoilType recoilCorrectionBinned_StatUnc(double pU1, double pU2, double qTb
 	return res;
 }
 
-Vec_f recoilCorrectionBinned_magn_StatUnc(Vec_recoilType pU) {
+Vec_d recoilCorrectionBinned_magn_StatUnc(Vec_recoilType pU) {
     
     unsigned size = pU.size();
-    Vec_f res(size, -1);
+    Vec_d res(size, -1);
     
     for(unsigned int i=0; i < size; i++) {
         res[i] = sqrt(pU[i].pu1*pU[i].pu1 + pU[i].pu2*pU[i].pu2);
@@ -1268,9 +1268,9 @@ Vec_f recoilCorrectionBinned_magn_StatUnc(Vec_recoilType pU) {
 }
 
 */
-Vec_f recoilCorrectionBinned_StatUnc(double pU1, double pU2, int qTbinIdx, int corrType, int corrIdx) {
+Vec_d recoilCorrectionBinned_StatUnc(double pU1, double pU2, int qTbinIdx, int corrType, int corrIdx) {
     
-    Vec_f res = recoilCorrectionBinned(pU1, pU2, qTbinIdx, corrType, corrIdx);
+    Vec_d res = recoilCorrectionBinned(pU1, pU2, qTbinIdx, corrType, corrIdx);
 	return res;
 }
 

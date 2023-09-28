@@ -39,7 +39,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 import mplhep as hep
 hep.style.use(hep.style.ROOT)

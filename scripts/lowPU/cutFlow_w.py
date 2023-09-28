@@ -16,7 +16,7 @@ import narf
 import hist
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 
 

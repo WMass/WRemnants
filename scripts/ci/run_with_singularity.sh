@@ -1,6 +1,6 @@
 #!/bin/bash
 export APPTAINER_BIND="/scratch,/eos,/cvmfs" 
-CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v13
+CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v21
 
 # Ensure kerberos permissions for eos access (requires systemd kerberos setup)
 if [ -d $XDG_RUNTIME_DIR/krb5cc ]; then

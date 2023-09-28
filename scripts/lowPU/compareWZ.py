@@ -15,7 +15,7 @@ import pickle
 import narf
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 def doPlot(tag, h_target, h_uncorr, h_corr, xMin=-100, xMax=100, label="", xLabel=""):
     
@@ -1104,13 +1104,13 @@ if __name__ == "__main__":
     ## load Z
     print("load z")
     flavor = "mumu"
-    datagroups_Z = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+    datagroups_Z = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met))
     
     
     ## load W
     print("load w")
     flavor = "mu"
-    datagroups_W = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+    datagroups_W = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met))
     print("done")
     
     

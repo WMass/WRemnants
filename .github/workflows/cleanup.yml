@@ -1,0 +1,33 @@
+name: EOS Cleanup
+
+on:
+  schedule:
+    - cron: '0 3 * * 0' # Run on Sunday morning at 3h00 UTC
+  workflow_dispatch:
+
+env: 
+  EOS_DIR: /eos/user/c/cmsmwbot/
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - name: Cleanup main
+        run: |
+          all_folders=$(xrdfs root://eosuser.cern.ch// ls -l $EOS_DIR/ScheduledBuilds/ | grep '^d' | sort -k 5 -r | awk '{print $7}')
+          newest_folders=($(echo "$all_folders" | head -n 6))
+          for folder in $all_folders; do
+            if ! [[ " ${newest_folders[@]} " =~ " $folder " ]]; then
+              xrdfs root://eosuser.cern.ch// rmdir "$EOS_DIR/ScheduledBuilds/$folder"
+            fi
+          done
+      - name: Cleanup unfolding
+        run: |
+          all_folders=$(xrdfs root://eosuser.cern.ch// ls -l $EOS_DIR/ScheduledBuilds_unfolding/ | grep '^d' | sort -k 5 -r | awk '{print $7}')
+          newest_folders=($(echo "$all_folders" | head -n 6))
+          for folder in $all_folders; do
+            if ! [[ " ${newest_folders[@]} " =~ " $folder " ]]; then
+              xrdfs root://eosuser.cern.ch// rmdir "$EOS_DIR/ScheduledBuilds_unfolding/$folder"
+            fi
+          done

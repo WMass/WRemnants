@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--minnlo_file", type=str, default="w_z_gen_dists.pkl.lz4", help="MiNNLO gen file, denominator in ratio") 
 parser.add_argument("-c", "--corr_files", type=str, nargs='+', required=True, help="Reference files for the corrections (both W+ and W- for the W)") 
-parser.add_argument("-g", "--generator", type=str, choices=["dyturbo", "scetlib", "scetlib_dyturbo", "matrix_radish"], 
+parser.add_argument("-g", "--generator", type=str, choices=["dyturbo", "mcfm", "scetlib", "scetlib_dyturbo", "matrix_radish"], 
     required=True, help="Generator used to produce correction hist")
 parser.add_argument("--outpath", type=str, default=f"{common.data_dir}/TheoryCorrections", help="Output path")
 parser.add_argument("-p", "--postfix", type=str, help="Postfix for output file name", default=None)

@@ -17,8 +17,7 @@ import narf
 import hist
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 
 
 def doOverlow(h):
@@ -66,7 +65,7 @@ def mTcomparison():
     outDir = "/eos/user/j/jaeyserm/www/wmass/lowHighPU/comparison/"
     histCfg = {"name": "mT_corr_rec", "axis": "mt"}
    
-    groups = make_datagroups_2016("mw_with_%s_eta_pt_%s.pkl.lz4" % (flavor, "RawPFMET"))
+    groups = Datagroups("mw_with_%s_eta_pt_%s.pkl.lz4" % (flavor, "RawPFMET"))
     bhist_highPU_RawPFMET = parseProc(groups, histCfg, "Wmunu")
     bhist_highPU_RawPFMET = slice_(bhist_highPU_RawPFMET, "eta_mT")
     hist_highPU_RawPFMET = narf.hist_to_root(bhist_highPU_RawPFMET)
@@ -74,7 +73,7 @@ def mTcomparison():
     hist_highPU_RawPFMET.SetLineWidth(2)
     hist_highPU_RawPFMET.Scale(1./hist_highPU_RawPFMET.Integral())
     
-    groups = make_datagroups_2016("mw_with_%s_eta_pt_%s.pkl.lz4" % (flavor, "DeepMETReso"))
+    groups = Datagroups("mw_with_%s_eta_pt_%s.pkl.lz4" % (flavor, "DeepMETReso"))
     bhist_highPU_DeepMETReso = parseProc(groups, histCfg, "Wmunu")
     bhist_highPU_DeepMETReso = slice_(bhist_highPU_DeepMETReso, "eta_mT")
     hist_highPU_DeepMETReso = narf.hist_to_root(bhist_highPU_DeepMETReso)
@@ -84,7 +83,7 @@ def mTcomparison():
     
     '''
    
-    groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, "RawPFMET"), flavor=flavor)
+    groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, "RawPFMET"), flavor=flavor)
     bhist_lowPU_RawPFMET = parseProc(groups, histCfg, "WJetsToMuNu")
     bhist_lowPU_RawPFMET = slice_(bhist_lowPU_RawPFMET, "eta")
     hist_lowPU_RawPFMET = narf.hist_to_root(bhist_lowPU_RawPFMET)
@@ -92,7 +91,7 @@ def mTcomparison():
     hist_lowPU_RawPFMET.SetLineWidth(2)
     hist_lowPU_RawPFMET.Scale(1./hist_lowPU_RawPFMET.Integral())
 
-    groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, "DeepMETReso"), flavor=flavor)
+    groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, "DeepMETReso"), flavor=flavor)
     bhist_lowPU_DeepMETReso = parseProc(groups, histCfg, "WJetsToMuNu")
     bhist_lowPU_DeepMETReso = slice_(bhist_lowPU_DeepMETReso, "eta")
     hist_lowPU_DeepMETReso = narf.hist_to_root(bhist_lowPU_DeepMETReso)
@@ -184,7 +183,7 @@ def mTcomparison_fromCards():
     
     '''
    
-    groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, "RawPFMET"), flavor=flavor)
+    groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, "RawPFMET"))
     bhist_lowPU_RawPFMET = parseProc(groups, histCfg, "WJetsToMuNu")
     bhist_lowPU_RawPFMET = slice_(bhist_lowPU_RawPFMET, "eta")
     hist_lowPU_RawPFMET = narf.hist_to_root(bhist_lowPU_RawPFMET)
@@ -192,7 +191,7 @@ def mTcomparison_fromCards():
     hist_lowPU_RawPFMET.SetLineWidth(2)
     hist_lowPU_RawPFMET.Scale(1./hist_lowPU_RawPFMET.Integral())
 
-    groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, "DeepMETReso"), flavor=flavor)
+    groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, "DeepMETReso"))
     bhist_lowPU_DeepMETReso = parseProc(groups, histCfg, "WJetsToMuNu")
     bhist_lowPU_DeepMETReso = slice_(bhist_lowPU_DeepMETReso, "eta")
     hist_lowPU_DeepMETReso = narf.hist_to_root(bhist_lowPU_DeepMETReso)
@@ -264,13 +263,13 @@ def eventYields():
     for proc in procs:
     
         met = "DeepMETReso"
-        groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+        groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
         hist_DeepMETReso = parseProc(groups, histCfg, proc)
         hist_DeepMETReso.SetLineColor(ROOT.kRed)
         hist_DeepMETReso.SetLineWidth(2)
         
         met = "RawPFMET"
-        groups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+        groups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
         hist_RawPFMET = parseProc(groups, histCfg, proc)
         hist_RawPFMET.SetLineColor(ROOT.kBlue)
         hist_RawPFMET.SetLineWidth(2)

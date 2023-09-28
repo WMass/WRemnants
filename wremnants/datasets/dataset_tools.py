@@ -3,6 +3,14 @@ from utilities import logging
 import subprocess
 import glob
 import random
+import pathlib
+import socket
+import ROOT
+
+from wremnants.datasets.datasetDict_v9 import dataDictV9
+from wremnants.datasets.datasetDict_v8 import dataDictV8
+from wremnants.datasets.datasetDict_gen import genDataDict
+from wremnants.datasets.datasetDict_lowPU import dataDictLowPU
 
 logger = logging.child_logger(__name__)
 
@@ -23,7 +31,10 @@ def makeFilelist(paths, maxFiles=-1, format_args={}, is_data=False, oneMCfileEve
         if format_args:
             path = path.format(**format_args)
             logger.debug(f"Reading files from path {path}")
-        filelist.extend(glob.glob(path) if path[:4] != "/eos" else buildXrdFileList(path, "eoscms.cern.ch"))
+        files = glob.glob(path) if path[:4] != "/eos" else buildXrdFileList(path, "eoscms.cern.ch")
+        if len(files) == 0:
+            logger.warning(f"Did not find any files matching path {path}!")
+        filelist.extend(files)
 
     if oneMCfileEveryN != None and not is_data:
         tmplist = []
@@ -81,3 +92,109 @@ def excludeProcs(excludes, datasets):
             return list(filter(excludes, datasets))
     else:
         return datasets
+
+def getDatasetDict(mode=None, nanoVersion="v9"):
+    if mode == "lowPU":
+        return dataDictLowPU
+
+    if nanoVersion == "v8":
+        dataDict = dataDictV8
+        logger.info('Using NanoAOD V8')
+    elif nanoVersion == "v9":
+        dataDict = dataDictV9
+    else:
+        raise ValueError("Only NanoAODv8 and NanoAODv9 are supported")
+
+    if mode == "gen":
+        dataDict.update(genDataDict)     
+
+    return dataDict
+
+def getDataPath(mode=None):
+    import socket
+    hostname = socket.gethostname()
+
+    if hostname == "lxplus8s10.cern.ch":
+        base_path = "/scratch/shared/NanoAOD"
+    if hostname == "cmswmass2.cern.ch":
+        base_path = "/data/shared/NanoAOD"
+    elif "mit.edu" in hostname:
+        base_path = "/scratch/submit/cms/wmass/NanoAOD"
+    elif hostname == "cmsanalysis.pi.infn.it":
+        base_path = "/scratchnvme/wmass/NANOV9/postVFP"
+
+    # NOTE: If anyone wants to run this at Pisa they'd probably want a different path
+    if mode == "lowPU":
+        base_path = f"{base_path}/LowPU/"
+
+    return base_path
+
+def is_zombie(file_path):
+    # Try opening the ROOT file and check if it's a zombie file
+    try:
+        file = ROOT.TFile.Open(file_path)
+        if not file or file.IsZombie():
+            logger.warning(f"Found zombie file: {file_path}")
+            return True
+        file.Close()
+        return False
+    except:
+        logger.warning(f"Found zombie file: {file_path}")
+        return True
+
+def getDatasets(maxFiles=-1, filt=None, excl=None, mode=None, base_path=None, nanoVersion="v9", 
+                data_tag="TrackFitV722_NanoProdv2", mc_tag="TrackFitV718_NanoProdv1", oneMCfileEveryN=None, checkFileForZombie=False):
+    if not base_path:
+        base_path = getDataPath(mode)
+    logger.info(f"Loading 2016 samples from {base_path}.")
+
+    dataDict = getDatasetDict(mode, nanoVersion)
+
+    narf_datasets = []
+    for sample,info in dataDict.items():
+        if sample in genDataDict:
+            base_path = base_path.replace("NanoAOD", "NanoGen")
+
+        is_data = info.get("group","") == "Data"
+
+        prod_tag = data_tag if is_data else mc_tag
+        paths = makeFilelist(info["filepaths"], maxFiles, format_args=dict(BASE_PATH=base_path, NANO_PROD_TAG=prod_tag), is_data=is_data, oneMCfileEveryN=oneMCfileEveryN)
+            
+        if checkFileForZombie:
+            paths = [p for p in paths if not is_zombie(p)]
+
+        if not paths:
+            logger.warning(f"Failed to find any files for dataset {sample}. Looking at {info['filepaths']}. Skipping!")
+            continue
+
+        narf_info = dict(
+            name=sample,
+            filepaths=paths,
+        )
+
+        if is_data:
+            if mode == "gen":
+                continue
+            narf_info.update(dict(
+                is_data=True,
+                lumi_csv=info["lumicsv"],
+                lumi_json=info["lumijson"],
+                group=info["group"] if "group" in info else None,
+            ))
+        else:
+            narf_info.update(dict(
+                xsec=info["xsec"],
+                group=info["group"] if "group" in info else None,
+                )
+            )
+        narf_datasets.append(narf.Dataset(**narf_info))
+    
+    narf_datasets = filterProcs(filt, narf_datasets)
+    narf_datasets = excludeProcs(excl, narf_datasets)
+
+    for sample in narf_datasets:
+        if not sample.filepaths:
+            logger.warning(f"Failed to find any files for sample {sample.name}!")
+
+    return narf_datasets
+

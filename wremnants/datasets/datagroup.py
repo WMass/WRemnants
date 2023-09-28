@@ -56,7 +56,10 @@ class Datagroup(object):
         self.memberOp.append(deepcopy(member_operation))
         self.members.append(member)
 
-    def deleteMembers(self, members):
+    def deleteMembers(self, members=None):
+        if members is None:
+            # delete all members
+            members = self.members[:]
         for m in members:
             self.deleteMember(m)
 

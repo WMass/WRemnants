@@ -142,8 +142,14 @@ helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, cons
 
 }
 
-ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewLeptons(const ROOT::VecOps::RVec<int>& status,
-        const ROOT::VecOps::RVec<int>& statusFlags, const ROOT::VecOps::RVec<int>& pdgId, const ROOT::VecOps::RVec<int>& motherIdx, const ROOT::VecOps::RVec<double>& pt, const ROOT::VecOps::RVec<double>& eta, const ROOT::VecOps::RVec<double>& phi) {
+ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewLeptons(
+  const ROOT::VecOps::RVec<int>& status,
+  const ROOT::VecOps::RVec<int>& statusFlags, 
+  const ROOT::VecOps::RVec<int>& pdgId, 
+  const ROOT::VecOps::RVec<double>& pt, 
+  const ROOT::VecOps::RVec<double>& eta, 
+  const ROOT::VecOps::RVec<double>& phi
+) {
 
   const std::size_t ngenparts = status.size();
   ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> leptons;
@@ -195,8 +201,14 @@ ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewLeptons(const ROOT::VecOps::RVec
 
 }
 
-ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewPhotons(const ROOT::VecOps::RVec<int>& status,
-        const ROOT::VecOps::RVec<int>& statusFlags, const ROOT::VecOps::RVec<int>& pdgId, const ROOT::VecOps::RVec<double>& pt, const ROOT::VecOps::RVec<double>& eta, const ROOT::VecOps::RVec<double>& phi) {
+ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewPhotons(
+  const ROOT::VecOps::RVec<int>& status,
+  const ROOT::VecOps::RVec<int>& statusFlags, 
+  const ROOT::VecOps::RVec<int>& pdgId, 
+  const ROOT::VecOps::RVec<double>& pt, 
+  const ROOT::VecOps::RVec<double>& eta, 
+  const ROOT::VecOps::RVec<double>& phi
+) {
 
   const std::size_t ngenparts = status.size();
   ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> photons;
@@ -226,7 +238,7 @@ ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> ewPhotons(const ROOT::VecOps::RVec
 
 }
 
-double ewMLepPhos(const ROOT::VecOps::RVec<PxPyPzEVector>& leptons, const ROOT::VecOps::RVec<PxPyPzEVector>& photons) {
+ROOT::Math::PxPyPzEVector ewGenVPhos(const ROOT::VecOps::RVec<PxPyPzEVector>& leptons, const ROOT::VecOps::RVec<PxPyPzEVector>& photons) {
 
   ROOT::Math::PxPyPzEVector full_system(0,0,0,0);
   for (auto &p : leptons) {
@@ -236,9 +248,8 @@ double ewMLepPhos(const ROOT::VecOps::RVec<PxPyPzEVector>& leptons, const ROOT::
     full_system += p;
   }
 
-  return full_system.mass();
+  return full_system;
 }
-
 
 
 } 

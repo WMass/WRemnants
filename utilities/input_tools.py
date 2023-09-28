@@ -241,7 +241,39 @@ def add_charge_axis(h, charge):
         hnew[...,charge_axis.index(charge)] = h.view(flow=True)
     return hnew
 
-def getPOInames(rtfile, poi_type="mu"):
+def getFitresult(fitresult_filename):
+    if fitresult_filename.endswith(".root"):
+        return uproot.open(fitresult_filename)
+    elif fitresult_filename.endswith(".hdf5"):
+        return h5py.File(fitresult_filename, mode='r')
+    else:
+        logger.warning(f"Unknown format of fitresult {fitresult}")
+        return None
+
+def getPOInames(fitresult_file, poi_type="mu"):
+    if isinstance(fitresult_file, h5py.File):
+        names = getPOInamesH5(fitresult_file, poi_type)
+    else:
+        names = getPOInamesRoot(fitresult_file, poi_type)
+
+    if len(names)==0:
+        logger.warning('No free parameters found (neither signal strenght(s), nor W mass)')
+        return [None]
+    return names
+
+def getPOInamesH5(h5file, poi_type="mu"):
+    outnames = h5file[
+        "outnames"][...].astype(str)
+    names = np.array([])
+    if poi_type is not None and poi_type in outnames:
+        names = h5file[f"{poi_type}_names"][...].astype(str)
+
+    if 'nois' in outnames:
+        names = np.append(names, 'Wmass')
+
+    return names
+
+def getPOInamesRoot(rtfile, poi_type="mu"):
     names = []
     if poi_type is not None and f'nuisance_impact_{poi_type}' in [k.replace(";1","") for k in rtfile.keys()]:
         impacts = rtfile[f'nuisance_impact_{poi_type}'].to_hist()
@@ -251,13 +283,75 @@ def getPOInames(rtfile, poi_type="mu"):
         impacts = rtfile['nuisance_impact_nois'].to_hist()
         names.append('Wmass')
 
-    if len(names)==0:
-        logger.warning('No free parameters found (neither signal strenght(s), nor W mass)')
-        return [None]
+    return np.array(names)
 
-    return names
-    
-def readImpacts(rtfile, group, sort=True, add_total=True, stat=0.0, POI='Wmass', normalize=True):
+def readImpacts(fitresult_file, group, sort=True, add_total=True, stat=0.0, POI='Wmass', normalize=True):
+    if isinstance(fitresult_file, h5py.File):
+        impacts, labels, norm, total = readImpactsH5(fitresult_file, group, POI=POI)
+    else:
+        impacts, labels, norm, total = readImpactsRoot(fitresult_file, group, POI=POI)
+
+    if sort:
+        order = np.argsort(impacts)
+        impacts = impacts[order]
+        labels = labels[order]
+
+    if add_total:
+        impacts = np.append(impacts, total)
+        labels = np.append(labels, "Total")
+
+    if normalize:
+        impacts /= norm
+
+    if stat > 0:
+        idx = np.argwhere(labels == "stat")
+        impacts[idx] = stat
+
+    return impacts, labels, norm
+
+def readImpactsH5(h5file, group, POI='Wmass', skip_systNoConstraint=True):
+
+    if POI is None:
+        poi_type=None
+    else:
+        poi_type = POI.split("_")[-1] if POI else None
+        poi_names = getPOInames(h5file, poi_type)
+        if POI=='Wmass':
+            impact_hist_total = "nuisance_impact_nois"
+            impact_hist = "nuisance_group_impact_nois" if group else "nuisance_impact_nois"
+        elif POI in poi_names:
+            impact_hist_total = f"nuisance_impact_{poi_type}"
+            impact_hist = f"nuisance_group_impact_{poi_type}" if group else f"nuisance_impact_{poi_type}"
+        else:
+            raise ValueError(f"Invalid POI: {POI}")
+
+    if group:
+        labels = h5file["hsystgroups"][...].astype(str)
+        labels = np.append(labels, "stat")
+    if not group:
+        labels = h5file["hsysts"][...].astype(str)
+
+    if poi_type is None:
+        impacts = np.zeros_like(labels, dtype=int)
+        total = 0.
+        norm = 0.
+    else:
+        iPOI = 0 if POI=='Wmass' else poi_names.index(POI)
+        impacts = h5file[impact_hist][...][iPOI]
+        total = h5file[impact_hist_total][...][iPOI,iPOI]
+        norm = h5file["x"][...][iPOI]
+
+    if len(labels)+1 == len(impacts): 
+        labels = np.append(labels, "binByBinStat")
+
+    if skip_systNoConstraint:
+        noConstraint = np.array([l in h5file["hsystsnoconstraint"][...].astype(str) for l in labels])
+        labels = labels[~noConstraint]
+        impacts = impacts[~noConstraint]
+
+    return impacts, labels, norm, total
+
+def readImpactsRoot(rtfile, group, POI='Wmass'):
     poi_type = POI.split("_")[-1] if POI else None
     poi_names = getPOInames(rtfile, poi_type)
     if POI=='Wmass':
@@ -277,7 +371,7 @@ def readImpacts(rtfile, group, sort=True, add_total=True, stat=0.0, POI='Wmass',
 
     if impact_hist not in rtfile:
         logger.warning("Did not find impact hist in file. Skipping!")
-        return np.zeros_like(labels), labels, 1.
+        return np.zeros_like(labels), labels, 1., 1.
     else:
         impacts = rtfile[impact_hist].to_hist()
         iPOI = 0 if POI=='Wmass' else poi_names.index(POI)
@@ -285,23 +379,8 @@ def readImpacts(rtfile, group, sort=True, add_total=True, stat=0.0, POI='Wmass',
         norm = rtfile["fitresults"][impacts.axes[0].value(iPOI)].array()[0]
         impacts = impacts.values()[iPOI,:]
 
-    if sort:
-        order = np.argsort(impacts)
-        impacts = impacts[order]
-        labels = labels[order]
+    return impacts, labels, norm, total
 
-    if add_total:
-        impacts = np.append(impacts, total)
-        labels = np.append(labels, "Total")
-
-    if normalize:
-        impacts /= norm
-
-    if stat > 0:
-        idx = np.argwhere(labels == "stat")
-        impacts[idx] = stat
-
-    return impacts, labels, norm
 
 def read_matched_scetlib_dyturbo_hist(scetlib_resum, scetlib_fo_sing, dyturbo_fo, axes=None, charge=None, fix_nons_bin0=True, coeff=None):
     hsing = read_scetlib_hist(scetlib_resum, charge=charge, flip_y_sign=coeff=="a4")
@@ -395,7 +474,6 @@ def args_from_metadata(card_tool, arg):
     return meta_data["args"][arg]
 
 def get_metadata(infile):
-    import narf
     results = None
     if infile.endswith(".pkl.lz4"):
         with lz4.frame.open(infile) as f:
@@ -405,9 +483,39 @@ def get_metadata(infile):
             results = pickle.load(f)
     elif infile.endswith(".hdf5"):
         h5file = h5py.File(infile, "r")
-        results = narf.ioutils.pickle_load_h5py(h5file["results"])
+        meta = h5file.get("result", h5file.get("meta", None))
+        results = ioutils.pickle_load_h5py(meta) if meta else None
 
-    if not results:
-        raise ValueError("Failed to find results dict. Note that only pkl, hdf5, and pkl.lz4 file types are supported")
+    if results is None:
+        logger.warning("Failed to find results dict. Note that only pkl, hdf5, and pkl.lz4 file types are supported")
+        return None
 
     return results["meta_info"] if "meta_info" in results else results["meta_data"]
+
+def read_infile(input):
+    # read histogramer input file(s)
+    result = {}
+    meta = []
+    infiles = []
+    if isinstance(input, list):
+        for inpt in input:
+            r, m, h = read_infile(inpt)
+            result.update(r)
+            meta += m
+            infiles += h
+        return result, meta, infiles
+    
+    logger.info(f"Load {input}")
+    if input.endswith(".pkl.lz4"):
+        with lz4.frame.open(input) as f:
+            result = pickle.load(f)
+    elif input.endswith(".hdf5"):
+        h5file = h5py.File(input, "r")
+        infiles = [h5file]
+        result = ioutils.pickle_load_h5py(h5file["results"])
+    else:
+        raise ValueError("Unsupported file type")
+
+    meta = result["meta_info"] if "meta_info" in result else result["meta_data"]
+
+    return result, [meta], [infiles]

@@ -7,7 +7,7 @@ from wremnants.datasets.datagroups2016 import make_datagroups_2016
 from wremnants import histselections as sel
 #from wremnants import plot_tools,theory_tools,syst_tools
 from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common, logging, output_tools, input_tools
 
 import narf
 import wremnants
@@ -15,7 +15,6 @@ from wremnants import theory_tools,syst_tools,theory_corrections
 import hist
 
 import numpy as np
-from utilities import input_tools
 
 import pickle
 import lz4.frame
@@ -43,14 +42,16 @@ from scripts.analysisTools.w_mass_13TeV.plotPrefitTemplatesWRemnants import plot
 
 sys.path.append(os.getcwd())
 
-def getBoostEff(n_pass, n_tot, integrateVar=[]):
+def getBoostEff(n_pass, n_tot, integrateVar=[], rebinUt=-1):
     s = hist.tag.Slicer()
+    num = n_pass.copy()
+    den = n_tot.copy()
+    if rebinUt > 0 and "ut" not in integrateVar:
+        num = num[{"ut": s[::hist.rebin(rebinUt)]}]
+        den = den[ {"ut": s[::hist.rebin(rebinUt)]}]
     if len(integrateVar):
-        num = n_pass[{v: s[::hist.sum] for v in integrateVar}]
-        den = n_tot[ {v: s[::hist.sum] for v in integrateVar}]
-    else:
-        num = n_pass
-        den = n_tot
+        num = num[{v: s[::hist.sum] for v in integrateVar}]
+        den = den[ {v: s[::hist.sum] for v in integrateVar}]
     eff_boost = hh.divideHists(num, den, cutoff=0.1, allowBroadcast=True, createNew=True, cutoff_val=0.0)
     vals = eff_boost.values()
     vals[vals < 0.0] = 0.0
@@ -81,6 +82,7 @@ if __name__ == "__main__":
     parser.add_argument(     '--passMt', action='store_true',   help='Measure efficiencies only for events passing mT, otherwise stay inclusive')
     parser.add_argument('-p','--processes', default=["Wmunu"], nargs='+', type=str,
                         help='Choose what processes to plot, otherwise all are done')
+    parser.add_argument(     '--rebinUt', default=-1, type=int, help='If positive, rebin yields versus uT by this number before deriving efficiencies in 3D')
     args = parser.parse_args()
 
     logger = logging.setup_logger(os.path.basename(__file__), args.verbose)
@@ -198,11 +200,11 @@ if __name__ == "__main__":
                             draw_both0_noLog1_onlyLog2=1, passCanvas=canvas,
                             nContours=args.nContours, palette=args.palette, invertePalette=args.invertPalette)
 
-        eff_iso_3D = getBoostEff(n_iso_pass, n_iso_tot)
-        eff_isonotrig_3D = getBoostEff(n_isonotrig_pass, n_isonotrig_tot)
-        eff_isoantitrig_3D = getBoostEff(n_isoantitrig_pass, n_isoantitrig_tot)
-        eff_triggerplus_3D = getBoostEff(n_triggerplus_pass, n_triggerplus_tot)
-        eff_triggerminus_3D = getBoostEff(n_triggerminus_pass, n_triggerminus_tot)
+        eff_iso_3D = getBoostEff(n_iso_pass, n_iso_tot, rebinUt=args.rebinUt)
+        eff_isonotrig_3D = getBoostEff(n_isonotrig_pass, n_isonotrig_tot, rebinUt=args.rebinUt)
+        eff_isoantitrig_3D = getBoostEff(n_isoantitrig_pass, n_isoantitrig_tot, rebinUt=args.rebinUt)
+        eff_triggerplus_3D = getBoostEff(n_triggerplus_pass, n_triggerplus_tot, rebinUt=args.rebinUt)
+        eff_triggerminus_3D = getBoostEff(n_triggerminus_pass, n_triggerminus_tot, rebinUt=args.rebinUt)
 
         resultDict[f"{d}_MC_eff_iso_etaptut"] = eff_iso_3D
         resultDict[f"{d}_MC_eff_isonotrig_etaptut"] = eff_isonotrig_3D
@@ -214,7 +216,7 @@ if __name__ == "__main__":
         # do it for events passing trigger ans isolation
         nPtBins = hTestUt.axes["pt"].size
         hTestUt = hTestUt[{"eta" : s[::hist.sum],
-                           "pt" :  s[0:nPtBins-1:hist.sum], # would s[::hist.sum] sum overflow pt bins?
+                           "pt" :  s[0:nPtBins:hist.sum], # would s[::hist.sum] sum overflow pt bins?
                            "passTrigger" : True,
                            "passIso" : True}]
         for charge in [-1, 1]:
@@ -239,11 +241,15 @@ if __name__ == "__main__":
                 
     postfix = ""
     toAppend = []
-    #if args.passMt:
-    #    toAppend.append("passMt")
+    if args.passMt:
+        toAppend.append("passMt")
+    if args.rebinUt > 0:
+        toAppend.append(f"rebinUt{args.rebinUt}")     
     postfix = "_".join(toAppend)
     if len(postfix):
         postfix = "_" + postfix
+
+    resultDict.update({"meta_info" : output_tools.metaInfoDict(args=args)})    
         
     outfile = outdir + f"efficiencies3D{postfix}.pkl.lz4"
     logger.info(f"Going to store 3D histograms {resultDict.keys()} in file {outfile}")

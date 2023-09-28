@@ -66,6 +66,12 @@ def prepareChargeFit(options, charges=["plus"]):
     for charge in charges:
         datacards.append(os.path.abspath(options.inputdir)+"/{b}_{ch}.txt".format(b=binname,ch=charge))
         channels.append('{b}_{ch}'.format(b=binname,ch=charge))
+    # add masked channel, only one for both gen charges
+    maskedChannels = []
+    if options.theoryAgnostic:
+        datacards.append(os.path.abspath(options.inputdir)+"/{b}_inclusive_xnorm.txt".format(b=binname))
+        channels.append('inclusive') # FIXME: should track what is done by CardTool.py
+        maskedChannels.append('inclusive')
 
     print('='*30)
     print("Looking for these cards")
@@ -97,7 +103,12 @@ def prepareChargeFit(options, charges=["plus"]):
         if options.doOnlyCard:
             return
         
-        txt2hdf5Cmd = 'text2hdf5.py {cf} --dataset {dn} --X-allow-no-signal'.format(cf=combinedCard, dn=options.dataname)
+        txt2hdf5Cmd = 'text2hdf5.py {cf} --dataset {dn}'.format(cf=combinedCard, dn=options.dataname)
+        if options.theoryAgnostic:
+            maskchan = ["--maskedChan {mc}".format(mc=maskedChannel) for maskedChannel in maskedChannels]
+            txt2hdf5Cmd += " --sparse {mc} --X-allow-no-background".format(mc=" ".join(maskchan))
+        else:
+            txt2hdf5Cmd += " --X-allow-no-signal"
             
         if len(postfix):
             txt2hdf5Cmd = txt2hdf5Cmd + " --postfix " + postfix
@@ -114,15 +125,21 @@ def prepareChargeFit(options, charges=["plus"]):
             safeSystem(txt2hdf5Cmd, dryRun=options.dryRun)
             
         metafilename = combinedCard.replace('.txt','.hdf5')
+        if args.theoryAgnostic:
+            metafilename = metafilename.replace('.hdf5','_sparse.hdf5')
         if len(postfix):
             metafilename = metafilename.replace('.hdf5','_%s.hdf5' % postfix)
-
+            
         bbboptions = " --binByBinStat "
         if not options.noCorrelateXsecStat: bbboptions += "--correlateXsecStat "
-        combineCmd = 'combinetf.py -t -1 {bbb} {metafile} --doImpacts --saveHists --computeHistErrors --doh5Output --POIMode none '.format(metafile=metafilename, bbb="" if options.noBBB else bbboptions)
+        combineCmd = 'combinetf.py -t -1 {bbb} {metafile} --doImpacts --saveHists --computeHistErrors '.format(metafile=metafilename, bbb="" if options.noBBB else bbboptions)
         if options.combinetfOption:
             combineCmd += " %s" % options.combinetfOption
-
+        if args.theoryAgnostic:
+            combineCmd += " --POIMode mu --allowNegativePOI"
+        else:
+            combineCmd += " --POIMode none"                        
+            
         fitdir_data = "{od}/fit/data/".format(od=os.path.abspath(cardSubfolderFullName))
         fitdir_Asimov = fitdir_data.replace("/fit/data/", "/fit/hessian/")
         fitdir_toys = fitdir_data.replace("/fit/data/", "/fit/toys/")
@@ -192,6 +209,7 @@ if __name__ == "__main__":
     parser.add_argument("-D", "--dataset",  dest="dataname", default="data_obs",  type=str,  help="Name of the observed dataset (pass name without x_ in the beginning). Useful to fit another pseudodata histogram")
     parser.add_argument("--combinetf-option",  dest="combinetfOption", default="",  type=str,  help="Pass other options to combinetf (TODO: some are already activated with other options, might move them here)")
     parser.add_argument("-t",  "--toys", type=int, default=0, help="Run combinetf for N toys if argument N is positive")
+    parser.add_argument(       '--theoryAgnostic', action='store_true', help='Run theory agnostic fit, with masked channels and so on')
     args = parser.parse_args()
 
     if not args.dryRun:

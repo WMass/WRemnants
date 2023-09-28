@@ -87,15 +87,14 @@ def write_analysis_output(results, outfile, args, update_name=True):
         to_append.append(args.theoryCorr[0]+"Corr")
     if hasattr(args, "uncertainty_hist") and args.uncertainty_hist != "nominal":
         to_append.append(args.uncertainty_hist)
-    if args.postfix:
-        to_append.append(args.postfix)
-    if args.correlatedNonClosureNP:
-        to_append.append("NonClosureCorl")
     if args.maxFiles > 0:
         to_append.append(f"maxFiles{args.maxFiles}")
 
     if to_append and update_name:
         outfile = outfile.replace(".hdf5", f"_{'_'.join(to_append)}.hdf5")
+
+    if args.postfix:
+        outfile = outfile.replace(".hdf5", f"_{args.postfix}.hdf5")
 
     if args.outfolder:
         if not os.path.exists(args.outfolder):

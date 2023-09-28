@@ -41,7 +41,7 @@ if not args.silent:
         print("name")
     print('-'*50)
         
-for k in tf.GetListOfKeys() :
+for k in tf.GetListOfKeys():
     name=k.GetName()
     if args.printAxisLabelHisto != "" and name != args.printAxisLabelHisto:
         continue

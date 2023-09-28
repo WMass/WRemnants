@@ -13,7 +13,7 @@ import functions
 import plotter
 
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 import lz4.frame
 import pickle
@@ -3304,7 +3304,7 @@ def prepareFile(fOut_):
     fOut = ROOT.TFile(fOut_, "RECREATE")
 
     # RECO level qT
-    datagroups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+    datagroups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met))
     procs = []
     if flavor == "mumu": procs = ["SingleMuon", "DYmumu"] + bkgs
     if flavor == "ee": procs = ["SingleElectron", "DYee"] + bkgs

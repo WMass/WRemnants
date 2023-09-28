@@ -1,7 +1,6 @@
-## example
-# python tests/testShapesIsoMtRegions.py path/to/pickle/file.pkl.lz4 /path/to/plot/folder/testShapesIsoMtRegions/ [-c minus] [--isoMtRegion 2]
+#!/usr/bin/env python3
 
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 from wremnants import histselections as sel
 #from wremnants import plot_tools,theory_tools,syst_tools
 from utilities import boostHistHelpers as hh
@@ -101,7 +100,7 @@ if __name__ == "__main__":
             selectOp = sel.histWmass_passMT_passIso
             # customized for fakes later on
             
-        groups = make_datagroups_2016(fname)
+        groups = Datagroups(fname)
         datasets = groups.getNames()
         logger.warning(datasets)
         if args.processes is not None and len(args.processes):

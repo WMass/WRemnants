@@ -102,21 +102,17 @@ def drange(x, y, jump):
         x += jump
         
         
-def readBoostHistProc(datagroups, hName, procNames, charge=None):
+def readBoostHistProc(groups, hName, procs, charge=None):
 
-    label = "%s_tmp" % (hName)
-    datagroups.setHists(hName, "", label=label, procsToRead=procNames)
-    bhist = None
-    for procName in procNames:
-        h = datagroups.groups[procName][label]
-        if bhist == None: bhist = h
-        else: bhist = bhist + h
-      
+    groups.setNominalName(hName)
+    groups.loadHistsForDatagroups(hName, syst="")
+    bhist = sum([groups.groups[p].hists[hName] for p in procs])
+
     axes = [ax.name for ax in bhist.axes]
     if "charge" in axes:
         s = hist.tag.Slicer()
         if charge and charge == "combined": bhist = bhist[{"charge" : s[::hist.sum]}]
         elif charge and charge == "plus": bhist = bhist[{"charge" : bhist.axes["charge"].index(+1)}]
         elif charge and charge == "minus": bhist = bhist[{"charge" : bhist.axes["charge"].index(-1)}]
-        
+
     return bhist 

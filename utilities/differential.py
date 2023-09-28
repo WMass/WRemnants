@@ -49,3 +49,26 @@ def get_dilepton_axes(gen_vars, gen_axes):
         selections.append("absYVGen < {0}".format(gen_axes["absYVGen"].edges[-1]))
 
     return axes, cols, selections
+
+def get_theoryAgnostic_axes():
+
+    # TODO, make it easier to customize from external inputs
+
+    # Note that the helicity axis is defined elsewhere, and must not be added to the list of axes returned here
+    axis_ptVgen = hist.axis.Variable(
+        [0., 5., 10., 15., 20., 25., 30., 35., 40., 45., 50.],
+        #[0., 2.5, 5., 7.5, 10., 12.5, 15., 17.5, 20., 22.5, 25., 30., 35., 40., 45., 50.],
+        name = "ptVgenSig", underflow=False, overflow=False
+    )
+    axis_absYVgen = hist.axis.Variable(
+        [0, 0.5, 1., 1.5, 2.0, 2.5],
+        #[0.25*i for i in range(11)],
+        #[0, 1.25, 2.5],
+        name = "absYVgenSig", underflow=False, overflow=False
+    )
+    
+    axes = [axis_ptVgen, axis_absYVgen]
+    cols = ["absYVgen", "ptVgen"] # name of the branch, not of the axis
+    
+    return axes, cols
+        

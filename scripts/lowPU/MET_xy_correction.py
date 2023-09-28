@@ -15,15 +15,7 @@ import pickle
 import narf
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import datagroupsLowPU
-from wremnants.datasets.datagroups import datagroups2016
-
-def readProc(datagroups, hName, procName):
-
-    label = "%s_%s" % (hName, procName)
-    datagroups.setHists(hName, "", label=label, procsToRead=[procName], selectSignal=False)
-    bhist = datagroups.groups[procName][label]
-    return bhist 
+from wremnants.datasets import datagroups
 
 
 def makePlot(hist_data, hist_mc, fOut, xLabel, npv, outDir_):
@@ -168,8 +160,8 @@ def METxyCorrection(direction = "x", corrType="uncorr", polyOrderData=-1, polyOr
     functions.prepareDir(outDir_, False)
 
     
-    b_data = functions.readBoostHistProc(datagroups, "MET%s_%s_npv" % (direction, corrType), [data])
-    b_mc = functions.readBoostHistProc(datagroups, "MET%s_%s_npv" % (direction, corrType), procs)
+    b_data = functions.readBoostHistProc(groups, "MET%s_%s_npv" % (direction, corrType), [data])
+    b_mc = functions.readBoostHistProc(groups, "MET%s_%s_npv" % (direction, corrType), procs)
 
     h_data = narf.hist_to_root(b_data)
     h_mc = narf.hist_to_root(b_mc)
@@ -294,17 +286,17 @@ def METxyCorrection(direction = "x", corrType="uncorr", polyOrderData=-1, polyOr
 if __name__ == "__main__":
 
     met = "DeepMETReso" # PFMET, RawPFMET DeepMETReso
-    flavor = "mu" # mu, e, mumu, ee
+    flavor = "mumu" # mu, e, mumu, ee
     lowPU = False
 
     # DATA For electron channels!
-    
+
     ####################################################################
     if lowPU:
         npv_max, npv_fit_min, npv_fit_max = 10, 0, 10
         lumi_header = "199 pb^{#minus1} (13 TeV)"
         
-        datagroups = datagroupsLowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+        groups = datagroupsLowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
         procs = ['EWK', 'Top', 'Zmumu'] 
         data = "SingleMuon" if "mu" in flavor else "SingleElectron"
 
@@ -335,7 +327,7 @@ if __name__ == "__main__":
             npv_max, npv_fit_min, npv_fit_max = 60, 5, 55
             polyOrderDataX, polyOrderMCX = 3, 3
             polyOrderDataY, polyOrderMCY = 3, 3
-            datagroups = datagroups2016(f"mz_wlike_with_mu_eta_pt_{met}.hdf5")
+            groups = datagroups.Datagroups(f"mz_wlike_with_mu_eta_pt_{met}.hdf5")
             procs = ["Zmumu", "Ztautau", "Other"]
             data = "Data"
         else:
@@ -350,8 +342,9 @@ if __name__ == "__main__":
                 datagroups.groups[g]['selectOp'] = None
             
 
-        outDir = "/eos/user/j/jaeyserm/www/wmass/highPU/METxy_correction/METxy_%s_%s/" % (flavor, met)
-        fOut = "wremnants/data/recoil/highPU/%s_%s/met_xy_correction.json" % (flavor, met)
+        #outDir = "/eos/user/j/jaeyserm/www/wmass/highPU/METxy_correction/METxy_%s_%s/" % (flavor, met)
+        outDir = f"/home/submit/jaeyserm/public_html/wmass/highPU/METxy_correction/METxy_{flavor}_{met}/"
+        fOut = "wremnants-data/data/recoil/highPU/%s_%s/met_xy_correction.json" % (flavor, met)
         functions.prepareDir(outDir, True)
         
         dictout = {}

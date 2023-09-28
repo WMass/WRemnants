@@ -43,7 +43,7 @@ def sortEffSyst(name):
     return -1
 
 def sortParameters(params):
-
+    
     params = sorted(params)
     # the sorting below assumes that one would use systematics from a specific group, not a totally random list, otherwise the order might end up a bit scrambled
     if any(re.match('pdf.*',x) for x in params):
@@ -60,7 +60,11 @@ def sortParameters(params):
         params = sorted(params, key = lambda x: sortEffSyst(x))
     elif any(re.match('.*prefire.*',x) for x in params):
         params = sorted(params, key = lambda x: utilities.getNFromString(x,chooseIndex=0))
-
+    elif any(re.match('.*CMS_scale_m.*',x) for x in params):
+        params = sorted(params, key = lambda x: utilities.getNFromString(x,chooseIndex=0))
+    elif any(re.match('.*Z_nonClosure.*',x) for x in params):
+        params = sorted(params, key = lambda x: utilities.getNFromString(x,chooseIndex=0))
+        params = sorted(params, key = lambda x: 0 if "_A_" in x else 1)
     return params
 
 if __name__ == "__main__":
@@ -135,13 +139,14 @@ if __name__ == "__main__":
                     valuesAndErrors[k]  = v #dict((k,v) for k,v in valuesAndErrors.items() if re.match(ppatt,k) and not k.endswith('_gen'))
 
     params = valuesAndErrors.keys()
+
     if args.excludeRegexp != None:
         excl = re.compile(args.excludeRegexp)
         params = list(filter(lambda x: not excl.match(x), params))
     if len(params)==0:
         print("No parameters selected. Exiting.")
         quit()
-
+            
     # if you are going to rank nuisances, just skip the sorting by names, to save some time
     if args.rankNuisancesBy:
         # this sorting will be managed later
@@ -179,7 +184,7 @@ if __name__ == "__main__":
         try: 
             mean_p = valuesPrefit[name+'_gen'][0]
         except:
-            # print(f"Exception caught: name = {name}")
+            #print(f"Exception caught: name = {name}")
             continue
         val_f,err_f = (valuesAndErrors[name][0],abs(valuesAndErrors[name][0]-valuesAndErrors[name][1]))
 

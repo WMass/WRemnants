@@ -15,8 +15,7 @@ import pickle
 import narf
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 
 
 
@@ -194,7 +193,7 @@ if __name__ == "__main__":
     
     if lowPU:
 
-        datagroups = make_datagroups_lowPU("lowPU_%s_%s.pkl.lz4" % (flavor, met), flavor=flavor)
+        datagroups = Datagroups("lowPU_%s_%s.pkl.lz4" % (flavor, met))
         lumiLabel = "199 pb^{#minus1} (13 TeV)"
 
         ##procs = ["Zmumu", "Ztautau", "Other"]
@@ -242,7 +241,7 @@ if __name__ == "__main__":
         
     else:
 
-        datagroups = make_datagroups_2016("mz_wlike_with_mu_eta_pt_%s.pkl.lz4" % met, wlike=True)
+        datagroups = Datagroups("mz_wlike_with_mu_eta_pt_%s.pkl.lz4" % met, wlike=True)
         lumiLabel = "16.8 fb^{#minus1} (13 TeV)"
 
         procs = ["Zmumu", "Ztautau", "Other"]

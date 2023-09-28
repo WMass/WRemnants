@@ -13,8 +13,8 @@ def parseArgs():
     return parser.parse_args()
 
 
-def printImpacts(args,rtfile,POI='Wmass'):
-    impacts,labels,_ = input_tools.readImpacts(rtfile, not args.ungroup, sort=args.sort, POI=POI, normalize = False)
+def printImpacts(args,fitresult,POI='Wmass'):
+    impacts,labels,_ = input_tools.readImpacts(fitresult, not args.ungroup, sort=args.sort, POI=POI, normalize = False)
     unit = 'MeV' if POI=='Wmass' else 'n.u. %'
     if args.nuisance:
         if args.nuisance not in labels:
@@ -27,6 +27,6 @@ def printImpacts(args,rtfile,POI='Wmass'):
 
 if __name__ == '__main__':
     args = parseArgs()
-    rtfile = uproot.open(args.inputFile)
-    for poi in input_tools.getPOInames(rtfile):
-        printImpacts(args,rtfile,poi)
+    fitresult = input_tools.getFitresult(args.inputFile)
+    for poi in input_tools.getPOInames(fitresult):
+        printImpacts(args,fitresult,poi)

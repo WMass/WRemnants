@@ -58,13 +58,45 @@ public:
     const tensor_t &get_tensor(const Xs&... xs) {
         return get_tensor_impl(std::index_sequence_for<Xs...>{}, xs...);
     }
-
     tensor_t operator() (double x1, double x2, double x3, int x4, double nominal_weight) {
         //std::cout << "Args are mass " << x1 << " pt " << x2 << " y " << x3 << " charge " << x4 << std::endl;
         return nominal_weight*get_tensor(x1, x2, x3, x4);
     }
+
+
 private:
     std::shared_ptr<const T> correctionHist_;
+};
+
+template <typename T>
+class TensorCorrectionsHelper2D : public TensorCorrectionsHelper<T> {
+
+using base_t = TensorCorrectionsHelper<T>;
+using tensor_t = typename T::storage_type::value_type::tensor_t;
+
+public:
+    //inherit constructor
+    using base_t::base_t;
+
+    tensor_t operator() (double x1, int charge, double nominal_weight) {
+        return nominal_weight*base_t::get_tensor(x1, charge);
+    }
+};
+
+template <typename T>
+class TensorCorrectionsHelper3D : public TensorCorrectionsHelper<T> {
+
+using base_t = TensorCorrectionsHelper<T>;
+using tensor_t = typename T::storage_type::value_type::tensor_t;
+
+public:
+
+    //inherit constructor
+    using base_t::base_t;
+
+    tensor_t operator() (double x1, double x2, int charge, double nominal_weight) {
+        return nominal_weight*base_t::get_tensor(x1, x2, charge);
+    }
 };
 
 template <typename T>

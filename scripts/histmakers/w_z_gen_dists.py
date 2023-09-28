@@ -5,6 +5,7 @@ parser,initargs = common.common_parser()
 import narf
 import wremnants
 from wremnants import theory_tools,syst_tools,theory_corrections
+from wremnants.datasets.dataset_tools import getDatasets
 import hist
 import math
 import os
@@ -12,19 +13,23 @@ import os
 
 parser.add_argument("--skipAngularCoeffs", action='store_true', help="Skip the conversion of helicity moments to angular coeff fractions")
 parser.add_argument("--singleLeptonHists", action='store_true', help="Also store single lepton kinematics")
+parser.add_argument("--photonHists", action='store_true', help="Also store photon kinematics")
 parser.add_argument("--skipEWHists", action='store_true', help="Also store histograms for EW reweighting. Use with --filter horace")
 parser.add_argument("--absY", action='store_true', help="use absolute |Y|")
+parser.add_argument("--applySelection", action='store_true', help="Apply selection on leptons")
+parser.add_argument("--auxiliaryHistograms", action="store_true", help="Safe auxiliary histograms (mainly for ew analysis)")
 
 parser = common.set_parser_default(parser, "filterProcs", common.vprocs)
+parser = common.set_parser_default(parser, "theoryCorr", [])
 
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles,
-                                              filt=args.filterProcs,
-                                              excl=args.excludeProcs, 
-                                              nanoVersion="v8" if args.v8 else "v9", base_path=args.dataPath, mode='gen')
+datasets = getDatasets(maxFiles=args.maxFiles,
+                        filt=args.filterProcs,
+                        excl=args.excludeProcs, 
+                        nanoVersion="v8" if args.v8 else "v9", base_path=args.dataPath, mode='gen')
 
 logger.debug(f"Will process samples {[d.name for d in datasets]}")
 
@@ -62,15 +67,15 @@ axis_l_pt_gen = hist.axis.Regular(29, 26., 55., name = "pt")
 corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, args.theoryCorr)
 
 def build_graph(df, dataset):
-    print("build graph")
-    print(dataset.name)
+    logger.info("build graph")
+    logger.info(dataset.name)
     results = []
     
     if dataset.is_data:
         raise RuntimeError("Running GEN analysis over data is not supported")
 
-    isW = dataset.name in common.wprocs
-    isZ = dataset.name in common.zprocs
+    isW = dataset.name.startswith("W") and dataset.name[1] not in ["W", "Z"] #in common.wprocs
+    isZ = dataset.name.startswith("Z") and dataset.name[1] not in ["W", "Z"] #in common.zprocs
 
     weight_expr = "std::copysign(1.0, genWeight)"
     df = df.Define("weight", weight_expr)
@@ -81,6 +86,13 @@ def build_graph(df, dataset):
         weight_expr = f"{weight_expr}*H2BugFixWeight[0]"
     elif "NNLOPS" in dataset.name:
         weight_expr = f"{weight_expr}*LHEScaleWeightAltSet1[4]"
+
+    if args.applySelection:
+        if isZ:
+            df = df.Filter("ewLeptons[0].pt()>25 && ewLeptons[1].pt()>25 && std::fabs(ewLeptons[0].eta())<3.5 && std::fabs(ewLeptons[1].eta())<3.5")
+        elif isW:
+            df = df.Filter("""(ewLeptons[0].mass() == 0 || (ewLeptons[0].pt()>25 && std::fabs(ewLeptons[0].eta())<3.5))
+                           && (ewLeptons[1].mass() == 0 || (ewLeptons[1].pt()>25 && std::fabs(ewLeptons[1].eta())<3.5))""")
 
     df = theory_tools.define_theory_weights_and_corrs(df, dataset.name, corr_helpers, args)
 
@@ -94,7 +106,7 @@ def build_graph(df, dataset):
     nominal_cols = ["massVgen", col_rapidity, "ptVgen", "chargeVgen"]
     lep_cols = ["etaPrefsrLep", "ptPrefsrLep", "chargeVgen"]
 
-    if args.singleLeptonHists and isW or isZ:
+    if args.singleLeptonHists and (isW or isZ):
         if isW:
             df = df.Define('ptPrefsrLep', 'genl.pt()')
             df = df.Define('etaPrefsrLep', 'genl.eta()')
@@ -105,19 +117,78 @@ def build_graph(df, dataset):
 
     if not args.skipEWHists and (isW or isZ):
         if isZ:
-            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.010)
+            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.010, bin_edges_low=[0,50,60], bin_edges_high=[120])
         else:
             massBins = theory_tools.make_ew_binning(mass = 80.3815, width = 2.0904, initialStep=0.010)
-        ew_cols = ['ewMll', 'ewLogDeltaM']
-        axis_ewMll = hist.axis.Variable(massBins, name = "ewMll")
-        axis_ewLogDeltaM = hist.axis.Regular(100, -5, 5, name = "ewLogDeltaM")
-        ew_axes = [axis_ewMll, axis_ewLogDeltaM]
-        results.append(df.HistoBoost("nominal_ew", ew_axes, [*ew_cols, "nominal_weight"], storage=hist.storage.Double()))
+        axis_ewMll = hist.axis.Variable(massBins, name = "ewMll", underflow=False)
+        axis_ewLogDeltaM = hist.axis.Regular(90, -5, 4, name = "ewLogDeltaM")
+        axis_ewPtll = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ewPTll") # hist.axis.Regular(100, 0, 100, name = "ewPtll")
+
+        results.append(df.HistoBoost("nominal_ew", [axis_ewMll, axis_ewLogDeltaM], ['ewMll', 'ewLogDeltaM', "nominal_weight"], storage=hist.storage.Weight()))
+        results.append(df.HistoBoost("nominal_ewMllPTll", [axis_ewMll, axis_ewPtll], ["ewMll", "ewPTll", "nominal_weight"], storage=hist.storage.Weight()))
+        if args.auxiliaryHistograms:
+            axis_ewMlly = hist.axis.Variable(massBins, name = "ewMlly")
+            results.append(df.HistoBoost("nominal_ewMlly", [axis_ewMlly], ["ewMlly", "nominal_weight"], storage=hist.storage.Weight()))
+            # coarse binning
+            axis_Mll = hist.axis.Regular(100, 50, 150, name = "Mll")
+            results.append(df.HistoBoost("nominal_Mll", [axis_Mll], ["ewMll", "nominal_weight"], storage=hist.storage.Weight()))
+            axis_Mlly = hist.axis.Regular(100, 50, 150, name = "Mlly")
+            results.append(df.HistoBoost("nominal_Mlly", [axis_Mlly], ["ewMlly", "nominal_weight"], storage=hist.storage.Weight()))
+
+            axis_PTll =  hist.axis.Regular(100, 0, 100, name = "PTll")
+            axis_PTlly = hist.axis.Regular(100, 0, 100, name = "PTlly")
+            axis_Yll =  hist.axis.Regular(100, -5, 5, name = "Yll")
+            axis_Ylly = hist.axis.Regular(100, -5, 5, name = "Ylly")
+            results.append(df.HistoBoost("nominal_PTll",  [axis_PTll],  ["ewPTll", "nominal_weight"], storage=hist.storage.Weight()))
+            results.append(df.HistoBoost("nominal_PTlly", [axis_PTlly], ["ewPTlly", "nominal_weight"], storage=hist.storage.Weight()))
+            results.append(df.HistoBoost("nominal_Yll",  [axis_Yll],  ["ewYll", "nominal_weight"], storage=hist.storage.Weight()))
+            results.append(df.HistoBoost("nominal_Ylly", [axis_Ylly], ["ewYlly", "nominal_weight"], storage=hist.storage.Weight()))
+
+            # single lepton hists
+            if args.singleLeptonHists:
+                if isZ:
+                    # first lepton is leading in pT
+                    df = df.Define('ewLepPt1', 'ewLeptons[0].pt()')
+                    df = df.Define('ewLepPt2', 'ewLeptons[1].pt()')
+                    df = df.Define('ewLepEta1', 'ewLeptons[0].eta()')
+                    df = df.Define('ewLepEta2', 'ewLeptons[1].eta()')
+                if isW:
+                    # first lepton is charged
+                    df = df.Define('ewLepPt1', 'ewLeptons[0].mass() == 0 ? ewLeptons[1].pt() : ewLeptons[0].pt()')
+                    df = df.Define('ewLepPt2', 'ewLeptons[0].mass() == 0 ? ewLeptons[0].pt() : ewLeptons[1].pt()')
+                    df = df.Define('ewLepEta1', 'ewLeptons[0].mass() == 0 ? ewLeptons[1].eta() : ewLeptons[0].eta()')
+                    df = df.Define('ewLepEta2', 'ewLeptons[0].mass() == 0 ? ewLeptons[0].eta() : ewLeptons[1].eta()')
+                
+                axis_ewLepPt = hist.axis.Regular(100, 0, 100, name = "pt")
+                results.append(df.HistoBoost("nominal_ewLepPt1", [axis_ewLepPt], ["ewLepPt1", "nominal_weight"], storage=hist.storage.Weight()))
+                results.append(df.HistoBoost("nominal_ewLepPt2", [axis_ewLepPt], ["ewLepPt2", "nominal_weight"], storage=hist.storage.Weight()))
+                axis_ewLepEta = hist.axis.Regular(100, -5, 5, name = "eta")
+                results.append(df.HistoBoost("nominal_ewLepEta1", [axis_ewLepEta], ["ewLepEta1", "nominal_weight"], storage=hist.storage.Weight()))
+                results.append(df.HistoBoost("nominal_ewLepEta2", [axis_ewLepEta], ["ewLepEta2", "nominal_weight"], storage=hist.storage.Weight()))
+
+            if args.photonHists:
+                # photon distributions
+                df = df.Define('nPhotons', 'ewPhotons.size()')
+                df = df.Define('leadPhotonPt', 'ewPhotons.size() > 0 ? log10(ewPhotons[0].pt()) : -99')
+                df = df.Define('leadPhotonEta', 'ewPhotons.size() > 0 ? ewPhotons[0].eta() : -99')
+                df = df.Define('sublPhotonPt', 'ewPhotons.size() > 1 ? log10(ewPhotons[1].pt()) : -99')
+                df = df.Define('sublPhotonEta', 'ewPhotons.size() > 1 ? ewPhotons[1].eta() : -99')
+                df = df.Define('trailPhotonPt', 'ewPhotons.size() > 2 ? log10(ewPhotons[2].pt()) : -99')
+                df = df.Define('trailPhotonEta', 'ewPhotons.size() > 2 ? ewPhotons[2].eta() : -99')
+
+                axis_ewNPhotons = hist.axis.Regular(5, 0, 5, name = "n")
+                results.append(df.HistoBoost("nominal_ewPhotons", [axis_ewNPhotons], ["nPhotons", "nominal_weight"], storage=hist.storage.Weight()))
+
+                axis_photonPt = hist.axis.Regular(100, -5, 5, name = "pt")
+                axis_photonEta = hist.axis.Regular(100, -5, 5, name = "eta")
+                results.append(df.HistoBoost("nominal_leadPhoton", [axis_photonPt, axis_photonEta], ["leadPhotonPt", "leadPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
+                results.append(df.HistoBoost("nominal_sublPhoton", [axis_photonPt, axis_photonEta], ["sublPhotonPt", "sublPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
+                results.append(df.HistoBoost("nominal_trailPhoton", [axis_photonPt, axis_photonEta], ["trailPhotonPt", "trailPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
 
     nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Double())
 
     results.append(nominal_gen)
-    if not 'horace' in dataset.name:
+    if not 'horace' in dataset.name and not 'winhac' in dataset.name:
         if "LHEScaleWeight" in df.GetColumnNames():
             df = theory_tools.define_scale_tensor(df)
             syst_tools.add_qcdScale_hist(results, df, nominal_axes, nominal_cols, "nominal_gen")
@@ -146,7 +217,7 @@ def build_graph(df, dataset):
 resultdict = narf.build_and_run(datasets, build_graph)
 output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args, update_name=not args.forceDefaultName)
 
-print("computing angular coefficients")
+logger.info("computing angular coefficients")
 z_moments = None
 w_moments = None
 

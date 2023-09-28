@@ -1,11 +1,8 @@
-import uproot
 import ROOT
-import pathlib
 import hist
 import pickle
 import lz4.frame
 from .correctionsTensor_helper import makeCorrectionsTensor
-from .theory_tools import scale_tensor_axes
 from utilities import common, logging
 import numpy as np
 

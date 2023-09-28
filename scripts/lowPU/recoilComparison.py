@@ -15,7 +15,7 @@ import pickle
 import narf
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 
 def doPlot(tag, qTbin, qTmin, qTmax, h_data, h_mc, h_bkg):
@@ -167,7 +167,7 @@ def param():
 
 def met_recoil_correlation():
 
-    groups_mumu = make_datagroups_lowPU("mz_lowPU_mumu.pkl.lz4", flavor="mumu")
+    groups_mumu = Datagroups("mz_lowPU_mumu.pkl.lz4")
     
     label = "uncorr"
     groups_mumu.setHists("met_recoil_uncorr", "", label=label, procsToRead=["DYmumu"], selectSignal=False)
@@ -709,7 +709,7 @@ if __name__ == "__main__":
         'ymaxR'             : yRatio,
     }   
     
-    groups_mumu = make_datagroups_lowPU("mz_lowPU_mumu.pkl.lz4", flavor="mumu")
+    groups_mumu = Datagroups("mz_lowPU_mumu.pkl.lz4")
     bkg_procs = ['EWK', 'TTbar']
     
     

@@ -133,7 +133,10 @@ def plotPrefitHistograms(hdata2D, hmc2D, outdir_dataMC, xAxisName, yAxisName,
     hMCstat = copy.deepcopy(den2D.Clone("hMCstat"))
     hMCstat.SetTitle("Sum of predicted processes")
     ROOT.wrem.makeHistStatUncertaintyRatio(hMCstat, den2D)
-    drawCorrelationPlot(hMCstat, xAxisName, yAxisName, "#sqrt{#sum w^{2}} / #sqrt{N}",
+    minyMCSum,maxyMCSum = getMinMaxHisto(hMCstat, sumError=False)
+    maxyMCSum = min(1.5,maxyMCSum)
+    minyMCSum = max(0.0, minyMCSum)
+    drawCorrelationPlot(hMCstat, xAxisName, yAxisName, "#sqrt{#sum w^{2}} / #sqrt{N}" + f"::{minyMCSum},{maxyMCSum}",
                         f"MCstatOverPoissonUncRatio_allProcs_{chargeLabel}", plotLabel="ForceTitle", outdir=outdir_dataMC,
                         palette=57, passCanvas=canvas, drawOption="COLZ0", skipLumi=True, zTitleOffSet=1.3)
     for h in hmc2D:
@@ -148,7 +151,10 @@ def plotPrefitHistograms(hdata2D, hmc2D, outdir_dataMC, xAxisName, yAxisName,
             hMCstat_Fake = copy.deepcopy(h.Clone("hMCstat_Fake"))
             hMCstat_Fake.SetTitle("Fake " + chargeLabel)
             ROOT.wrem.makeHistStatUncertaintyRatio(hMCstat_Fake, h)
-            drawCorrelationPlot(hMCstat_Fake, xAxisName, yAxisName, "#sqrt{#sum w^{2}} / #sqrt{N}::2,7",
+            minyFake,maxyFake = getMinMaxHisto(hMCstat_Fake, sumError=False)
+            maxyFake = min(7.0,maxyFake)
+            minyFake = max(0.0, minyFake)
+            drawCorrelationPlot(hMCstat_Fake, xAxisName, yAxisName, "#sqrt{#sum w^{2}} / #sqrt{N}" + f"::{minyFake},{maxyFake}",
                                 f"MCstatOverPoissonUncRatio_Fake_{chargeLabel}", plotLabel="ForceTitle", outdir=outdir_dataMC,
                                 palette=57, passCanvas=canvas, drawOption="COLZ0", skipLumi=True, zTitleOffSet=1.3)
     
@@ -253,19 +259,20 @@ if __name__ == "__main__":
     if not args.pseudodata:
         processes = ["Data"] + processes
     charges = ["plus", "minus"] if args.charges == "both" else [args.charges]
-
+    
     xAxisName = "Muon #eta"
     yAxisName = "Muon p_{T} (GeV)"
 
     colors = colors_plots_
     legEntries = legEntries_plots_
-    for charge in charges:
     
+    for charge in charges:
+
         # read histograms
         nomihists = {}
         infile = safeOpenFile(fname)
         for proc in processes:
-            nomihists[proc] = safeGetObject(infile, f"{proc}/x_{proc}_{charge}", detach=True) # process name as subfolder
+            nomihists[proc] = safeGetObject(infile, f"{proc}/nominal_{proc}_{charge}", detach=True) # process name as subfolder
         if args.pseudodata:
             nomihists["Data"] = safeGetObject(infile, f"{args.pseudodata}_{charge}", detach=True)
         infile.Close()
@@ -275,7 +282,7 @@ if __name__ == "__main__":
 
         outdir_dataMC = f"{outdir}dataMC_{charge}/"
         createPlotDirAndCopyPhp(outdir_dataMC)
-        
+
         plotPrefitHistograms(hdata2D, hmc2D, outdir_dataMC, xAxisName=xAxisName, yAxisName=yAxisName,
                              lumi=args.lumi, ptRangeProjection=args.ptRangeProjection, chargeLabel=charge,
                              canvas=canvas, canvasWide=cwide, canvas1D=canvas1D,

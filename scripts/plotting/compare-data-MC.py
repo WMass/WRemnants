@@ -1,4 +1,4 @@
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 from wremnants import histselections as sel
 from wremnants import plot_tools
 import matplotlib.pyplot as plt
@@ -48,7 +48,7 @@ else: action = lambda x: x.project(args.observable)
 for chn in chns:
     for pdf in args.pdf:
         for pseudo in filter(lambda x: x != pdf, args.pdf):
-            combine_file = make_datagroups_2016(
+            combine_file = Datagroups(
                 f"{combine_files_root_dir}/{args.study}/{pdf}/{pseudo}CEN/WMassCombineInput.root", 
                 combine = True,
                 pseudodata_pdfset = pseudo

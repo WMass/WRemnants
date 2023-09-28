@@ -14,7 +14,7 @@ import lz4.frame
 import pickle
 import narf
 
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 
 
 def doOverlow(h):
@@ -848,7 +848,7 @@ if __name__ == "__main__":
     outDir = "/eos/user/j/jaeyserm/www/wmass/highPU/Z%s_%s/plots%s/" % (flavor, met, suffix)
     functions.prepareDir(outDir, remove=True)
       
-    groups = make_datagroups_2016("mz_wlike_with_mu_eta_pt_%s%s.pkl.lz4" % (met, suffix))
+    groups = Datagroups("mz_wlike_with_mu_eta_pt_%s%s.pkl.lz4" % (met, suffix))
     groups.groups.update({
         "TTbar" : dict(
                 members = [groups.datasets[x] for x in ["TTLeptonicPostVFP", "TTSemileptonicPostVFP", "SingleTschanLepDecaysPostVFP", "SingleTtWAntitopPostVFP", "SingleTtchanAntitopPostVFP", "SingleTtchanTopPostVFP"]],

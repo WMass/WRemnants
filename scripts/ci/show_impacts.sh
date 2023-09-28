@@ -11,5 +11,3 @@ if [ ! -d $2 ]; then
     mkdir -p $2
 fi
 python3 scripts/combine/pullsAndImpacts.py --oneSidedImpacts -f $1 output --outFolder $2 -o $3 --otherExtensions pdf png -n 50
-# Don't limit the number for the html plot
-python3 scripts/combine/pullsAndImpacts.py --oneSidedImpacts -f $1 output --outFolder $2 -o $3 

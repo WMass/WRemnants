@@ -78,7 +78,8 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--make-asymmetry', dest="makeAsymmetry", action="store_true", help="Make ratio of difference over the sum. For this to make sense, the binning of the two inputs must be consistent")
     parser.add_argument('-p', '--make-pulls', dest="makePulls", action="store_true", help="Make pulls of input histograms, i.e. (h1-h2)/error, where error is taken as the quadrature sum of the errors of the input")
     parser.add_argument(       '--pull-error-ScaleFactor', dest='pullErrorScaleFactor', default='1.', type=float, help='Inflate the error by this factor when making the pulls (because it is assumed the inputs are uncorrelated, so the error might need a correction)')
-    parser.add_argument('-u', '--unroll', action="store_true",  help="Make plot of unrilled 1D histogram from the 2D ratio")
+    parser.add_argument('-u', '--unroll', action="store_true",  help="Make plot of unrolled 1D histogram from the 2D ratio (along x)")
+    parser.add_argument(      '--unrolly', action="store_true",  help="Unroll along y instead of along x")
     parser.add_argument(      '--roll1Dto2D', action="store_true",  help="Input histograms are 1D distributions to be unrolled into 2D. Need binning from option --binning-file-to-roll")
     parser.add_argument(      '--binning-file-to-roll', dest="binFileToRoll", default="", help="File with binning to roll 1D into 2D (the reco binning is used)")
     parser.add_argument(      '--drawOption',  default='colz0', type=str, help='Draw option for TH2')
@@ -288,15 +289,37 @@ if __name__ == "__main__":
         )
 
     # unroll 2D ratio into a 1D
-    if args.unroll:
+    if args.unroll or args.unrolly:
         canvas_unroll = ROOT.TCanvas("canvas_unroll","",3000,800)
         bottomMargin = 0.12
         canvas_unroll.SetTickx(1)
         canvas_unroll.SetTicky(1)
         canvas_unroll.cd()
         canvas_unroll.SetBottomMargin(bottomMargin)                                            
-        
-        ratio_unrolled = unroll2Dto1D(hratio, newname=f"unrolled_{hratio.GetName()}", cropNegativeBins=False)
+
+        unrollNameID = "unrolled"
+        xAxisTitle_unroll = f"Unrolled bin: '{yAxisTitle}' vs '{xAxisTitle}'"
+        vertLineDivisions="{a},{b}".format(a=hratio.GetNbinsY(),b=hratio.GetNbinsX())
+        nBinsUnrollVar = hratio.GetNbinsY()
+        unrollAxis = hratio.GetYaxis()
+        if args.unrolly:
+            unrollNameID = "unrolledY"
+            xAxisTitle_unroll = f"Unrolled bin: '{xAxisTitle}' vs '{yAxisTitle}'"
+            vertLineDivisions="{a},{b}".format(a=hratio.GetNbinsX(),b=hratio.GetNbinsY())
+            nBinsUnrollVar = hratio.GetNbinsX()
+            unrollAxis = hratio.GetXaxis()
+
+        unrollBinRanges = []
+        if nBinsUnrollVar > 15:
+            for ibin in range(nBinsUnrollVar):
+                unrollBinRanges.append("") # keep dummy otherwise there's too much text most of the time
+        else:
+            for ibin in range(nBinsUnrollVar):
+                unrollBinRanges.append("#splitline{{{v} in}}{{[{vmin},{vmax}]}}".format(v="x" if args.unrolly else "y",
+                                                                                        vmin=int(unrollAxis.GetBinLowEdge(ibin+1)),
+                                                                                        vmax=int(unrollAxis.GetBinLowEdge(ibin+2))))
+         
+        ratio_unrolled = unroll2Dto1D(hratio, newname=f"{unrollNameID}_{hratio.GetName()}", cropNegativeBins=False, invertUnroll=args.unrolly)
         unitLine = copy.deepcopy(ratio_unrolled.Clone("tmp_horizontalLineAt1"))
         unitLine.Reset("ICESM")
         ratioUnc = copy.deepcopy(ratio_unrolled.Clone("tmp_ratioUnc"))
@@ -308,24 +331,17 @@ if __name__ == "__main__":
             ratioUnc.SetBinContent(ib, 1.0)
             ratioUnc.SetBinError(ib, 0.0 if (args.divideRelativeError or args.divideError) else ratio_unrolled.GetBinError(ib))
             ratio_unrolled.SetBinError(ib, 0.0)
-        yBinRanges = []
-        if hratio.GetNbinsY() > 15:
-            for iybin in range(hratio.GetNbinsY()):
-                yBinRanges.append("") # keep dummy otherwise there's too much text most of the time
-        else:
-            for iybin in range(hratio.GetNbinsY()):
-                yBinRanges.append("#splitline{{y in}}{{[{ptmin},{ptmax}]}}".format(ptmin=int(hratio.GetYaxis().GetBinLowEdge(iybin+1)),
-                                                                                   ptmax=int(hratio.GetYaxis().GetBinLowEdge(iybin+2))))
+
         zAxisTitle_unroll = zAxisTitle if "::" not in zAxisTitle else str(zAxisTitle.split("::")[0])
         whatUncertainty = "numerator" if args.setRatioUnc == "num" else "denominator" if args.setRatioUnc == "den" else "total"
         if args.divideError or args.divideRelativeError:
             drawNTH1([ratio_unrolled, unitLine], [f"Ratio {args.histTitle}", "Unity"],
-                     f"Unrolled bin: '{yAxisTitle}' vs '{xAxisTitle}'", zAxisTitle_unroll,
+                     xAxisTitle_unroll, zAxisTitle_unroll,
                      ratio_unrolled.GetName(), outname,
                      leftMargin=0.06, rightMargin=0.01,
                      legendCoords="0.06,0.99,0.91,0.99;3", lowerPanelHeight=0.0, skipLumi=True, passCanvas=canvas_unroll,
-                    drawVertLines="{a},{b}".format(a=hratio.GetNbinsY(),b=hratio.GetNbinsX()),
-                     textForLines=yBinRanges, transparentLegend=False,
+                     drawVertLines=vertLineDivisions,
+                     textForLines=unrollBinRanges, transparentLegend=False,
                      onlyLineColor=True, useLineFirstHistogram=True, drawErrorAll=True, lineWidth=1,
                      colorVec=[ROOT.kRed])
         else:
@@ -333,12 +349,12 @@ if __name__ == "__main__":
             legUnrollHists = [f"Ratio {args.histTitle}", f"Uncertainty ({whatUncertainty})", "Unity"]
             colorUnrollHists = [ROOT.kBlack, ROOT.kRed] # only from second histogram onwards
             drawNTH1(unrollHists, legUnrollHists,
-                     f"Unrolled bin: '{yAxisTitle}' vs '{xAxisTitle}'", zAxisTitle_unroll,
+                     xAxisTitle_unroll, zAxisTitle_unroll,
                      ratio_unrolled.GetName(), outname,
                      leftMargin=0.06, rightMargin=0.01,
                      legendCoords="0.06,0.99,0.91,0.99;3", lowerPanelHeight=0.0, skipLumi=True, passCanvas=canvas_unroll,
-                     drawVertLines="{a},{b}".format(a=hratio.GetNbinsY(),b=hratio.GetNbinsX()),
-                     textForLines=yBinRanges, transparentLegend=False,
+                     drawVertLines=vertLineDivisions,
+                     textForLines=unrollBinRanges, transparentLegend=False,
                      onlyLineColor=False, useLineFirstHistogram=True, drawErrorAll=True, lineWidth=1,
                      fillStyleSecondHistogram=1001, fillColorSecondHistogram=ROOT.kGray,
                      colorVec=colorUnrollHists)

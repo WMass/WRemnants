@@ -67,43 +67,26 @@ def make_corr_helper_fromnp(filename=f"{common.data_dir}/N3LLCorrections/inclusi
     corrh[:,hist.overflow,...] = 1.
     corrh[:,:,hist.overflow,...] = 1.
 
-    return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper, tensor_rank=1)
+    return makeCorrectionsTensor(corrh)
+
+def load_corr_hist(filename, proc, histname):
+    with lz4.frame.open(filename) as f:
+        corr = pickle.load(f)
+        corrh = corr[proc][histname]
+    return corrh
 
 def make_corr_helper(filename, proc, histname):
-    with lz4.frame.open(filename) as f:
-        corr = pickle.load(f)
-        corrh = corr[proc][histname]
-
-    return makeCorrectionsTensor(corrh, ROOT.wrem.TensorCorrectionsHelper, tensor_rank=1)
+    corrh = load_corr_hist(filename, proc, histname)
+    return makeCorrectionsTensor(corrh)
 
 def make_corr_by_helicity_helper(filename, proc, histname):
-    with lz4.frame.open(filename) as f:
-        corr = pickle.load(f)
-        corrh = corr[proc][histname]
-
+    corrh = load_corr_hist(filename, proc, histname)
     return makeCorrectionsTensor(corrh, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3)
 
 def get_corr_name(generator):
     # Hack for now
     label = generator.replace("1D", "")
     return f"{label}_minnlo_ratio" if "Helicity" not in generator else f"{label.replace('Helicity', '')}_minnlo_coeffs"
-
-def load_corr_helpers(procs, generators):
-    corr_helpers = {}
-    for proc in procs:
-        corr_helpers[proc] = {}
-        for generator in generators:
-            fname = f"{common.data_dir}/TheoryCorrections/{generator}Corr{proc[0]}.pkl.lz4"
-            if not os.path.isfile(fname):
-                logger.warning(f"Did not find correction file for process {proc}, generator {generator}. No correction will be applied for this process!")
-                continue
-            corr_hist_name = get_corr_name(generator)
-            helper_func = make_corr_helper if "Helicity" not in generator else make_corr_by_helicity_helper
-            corr_helpers[proc][generator] = helper_func(fname, proc[0], corr_hist_name)
-    for generator in generators:
-        if not any([generator in corr_helpers[proc] for proc in procs]):
-            raise ValueError(f"Did not find correction for generator {generator} for any processes!")
-    return corr_helpers
 
 def rebin_corr_hists(hists, ndim=-1, use_predefined_bins=False):
     # Allow trailing dimensions to be different (e.g., variations)

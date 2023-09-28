@@ -7,6 +7,7 @@ import narf
 import wremnants
 from wremnants import theory_tools,syst_tools,theory_corrections, muon_validation, muon_calibration, muon_selections, unfolding_tools
 from wremnants.histmaker_tools import scale_to_data, aggregate_groups
+from wremnants.datasets.dataset_tools import getDatasets
 import hist
 import lz4.frame
 import math
@@ -14,6 +15,8 @@ import time
 import os
 import numpy as np
 
+parser = common.set_parser_default(parser, "genVars", ["qGen", "ptGen", "absEtaGen"])
+parser = common.set_parser_default(parser, "genBins", [17, 0])
 parser = common.set_parser_default(parser, "pt", [34, 26, 60])
 parser = common.set_parser_default(parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"])
 
@@ -21,10 +24,10 @@ args = parser.parse_args()
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 thisAnalysis = ROOT.wrem.AnalysisType.Wlike
-datasets = wremnants.datasets2016.getDatasets(maxFiles=args.maxFiles,
-                                              filt=args.filterProcs,
-                                              excl=args.excludeProcs, 
-                                              nanoVersion="v8" if args.v8 else "v9", base_path=args.dataPath)
+datasets = getDatasets(maxFiles=args.maxFiles,
+                        filt=args.filterProcs,
+                        excl=args.excludeProcs, 
+                        nanoVersion="v8" if args.v8 else "v9", base_path=args.dataPath)
 
 era = args.era
 
@@ -46,8 +49,8 @@ template_maxpt = args.pt[2]
 logger.info(f"Pt binning: {template_npt} bins from {template_minpt} to {template_maxpt}")
 
 # standard regular axes
-axis_eta = hist.axis.Regular(template_neta, template_mineta, template_maxeta, name = "eta", overflow=not args.excludeFlow, underflow=not args.excludeFlow)
-axis_pt = hist.axis.Regular(template_npt, template_minpt, template_maxpt, name = "pt", overflow=not args.excludeFlow, underflow=not args.excludeFlow)
+axis_eta = hist.axis.Regular(template_neta, template_mineta, template_maxeta, name = "eta", overflow=False, underflow=False)
+axis_pt = hist.axis.Regular(template_npt, template_minpt, template_maxpt, name = "pt", overflow=False, underflow=False)
 
 # categorical axes in python bindings always have an overflow bin, so use a regular
 # axis for the charge
@@ -81,15 +84,19 @@ logger.info(f"SF file: {args.sfFile}")
 
 pileup_helper = wremnants.make_pileup_helper(era = era)
 
-mc_jpsi_crctn_helper, data_jpsi_crctn_helper = muon_calibration.make_jpsi_crctn_helpers(args)
+calib_filepaths = common.calib_filepaths
+closure_filepaths = common.closure_filepaths
+diff_weights_helper = ROOT.wrem.SplinesDifferentialWeightsHelper(calib_filepaths['tflite_file']) if (args.muonScaleVariation == 'smearingWeightsSplines' or args.validationHists) else None
+mc_jpsi_crctn_helper, data_jpsi_crctn_helper, mc_jpsi_crctn_unc_helper, data_jpsi_crctn_unc_helper = muon_calibration.make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=True)
+z_non_closure_parametrized_helper, z_non_closure_binned_helper = muon_calibration.make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths)
 
 mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper = muon_calibration.make_muon_calibration_helpers(args)
 
-smearing_helper = muon_calibration.make_muon_smearing_helpers() if args.smearing else None
+smearing_helper, smearing_uncertainty_helper = (None, None) if args.noSmearing else muon_calibration.make_muon_smearing_helpers()
 
 bias_helper = muon_calibration.make_muon_bias_helpers(args) if args.biasCalibration else None
 
-corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, args.theoryCorr)
+corr_helpers = theory_corrections.load_corr_helpers([d.name for d in datasets if d.name in common.vprocs], args.theoryCorr)
 
 # recoil initialization
 if not args.noRecoil:
@@ -140,11 +147,11 @@ def build_graph(df, dataset):
     df = muon_calibration.define_corrected_muons(df, cvh_helper, jpsi_helper, args, dataset, smearing_helper, bias_helper)
 
     df = muon_selections.select_veto_muons(df, nMuons=2)
-    df = muon_selections.select_good_muons(df, nMuons=2, use_trackerMuons=args.trackerMuons, use_isolation=True)
+    df = muon_selections.select_good_muons(df, template_minpt, template_maxpt, nMuons=2, use_trackerMuons=args.trackerMuons, use_isolation=True)
 
     df = muon_selections.define_trigger_muons(df, what_analysis=thisAnalysis)
 
-    df = muon_selections.select_z_candidate(df, template_minpt, template_maxpt, mass_min, mass_max)
+    df = muon_selections.select_z_candidate(df, mass_min, mass_max)
 
     df = muon_selections.select_standalone_muons(df, dataset, args.trackerMuons, "trigMuons")
     df = muon_selections.select_standalone_muons(df, dataset, args.trackerMuons, "nonTrigMuons")
@@ -206,7 +213,7 @@ def build_graph(df, dataset):
     nominal = df.HistoBoost("nominal", axes, [*cols, "nominal_weight"])
     results.append(nominal)
 
-    if not args.noRecoil:
+    if not args.noRecoil and args.recoilUnc:
         df = recoilHelper.add_recoil_unc_Z(df, results, dataset, cols, axes, "nominal")
 
     if not dataset.is_data and not args.onlyMainHistograms:
@@ -220,11 +227,70 @@ def build_graph(df, dataset):
 
             df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, axes, cols, for_wmass=False)
 
-            # Don't think it makes sense to apply the mass weights to scale leptons from tau decays
-            if not "tau" in dataset.name:
-                syst_tools.add_muonscale_hist(
-                    results, df, args.muonCorrEtaBins, args.muonCorrMag, isW, axes, cols,
-                    muon_eta="trigMuons_eta0")
+            reco_sel = "vetoMuonsPre"
+            require_prompt = "tau" not in dataset.name
+            df = muon_calibration.define_genFiltered_recoMuonSel(df, reco_sel, require_prompt)
+            reco_sel_GF = muon_calibration.getColName_genFiltered_recoMuonSel(reco_sel, require_prompt)
+            df = muon_calibration.define_matched_gen_muons_kinematics(df, reco_sel_GF)
+            df = muon_calibration.calculate_matched_gen_muon_kinematics(df, reco_sel_GF)
+            df = muon_calibration.define_matched_reco_muon_kinematics(df, reco_sel_GF)
+
+            ####################################################
+            # nuisances from the muon momemtum scale calibration 
+            if (args.muonCorrData in ["massfit", "lbl_massfit"]):
+                input_kinematics = [
+                    f"{reco_sel_GF}_recoPt",
+                    f"{reco_sel_GF}_recoEta",
+                    f"{reco_sel_GF}_recoCharge",
+                    f"{reco_sel_GF}_genPt",
+                    f"{reco_sel_GF}_genEta",
+                    f"{reco_sel_GF}_genCharge"
+                ]
+                if diff_weights_helper:
+                    df = df.Define(f'{reco_sel_GF}_response_weight', diff_weights_helper, [*input_kinematics])
+                    input_kinematics.append(f'{reco_sel_GF}_response_weight')
+
+                # muon scale variation from stats. uncertainty on the jpsi massfit
+                df = df.Define(
+                    "nominal_muonScaleSyst_responseWeights_tensor", data_jpsi_crctn_unc_helper,
+                    [*input_kinematics, "nominal_weight"]
+                )
+                muonScaleSyst_responseWeights = df.HistoBoost(
+                    "nominal_muonScaleSyst_responseWeights", axes,
+                    [*cols, "nominal_muonScaleSyst_responseWeights_tensor"],
+                    tensor_axes = data_jpsi_crctn_unc_helper.tensor_axes, storage=hist.storage.Double()
+                )
+                results.append(muonScaleSyst_responseWeights)
+
+                df = muon_calibration.add_resolution_uncertainty(df, axes, results, cols, smearing_uncertainty_helper, reco_sel_GF)
+
+                # add the ad-hoc Z non-closure nuisances from the jpsi massfit to muon scale unc
+                df = df.DefinePerSample("AFlag", "0x01")
+                df = df.Define(
+                    "Z_non_closure_parametrized_A", z_non_closure_parametrized_helper,
+                    [*input_kinematics, "nominal_weight", "AFlag"]
+                )
+                hist_Z_non_closure_parametrized_A = df.HistoBoost(
+                    "nominal_Z_non_closure_parametrized_A",
+                    axes, [*cols, "Z_non_closure_parametrized_A"],
+                    tensor_axes = z_non_closure_parametrized_helper.tensor_axes,
+                    storage=hist.storage.Double()
+                )
+                results.append(hist_Z_non_closure_parametrized_A)
+
+                df = df.DefinePerSample("MFlag", "0x04")
+                df = df.Define(
+                    "Z_non_closure_parametrized_M", z_non_closure_parametrized_helper,
+                    [*input_kinematics, "nominal_weight", "MFlag"]
+                )
+                hist_Z_non_closure_parametrized_M = df.HistoBoost(
+                    "nominal_Z_non_closure_parametrized_M",
+                    axes, [*cols, "Z_non_closure_parametrized_M"],
+                    tensor_axes = z_non_closure_parametrized_helper.tensor_axes,
+                    storage=hist.storage.Double()
+                )
+                results.append(hist_Z_non_closure_parametrized_M)
+            ####################################################
 
     if hasattr(dataset, "out_of_acceptance"):
         # Rename dataset to not overwrite the original one

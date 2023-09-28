@@ -18,7 +18,7 @@ import lz4.frame
 import pickle
 import narf
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 
 
@@ -982,7 +982,7 @@ if __name__ == "__main__":
     functions.prepareDir(outDir, remove=True)
     
     print("Open")
-    groups = make_datagroups_lowPU("lowPU_%s_%s%s.pkl.lz4" % (flavor, met, suffix), flavor=flavor)
+    groups = Datagroups("lowPU_%s_%s%s.pkl.lz4" % (flavor, met, suffix), flavor=flavor)
     
     if flavor == "mumu":
         procs, data = ['EWK', 'Top', 'Zmumu'], 'SingleMuon'

@@ -137,7 +137,7 @@ only_central_pdf_datasets = [
     "Zmumu_bugfix_slc7",
 ]
 
-extended_pdf_datasets = [x for x in common.vprocs+common.vprocs_lowpu if not any(y in x for y in ["NNLOPS", "MiNLO"])]
+extended_pdf_datasets = [x for x in common.vprocs_all if not any(y in x for y in ["NNLOPS", "MiNLO"])]
 
 def define_prefsr_vars(df):
     if "prefsrLeps" in df.GetColumnNames():
@@ -160,6 +160,9 @@ def define_prefsr_vars(df):
     return df
 
 def define_scale_tensor(df):
+    if "scaleWeights_tensor" in df.GetColumnNames():
+        logger.debug("scaleWeight_tensor already defined, do nothing here.")
+        return df
     # convert vector of scale weights to 3x3 tensor and clip weights to |weight|<10.
     df = df.Define("scaleWeights_tensor", f"wrem::makeScaleTensor(LHEScaleWeight, theory_weight_truncate);")
     df = df.Define("scaleWeights_tensor_wnom", "auto res = scaleWeights_tensor; res = nominal_weight*res; return res;")
@@ -167,15 +170,21 @@ def define_scale_tensor(df):
     return df
 
 def define_ew_vars(df):
-    df = df.Define("ewLeptons", "wrem::ewLeptons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_genPartIdxMother, GenPart_pt, GenPart_eta, GenPart_phi)")
+    df = df.Define("ewLeptons", "wrem::ewLeptons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_pt, GenPart_eta, GenPart_phi)")
     df = df.Define("ewPhotons", "wrem::ewPhotons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_pt, GenPart_eta, GenPart_phi)")
+    df = df.Define('ewGenV', 'wrem::ewGenVPhos(ewLeptons, ewPhotons)')
     df = df.Define('ewMll', '(ewLeptons[0]+ewLeptons[1]).mass()')
-    df = df.Define('ewMlly', 'wrem::ewMLepPhos(ewLeptons, ewPhotons)')
+    df = df.Define('ewMlly', 'ewGenV.mass()')
     df = df.Define('ewLogDeltaM', 'log10(ewMlly-ewMll)')
+
+    df = df.Define('ewPTll', '(ewLeptons[0]+ewLeptons[1]).pt()')
+    df = df.Define('ewPTlly', 'ewGenV.pt()')
+    df = df.Define('ewYll', '(ewLeptons[0]+ewLeptons[1]).Rapidity()')
+    df = df.Define('ewYlly', 'ewGenV.Rapidity()')
 
     return df
 
-def make_ew_binning(mass = 91.1535, width = 2.4932, initialStep = 0.1):
+def make_ew_binning(mass = 91.1535, width = 2.4932, initialStep = 0.1, bin_edges_low=[], bin_edges_high=[]):
     maxVal = ROOT.Math.breitwigner_pdf(mass, width, mass)
     bins = [mass]
     currentMass = mass
@@ -187,6 +196,12 @@ def make_ew_binning(mass = 91.1535, width = 2.4932, initialStep = 0.1):
         if lowMass - binSize > 0:
             bins.insert(0, lowMass)
     bins.insert(0, 0.)
+
+    if bin_edges_low:
+        bins = bin_edges_low + [b for b in bins if b > bin_edges_low[-1]][1:]
+    if bin_edges_high:
+        bins = [b for b in bins if b < bin_edges_high[-1]][:-1] + bin_edges_high
+
     return bins
 
 def pdf_info_map(dataset, pdfset):
@@ -199,6 +214,7 @@ def pdf_info_map(dataset, pdfset):
 def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
     if dataset_name not in common.vprocs_all or \
             "horace" in dataset_name or \
+            "winhac" in dataset_name or \
             "LHEPdfWeight" not in df.GetColumnNames():
         logger.warning(f"Did not find PDF weights for sample {dataset_name}! Using nominal PDF in sample")
         return df
@@ -278,14 +294,16 @@ def build_weight_expr(df, exclude_weights=[]):
 
     if "extra_weight" in valid_cols:
         logger.info("Adding additional weight '{extra_weight}'")
-        found_weights.append(extra_weight)
+        found_weights.append("extra_weight")
 
     weight_expr = "*".join(found_weights)
+
     logger.debug(f"Weight is {weight_expr}")
 
     return weight_expr
 
 def define_nominal_weight(df):
+    logger.debug("Defining nominal weight")
     return df.Define(f"nominal_weight", build_weight_expr(df))
 
 def define_theory_corr(df, dataset_name, helpers, generators, modify_central_weight):
@@ -295,7 +313,6 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
 
     if not modify_central_weight or not generators or generators[0] not in dataset_helpers:
         df = df.DefinePerSample("theory_corr_weight", "1.0")
-        return df
 
     for i, generator in enumerate(generators):
         if generator not in dataset_helpers:
@@ -310,17 +327,16 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
         elif 'ew' in generator:
             # Used as a placeholder to match the helper dimensionality 
             df = df.DefinePerSample(f"{generator}Dummy", "0.")
-            multiplicative_weight = i != 0 and modify_central_weight
             if i != 0 and modify_central_weight:
-                df = df.Define(f"ew_corr_weight", build_weight_expr(df))
+                df = df.Define(f"ew_{generator}corr_weight", build_weight_expr(df))
             else:
-                df = df.Alias("ew_corr_weight", "nominal_weight_uncorr")
-            df = df.Define(f"{generator}Weight_tensor", helper, ["ewMll", "ewLogDeltaM", f"{generator}Dummy", "chargeVgen", "ew_corr_weight"]) # multiplying with nominal QCD weight
+                df = df.Alias(f"ew_{generator}corr_weight", "nominal_weight_uncorr")
+            df = df.Define(f"{generator}Weight_tensor", helper, [*helper.hist.axes.name[:-2], "chargeVgen", f"ew_{generator}corr_weight"]) # multiplying with nominal QCD weight
         else:
             df = df.Define(f"{generator}Weight_tensor", helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", "nominal_weight_uncorr"])
 
         if i == 0 and modify_central_weight:
-            df = df.Define("theory_corr_weight", f"{generator}Weight_tensor(0)/nominal_weight_uncorr")
+            df = df.Define("theory_corr_weight", f"nominal_weight_uncorr == 0 ? 0 : {generator}Weight_tensor(0)/nominal_weight_uncorr")
 
     return df
 
@@ -343,21 +359,22 @@ def make_theory_corr_hists(df, name, axes, cols, helpers, generators, modify_cen
         var_axis = helpers[generator].tensor_axes[-1]
 
         # special treatment for Omega since it needs to be decorrelated in charge and rapidity
-        if any(var_label.startswith("Omega") for var_label in var_axis):
+        if isinstance(var_axis, hist.axis.StrCategory) and any(var_label.startswith("Omega") for var_label in var_axis):
             omegaidxs = [var_axis.index(var_label) for var_label in var_axis if var_label.startswith("Omega")]
 
             # include nominal as well
             omegaidxs = [0] + omegaidxs
 
-            df = df.Define(f"{generator}Omega",
-                            f"""
-                            constexpr std::array<std::ptrdiff_t, {len(omegaidxs)}> idxs = {{{",".join([str(idx) for idx in omegaidxs])}}};
-                            Eigen::TensorFixedSize<double, Eigen::Sizes<{len(omegaidxs)}>> res;
-                            for (std::size_t i = 0; i < idxs.size(); ++i) {{
-                              res(i) = {generator}Weight_tensor(idxs[i]);
-                            }}
-                            return res;
-                            """)
+            if f"{generator}Omega" not in df.GetColumnNames():
+                df = df.Define(f"{generator}Omega",
+                                f"""
+                                constexpr std::array<std::ptrdiff_t, {len(omegaidxs)}> idxs = {{{",".join([str(idx) for idx in omegaidxs])}}};
+                                Eigen::TensorFixedSize<double, Eigen::Sizes<{len(omegaidxs)}>> res;
+                                for (std::size_t i = 0; i < idxs.size(); ++i) {{
+                                res(i) = {generator}Weight_tensor(idxs[i]);
+                                }}
+                                return res;
+                                """)
 
             axis_Omega = hist.axis.StrCategory([var_axis[idx] for idx in omegaidxs], name = var_axis.name)
 

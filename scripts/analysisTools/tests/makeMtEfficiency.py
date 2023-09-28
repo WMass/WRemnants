@@ -3,14 +3,25 @@
 # python w-mass-13TeV/makeMtEfficiency.py plots/testNanoAOD/WmassPlots/histograms_isoChargeMtPtEta_fakeRegion_deepMET_NanoV9/checkPlots_lowIso_plus/postVFP//plots_fakerate.root --mt mt_MET mt_deepMET --mtleg PFMET deepMET --signal Wmunu_plus;   python w-mass-13TeV/makeMtEfficiency.py plots/testNanoAOD/WmassPlots/histograms_isoChargeMtPtEta_fakeRegion_deepMET_NanoV9/checkPlots_highIso_plus/postVFP//plots_fakerate.root --mt mt_MET mt_deepMET --mtleg PFMET deepMET --signal Wmunu_plus;   python w-mass-13TeV/makeMtEfficiency.py plots/testNanoAOD/WmassPlots/histograms_isoChargeMtPtEta_fakeRegion_deepMET_NanoV9/checkPlots_lowIso_plus_1morejet/postVFP//plots_fakerate.root --mt mt_MET mt_deepMET --mtleg PFMET deepMET --signal Wmunu_plus --invertmt;   python w-mass-13TeV/makeMtEfficiency.py plots/testNanoAOD/WmassPlots/histograms_isoChargeMtPtEta_fakeRegion_deepMET_NanoV9/checkPlots_highIso_plus_1morejet/postVFP//plots_fakerate.root --mt mt_MET mt_deepMET --mtleg PFMET deepMET --signal Wmunu_plus --invertmt
 
 # take mT distributions and check S/B for different mT cuts (ideally done for low isolation region without mT cuts)
-import re
-import os, os.path
-import logging
+import os, os.path, re, array, math
+import time
 import argparse
 import shutil
 import ctypes
 
-## safe batch mode
+import narf
+import narf.fitutils
+import wremnants
+import hist
+import lz4.frame, pickle
+from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants import histselections as sel
+
+import numpy as np
+
+from utilities import boostHistHelpers as hh, common, logging
+
+## safe batch mode                                 
 import sys
 args = sys.argv[:]
 sys.argv = ['-b']
@@ -21,19 +32,16 @@ ROOT.PyConfig.IgnoreCommandLineOptions = True
 
 from copy import *
 
-#sys.path.append(os.getcwd() + "/plotUtils/")
-#from utility import *
 from scripts.analysisTools.plotUtils.utility import *
-
-sys.path.append(os.getcwd())
-# now using the C++ version, it is much faster
 from scripts.analysisTools.tests.cropNegativeTemplateBins import cropNegativeContent
 
-logging.basicConfig(level=logging.INFO)
-
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("rootfile", type=str, nargs=1, help="Input file with histograms")
+    parser.add_argument("hdf5fileDeepMet", type=str, nargs=1, help="Input file with histograms for deepMet")
+    parser.add_argument("hdf5filePFMet", type=str, nargs=1, help="Input file with histograms for PFMet")
+    parser.add_argument("outputfolder",  type=str, nargs=1)
+    
     parser.add_argument("--mt", type=str, nargs="+", default=["mt_MET"], help="mt histograms to use")
     parser.add_argument("--mtleg", type=str, nargs="+", default=["PFMET"], help="mt name for legend")
     parser.add_argument("--signal", type=str, default="Wmunu_plus", help="Process to be used for signal efficiency")
@@ -43,14 +51,36 @@ if __name__ == "__main__":
            
     fname = args.rootfile[0]
     postfix = f"_{args.postfix}" if args.postfix else ""
-    outdir = os.path.dirname(fname) + f"/mtCutEfficiency{postfix}/"
+    outdir = f"{args.outputfolder[0]}/mtCutEfficiency{postfix}/"
     createPlotDirAndCopyPhp(outdir)
     
     ROOT.TH1.SetDefaultSumw2()
-
+    
     nomihists = {}
     hqcd = {}
     hother = {}
+
+def getHistograms(inputfile):
+    
+    groups = make_datagroups_2016(inputfile, applySelection=False)
+    datasets = groups.getNames() # this has all the original defined groups
+    datasetsNoQCD = list(filter(lambda x: x != "QCD", datasets)) # exclude QCD MC if present
+    logger.info(f"All original datasets available {datasets}")
+    inputHistName = "mTStudyForFakes"
+    groups.setNominalName(inputHistName)
+    groups.loadHistsForDatagroups(inputHistName, syst="", procsToRead=datasets, applySelection=False)
+    histInfo = groups.getDatagroups() # keys are same as returned by groups.getNames() 
+    rootHists = {d: None for d in datasetsNoQCD}
+    s = hist.tag.Slicer()
+    for d in datasets:
+        #print(d)
+        hnarf = histInfo[d].hists[inputHistName]
+        # start integrating
+        hnarf = hnarf[{"eta" : s[::hist.sum],
+                       "pt" : s[0:hist.len:hist.sum], # make sure to remove overflow here, we often don't cut on pt 
+                       "hasJets": s[::hist.sum]
+                
+    
     # read histograms
     infile = safeOpenFile(fname)
     for mt in args.mt:
@@ -64,7 +94,7 @@ if __name__ == "__main__":
             if mt not in name:
                 continue
             proc = name.split(f"{mt}_")[1]
-            print(f">>> Reading {name}: process {proc}")
+            print(f"--> Reading {name}: process {proc}")
             nomihists[mt][proc] = safeGetObject(infile, name, detach=True)
         hqcd[mt] = copy.deepcopy(nomihists[mt]["data"].Clone(f"{mt}_data_fakes"))
         hqcd[mt].Add(nomihists[mt]["background"],-1.0) # "background includes everything but data

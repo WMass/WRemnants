@@ -124,6 +124,7 @@ if __name__ == "__main__":
     parser.add_argument(     '--systPostfix', type=str, default=None, help="Postfix for plot showing some syst variations")
     parser.add_argument(     '--fakeSystToW', default=False , action='store_true',   help='Make additional plots where systs on fakes are translated into signal variation')
     parser.add_argument(     '--sumFakeAndW', default=False , action='store_true',   help='In addition to other plots, and as alternative to --fakeSystToW, sum Fake and W and show variations from varying signal or Fake only')
+    parser.add_argument(     '--difference', dest='addDifference',  action='store_true', help='Also plot difference of syst and nomi, not just their ratio')
     args = parser.parse_args()
 
     doUnrolled = (args.plot == "unrolled") or (args.plot == "all")
@@ -143,7 +144,7 @@ if __name__ == "__main__":
     
     processes = args.processes.split(',')
     inputsysts = args.systematics.split(',')
-    regexp_syst = re.compile(args.systematics.replace(',','|'))
+    regexp_syst = re.compile(args.systematics.replace(",","|"))
 
     transformFakeIntoSignalVariation = False
     if args.fakeSystToW:
@@ -186,13 +187,14 @@ if __name__ == "__main__":
             f = rf.GetDirectory(p)
             #f.cd(p)
         if isWrem:
-            nominals[p] = safeGetObject(f, f"x_{p}_{args.charge}")
+            nominals[p] = safeGetObject(f, f"nominal_{p}_{args.charge}")
         else:
-            nominals[p] = safeGetObject(f, f"x_{p}")
+            nominals[p] = safeGetObject(f, f"nominal_{p}")
         nominals[p].SetTitle(p)
         if args.plotNominal:
             if do2D:
-                drawCorrelationPlot(nominals[p], "Muon #eta", "Muon p_{T} (GeV)", f"Events",
+                minnomi,maxnomi = getMinMaxHisto(nominals[p], excludeEmpty=True, sumError=False)
+                drawCorrelationPlot(nominals[p], "Muon #eta", "Muon p_{T} (GeV)", f"Events::{minnomi},{maxnomi}",
                                     nominals[p].GetName(), plotLabel="ForceTitle", outdir=outdir,
                                     smoothPlot=False, drawProfileX=False, scaleToUnitArea=False, draw_both0_noLog1_onlyLog2=1,
                                     palette=args.palette, nContours=args.nContours, invertePalette=args.invertePalette,
@@ -216,6 +218,9 @@ if __name__ == "__main__":
                 ratio_unrolled = unroll2Dto1D(h_relativeStatUnc, newname=f"unrolled_{h_relativeStatUnc.GetName()}", cropNegativeBins=False)
                 plotUnrolledHistogram(ratio_unrolled, p, f"relStatUnc_{args.charge}", outdir, canvas_unroll, h_relativeStatUnc, yAxisTitle="Relative stat uncertainty", channelCharge=args.charge)
 
+    if args.plotStat:
+        quit()
+                
     systList = {p : [] for p in processes}
     systLeg  = {p : [] for p in processes}
     systList_eta = {p : [] for p in processes}
@@ -240,82 +245,112 @@ if __name__ == "__main__":
         systList_WmunuAndFake_pt[-1].Add(systList_pt["Fake"][-1])
 
     # now make a full loop for systematics
-        
-    for k in f.GetListOfKeys():
-        name = k.GetName()
-        if isWrem and not name.endswith(args.charge): continue
-        # check name also allowing for perfect matching
-        if not any(x in name for x in inputsysts) and not regexp_syst.match(name): continue
-
-        # TODO: find more general way to split name, if process or syst name has underscores
-        if isWrem:
-            tokens = name.split("_")
-            pname = f"{tokens[1]}"
-            if pname not in processes: continue
-            sname = f"{'_'.join(tokens[2:-1])}"
-            snameLeg = sname.replace("effStatSmooth", "effStat").replace("qall","")
-            systLeg[pname].append(snameLeg)
-            sname += f"_{args.charge}"
+    for p in processes:
+        if (rf.GetDirectory(p)):
+            print(f"Browsing file into subfolder {p}")
+            f = rf.GetDirectory(p)
         else:
-            tokens = name.split("__") # remove "x_" and name of nuisance
-            #print(tokens)
-            pname = tokens[0].lstrip("x_")
-            if pname not in processes: continue
-            sname = tokens[1]
-            systLeg[pname].append(sname)
+            print(f"Warning: didn't find folder {p}, skipping it")
+            continue
+        for k in f.GetListOfKeys():
+            name = k.GetName()
+            if isWrem and not name.endswith(args.charge): continue
+            # check name also allowing for perfect matching
+            if not any(x in name for x in inputsysts) and not regexp_syst.match(name): continue
 
-        alternate = f.Get(name)
-        alternate.SetDirectory(0)    
-        systList[pname].append(unroll2Dto1D(alternate, newname=f"unrolled_{alternate.GetName()}", cropNegativeBins=False))
-        systList_eta[pname].append(alternate.ProjectionX(f"{alternate.GetName()}_eta", 1, alternate.GetNbinsY(), "e"))
-        systList_pt[pname].append( alternate.ProjectionY(f"{alternate.GetName()}_pt",  1, alternate.GetNbinsX(), "e"))
-        if transformFakeIntoSignalVariation and pname == "Fake":
-            systList_FakeOnSignal.append(copy.deepcopy(systList[pname][-1].Clone(f"unrolled_{alternate.GetName()}_FakeOnSignal")))
-            systList_eta_FakeOnSignal.append(copy.deepcopy(systList_eta[pname][-1].Clone(f"{alternate.GetName()}_eta_FakeOnSignal")))
-            systList_pt_FakeOnSignal.append(copy.deepcopy(systList_pt[pname][-1].Clone(f"{alternate.GetName()}_pt_FakeOnSignal")))
-            # subtract nominal
-            systList_FakeOnSignal[-1].Add(systList["Fake"][0], -1.0)
-            systList_eta_FakeOnSignal[-1].Add(systList_eta["Fake"][0], -1.0)
-            systList_pt_FakeOnSignal[-1].Add(systList_pt["Fake"][0], -1.0)
-            # add nominal signal
-            systList_FakeOnSignal[-1].Add(systList["Wmunu"][0])
-            systList_eta_FakeOnSignal[-1].Add(systList_eta["Wmunu"][0])
-            systList_pt_FakeOnSignal[-1].Add(systList_pt["Wmunu"][0])
-                
-        ratio = alternate.Clone(f"systRatio_{sname}")
-        if args.plotSystOriginal:
+            # TODO: find more general way to split name, if process or syst name has underscores
+            if isWrem:
+                if len(processes) == 1:
+                    pname = processes[0]
+                    tokens = name.split("_")
+                    sname = name.split(f"{pname}_")[1]
+                    sname = f"{'_'.join(sname.split('_')[:-1])}"
+                else:
+                    tokens = name.split("_")
+                    pname = f"{tokens[1]}"
+                    sname = f"{'_'.join(tokens[2:-1])}"
+                if pname not in processes: continue
+                snameLeg = sname.replace("effStatSmooth", "effStat").replace("qall","")
+                systLeg[pname].append(snameLeg)
+                sname += f"_{args.charge}"
+            else:
+                tokens = name.split("__") # remove "x_" and name of nuisance
+                #print(tokens)
+                pname = tokens[0].lstrip("x_")
+                if pname not in processes: continue
+                sname = tokens[1]
+                systLeg[pname].append(sname)
+
+            alternate = f.Get(name)
+            alternate.SetDirectory(0)    
+            systList[pname].append(unroll2Dto1D(alternate, newname=f"unrolled_{alternate.GetName()}", cropNegativeBins=False))
+            systList_eta[pname].append(alternate.ProjectionX(f"{alternate.GetName()}_eta", 1, alternate.GetNbinsY(), "e"))
+            systList_pt[pname].append( alternate.ProjectionY(f"{alternate.GetName()}_pt",  1, alternate.GetNbinsX(), "e"))
+            if transformFakeIntoSignalVariation and pname == "Fake":
+                systList_FakeOnSignal.append(copy.deepcopy(systList[pname][-1].Clone(f"unrolled_{alternate.GetName()}_FakeOnSignal")))
+                systList_eta_FakeOnSignal.append(copy.deepcopy(systList_eta[pname][-1].Clone(f"{alternate.GetName()}_eta_FakeOnSignal")))
+                systList_pt_FakeOnSignal.append(copy.deepcopy(systList_pt[pname][-1].Clone(f"{alternate.GetName()}_pt_FakeOnSignal")))
+                # subtract nominal
+                systList_FakeOnSignal[-1].Add(systList["Fake"][0], -1.0)
+                systList_eta_FakeOnSignal[-1].Add(systList_eta["Fake"][0], -1.0)
+                systList_pt_FakeOnSignal[-1].Add(systList_pt["Fake"][0], -1.0)
+                # add nominal signal
+                systList_FakeOnSignal[-1].Add(systList["Wmunu"][0])
+                systList_eta_FakeOnSignal[-1].Add(systList_eta["Wmunu"][0])
+                systList_pt_FakeOnSignal[-1].Add(systList_pt["Wmunu"][0])
+
+            ratio = alternate.Clone(f"systRatio_{sname}")
+            difference = alternate.Clone(f"systDiff_{sname}")
+            if args.plotSystOriginal:
+                if do2D:
+                    drawCorrelationPlot(alternate, "Muon #eta", "Muon p_{T} (GeV)", "Events",
+                                        f"{name}_Syst", plotLabel="ForceTitle", outdir=outdir,
+                                        smoothPlot=False, drawProfileX=False, scaleToUnitArea=False, draw_both0_noLog1_onlyLog2=1,
+                                        palette=args.palette, nContours=args.nContours, invertePalette=args.invertePalette,
+                                        passCanvas=canvas, drawOption="COLZ0")
+                if doUnrolled:
+                    plotUnrolledHistogram(systList[pname][-1], pname, sname+"_Syst", outdir, canvas_unroll, ratio, errorBars=args.addErrorBars, yAxisTitle="Events", channelCharge=args.charge)
+
+            ratio.SetDirectory(0)
+            #ratios[pname].append(htmp.Divide(nominals[pname]))
+            ratio.Divide(nominals[pname])
+            ratio.SetTitle(f"#splitline{{syst: {sname}}}{{proc: {pname}}}")
+            if args.addDifference:
+                difference.SetDirectory(0)
+                difference.Add(nominals[pname], -1.0)
+                difference.SetTitle(f"#splitline{{syst: {sname}}}{{proc: {pname}}}")
+
             if do2D:
-                drawCorrelationPlot(alternate, "Muon #eta", "Muon p_{T} (GeV)", "Events",
-                                    f"{name}_Syst", plotLabel="ForceTitle", outdir=outdir,
+                minratio,maxratio = getMinMaxHisto(ratio, excludeEmpty=True, sumError=False)
+                drawCorrelationPlot(ratio, "Muon #eta", "Muon p_{T} (GeV)", f"{pname}: syst / nominal::{minratio},{maxratio}",
+                                    f"ratio_{name}", plotLabel="ForceTitle", outdir=outdir,
                                     smoothPlot=False, drawProfileX=False, scaleToUnitArea=False, draw_both0_noLog1_onlyLog2=1,
                                     palette=args.palette, nContours=args.nContours, invertePalette=args.invertePalette,
                                     passCanvas=canvas, drawOption="COLZ0")
-            if doUnrolled:
-                plotUnrolledHistogram(systList[pname][-1], pname, sname+"_Syst", outdir, canvas_unroll, ratio, errorBars=args.addErrorBars, yAxisTitle="Events", channelCharge=args.charge)
-            
-        ratio.SetDirectory(0)
-        #ratios[pname].append(htmp.Divide(nominals[pname]))
-        ratio.Divide(nominals[pname])
-        ratio.SetTitle(f"syst: {sname}")
-        if do2D:
-            drawCorrelationPlot(ratio, "Muon #eta", "Muon p_{T} (GeV)", f"{pname}: syst / nominal",
-                                name, plotLabel="ForceTitle", outdir=outdir,
-                                smoothPlot=False, drawProfileX=False, scaleToUnitArea=False, draw_both0_noLog1_onlyLog2=1,
-                                palette=args.palette, nContours=args.nContours, invertePalette=args.invertePalette,
-                                passCanvas=canvas, drawOption="COLZ0")
-        if doUnrolled:
-            ratio_unrolled = unroll2Dto1D(ratio, newname=f"unrolledRatio_{name}", cropNegativeBins=False)
-            plotUnrolledHistogram(ratio_unrolled, pname, sname, outdir, canvas_unroll, ratio, errorBars=args.addErrorBars, channelCharge=args.charge, canvasFullName=ratio_unrolled.GetName())
+                if args.addDifference:
+                    drawCorrelationPlot(difference, "Muon #eta", "Muon p_{T} (GeV)", f"Difference: syst - nominal",
+                                        f"diff_{name}", plotLabel="ForceTitle", outdir=outdir,
+                                        smoothPlot=False, drawProfileX=False, scaleToUnitArea=False, draw_both0_noLog1_onlyLog2=1,
+                                        palette=args.palette, nContours=args.nContours, invertePalette=args.invertePalette,
+                                        passCanvas=canvas, drawOption="COLZ0")
 
-            if args.statUncRatio:
-                statUncNomi = nominals[pname].Clone(f"statUnc_{nominals[pname].GetName()}")
-                fillTH2fromTH2part(statUncNomi, nominals[pname], fillWithError=True)
-                statUncAlt = alternate.Clone(f"statUnc_{alternate.GetName()}")
-                fillTH2fromTH2part(statUncAlt, alternate, fillWithError=True)
-                ratioStatUnc = statUncAlt.Clone(f"ratioStatUncSystOverNomi_{sname}")
-                ratioStatUnc.Divide(statUncNomi)
-                ratioStatUnc_unrolled = unroll2Dto1D(ratioStatUnc, newname=f"unrolledStatUncRatio_{name}", cropNegativeBins=False)
-                plotUnrolledHistogram(ratioStatUnc_unrolled, pname, f"{sname}_statUncRatioWithNomi", outdir, canvas_unroll, ratioStatUnc, errorBars=False, yAxisTitle="stat. uncertainty ratio: syst/nomi", channelCharge=args.charge)
+            if doUnrolled:
+                ratio_unrolled = unroll2Dto1D(ratio, newname=f"unrolledRatio_{name}", cropNegativeBins=False)
+                plotUnrolledHistogram(ratio_unrolled, pname, sname, outdir, canvas_unroll, ratio, errorBars=args.addErrorBars, channelCharge=args.charge, canvasFullName=ratio_unrolled.GetName())
+                if args.addDifference:
+                    difference_unrolled = unroll2Dto1D(difference, newname=f"unrolledDifference_{name}", cropNegativeBins=False)
+                    plotUnrolledHistogram(difference_unrolled, pname, sname, outdir, canvas_unroll, ratio, errorBars=args.addErrorBars, channelCharge=args.charge, canvasFullName=difference_unrolled.GetName(), yAxisTitle="syst - nomi")
+
+
+                if args.statUncRatio:
+                    statUncNomi = nominals[pname].Clone(f"statUnc_{nominals[pname].GetName()}")
+                    fillTH2fromTH2part(statUncNomi, nominals[pname], fillWithError=True)
+                    statUncAlt = alternate.Clone(f"statUnc_{alternate.GetName()}")
+                    fillTH2fromTH2part(statUncAlt, alternate, fillWithError=True)
+                    ratioStatUnc = statUncAlt.Clone(f"ratioStatUncSystOverNomi_{sname}")
+                    ratioStatUnc.Divide(statUncNomi)
+                    ratioStatUnc_unrolled = unroll2Dto1D(ratioStatUnc, newname=f"unrolledStatUncRatio_{name}", cropNegativeBins=False)
+                    plotUnrolledHistogram(ratioStatUnc_unrolled, pname, f"{sname}_statUncRatioWithNomi", outdir, canvas_unroll, ratioStatUnc, errorBars=False, yAxisTitle="stat. uncertainty ratio: syst/nomi", channelCharge=args.charge)
     print()
 
     ptBinRanges = []

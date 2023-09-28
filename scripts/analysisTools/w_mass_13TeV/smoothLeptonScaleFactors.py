@@ -665,7 +665,8 @@ def fitTurnOnTF(hist, key, outname, mc, channel="el", hist_chosenFunc=0, drawFit
             hAcceptBand.SetBinContent(i, yMaxBand)
             hAcceptBand.SetBinError(i, 0.0)
     hAcceptBand.SetFillColorAlpha(ROOT.kYellow+1, 0.5)
-    hAcceptBand.Draw("HIST SAME")
+    if step != "tracking":
+        hAcceptBand.Draw("HIST SAME")
     ########################################
     
     # Now the bottom panel
@@ -734,17 +735,17 @@ def fitTurnOnTF(hist, key, outname, mc, channel="el", hist_chosenFunc=0, drawFit
         dataRatio.SetBinContent(ib, dataRatio.GetBinContent(ib) / denVal)
         dataRatio.SetBinError(  ib, dataRatio.GetBinError(ib)   / denVal)
         
-    miny, maxy = getMinMaxMultiHisto(ratios+[den, dataRatio], excludeEmpty=True, sumError=True,
-                                     excludeUnderflow=True, excludeOverflow=True)
+    rminy, rmaxy = getMinMaxMultiHisto(ratios+[den, dataRatio], excludeEmpty=True, sumError=True,
+                                       excludeUnderflow=True, excludeOverflow=True)
     # append here so that the min max doesn't include it, sometimes the last points skyrocket
     if addCurve:
         ratios.append(ratioCurve)
 
-    diffy = maxy - miny
+    diffy = rmaxy - rminy
     offset = 0.1
-    miny -= offset * diffy
-    maxy += offset * diffy
-    frame.GetYaxis().SetRangeUser(miny, maxy)
+    rminy -= offset * diffy
+    rmaxy += offset * diffy
+    frame.GetYaxis().SetRangeUser(rminy, rmaxy)
     frame.Draw()
     den.Draw("E4SAME")
     denOnlyLine = copy.deepcopy(den.Clone("denOnlyLine"))
@@ -772,6 +773,7 @@ def fitTurnOnTF(hist, key, outname, mc, channel="el", hist_chosenFunc=0, drawFit
 
     ### Draw band to highlight acceptance
     hAcceptBandRatio = copy.deepcopy(hist.Clone("hAcceptBandRatio"))
+    hAcceptBandRatio.Reset("ICESM")
     yMaxBand = maxy
     for i in range(1, 1 + hAcceptBandRatio.GetNbinsX()):
         if hAcceptBandRatio.GetBinCenter(i) > 26.0 and hAcceptBandRatio.GetBinCenter(i) < 55.0:
@@ -781,7 +783,8 @@ def fitTurnOnTF(hist, key, outname, mc, channel="el", hist_chosenFunc=0, drawFit
             hAcceptBandRatio.SetBinContent(i, yMaxBand)
             hAcceptBandRatio.SetBinError(i, 0.0)
     hAcceptBandRatio.SetFillColorAlpha(ROOT.kYellow+1, 0.5)
-    hAcceptBandRatio.Draw("HIST SAME")
+    if step != "tracking":
+        hAcceptBandRatio.Draw("HIST SAME")
     ########################################
     
     pad2.RedrawAxis("sameaxis")

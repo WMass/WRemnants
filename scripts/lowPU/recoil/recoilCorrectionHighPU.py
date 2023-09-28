@@ -18,7 +18,7 @@ import recoilLibs_scipy as rls
 
 rls.__topRight__ = "16.8 fb^{#minus1} (13 TeV)"
 
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 
 import lz4.frame
 import narf
@@ -1155,7 +1155,7 @@ if __name__ == "__main__":
     flavor = "mumu" # mu, e, mumu, ee
    
     
-    groups = make_datagroups_2016("mz_wlike_with_mu_eta_pt_%s_nnpdf31.pkl.lz4" % met)
+    groups = Datagroups("mz_wlike_with_mu_eta_pt_%s_nnpdf31.pkl.lz4" % met)
     groups.groups.update({
         "TTbar" : dict(
                 members = [groups.datasets[x] for x in ["TTLeptonicPostVFP", "TTSemileptonicPostVFP", "SingleTschanLepDecaysPostVFP", "SingleTtWAntitopPostVFP", "SingleTtchanAntitopPostVFP", "SingleTtchanTopPostVFP"]],

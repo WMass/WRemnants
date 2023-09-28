@@ -15,8 +15,7 @@ import pickle
 import narf
 import numpy as np
 
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets import datagroups
 
 
 
@@ -25,15 +24,13 @@ if __name__ == "__main__":
 
     met = "DeepMETReso" # PFMET, RawPFMET DeepMETReso
     flavor = "mumu" # mu, e, mumu, ee
-    pdf = "nnpdf31"
     lowPU = False
 
-    
     ####################################################################
     if lowPU:
         recoil_qTbins = list(range(0, 30, 1)) + list(range(30, 50, 2)) + list(range(50, 70, 5)) + list(range(70, 120, 10)) + [120, 150, 300]
         
-        datagroups = make_datagroups_lowPU("lowPU_%s_%s_%s.pkl.lz4" % (flavor, met, pdf), flavor=flavor)
+        datagroups = Datagroups("lowPU_%s_%s_%s.pkl.lz4" % (flavor, met, pdf))
         sig = "Zmumu"
         data = "SingleMuon"
         bkgs = ['EWK', 'Top'] 
@@ -64,15 +61,18 @@ if __name__ == "__main__":
 
     else:
         recoil_qTbins = list(range(0, 50, 1)) + list(range(50, 80, 2)) + list(range(80, 120, 5)) + list(range(120, 160, 10)) + list(range(160, 300, 20)) + [500]
+        recoil_qTbins = list(range(0, 201, 1))
         
-        datagroups = make_datagroups_2016("mz_wlike_with_mu_eta_pt_%s_%s.pkl.lz4" % (met, pdf), wlike=True)
+        #groups = datagroups.Datagroups(f"mz_wlike_with_mu_eta_pt_{met}.hdf5")
+        groups = datagroups.Datagroups(f"mz_wlike_with_mu_eta_pt_DeepMETReso_nnpdf31_noPTcut.hdf5")
+        
         sig = "Zmumu"
         data = "Data"
         bkgs = ['Ztautau', 'Other']
 
-        h_sig = narf.hist_to_root(functions.readBoostHistProc(datagroups, "qT", [sig]))
-        h_data = narf.hist_to_root(functions.readBoostHistProc(datagroups, "qT", [data]))
-        h_bkgs = narf.hist_to_root(functions.readBoostHistProc(datagroups, "qT", bkgs))
+        h_sig = narf.hist_to_root(functions.readBoostHistProc(groups, "qT", [sig]))
+        h_data = narf.hist_to_root(functions.readBoostHistProc(groups, "qT", [data]))
+        h_bkgs = narf.hist_to_root(functions.readBoostHistProc(groups, "qT", bkgs))
         
         h_sig = functions.Rebin(h_sig, recoil_qTbins)
         h_data = functions.Rebin(h_data, recoil_qTbins)
@@ -85,13 +85,13 @@ if __name__ == "__main__":
         
         weights = []
         for i in range(1, h_sig.GetNbinsX()+1):
-            w = h_data.GetBinContent(i)/h_sig.GetBinContent(i)
+            w = h_data.GetBinContent(i)/h_sig.GetBinContent(i) if h_sig.GetBinContent(i) > 0 and h_data.GetBinContent(i) else 1
             weights.append(w)
             print(h_data.GetBinLowEdge(i), h_data.GetBinLowEdge(i+1), w)
 
         outDict = {}
         outDict['qT_bins'] = recoil_qTbins
         outDict['weights'] = weights
-        functions.writeJSON("wremnants/data/recoil/highPU/%s_%s/qT_reweighting.json" % (flavor, met), outDict)
+        functions.writeJSON("wremnants-data/data/recoil/highPU/%s_%s/qT_reweighting.json" % (flavor, met), outDict)
 
 

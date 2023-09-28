@@ -18,7 +18,7 @@ def select_veto_muons(df, nMuons=1):
 
     return df
 
-def select_good_muons(df, nMuons=1, use_trackerMuons=False, use_isolation=False):
+def select_good_muons(df, ptLow, ptHigh, nMuons=1, use_trackerMuons=False, use_isolation=False):
 
     if use_trackerMuons:
         if dataset.group in bkgMCprocs:
@@ -28,7 +28,7 @@ def select_good_muons(df, nMuons=1, use_trackerMuons=False, use_isolation=False)
     else:
         df = df.Define("Muon_category", "Muon_isGlobal && Muon_highPurity")
 
-    goodMuonsSelection = "vetoMuons && Muon_mediumId && Muon_category"
+    goodMuonsSelection = f"Muon_correctedPt > {ptLow} && Muon_correctedPt < {ptHigh} && vetoMuons && Muon_mediumId && Muon_category"
     if use_isolation:
         # for w like we directly require isolated muons, for w we need non-isolated for qcd estimation
         goodMuonsSelection += " && Muon_pfRelIso04_all < 0.15"
@@ -81,11 +81,9 @@ def define_muon_uT_variable(df, isWorZ, smooth3dsf=False, colNamePrefix="goodMuo
         
     return df
 
-def select_z_candidate(df, ptLow, ptHigh, mass_min=60, mass_max=120):
+def select_z_candidate(df, mass_min=60, mass_max=120):
 
     df = df.Filter("Sum(trigMuons) == 1 && Sum(nonTrigMuons) == 1")
-    df = df.Filter(f"trigMuons_pt0 > {ptLow} && trigMuons_pt0 < {ptHigh}")
-    df = df.Filter(f"nonTrigMuons_pt0 > {ptLow} && nonTrigMuons_pt0 < {ptHigh}")
 
     df = df.Define("trigMuons_mom4", "ROOT::Math::PtEtaPhiMVector(trigMuons_pt0, trigMuons_eta0, trigMuons_phi0, wrem::muon_mass)")
     df = df.Define("nonTrigMuons_mom4", "ROOT::Math::PtEtaPhiMVector(nonTrigMuons_pt0, nonTrigMuons_eta0, nonTrigMuons_phi0, wrem::muon_mass)")

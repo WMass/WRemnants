@@ -15,7 +15,7 @@ sys.path.insert(0, "scripts/lowPU/recoil/")
 import functions
 import plotter
 import recoilLibs_scipy as rls
-from wremnants.datasets.datagroupsLowPU import make_datagroups_lowPU
+from wremnants.datasets.datagroups import Datagroups
 
 import lz4.frame
 import narf
@@ -1834,7 +1834,7 @@ def prepareFile(fInName, fOutName):
         return bhist 
 
 
-    datagroups = make_datagroups_lowPU(fInName, flavor=flavor)
+    datagroups = Datagroups(fInName)
     procs = ["ZZ", "EWK_noZZ", "Top"]
     if flavor == "mumu": procs += ["SingleMuon", "Zmumu"]
     if flavor == "ee": procs += ["SingleElectron", "DYee"]
@@ -1988,7 +1988,7 @@ if __name__ == "__main__":
     outCfgDir = f"wremnants/data/recoil/lowPU/{flavor}_{met}/"
     #functions.prepareDir(outDir, remove=True)
 
-    groups = make_datagroups_lowPU("lowPU_%s_RawPFMET_%s_nnpdf31.pkl.lz4" % (flavor, met), flavor=flavor)
+    groups = make_datagroups_lowPU("lowPU_%s_RawPFMET_%s_nnpdf31.pkl.lz4" % (flavor, met))
 
 
     outDir = "/eos/user/j/jaeyserm/www/wmass/lowPU/recoilCorrection/recoil_%s_%s/" % (flavor, met)

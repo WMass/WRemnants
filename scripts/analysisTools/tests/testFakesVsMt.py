@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ## example
-# python tests/testFakesVsMt.py /scratch/mciprian/CombineStudies/TRASHTEST/testMyPRafterMerge/mw_with_mu_eta_pt_scetlibCorr_23mar_isoEffiSmoothingPol4.hdf5 plots/fromMyWremnants/fitResults/TRASHTEST/testMyPRafterMerges/23mar2023/full_isoEffiSmoothingPol4/testFakesVsMt/ --palette 87 --rebin-x 4 --rebin-y 2 --mt-bin-edges "0,5,10,15,20,25,30,35,40,45,50,55,60" --mt-nominal-range "0,40" --mt-fit-range "0,40" -c plus -z "RawPFMET m_{T} (GeV)" --fit-pol-degree 1 --integral-mt-method sideband -v 4 --skip-plot-2D --max-pt 50 [--jet-cut]
+# python tests/testFakesVsMt.py /scratch/mciprian/CombineStudies/12July2023/mw_with_mu_eta_pt_scetlib_dyturboCorr_testFakes_deepMet.hdf5 plots/fromMyWremnants/fitResults/12July2023/testFakes_3DSF/deepMET/noDphiCut/testFakesVsMt/ --palette 87 --rebinx 4 --rebiny 2 --mtBinEdges "0,5,10,15,20,25,30,35,40,45,50,55,60,65" --mtNominalRange "0,40" --mtFitRange "0,40" --fitPolDegree 1 --integralMtMethod sideband -v 4 --maxPt 50  --met deepMET [--dphiStudy] [--jetCut] [--dphiMuonMetCut 0.25]
 #
 # Note: --jet-cut is used to enforce the jet requirement to derive the FRF,
 #       however the validation is made using the nominal histogram, which may or may not have had that cut included
@@ -17,10 +17,9 @@ import narf.fitutils
 import wremnants
 import hist
 import lz4.frame, pickle
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.datasets.datagroups import Datagroups
 from wremnants import histselections as sel
 
-import hist
 import numpy as np
 
 from utilities import boostHistHelpers as hh, common, logging
@@ -136,17 +135,6 @@ def plotProjection1Dfrom3D(rootHists, datasets, outfolder_dataMC, canvas1Dshapes
     plotDistribution1D(hdata, hmc, datasets,
                        outfolder_dataMC, canvas1Dshapes=canvas1Dshapes,
                        xAxisName=xAxisName, plotName=plotName)
-
-# def integralFRFonMtPdf(mTshape, funcFullRange, useBinnedCorr=useBinnedCorr):
-#     integralMtNorm = 1./mTshape.Integral()
-#     for ib in range(1, 1+mTshape.GetNbinsX()):
-#         mTbinVal = mTshape.GetBinCenter(ib)
-#         valFRF = h1.GetBinContent(max(1, min(h1.GetXaxis().FindFixBin(mTbinVal), h1.GetNbinsX()))) if useBinnedCorr else funcFullRange.Eval(mTbinVal)
-#         mTshapeBinContent = mTshape.GetBinContent(ib)
-#         addVal = max(0.0, valFRF) * mTshapeBinContent
-#         averageFRF += addVal
-#     averageFRF *= integralMtNorm
-#     return averageFRF
 
 
 def drawAndFitFRF(h1,
@@ -528,7 +516,7 @@ def runStudy(charge, outfolder, rootfilename, args):
     canvas_unroll.cd()
     canvas_unroll.SetBottomMargin(bottomMargin)
 
-    groups = make_datagroups_2016(args.inputfile[0], applySelection=False)
+    groups = Datagroups(args.inputfile[0])
     datasets = groups.getNames() # this has all the original defined groups
     datasetsNoQCD = list(filter(lambda x: x != "QCD", datasets)) # exclude QCD MC if present
     datasetsNoFakes = list(filter(lambda x: x != "Fake", datasets)) 
@@ -540,11 +528,14 @@ def runStudy(charge, outfolder, rootfilename, args):
     histInfo = groups.getDatagroups() # keys are same as returned by groups.getNames() 
     rootHists = {d: None for d in datasets} # for the fake study, eta-pt aleady rebinned
     rootHists_forplots = {d: None for d in datasets} # for 1D plots, mt rebinned by 2 but no eta-pt rebinning
+    rootHists_asNominal = {d: None for d in datasets}
+    rootHists_forMtWithDataDrivenFakes = {d: None for d in datasetsNoQCD}
     hnarf_fakerateDeltaPhi = None
     for d in datasets:
         #print(d)
         hnarf = histInfo[d].hists[inputHistName]
-        hnarf_forplots = copy.deepcopy(hnarf)
+        hnarf_forplots = hnarf.copy()
+        hnarf_asNominal = hnarf.copy()
         # rebin eta-pt for actual test with fakes, while collapsing other axes for the simple plots as needed,
         # this is only to avoid that THn are too big
         s = hist.tag.Slicer()
@@ -556,12 +547,12 @@ def runStudy(charge, outfolder, rootfilename, args):
             # note, with python/boost/hist slicing the second edge is excluded from projections,
             # also when it is used as actual bin id, so s[1:1:hist.sum] doesn't work, while s[1:2:hist.sum] picks bin 1
             hnarf_fakerateDeltaPhi = copy.deepcopy(hnarf)
-            hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"pt": s[:complex(0,args.maxPt)]}]
+            hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"pt": s[0:complex(0,args.maxPt)]}]
             # rebin a bit more in pt and eta
             hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"eta" : s[::hist.rebin(2)]}]
             hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"pt" : s[::hist.rebin(2)]}]
             if args.jetCut:
-                hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"hasJets": s[0:1:hist.sum]}]
+                hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"hasJets": True}]
             else:
                 hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[{"hasJets": s[::hist.sum]}]
             lowMtUpperBound = int(args.mtNominalRange.split(",")[1])
@@ -622,6 +613,41 @@ def runStudy(charge, outfolder, rootfilename, args):
         hnarf_forplots = hnarf_forplots[{"DphiMuonMet" : s[complex(0, 0.01+dphiMuonMetCut):complex(0, np.pi)]}] # cut but do not integrate
         hnarf_forplots = hnarf_forplots[{"mt" : s[::hist.rebin(2)]}]
         rootHists_forplots[d] = narf.hist_to_root(hnarf_forplots) # this is a THnD with eta-pt-charge-mt-passIso-hasJets-DphiMuonMet
+        # prepare nominal histograms in signal region for some plots
+        # integrate njet and Dphi in appropriate range
+        hnarf_asNominal = hnarf_asNominal[{"hasJets" : s[::hist.sum], # jet inclusive                  
+                                           "DphiMuonMet" : s[complex(0, 0.01+dphiMuonMetCut):complex(0, np.pi):hist.sum]}]
+        hnarf_forMtWithDataDrivenFakes = hnarf_asNominal.copy()
+        mtThreshold = float(args.mtNominalRange.split(",")[-1])
+        # now select signal region
+        if d == "Fake":
+            # do ABCD method for Fakes, using binned mT axis
+            hnarf_asNominal = sel.fakeHistABCD(hnarf_asNominal,
+                                               thresholdMT=mtThreshold,
+                                               axis_name_mt="mt",
+                                               integrateMT=True)
+            hnarf_forMtWithDataDrivenFakes = sel.fakeHistABCD(hnarf_forMtWithDataDrivenFakes,
+                                                              thresholdMT=mtThreshold,
+                                                              axis_name_mt="mt",
+                                                              integrateMT=False)
+        else:
+            nMtBins = hnarf_asNominal.axes["mt"].size
+            # just select signal region: pass isolation and mT > mtThreshold with overflow included
+            hnarf_asNominal = hnarf_asNominal[{"passIso" : True, 
+                                               "mt" : s[complex(0,mtThreshold):hist.overflow:hist.sum],
+                                               }]
+            hnarf_forMtWithDataDrivenFakes = hnarf_forMtWithDataDrivenFakes[{"passIso" : True, 
+                                                                             "mt" : s[complex(0,mtThreshold):nMtBins],
+                                                                             }]
+        rootHists_asNominal[d] = narf.hist_to_root(hnarf_asNominal)
+        # now integrate eta-pt to keep mt
+        nPtBins = hnarf_asNominal.axes["pt"].size
+        hnarf_forMtWithDataDrivenFakes = hnarf_forMtWithDataDrivenFakes[{"eta" : s[::hist.sum],
+                                                                         "pt"  : s[0:nPtBins:hist.sum],
+                                                                         "charge" : 0 if charge == "minus" else 1,
+                                                                         }]
+        if d in datasetsNoQCD:
+            rootHists_forMtWithDataDrivenFakes[d] = narf.hist_to_root(hnarf_forMtWithDataDrivenFakes)
     ########
     ########
     # data-MC already done in the management of the groups above
@@ -629,21 +655,28 @@ def runStudy(charge, outfolder, rootfilename, args):
     # the other processes are still needed to make other plots with data and MC, like mT in the different regions
     histo_fakes = copy.deepcopy(rootHists["QCD" if args.useQCDMC else "Fake"])    
     
-    # get the standard signal region with the data-driven fakes,
-    # it will be needed to make the plot with/without the corrections
-    inputHistName = "nominal"
-    groups.setNominalName(inputHistName)
-    groups.setSelectOp(sel.histWmass_passMT_passIso)
-    groups.setSelectOp(sel.fakeHistABCD, processes=["Fake"])
+    ### get the standard signal region with the data-driven fakes,
+    ### it will be needed to make the plot with/without the corrections
+    ### try using histogram "mTStudyForFakes", so the deltaPhi cut can be added/removed at will
+    ### (the nominal histogram from the loop will always have the dphi cut since it is default in histmaker)
+    #
+    # inputHistName = "nominal"
+    # groups.setNominalName(inputHistName)
+    # groups.setSelectOp(sel.histWmass_passMT_passIso)
+    # groups.setSelectOp(sel.fakeHistABCD, processes=["Fake"])
+    # datasets_nominal = datasetsNoFakes if args.useQCDMC else datasetsNoQCD
+    # groups.loadHistsForDatagroups(inputHistName, syst="", procsToRead=datasets_nominal)
+    # histInfo_nominal = groups.getDatagroups()
+    # rootHists_nominal = {d: None for d in datasets_nominal}
+    # for d in rootHists_nominal.keys():
+    #     hnarf_nominal = histInfo_nominal[d].hists[inputHistName]
+    #     rootHists_nominal[d] = narf.hist_to_root(hnarf_nominal) # this is a TH3D with eta-pt-charge
+    #######
     datasets_nominal = datasetsNoFakes if args.useQCDMC else datasetsNoQCD
-    groups.loadHistsForDatagroups(inputHistName, syst="", procsToRead=datasets_nominal)
-    histInfo_nominal = groups.getDatagroups()
     rootHists_nominal = {d: None for d in datasets_nominal}
     for d in rootHists_nominal.keys():
-        hnarf_nominal = histInfo_nominal[d].hists[inputHistName]
-        rootHists_nominal[d] = narf.hist_to_root(hnarf_nominal) # this is a TH3D with eta-pt-charge
-    #######
-
+        rootHists_nominal[d] = rootHists_asNominal[d] # this is a TH3D with eta-pt-charge
+        
     # get a copy of the eta-pt-charge histogram to use as template with same binning as the analysis histograms
     # it will be filled with the correction uncertainty to be used as a systematic
     # adding charge in its name even if this is a TH3: in this way we will have the correction for plus defined for both charges,
@@ -660,11 +693,22 @@ def runStudy(charge, outfolder, rootfilename, args):
                
     # bin number from root histogram
     chargeBin = 1 if charge == "minus" else 2
+
+    # plot mT with data-driven fakes, as a test (should add the mT correction in fact)
+    hmcMt = {}
+    for d in datasetsNoQCD:
+        if d == "Data":
+            continue
+        hmcMt[d] = rootHists_forMtWithDataDrivenFakes[d]
+    hdataMt = rootHists_forMtWithDataDrivenFakes["Data"]
+    plotDistribution1D(hdataMt, hmcMt, datasetsNoQCD,
+                       outfolder_dataMC, canvas1Dshapes=canvas1Dshapes,
+                       xAxisName=f"{args.met} m_{{T}} (GeV)", plotName=f"mT_passIso_jetInclusive_passMT_dataDriveFakes")
+    
     
     # plot mT, eta, pt in some regions iso-nJet regions, for checks
     # don't plot fakes here
     for xbin in axisVar.keys():
-        #rebinVariable = 2 if xbin == 3 else None ## no longer needed, rebinned directly from boost
         # Dphi in 4 mT bins, for jet inclusive and pass/fail iso
         if xbin == 6:
             mtRanges = [0, 20, 40, 60, -1]
@@ -1075,7 +1119,7 @@ def runStudy(charge, outfolder, rootfilename, args):
                  drawVertLines="{a},{b}".format(a=hFRFcorr.GetNbinsY(),b=hFRFcorr.GetNbinsX()),
                  textForLines=ptBinRanges, transparentLegend=False,
                  onlyLineColor=True, noErrorRatioDen=True, useLineFirstHistogram=True, setOnlyLineRatio=True, lineWidth=1,
-                 colorVec=colorVec)
+                 colorVec=colorVec, drawLineTopPanel=1.0)
 
     if hFRFcorrTestCap is not None:
         drawCorrelationPlot(hFRFcorrTestCap,
@@ -1214,9 +1258,9 @@ def runStudyVsDphi(charge, outfolder, args):
         hnarf = hnarf[{"pt" : s[::hist.rebin(args.rebinPt)]}]
         # note, with python/boost/hist slicing the second edge is excluded from projections,
         # also when it is used as actual bin id, so s[1:1:hist.sum] doesn't work, while s[1:2:hist.sum] picks bin 1
-        hnarf = hnarf[{"pt": s[:complex(0,args.maxPt)]}]
+        hnarf = hnarf[{"pt": s[0:complex(0,args.maxPt)]}]
         if args.jetCut:
-            hnarf = hnarf[{"hasJets": s[0:1:hist.sum]}]
+            hnarf = hnarf[{"hasJets": True}]
         else:
             hnarf = hnarf[{"hasJets": s[::hist.sum]}]
         # rebin a bit more in eta-pt

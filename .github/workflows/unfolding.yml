@@ -1,0 +1,474 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Unfolding
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 1 * * 1,3,5' # Run on Monday, Wednesday, and Friday morning at 1h00 UTC
+    - cron: '30 5 * * 1-5' # Run on weekdays
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env: 
+  MAX_FILES: 10
+  LUMI_SCALE: 760
+  NTHREADS: 16
+  LOCAL_WEB_DIR: www/WMassAnalysis/PRValidation
+  EOS_DIR: /eos/user/c/cmsmwbot
+  OUTFILE_WMASS: "mw_with_mu_eta_pt_unfolding.hdf5"
+  OUTFILE_WLIKE: "mz_wlike_with_mu_eta_pt_unfolding.hdf5"
+  OUTFILE_DILEPTON: "mz_dilepton_unfolding.hdf5"
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+
+  setenv:
+    runs-on: [self-hosted, linux, x64]
+
+    outputs:
+      WREMNANTS_OUTDIR: ${{steps.export.outputs.WREMNANTS_OUTDIR}}
+      WEB_DIR: ${{steps.export.outputs.WEB_DIR}}
+      PLOT_DIR: ${{steps.export.outputs.PLOT_DIR}}
+      NTHREADS: ${{steps.export.outputs.NTHREADS}}
+      MAX_FILES: ${{steps.export.outputs.MAX_FILES}}
+      LUMI_SCALE: ${{steps.export.outputs.LUMI_SCALE}}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: setup kerberos
+        run: |
+          kinit -kt ~/private/.keytab cmsmwbot
+          klist -k -t -e ~/private/.keytab
+          klist
+          echo "xrdfs root://eosuser.cern.ch// ls $EOS_DIR"
+          xrdfs root://eosuser.cern.ch// ls $EOS_DIR
+
+      - name: setup unscheduled
+        if: github.event_name != 'schedule'
+        run: echo PLOT_DIR=PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')/$(date +%Y_%m_%d)/unfolding >> $GITHUB_ENV
+
+      - name: setup scheduled build
+        if: github.event.schedule == '0 1 * * 1,3,5'
+        run: |
+          echo PLOT_DIR=ScheduledBuilds_unfolding/$(date +%Y_%m_%d)_$(git rev-parse --short "$GITHUB_SHA")/unfolding >> $GITHUB_ENV
+
+      - name: setup reference run
+        if: github.event.schedule == '30 5 * * 1-5'
+        run: |
+          echo PLOT_DIR=ReferenceRuns/$(date +%Y_%m_%d)_$(git rev-parse --short "$GITHUB_SHA")/unfolding >> $GITHUB_ENV
+
+      - name: setup full events
+        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        run: |
+          echo "NTHREADS=64" >> $GITHUB_ENV
+          echo "MAX_FILES=-1" >> $GITHUB_ENV
+          echo "LUMI_SCALE=1" >> $GITHUB_ENV
+
+      - name: setup outdir
+        run: echo "WREMNANTS_OUTDIR=/tmp/${USER}/$(uuidgen)" >> $GITHUB_ENV
+
+      - name: setup webdir
+        # TODO: Get the local writing+copy to eos working
+        run: echo "WEB_DIR=$WREMNANTS_OUTDIR/$LOCAL_WEB_DIR" >> $GITHUB_ENV
+
+      - name: create webdir
+        run: mkdir -p ${{env.WEB_DIR}}
+
+      - id: export
+        run: |
+          echo "PLOT_DIR=$PLOT_DIR" >> $GITHUB_OUTPUT
+          echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
+          echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_OUTPUT
+          echo "NTHREADS=$NTHREADS" >> $GITHUB_OUTPUT
+          echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
+          echo "WEB_DIR=$WEB_DIR" >> $GITHUB_OUTPUT
+
+  w-analysis:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: setenv
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=${LUMI_SCALE}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass setup lumi scale
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: | 
+          echo "LUMI_SCALE=120" >> $GITHUB_ENV
+          echo "NTRHEADS=${NTHREADS}*2" >> $GITHUB_ENV
+
+      - name: wmass analysis
+        # run with a reduced binning
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding --unfolding 
+          --pt 6 26 56 --eta 6 -2.4 2.4 --genBins 2 3
+
+      - name: wmass analysis
+        # run with full binning
+        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding --unfolding
+
+  w-unfolding:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass plot response matrix
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
+          --axes "pt-ptGen" "abs(eta)-absEtaGen" --procFilters Wmunu -p mw -o $WEB_DIR -f $PLOT_DIR $HIST_FILE
+
+      - name: wmass combine setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          -i $HIST_FILE --lumiScale $LUMI_SCALE --unfold --ABCD --hdf5 --sparse -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_unfolding
+
+      - name: wmass combine fit 
+        run: >-
+          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          unfolding ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_unfolding/ card_sparse.hdf5
+
+      - name: wmass combine unfolding plot pulls 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/pullsAndImpacts.py 
+          -f $WREMNANTS_OUTDIR/WMass_eta_pt_charge_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint 
+          --debug output --outFolder $WEB_DIR/$PLOT_DIR -o pulls_unfolding_mw.html -n 50 --otherExtensions png pdf
+
+      - name: wmass combine unfolding plot xsec 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py $HIST_FILE 
+          --fitresult $WREMNANTS_OUTDIR/WMass_eta_pt_charge_unfolding/fitresults_123456789.hdf5 -o $WEB_DIR -f $PLOT_DIR --debug --rrange 0.9 1.1 --logy
+
+  w-theoryfit:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-unfolding]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass theoryfit combine setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE 
+          --fitresult ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_unfolding/fitresults_123456789.hdf5 --fitvar qGen-ptGen-absEtaGen 
+          --hdf5 -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_theoryfit
+
+      - name: wmass theoryfit combine fit 
+        run: >-
+          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          theoryfit ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_theoryfit card.hdf5 
+
+      - name: wmass theoryfit combine impacts
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh 
+          $WREMNANTS_OUTDIR/WMass_eta_pt_charge_theoryfit/fitresults_123456789.hdf5 $WEB_DIR/$PLOT_DIR impactsW.html
+
+  wlike-analysis:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: setenv
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=${LUMI_SCALE}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wlike analysis
+        # run with a reduced binning
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding --unfolding 
+          --pt 10 26 56 --eta 24 -2.4 2.4 --genBins 2 3
+
+      - name: wlike analysis
+        # run with full binning
+        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding --unfolding
+
+
+  wlike-unfolding:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, wlike-analysis]
+
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass plot response matrix
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
+          --axes "pt-ptGen" "abs(eta)-absEtaGen" --procFilters Zmumu -p mz_wlike -o $WEB_DIR -f $PLOT_DIR $HIST_FILE
+
+      - name: wlike combine unfolding setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          -i $HIST_FILE --lumiScale $LUMI_SCALE --unfolding --hdf5 --sparse -o $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge_unfolding/
+
+      - name: wlike combine unfolding fit 
+        run: >-
+          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          unfolding $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge_unfolding/ card_sparse.hdf5
+
+      - name: wlike combine unfolding plot xsec 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py 
+          $HIST_FILE --fitresult $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge_unfolding/fitresults_123456789.hdf5 
+          -o $WEB_DIR -f $PLOT_DIR --debug --rrange 0.9 1.1
+
+
+  wlike-theoryfit:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, wlike-unfolding]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wlike theoryfit combine setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE 
+          --fitresult ${WREMNANTS_OUTDIR}/ZMassWLike_eta_pt_charge_unfolding/fitresults_123456789.hdf5 --fitvar qGen-ptGen-absEtaGen 
+          --hdf5 -o $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge_theoryfit
+
+      - name: wlike theoryfit combine fit 
+        run: >-
+          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          theoryfit ${WREMNANTS_OUTDIR}/ZMassWLike_eta_pt_charge_theoryfit card.hdf5 
+
+      - name: wlike theoryfit combine impacts
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh 
+          $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge_theoryfit/fitresults_123456789.hdf5 $WEB_DIR/$PLOT_DIR impactsWlike.html
+
+  dilepton:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: setenv
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
+          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
+          echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: dilepton analysis
+        # run with a reduced binning
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --axes ptll yll --postfix unfolding --unfolding --genVars ptVGen
+
+      - name: dilepton analysis
+        # run with full binning
+        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py 
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --axes ptll yll --postfix unfolding --unfolding
+
+
+  dilepton-unfolding:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, dilepton]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: test
+        run: echo "The web dir is $WEB_DIR plot dir is ${PLOT_DIR}"
+
+      - name: wmass plot response matrix
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
+          --axes ptll-ptVGen --procFilters Zmumu -p mz -o $WEB_DIR -f $PLOT_DIR $HIST_FILE
+
+      - name: dilepton combine ptll unfolding setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          -i $HIST_FILE --fitvar ptll --lumiScale $LUMI_SCALE --unfolding --hdf5 --sparse -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_unfolding
+
+      - name: dilepton combine ptll unfolding fit
+        run: >- 
+          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          unfolding $WREMNANTS_OUTDIR/ZMassDilepton_ptll_unfolding/ card_sparse.hdf5
+
+      - name: dilepton combine unfolding plot prefit 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_plots.py 
+          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_unfolding/fitresults_123456789.root -o $WEB_DIR -f $PLOT_DIR --debug 
+          --rrange 0.9 1.1 --channels all --lumi=$LUMI_SCALE
+
+      - name: dilepton combine unfolding plot pulls 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/pullsAndImpacts.py 
+          -f $WREMNANTS_OUTDIR/ZMassDilepton_ptll_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint 
+          --debug output --outFolder $WEB_DIR/$PLOT_DIR -o pulls_unfolding_ptll.html -n 50 --otherExtensions png pdf
+
+      - name: dilepton combine unfolding plot xsec 
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py $HIST_FILE 
+          --fitresult $WREMNANTS_OUTDIR/ZMassDilepton_ptll_unfolding/fitresults_123456789.hdf5 -o $WEB_DIR -f $PLOT_DIR --debug --rrange 0.9 1.1 --logy
+
+
+  copy-clean:
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis, w-unfolding, w-theoryfit, 
+      wlike-analysis, wlike-unfolding, wlike-theoryfit, 
+      dilepton, dilepton-unfolding]
+    if: always() 
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+
+      - name: copy clean plots
+        run: |
+          echo "xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR/* root://eosuser.cern.ch//$EOS_DIR/$LOCAL_WEB_DIR"
+          xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR/* root://eosuser.cern.ch//$EOS_DIR/$LOCAL_WEB_DIR
+          echo "Removing temp directory $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR"
+          rm -r $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR
+          
+      - name: save analysis files
+        if: github.event_name != 'pull_request' && github.event.schedule == '0 1 * * 1,3,5'
+        run: |
+          echo "xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR root://eosuser.cern.ch//$EOS_DIR/ScheduledBuilds_unfolding/"
+          xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR root://eosuser.cern.ch//$EOS_DIR/ScheduledBuilds_unfolding/
+
+      - name: clean
+        run: |
+          echo "Removing temp directory $WREMNANTS_OUTDIR"
+          rm -r $WREMNANTS_OUTDIR
