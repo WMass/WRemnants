@@ -124,7 +124,7 @@ helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, cons
   // computing moments e.g. as used in arxiv:1708.00008 eq. 2.13
   Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1, 1>> moments;
   moments(0, 0, 0) = 1.;
-  moments(1, 0, 0) = cosThetaCS*cosThetaCS;
+  moments(1, 0, 0) = 4-10*cosThetaCS*cosThetaCS;
   moments(2, 0, 0) = sin2ThetaCS*cosPhiCS;
   moments(3, 0, 0) = sinThetaCS*sinThetaCS*cos2PhiCS;
   moments(4, 0, 0) = sinThetaCS*cosPhiCS;
@@ -139,6 +139,39 @@ helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, cons
 
   return original_weight*scale_tensor.reshape(reshapescale).broadcast(broadcasthelicities)*moments.broadcast(broadcastscales);
 
+}
+
+template <std::size_t nSize>
+Eigen::TensorFixedSize<double, Eigen::Sizes<9, nSize>> makePDFMomentScaleTensor(const CSVars &csvars, const  Eigen::TensorFixedSize<double, Eigen::Sizes<nSize>>&pdf_tensor, double original_weight = 1.0) {
+
+  constexpr Eigen::Index nhelicity = 9;
+
+  const double sinThetaCS = csvars.sintheta;
+  const double cosThetaCS = csvars.costheta;
+  const double sinPhiCS = csvars.sinphi;
+  const double cosPhiCS = csvars.cosphi;
+
+  const double sin2ThetaCS = 2.*sinThetaCS*cosThetaCS;
+  const double sin2PhiCS = 2.*sinPhiCS*cosPhiCS;
+  const double cos2ThetaCS = 1. - 2.*sinThetaCS*sinThetaCS;
+  const double cos2PhiCS= 1. - 2.*sinPhiCS*sinPhiCS;
+
+  Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1>> moments;
+  moments(0, 0) = 1.;
+  moments(1, 0) = 4-10*cosThetaCS*cosThetaCS;
+  moments(2, 0) = sin2ThetaCS*cosPhiCS;
+  moments(3, 0) = sinThetaCS*sinThetaCS*cos2PhiCS;
+  moments(4, 0) = sinThetaCS*cosPhiCS;
+  moments(5, 0) = cosThetaCS;
+  moments(6, 0) = sinThetaCS*sinThetaCS*sin2PhiCS;
+  moments(7, 0) = sin2ThetaCS*sinPhiCS;
+  moments(8, 0) = sinThetaCS*sinPhiCS;
+
+  constexpr std::array<Eigen::Index, 2> broadcastpdf = { 1, nSize };
+  constexpr std::array<Eigen::Index, 2> broadcasthelicities = { nhelicity, 1};
+  constexpr std::array<Eigen::Index, 2> reshapepdf = { 1, nSize };
+
+  return original_weight*pdf_tensor.reshape(reshapepdf).broadcast(broadcasthelicities)*moments.broadcast(broadcastpdf);
 
 }
 

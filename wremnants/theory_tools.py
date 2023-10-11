@@ -68,7 +68,7 @@ pdfMap = {
     },
     "nnpdf30" : {
         "name" : "pdfNNPDF30",
-        "branch" : "LHEPdfWeightAltSet13",
+        "branch" : "LHEPdfWeightAltSet7",
         "combine" : "symHessian",
         "entries" : 101,
         "alphas" : ["LHEPdfWeightAltSet15[0]", "LHEPdfWeightAltSet16[0]"],
@@ -151,6 +151,7 @@ def define_prefsr_vars(df):
     df = df.Define("genlanti", "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[1]], GenPart_eta[prefsrLeps[1]], GenPart_phi[prefsrLeps[1]], GenPart_mass[prefsrLeps[1]])")
     df = df.Define("genV", "ROOT::Math::PxPyPzEVector(genl)+ROOT::Math::PxPyPzEVector(genlanti)")
     df = df.Define("ptVgen", "genV.pt()")
+    df = df.Define("ptqVgen", "genV.pt()/genV.mass()")
     df = df.Define("massVgen", "genV.mass()")
     df = df.Define("yVgen", "genV.Rapidity()")
     df = df.Define("phiVgen", "genV.Phi()")
@@ -375,16 +376,18 @@ def make_theory_corr_hists(df, name, axes, cols, helpers, generators, modify_cen
 
     return res
 
-def scale_angular_moments(hist_moments_scales, sumW2=False, createNew=False):
+def scale_angular_moments(hist_moments_scales, upToA4= False, sumW2=False, createNew=False):
     # e.g. from arxiv:1708.00008 eq. 2.13, note A_0 is NOT the const term!
-    scales = np.array([1., -10., 5., 10., 4., 4., 5., 5., 4.])
+    #scales = np.array([1., 1., 5., 10., 4., 4., 5., 5., 4.])
+    scales = np.array([1., 1., 5., 10., 4., 4.]) if upToA4 else np.array([1., 1., 5., 10., 4., 4., 5., 5., 4.]) 
 
     hel_idx = hist_moments_scales.axes.name.index("helicity")
     scaled_vals = np.moveaxis(hist_moments_scales.view(flow=True), hel_idx, -1)*scales
     if createNew:
         hnew = hist.Hist(*hist_moments_scales.axes, storage = hist.storage.Weight() if sumW2 else hist.storage.Double())
     else:
-        hnew = hist_moments_scales
+        #hnew = hist_moments_scales
+        hnew = hist.Hist(*hist_moments_scales.axes, storage = hist_moments_scales._storage_type())
     hnew.view(flow=True)[...] = np.moveaxis(scaled_vals, -1, hel_idx) 
     return hnew
 
@@ -395,7 +398,7 @@ def replace_by_neighbors(vals, replace):
     indices = ndimage.distance_transform_edt(replace, return_distances=False, return_indices=True)
     return vals[tuple(indices)]
 
-def moments_to_angular_coeffs(hist_moments_scales, cutoff=1e-5, sumW2=False):
+def moments_to_angular_coeffs(hist_moments_scales, upToA4= False, cutoff=1e-5, sumW2=False):
     sumW2 = sumW2 and hist_moments_scales._storage_type == hist.storage.Weight
 
     if hist_moments_scales.empty():
@@ -403,7 +406,7 @@ def moments_to_angular_coeffs(hist_moments_scales, cutoff=1e-5, sumW2=False):
     # broadcasting happens right to left, so move to rightmost then move back
     hel_ax = hist_moments_scales.axes["helicity"]
     hel_idx = hist_moments_scales.axes.name.index("helicity")
-    vals = np.moveaxis(scale_angular_moments(hist_moments_scales, sumW2).view(flow=True), hel_idx, -1) 
+    vals = np.moveaxis(scale_angular_moments(hist_moments_scales, upToA4, sumW2).view(flow=True), hel_idx, -1) 
     values = vals.value if hasattr(vals,"value") else vals
     
     # select constant term, leaving dummy axis for broadcasting
@@ -413,14 +416,18 @@ def moments_to_angular_coeffs(hist_moments_scales, cutoff=1e-5, sumW2=False):
 
     # e.g. from arxiv:1708.00008 eq. 2.13, note A_0 is NOT the const term!
     offsets = np.array([0., 4., 0., 0., 0., 0., 0., 0., 0.])
+    #print("vals = ", vals, "norm = ", norm_vals)
 
-    coeffs = vals / norm_vals + offsets
+    coeffs = vals / norm_vals# + offsets
 
     # replace values in zero-xsec regions (otherwise A0 is spuriously set to 4.0 from offset)
     coeffs = np.where(np.abs(values) < cutoff, np.full_like(vals, hist.accumulators.WeightedSum(0,0) if sumW2 else 0), coeffs)
     coeffs = np.moveaxis(coeffs, -1, hel_idx)
 
-    hist_coeffs_scales = hist.Hist(*hist_moments_scales.axes, storage = hist.storage.Weight() if sumW2 else hist.storage.Double(), 
+    #hist_coeffs_scales = hist.Hist(*hist_moments_scales.axes, storage = hist.storage.Weight() if sumW2 else hist.storage.Double(), 
+        #name = "hist_coeffs_scales", data = coeffs
+    #)
+    hist_coeffs_scales = hist.Hist(*hist_moments_scales.axes, storage = hist_moments_scales._storage_type(), 
         name = "hist_coeffs_scales", data = coeffs
     )
 

@@ -4,17 +4,20 @@ parser,initargs = common.common_parser()
 
 import narf
 import wremnants
-from wremnants import theory_tools,syst_tools,theory_corrections
+from wremnants import theory_tools,syst_tools,theory_corrections, theoryAgnostic_tools
 from wremnants.datasets.dataset_tools import getDatasets
 import hist
 import math
 import os
+import numpy as np
 
 
 parser.add_argument("--skipAngularCoeffs", action='store_true', help="Skip the conversion of helicity moments to angular coeff fractions")
 parser.add_argument("--singleLeptonHists", action='store_true', help="Also store single lepton kinematics")
 parser.add_argument("--skipEWHists", action='store_true', help="Also store histograms for EW reweighting. Use with --filter horace")
 parser.add_argument("--absY", action='store_true', help="use absolute |Y|")
+parser.add_argument("--ptqVgen", action='store_true', help="If want to store qt by q")
+parser.add_argument("--addhelicity", action='store_true', help="If want to store qt by q")
 
 parser = common.set_parser_default(parser, "filterProcs", common.vprocs)
 
@@ -47,6 +50,12 @@ axis_ptVgen = hist.axis.Variable(
     # list(range(0,151))+[160., 190.0, 220.0, 250.0, 300.0, 400.0, 500.0, 800.0, 1500.0], 
     list(range(0,101)), # this is the same binning as hists from theory corrections
     name = "ptVgen", underflow=False,
+)
+#axis_ptqVgen = hist.axis.Regular(
+#    20, 0., 0.5, name = "ptqVgen", underflow=False
+#)
+axis_ptqVgen = hist.axis.Variable(
+    [round(x, 4) for x in list(np.arange(0, 0.1 + 0.0125, 0.0125))]+[round(x, 4) for x in list(np.arange(0.1+0.025, 0.5 + 0.025, 0.025))], name = "ptqVgen", underflow=False
 )
 
 axis_chargeWgen = hist.axis.Regular(
@@ -86,13 +95,22 @@ def build_graph(df, dataset):
     df = theory_tools.define_theory_weights_and_corrs(df, dataset.name, corr_helpers, args)
 
     if isZ:
-        nominal_axes = [axis_massZgen, axis_rapidity, axis_ptVgen, axis_chargeZgen]
+        if(args.ptqVgen):
+            nominal_axes = [axis_massZgen, axis_rapidity, axis_ptqVgen, axis_chargeZgen]
+        else:
+            nominal_axes = [axis_massZgen, axis_rapidity, axis_ptVgen, axis_chargeZgen]
         lep_axes = [axis_l_eta_gen, axis_l_pt_gen, axis_chargeZgen]
     else:
-        nominal_axes = [axis_massWgen, axis_rapidity, axis_ptVgen, axis_chargeWgen]
+        if(args.ptqVgen):
+            nominal_axes = [axis_massWgen, axis_rapidity, axis_ptqVgen, axis_chargeWgen]
+        else:
+            nominal_axes = [axis_massWgen, axis_rapidity, axis_ptVgen, axis_chargeWgen]
         lep_axes = [axis_l_eta_gen, axis_l_pt_gen, axis_chargeWgen]
-
-    nominal_cols = ["massVgen", col_rapidity, "ptVgen", "chargeVgen"]
+   
+    if(args.ptqVgen):
+        nominal_cols = ["massVgen", col_rapidity, "ptqVgen", "chargeVgen"]
+    else:
+        nominal_cols = ["massVgen", col_rapidity, "ptVgen", "chargeVgen"]
     lep_cols = ["etaPrefsrLep", "ptPrefsrLep", "chargeVgen"]
 
     if args.singleLeptonHists and isW or isZ:
@@ -122,8 +140,7 @@ def build_graph(df, dataset):
         results.append(df.HistoBoost("nominal_Mll", [axis_Mll], ["ewMll", "nominal_weight"], storage=hist.storage.Weight()))
         axis_Mlly = hist.axis.Regular(100, 50, 150, name = "Mlly")
         results.append(df.HistoBoost("nominal_Mlly", [axis_Mlly], ["ewMlly", "nominal_weight"], storage=hist.storage.Weight()))
-
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Double())
+    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"],  storage=hist.storage.Weight()) #storage=hist.storage.Double())
 
     results.append(nominal_gen)
     if not 'horace' in dataset.name:
@@ -131,11 +148,12 @@ def build_graph(df, dataset):
             df = theory_tools.define_scale_tensor(df)
             syst_tools.add_qcdScale_hist(results, df, nominal_axes, nominal_cols, "nominal_gen")
             df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhi, scaleWeights_tensor, nominal_weight)")
-            helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes], storage=hist.storage.Double())
+            helicity_moments_scale = df.HistoBoost("helicity_moments_scale", nominal_axes, [*nominal_cols, "helicity_moments_scale_tensor"], tensor_axes = [wremnants.axis_helicity, *wremnants.scale_tensor_axes], storage=hist.storage.Weight())#, storage=hist.storage.Double())
             results.append(helicity_moments_scale)
 
         if "LHEPdfWeight" in df.GetColumnNames():
-            syst_tools.add_pdf_hists(results, df, dataset.name, nominal_axes, nominal_cols, args.pdfs, "nominal_gen")
+            #df = theoryAgnostic_tools.define_helicity_weights(df)
+            syst_tools.add_pdf_hists(results, df, dataset.name, nominal_axes, nominal_cols, args.pdfs, "nominal_gen", args.addhelicity)
 
     if args.theoryCorr and dataset.name in corr_helpers:
         results.extend(theory_tools.make_theory_corr_hists(df, "nominal_gen", nominal_axes, nominal_cols,
@@ -153,7 +171,10 @@ def build_graph(df, dataset):
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)
-output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args, update_name=not args.forceDefaultName)
+if(args.ptqVgen):
+    output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('.py', f'_pdf_{args.pdfs[0]}_vars_qtbyQ.hdf5')}", args, update_name=not args.forceDefaultName)
+else:
+    output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('.py', f'_pdf_{args.pdfs[0]}_vars_qt.hdf5')}", args, update_name=not args.forceDefaultName)
 
 logger.info("computing angular coefficients")
 z_moments = None

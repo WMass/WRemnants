@@ -3,6 +3,7 @@ import hist
 import numpy as np
 from utilities import boostHistHelpers as hh, common, logging
 from wremnants import theory_tools
+#from wremnants import theoryAgnostic_tools
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.helicity_utils import *
 import re
@@ -301,24 +302,24 @@ def add_pdf_hists(results, df, dataset, axes, cols, pdfs, base_name="nominal", a
             logger.warning(f"PDF {pdf} was not found for sample {dataset}. Skipping uncertainty hist!")
             continue
 
+        pdfHist = df.HistoBoost(pdfHistName, axes, [*cols, tensorName], tensor_axes=[pdf_ax], storage=hist.storage.Weight())
         if pdfInfo["alphasRange"] == "001":
-            alphaSHistName = Datagroups.histName(base_name, syst=f"{pdfName}alphaS001")
+            name = Datagroups.histName(base_name, syst=f"{pdfName}alphaS001")
             as_ax = hist.axis.StrCategory(["as0117", "as0119"], name="alphasVar")
         else:
-            alphaSHistName = Datagroups.histName(base_name, syst=f"{pdfName}alphaS002")
+            name = Datagroups.histName(base_name, syst=f"{pdfName}alphaS002")
             as_ax = hist.axis.StrCategory(["as0116", "as0120"], name="alphasVar")
+        alphaSHist = df.HistoBoost(name, axes, [*cols, tensorASName], tensor_axes=[as_ax], storage=hist.storage.Weight())
+        results.extend([pdfHist, alphaSHist])
 
         if addhelicity:
-            pdfHeltensor, pdfHeltensor_axes =  make_pdfweight_helper_helicity(npdf, pdf_ax)
-            df = df.Define(f'{tensorName}_helicity', pdfHeltensor, [tensorName, "helWeight_tensor"])
-            pdfHist = df.HistoBoost(pdfHistName, axes, [*cols, f'{tensorName}_helicity'], tensor_axes=pdfHeltensor_axes, storage=hist.storage.Double())
-            alphaSHeltensor, alphaSHeltensor_axes =  make_pdfweight_helper_helicity(2, as_ax)
-            df = df.Define(f'{tensorASName}_helicity', alphaSHeltensor, [tensorASName, "helWeight_tensor"])
-            alphaSHist = df.HistoBoost(alphaSHistName, axes, [*cols, f'{tensorASName}_helicity'], tensor_axes=alphaSHeltensor_axes, storage=hist.storage.Double())
-        else:
-            pdfHist = df.HistoBoost(pdfHistName, axes, [*cols, tensorName], tensor_axes=[pdf_ax], storage=hist.storage.Double())
-            alphaSHist = df.HistoBoost(alphaSHistName, axes, [*cols, tensorASName], tensor_axes=[as_ax], storage=hist.storage.Double())
-        results.extend([pdfHist, alphaSHist])
+            df = df.Define(f"{tensorName}_moments_tensor", f"wrem::makePDFMomentScaleTensor<{npdf}>(csSineCosThetaPhi, {tensorName})")
+            pdfHist_helicity = df.HistoBoost(f"{pdfHistName}_pdfhelicity", axes, [*cols, f"{tensorName}_moments_tensor"], tensor_axes=[theory_tools.axis_helicity, pdf_ax], storage=hist.storage.Weight())
+            results.append(pdfHist_helicity)
+            df = df.Define(f"{tensorASName}_moments_tensor", f"wrem::makePDFMomentScaleTensor<2>(csSineCosThetaPhi, {tensorASName}, nominal_weight)")
+            pdfASHist_helicity = df.HistoBoost(f"{name}_pdfhelicity", axes, [*cols, f"{tensorASName}_moments_tensor"], tensor_axes=[theory_tools.axis_helicity, as_ax], storage=hist.storage.Weight())
+            results.append(pdfASHist_helicity)
+
     return df
 
 def add_qcdScale_hist(results, df, axes, cols, base_name="nominal", addhelicity=False):
