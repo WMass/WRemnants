@@ -1581,6 +1581,61 @@ private:
 
 };
 
+template<std::size_t N>
+class SmearingHelperSimpleMulti {
+
+public:
+    SmearingHelperSimpleMulti(const double sigmarel) : hash_(std::hash<std::string>()("SmearingHelperSimpleMulti")), sigmarel_(sigmarel) {}
+
+    RVec<double> operator() (const unsigned int run, const unsigned int lumi, const unsigned long long event,
+                            const RVec<float> &recPts, const RVec<float> &recEtas, const RVec<int> &recCharges) {
+
+        std::seed_seq seq{hash_, std::size_t(run), std::size_t(lumi), std::size_t(event)};
+        std::mt19937 rng(seq);
+
+        RVec<double> res;
+        res.reserve(N*recPts.size());
+        for (std::size_t i = 0; i < recPts.size(); ++i) {
+            const double pt = recPts[i];
+            const double eta = recEtas[i];
+            const double charge = recCharges[i];
+
+            const double qop = charge/pt/std::cosh(eta);
+
+            const double dsigma = sigmarel_*qop;
+
+            std::normal_distribution gaus{qop, dsigma};
+
+            for (std::size_t irep = 0; irep < N; ++irep) {
+                const double qopout = gaus(rng);
+
+                res.emplace_back(qopout);
+            }
+        }
+
+        return res;
+    }
+
+
+private:
+    const std::size_t hash_;
+    const double sigmarel_;
+};
+
+template <typename T>
+RVec<T> replicate_rvec(const RVec<T> &v, std::size_t n) {
+    RVec<T> res;
+    res.reserve(n*v.size());
+
+    for (const T &el : v) {
+        for (std::size_t irep=0; irep < n; ++irep) {
+            res.emplace_back(el);
+        }
+    }
+
+    return res;
+}
+
 class ScaleHelperSimpleWeight {
 
 public:

@@ -52,11 +52,14 @@ mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper =
 smearing_helper, smearing_uncertainty_helper = (None, None) if args.noSmearing else muon_calibration.make_muon_smearing_helpers()
 bias_helper = muon_calibration.make_muon_bias_helpers(args) if args.biasCalibration else None
 
+sigmarel = 5e-3
+scalerel = 5e-4
+nreps = 100
+
+smearing_helper_simple_multi = ROOT.wrem.SmearingHelperSimpleMulti[nreps](sigmarel)
+
 if args.testHelpers:
     response_helper = ROOT.wrem.SplinesDifferentialWeightsHelper(f"{wremnants.data_dir}/calibration/muon_response.tflite")
-
-    sigmarel = 5e-3
-    scalerel = 5e-4
 
     smearing_helper_simple = ROOT.wrem.SmearingHelperSimple(sigmarel, ROOT.ROOT.GetThreadPoolSize())
     smearing_helper_simple_weights = ROOT.wrem.SmearingHelperSimpleWeight(sigmarel)
@@ -119,6 +122,27 @@ def build_graph(df, dataset):
         hist_qopr = df.HistoBoost("hist_qopr", response_axes, [*response_cols, "nominal_weight"])
         results.append(hist_qopr)
 
+        df = df.Define("selMuons_shiftedqopr", f"(1. + {scalerel})*selMuons_qopr")
+
+        response_cols_shifted = ["selMuons_genPt", "selMuons_genEta", "selMuons_genCharge", "selMuons_shiftedqopr"]
+        hist_qopr_shifted = df.HistoBoost("hist_qopr_shifted", response_axes, [*response_cols_shifted, "nominal_weight"])
+        hist_qopr_shifted._hist.metadata = { "scalerel" : scalerel }
+        results.append(hist_qopr_shifted)
+
+        df = df.Define("selMuonsMulti_smearedmqop", smearing_helper_simple_multi, ["run", "luminosityBlock", "event", "selMuons_correctedPt", "selMuons_correctedEta", "selMuons_correctedCharge"])
+
+        df = df.Define("selMuonsMulti_genPt", f"wrem::replicate_rvec(selMuons_genPt, {nreps})")
+        df = df.Define("selMuonsMulti_genEta", f"wrem::replicate_rvec(selMuons_genEta, {nreps})")
+        df = df.Define("selMuonsMulti_genCharge", f"wrem::replicate_rvec(selMuons_genCharge, {nreps})")
+        df = df.Define("selMuonsMulti_genQop", f"wrem::replicate_rvec(selMuons_genQop, {nreps})")
+        df = df.Define("selMuonsMulti_smearedqopr", "selMuonsMulti_smearedmqop/selMuonsMulti_genQop")
+
+        response_cols_smeared_multi = ["selMuonsMulti_genPt", "selMuonsMulti_genEta", "selMuonsMulti_genCharge", "selMuonsMulti_smearedqopr"]
+        hist_qopr_smearedmulti = df.HistoBoost("hist_qopr_smearedmulti", response_axes, [*response_cols_smeared_multi, "nominal_weight"])
+        hist_qopr_smearedmulti._hist.metadata = { "sigmarel" : sigmarel }
+        results.append(hist_qopr_smearedmulti)
+
+
         if args.testHelpers:
 
             df = df.Define("selMuons_response_weight", response_helper, ["selMuons_correctedPt", "selMuons_correctedEta", "selMuons_correctedCharge", "selMuons_genPt", "selMuons_genEta", "selMuons_genCharge"])
@@ -135,7 +159,6 @@ def build_graph(df, dataset):
             df = df.Define("selMuons_transformedqop", "selMuons_correctedCharge*1.0/(selMuons_transformedPt*cosh(selMuons_correctedEta))")
             df = df.Define("selMuons_transformedqopr", "selMuons_transformedqop/selMuons_genQop")
 
-            df = df.Define("selMuons_shiftedqopr", f"(1. + {scalerel})*selMuons_qopr")
             df = df.Define("weight_scale", scale_helper_simple_weights, ["selMuons_correctedPt", "selMuons_correctedEta", "selMuons_correctedCharge", "selMuons_response_weight", "nominal_weight"])
 
             response_cols_smeared = ["selMuons_genPt", "selMuons_genEta", "selMuons_genCharge", "selMuons_smearedqopr"]
@@ -148,10 +171,6 @@ def build_graph(df, dataset):
 
             hist_qopr_smeared_weight = df.HistoBoost("hist_qopr_smeared_weight", response_axes, [*response_cols, "weight_smear"])
             results.append(hist_qopr_smeared_weight)
-
-            response_cols_shifted = ["selMuons_genPt", "selMuons_genEta", "selMuons_genCharge", "selMuons_shiftedqopr"]
-            hist_qopr_shifted = df.HistoBoost("hist_qopr_shifted", response_axes, [*response_cols_shifted, "nominal_weight"])
-            results.append(hist_qopr_shifted)
 
             hist_qopr_scaled_weight = df.HistoBoost("hist_qopr_scaled_weight", response_axes, [*response_cols, "weight_scale"])
             results.append(hist_qopr_scaled_weight)
