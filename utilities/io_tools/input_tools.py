@@ -169,8 +169,8 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
             pdf_member = int(var.removeprefix("pdf"))
         else:
             pdf_member = 0
-        if ("kappaf" in var or "kappaFO" in var) and var not in scales_map:
-            raise ValueError(f"Scale variation {var} found for fo_sing piece but no corresponding variation found for dyturbo")
+        if var in scales_map.keys() and var not in scales_map:
+            raise ValueError(f"Scale variation {var} found for fo_sing piece but no corresponding variation for dyturbo")
         dyturbo_scale = scales_map.get(var, "mur1-muf1")
         dyturbo_name = base_name.format(i=pdf_member, scale=dyturbo_scale)
         h = read_dyturbo_hist([dyturbo_name], axes=axes, charge=charge)

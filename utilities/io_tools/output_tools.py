@@ -57,7 +57,7 @@ def write_analysis_output(results, outfile, args):
         to_append.append(args.theoryCorr[0]+"Corr")
     if args.maxFiles is not None:
         to_append.append(f"maxFiles_{args.maxFiles}".replace("-","m"))
-    if args.pdfs[0] != "msht20": 
+    if args.pdfs[0] != "ct18z": 
         to_append.append(args.pdfs[0])
     if hasattr(args, "ptqVgen") and args.ptqVgen:
         to_append.append("vars_qtbyQ")

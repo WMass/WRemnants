@@ -149,7 +149,7 @@ def common_parser(for_reco_highPU=False):
             filtered_values = [x for x in values if x not in ["none", None]]
             setattr(namespace, self.dest, filtered_values)
 
-    parser.add_argument("--pdfs", type=str, nargs="+", default=["msht20"], 
+    parser.add_argument("--pdfs", type=str, nargs="+", default=["ct18z"], 
         choices=theory_tools.pdfMap.keys(), help="PDF sets to produce error hists for", action=PDFFilterAction)
     parser.add_argument("--altPdfOnlyCentral", action='store_true', help="Only store central value for alternate PDF sets")
     parser.add_argument("--maxFiles", type=int, help="Max number of files (per dataset)", default=None)
