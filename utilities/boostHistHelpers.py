@@ -320,7 +320,8 @@ def makeAbsHist(h, axis_name, rename=True):
     hnew = hist.Hist(*h.axes[:axidx], abs_ax, *h.axes[axidx+1:], storage=h.storage_type())
     
     s = hist.tag.Slicer()
-    hnew[...] = h[{axis_name : s[ax.index(0):]}].view(flow=True) + np.flip(h[{axis_name : s[:ax.index(0)]}].view(flow=True), axis=axidx)
+    view = h[{axis_name : s[ax.index(0):]}].view(flow=True) + np.flip(h[{axis_name : s[:ax.index(0)]}].view(flow=True), axis=axidx)
+    hnew[...] = np.take(view, range(ax.traits.underflow, abs_ax.size+ax.traits.underflow), axidx)
     return hnew
 
 # Checks if edges1 could be rebinned to edges2. Order is important!
