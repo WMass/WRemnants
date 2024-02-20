@@ -29,11 +29,11 @@ procs.append("WminustaunuPostVFP")
 
 
 with h5py.File(infile, 'r') as f:
-    results = narf.ioutils.pickle_load_h5py(f["results"])
     for proc in procs:
-        hist_response_proc = results[proc]["output"]["hist_qopr"].get()
-        hist_response_scaled_proc = results[proc]["output"]["hist_qopr_shifted"].get()
-        hist_response_smeared_proc = results[proc]["output"]["hist_qopr_smearedmulti"].get()
+        results = narf.ioutils.pickle_load_h5py(f[proc])
+        hist_response_proc = results["output"]["hist_qopr"].get()
+        hist_response_scaled_proc = results["output"]["hist_qopr_shifted"].get()
+        hist_response_smeared_proc = results["output"]["hist_qopr_smearedmulti"].get()
         if hist_response is None:
             hist_response = hist_response_proc
             hist_response_scaled = hist_response_scaled_proc
