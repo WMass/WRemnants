@@ -1044,6 +1044,59 @@ private:
     std::shared_ptr<const HIST> hsmear_;
 };
 
+template<typename HIST>
+class SmearingHelperParametrized{
+
+public:
+    SmearingHelperParametrized(HIST&& smearings) :
+        hash_(std::hash<std::string>()("SmearingHelperParametrized")),
+        hsmear_(std::make_shared<const HIST>(std::move(smearings)))
+        {}
+
+    RVec<float> operator() (const unsigned int run, const unsigned int lumi, const unsigned long long event, const RVec<float>& pts, const RVec<float>& etas) const {
+        std::seed_seq seq{hash_, std::size_t(run), std::size_t(lumi), std::size_t(event)};
+        std::mt19937 rng(seq);
+
+        RVec<float> corrected_pt(pts.size(), 0.);
+        for (size_t i = 0; i < pts.size(); i++) {
+            const float pt = pts[i];
+            const float eta = etas[i];
+
+            auto const &resolution_parms = narf::get_value(*hsmear_, eta).data();
+
+            std::array<double, 2> resolution_data_mc;
+            for (std::size_t idatamc = 0; idatamc < 2; ++idatamc) {
+                const double a = resolution_parms(0, idatamc);
+                const double c = resolution_parms(1, idatamc);
+                const double b = resolution_parms(2, idatamc);
+                const double d = resolution_parms(3, idatamc);
+
+                resolution_data_mc[idatamc] = a + c*pt*pt + b/(1. + d/pt/pt);
+            }
+
+            const double sigmasq = resolution_data_mc[0] - resolution_data_mc[1];
+
+
+            if (sigmasq > 0.) {
+                const double k = 1./pt;
+                std::normal_distribution gaus{k, std::sqrt(sigmasq)*k};
+                const double ksmeared = gaus(rng);
+                corrected_pt[i] = 1./ksmeared;
+            }
+            else {
+                corrected_pt[i] = pt;
+            }
+        }
+        return corrected_pt;
+    }
+
+    const HIST &hist() const { return *hsmear_; }
+
+private:
+    const std::size_t hash_;
+    std::shared_ptr<const HIST> hsmear_;
+};
+
 
 template<typename HIST, std::size_t NVar>
 class SmearingUncertaintyHelper{
@@ -1079,6 +1132,69 @@ public:
 
 private:
     std::shared_ptr<const HIST> hsmear_;
+};
+
+
+template<typename HISTNOM, typename HISTVAR, std::size_t NVar>
+class SmearingUncertaintyHelperParametrized : public SmearingHelperParametrized<HISTNOM> {
+
+public:
+    using base_t = SmearingHelperParametrized<HISTNOM>;
+    using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NVar>>;
+
+    SmearingUncertaintyHelperParametrized(const base_t &helper, HISTVAR&& hvar) :
+        base_t(helper),
+        hvar_(std::make_shared<const HISTVAR>(std::move(hvar)))
+        {}
+
+    out_tensor_t operator() (const RVec<float>& pts, const RVec<float>& etas, const RVec<std::pair<double, double>> &weights, const double nominal_weight = 1.0) const {
+
+        out_tensor_t res;
+        res.setConstant(nominal_weight);
+
+        for (size_t i = 0; i < pts.size(); i++) {
+            const float pt = pts[i];
+            const float eta = etas[i];
+            const double dweightdsigmasq = weights[i].second;
+
+            const double k = 1./pt;
+
+            auto const &resolution_parms = narf::get_value(base_t::hist(), eta).data();
+
+            const std::size_t idatamc = 0;
+            const double anom = resolution_parms(0, idatamc);
+            const double cnom = resolution_parms(1, idatamc);
+            const double bnom = resolution_parms(2, idatamc);
+            const double dnom = resolution_parms(3, idatamc);
+
+            const double sigmasqnom =  anom + cnom*pt*pt + bnom/(1. + dnom/pt/pt);
+
+            auto const &resolution_parms_var = narf::get_value(*hvar_, eta).data();
+
+            out_tensor_t iweight;
+            for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
+                const double avar = resolution_parms_var(0, ivar);
+                const double cvar = resolution_parms_var(1, ivar);
+                const double bvar = resolution_parms_var(2, ivar);
+                const double dvar = resolution_parms_var(3, ivar);
+
+                const double sigmasqvar =  avar + cvar*pt*pt + bvar/(1. + dvar/pt/pt);
+
+                const double dsigmarelsq = sigmasqvar - sigmasqnom;
+
+                iweight(ivar) = 1. + dweightdsigmasq*dsigmarelsq*k*k;
+            }
+
+            const out_tensor_t iweight_clamped = wrem::clip_tensor(iweight, 10.);
+
+            res *= iweight_clamped;
+        }
+        return res;
+    }
+
+private:
+    std::shared_ptr<const HISTNOM> hnom_;
+    std::shared_ptr<const HISTVAR> hvar_;
 };
 
 template<typename T>

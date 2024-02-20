@@ -169,7 +169,7 @@ def make_muon_bias_helpers(args):
 
     return helper
 
-def make_muon_smearing_helpers(filename = f"{data_dir}/calibration/smearingrel_smooth.pkl.lz4",
+def make_muon_smearing_helpers_binned(filename = f"{data_dir}/calibration/smearingrel_smooth.pkl.lz4",
                                filenamevar = f"{data_dir}/calibration/smearing_variations_smooth.pkl.lz4"):
     # this helper smears muon pT to match the resolution in data
 
@@ -191,6 +191,102 @@ def make_muon_smearing_helpers(filename = f"{data_dir}/calibration/smearingrel_s
     helper_var = ROOT.wrem.SmearingUncertaintyHelper[type(smearing_variations_boost), neig](ROOT.std.move(smearing_variations_boost))
 
     helper_var.tensor_axes = [var_axis]
+
+    return helper, helper_var
+
+def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutionDATA_LBL_JZ_seagulls.root",
+                               filenamemc = f"{data_dir}/calibration/resolutionMC_LBL_JZ_seagulls.root"):
+    # this helper smears muon pT to match the resolution in data
+
+    def load_res(filename):
+        f = ROOT.TFile.Open(filename)
+        a = f.Get("a")
+        c = f.Get("c")
+        b = f.Get("b")
+        d = f.Get("d")
+        cov = f.Get("covariance_matrix")
+
+        a = narf.root_to_hist(a, axis_names = ["res_eta"])
+        c = narf.root_to_hist(c, axis_names = ["res_eta"])
+        b = narf.root_to_hist(b, axis_names = ["res_eta"])
+        d = narf.root_to_hist(d, axis_names = ["res_eta"])
+        cov = narf.root_to_hist(cov)
+
+        f.Close()
+
+        return a,c,b,d,cov
+
+    adata, cdata, bdata, ddata, covdata = load_res(filenamedata)
+    amc, cmc, bmc, dmc, covmc = load_res(filenamemc)
+
+    # d^2 values are fixed to 100 and not written in the root files so set them by hand
+    ddata.values()[...] = 100.
+    ddata.variances()[...] = 0.
+
+    dmc.values()[...] = 100.
+    dmc.variances()[...] = 0.
+
+    axis_res_eta = adata.axes["res_eta"]
+    axis_res_parm = hist.axis.StrCategory(["a", "c", "b", "d"], name = "res_parm")
+    axis_res_parm_reduced = hist.axis.StrCategory(["a", "b", "c"], name = "res_parm_reduced")
+    axis_data_mc = hist.axis.StrCategory(["data", "mc"], name = "data_mc")
+
+    neta = axis_res_eta.size
+    nparms = axis_res_parm.size
+    nparmsreduced = axis_res_parm_reduced.size
+
+    hnomw = hist.Hist(axis_res_eta, axis_res_parm, axis_data_mc, storage = hist.storage.Weight())
+
+    hnomw[{"data_mc" : "data", "res_parm" : "a"}] = adata.view()
+    hnomw[{"data_mc" : "data", "res_parm" : "c"}] = cdata.view()
+    hnomw[{"data_mc" : "data", "res_parm" : "b"}] = bdata.view()
+    hnomw[{"data_mc" : "data", "res_parm" : "d"}] = ddata.view()
+
+    hnomw[{"data_mc" : "mc", "res_parm" : "a"}] = amc.view()
+    hnomw[{"data_mc" : "mc", "res_parm" : "c"}] = cmc.view()
+    hnomw[{"data_mc" : "mc", "res_parm" : "b"}] = bmc.view()
+    hnomw[{"data_mc" : "mc", "res_parm" : "d"}] = dmc.view()
+
+    hnom = hist.Hist(*hnomw.axes)
+    hnom[...] = hnomw.values()
+
+    def check_variances(h, cov):
+        variances = np.diag(cov.values())
+        variances = np.reshape(variances, (neta, -1))
+        nparmcov = variances.shape[-1]
+        for iparm, parm in enumerate(axis_res_parm_reduced):
+            if not np.all(np.isclose(variances[..., iparm], h[{"res_parm" : parm}].variances(), atol=0.)):
+                raise ValueError("Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order.")
+
+    hnomwdata = hnomw[{"data_mc" : "data"}]
+    hnomwmc = hnomw[{"data_mc" : "mc"}]
+
+    check_variances(hnomwdata, covdata)
+    check_variances(hnomwmc, covmc)
+
+    dcov = covdata.values() + covmc.values()
+    nvar = dcov.shape[0]
+
+    e, v = np.linalg.eigh(dcov)
+
+    dparms = np.sqrt(e[None, :])*v
+    dparms = np.reshape(dparms, (neta, -1, nvar))
+
+    axis_res_var = hist.axis.Integer(0, nvar, name = "smearing_variation")
+
+    hvar = hist.Hist(axis_res_eta, axis_res_parm, axis_res_var)
+    hvar[...] = hnomwdata.values()[..., None]
+
+    for iparm, parm in enumerate(axis_res_parm_reduced):
+        hvar[{"res_parm" : parm}] = hvar[{"res_parm" : parm}].values() + dparms[:, iparm, :]
+
+    hnom = narf.hist_to_pyroot_boost(hnom, tensor_rank=2)
+    hvar = narf.hist_to_pyroot_boost(hvar, tensor_rank=2)
+
+    helper = ROOT.wrem.SmearingHelperParametrized[type(hnom)](ROOT.std.move(hnom))
+    helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[type(hnom), type(hvar), nvar](helper, ROOT.std.move(hvar))
+
+    helper_var.tensor_axes = [axis_res_var]
 
     return helper, helper_var
 
