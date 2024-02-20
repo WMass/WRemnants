@@ -56,7 +56,7 @@ calib_filepaths = {
     },
     'data_corrfile': {
         'massfit': f"{calib_dir}/calibrationJDATA_ideal.root",
-        'lbl_massfit': f"{calib_dir}/calibrationJDATA_rewtgr_3dmap_LBL_MCstat.root"
+        'lbl_massfit': f"{calib_dir}/calibrationJDATA_MCstat_inclusive_smeared.root"
     },
     'mc_resofile': f"{calib_dir}/sigmaMC_LBL_JYZ.root",
     'data_resofile': f"{calib_dir}/sigmaDATA_LBL_JYZ.root",
