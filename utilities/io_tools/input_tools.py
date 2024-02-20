@@ -152,12 +152,13 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
     # map from scetlib fo variations naming to dyturbo naming
     # *FIXME* this is sensitive to presence or absence of trailing zeros for kappas
     scales_map = {
+            "pdf0" : "mur1-muf1",
             "kappaFO0.5-kappaf2." : "murH-muf1",
             "kappaFO2.-kappaf0.5" : "mur2-muf1",
             "kappaf0.5" : "mur1-mufH",
             "kappaf2." : "mur1-muf2",
             "kappaFO0.5" : "murH-mufH",
-            "kappaFO2." : "mur2-muf2"
+            "kappaFO2." : "mur2-muf2",
         }
 
     var_hist = None
