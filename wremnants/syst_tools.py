@@ -253,10 +253,10 @@ def decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axli
     if len(axlim) or len(rebin):
         hvar = hh.rebinHistMultiAx(hvar, newDecorrAxesNames, rebin, axlim[::2], axlim[1::2])
 
-    for var, absval in itertools.zip_longest(newDecorrAxesNames, absval):
+    for ax, absval in itertools.zip_longest(newDecorrAxesNames, absval):
         if absval:
-            logger.info(f"Taking the absolute value of axis '{var}'")
-            hvar = hh.makeAbsHist(h, ax, rename=False)
+            logger.info(f"Taking the absolute value of axis '{ax}'")
+            hvar = hh.makeAbsHist(hvar, ax, rename=False)
 
     # if there is a mirror axis, put it at the end, since CardTool.py requires it like that
     if "mirror" in hvar.axes.name and hvar.axes.name.index("mirror") == len(hvar.shape)-1:
