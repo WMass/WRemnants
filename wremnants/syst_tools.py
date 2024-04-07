@@ -259,7 +259,7 @@ def decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axli
             hvar = hh.makeAbsHist(hvar, ax, rename=False)
 
     # if there is a mirror axis, put it at the end, since CardTool.py requires it like that
-    if "mirror" in hvar.axes.name and hvar.axes.name.index("mirror") == len(hvar.shape)-1:
+    if "mirror" in hvar.axes.name and hvar.axes.name.index("mirror") != len(hvar.shape)-1:
         sortedAxes = [n for n in hvar.axes.name if n != "mirror"]
         sortedAxes.append("mirror")
         hvar = hvar.project(*sortedAxes)

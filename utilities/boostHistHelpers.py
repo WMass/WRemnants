@@ -703,12 +703,12 @@ def expand_hist_by_duplicate_axis(href, ref_ax_name, new_ax_name, swap_axes=Fals
     exp_data = data*np.reshape(np.identity(data.shape[0]), (data.shape[0], data.shape[0], *(1 for i in data.shape[1:])))
     # Move original and duplicated axes to desired positions
     exp_data = np.moveaxis(exp_data, 0, new_axis_idx)
-    hnew.values(flow=flow)[...] = np.moveaxis(exp_data, 0, ref_ax_idx)
+    hnew.values(flow=flow)[...] = np.moveaxis(exp_data, 0, ref_ax_idx+(new_axis_idx!=-1 and new_axis_idx<ref_ax_idx)) # move back one further if new axis comes before old one
     if href.storage_type == hist.storage.Weight:
         var = np.moveaxis(href.variances(flow=flow), ref_ax_idx, 0)
         exp_var = var*np.reshape(np.identity(var.shape[0]), (var.shape[0], var.shape[0], *(1 for i in var.shape[1:])))
         exp_var = np.moveaxis(exp_var, 0, new_axis_idx)
-        hnew.variances(flow=flow)[...] = np.moveaxis(exp_var, 0, ref_ax_idx)
+        hnew.variances(flow=flow)[...] = np.moveaxis(exp_var, 0, ref_ax_idx+(new_axis_idx!=-1 and new_axis_idx<ref_ax_idx))
 
     return hnew
 
