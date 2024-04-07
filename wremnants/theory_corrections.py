@@ -193,7 +193,7 @@ def rebin_corr_hists(hists, ndim=-1, binning=None):
     ndims = min([x.ndim for x in hists]) if ndim < 0 else ndim
     if binning:
         try:
-            hists = [h if not h else hh.rebinHistMultiAx(h, binning) for h in hists]
+            hists = [h if not h else hh.rebinHistMultiAx(h, binning.keys(), binning.values()) for h in hists]
         except ValueError as e:
             logger.warning("Can't rebin axes to predefined binning")
         return hists
@@ -383,7 +383,7 @@ def read_combined_corrs(procNames, generator, corr_files, axes=[], absy=True, re
         h = hh.makeAbsHist(h, "Y")
 
     if rebin:
-        h = hh.rebinHistMultiAx(h, rebin)
+        h = hh.rebinHistMultiAx(h, rebin.keys(), rebin.values())
 
     return h
 

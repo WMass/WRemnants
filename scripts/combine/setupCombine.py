@@ -69,7 +69,10 @@ def make_parser(parser=None):
     parser.add_argument("--fitXsec", action='store_true', help="Fit signal inclusive cross section")
     parser.add_argument("--fitWidth", action='store_true', help="Fit boson width")
     parser.add_argument("--fitMassDiff", type=str, default=None, choices=["charge", "cosThetaStarll", "eta-sign", "eta-range", "etaRegion", "etaRegionSign", "etaRegionRange"], help="Fit an additional POI for the difference in the boson mass")
-    parser.add_argument("--fitMassDecorr", type=str, default=None, help="Decorrelate POI for given axis, fit multiple POIs for the different POIs")
+    parser.add_argument("--fitMassDecorr", type=str, default=[], nargs='*', help="Decorrelate POI for given axes, fit multiple POIs for the different POIs")
+    parser.add_argument("--decorrRebin", type=int, nargs='*', default=[], help="Rebin axis by this value (default, 1, does nothing)")
+    parser.add_argument("--decorrAbsval", type=int, nargs='*', default=[], help="Take absolute value of axis if 1 (default, 0, does nothing)")
+    parser.add_argument("--decorrAxlim", type=float, default=[], nargs='*', help="Restrict axis to this range (assumes pairs of values by axis, with trailing axes optional)")
     parser.add_argument("--fitresult", type=str, default=None ,help="Use data and covariance matrix from fitresult (for making a theory fit)")
     parser.add_argument("--noMCStat", action='store_true', help="Do not include MC stat uncertainty in covariance for theory fit (only when using --fitresult)")
     parser.add_argument("--fakerateAxes", nargs="+", help="Axes for the fakerate binning", default=["eta","pt","charge"])
@@ -413,7 +416,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
 
     if not (args.doStatOnly and constrainMass):
         if args.massVariation != 0:
-            if not args.fitMassDecorr:
+            if len(args.fitMassDecorr)==0:
                 cardTool.addSystematic(f"massWeight{label}",
                                     processes=signal_samples_forMass,
                                     group=f"massShift",
@@ -425,22 +428,24 @@ def setup(args, inputFile, fitvar, xnorm=False):
                                     passToFakes=passSystToFakes
                 )
             else:
-                suffix = "".join([a.capitalize() for a in args.fitMassDecorr.split("-")])
+                suffix = "".join([a.capitalize() for a in args.fitMassDecorr])
+                new_names = [f"{a}_decorr" for a in args.fitMassDecorr]
                 cardTool.addSystematic(
                     name=f"massWeight{label}",
                     processes=signal_samples_forMass,
                     rename=f"massDecorr{suffix}{label}",
                     group=f"massDecorr{label}",
                     # systNameReplace=[("Shift",f"Diff{suffix}")],
-                    skipEntries=[(x, -1) for x in massWeightNames(proc=label, exclude=args.massVariation)],
+                    skipEntries=[(x, *[-1]*len(args.fitMassDecorr)) for x in massWeightNames(proc=label, exclude=args.massVariation)],
                     noi=not constrainMass,
                     noConstraint=not constrainMass,
                     mirror=False,
-                    systAxes=["massShift", f"{args.fitMassDecorr}Diff"],
+                    systAxes=["massShift", *new_names],
                     passToFakes=passSystToFakes,
                     actionRequiresNomi=True,
-                    action=syst_tools.decorrelateByAxis, 
-                    actionArgs=dict(axisToDecorrName=args.fitMassDecorr, decorrEdges=[], newDecorrAxisName=f"{args.fitMassDecorr}Diff")
+                    action=syst_tools.decorrelateByAxes, 
+                    actionArgs=dict(
+                        axesToDecorrNames=args.fitMassDecorr, newDecorrAxesNames=new_names, axlim=args.decorrAxlim, rebin=args.decorrRebin, absval=args.decorrAbsval)
                 )
 
         if args.fitMassDiff:
@@ -684,8 +689,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
                                    action=syst_tools.decorrelateByAxis,
                                    actionArgs=dict(axisToDecorrName=decorrVarAxis,
                                                    # empty array automatically uses all edges of the axis named "axisToDecorrName"
-                                                   # decorrEdges=[round(-2.4+i*0.1,1) for i in range(49)],
-                                                   decorrEdges=[], 
+                                                   # rebin=[round(-2.4+i*0.1,1) for i in range(49)],
                                                    newDecorrAxisName="decorrEta"
                                                    )
                                    )

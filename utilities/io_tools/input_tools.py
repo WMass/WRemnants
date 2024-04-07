@@ -506,7 +506,7 @@ def read_dyturbo_angular_coeffs(dyturbof, boson=None, rebin=None, absy=True, add
         ax._ax.metadata["name"] = name
 
     if rebin:
-        sigma_ul = hh.rebinHistMultiAx(sigma_ul, rebin)
+        sigma_ul = hh.rebinHistMultiAx(sigma_ul, rebin.keys(), rebin.values())
     if absy:
         sigma_ul = hh.makeAbsHist(sigma_ul, "Y")
 
@@ -519,7 +519,7 @@ def read_dyturbo_angular_coeffs(dyturbof, boson=None, rebin=None, absy=True, add
         for ax,name in zip(sigma_i.axes, ["qT", "Y"]):
             ax._ax.metadata["name"] = name
         if rebin:
-            sigma_i = hh.rebinHistMultiAx(sigma_i, rebin)
+            sigma_i = hh.rebinHistMultiAx(sigma_i, rebin.keys(), rebin.values())
         if absy:
             sigma_i = hh.makeAbsHist(sigma_i, "Y")
         entry = (*[0]*len(add_axes), Ellipsis, charge_ax.index(charge), i)

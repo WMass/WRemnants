@@ -4,6 +4,7 @@ from functools import reduce
 import collections
 from utilities import common, logging
 import copy
+import itertools
 
 logger = logging.child_logger(__name__)
 
@@ -340,14 +341,27 @@ def compatibleBins(edges1, edges2):
     comparef = np.vectorize(lambda x: np.isclose(x, edges1).any())
     return np.all(comparef(edges2))
 
-def rebinHistMultiAx(h, axis_map):
-    for ax, binning in axis_map.items():
+def rebinHistMultiAx(h, axes, edges=[], lows=[], highs=[]):
+    # edges: lists of new edges or integers to merge bins, in case new edges are given the lows and highs will be ignored
+    # lows: list of new lower boundaries
+    # highs: list of new upper boundaries
+
+    sel = {}
+    for ax,low,high,rebin in itertools.zip_longest(axes, lows, highs, edges):
         if ax not in h.axes.name:
             logger.debug(f"Did not find axis {ax} in hist. Skipping rebin.")
             continue
-        h = rebinHist(h, ax, binning)
-
-    return h
+        if rebin is not None and type(rebin) != int:
+            h = rebinHist(h, ax, rebin)
+        elif low is not None and high is not None:
+            # in case high edge is upper edge of last bin we need to manually set the upper limit
+            upper = hist.overflow if high==h.axes[ax].edges[-1] else complex(0, high) 
+            logger.info(f"Restricting the axis '{ax}' to range [{low}, {high}]")
+            sel[ax] = slice(complex(0, low), upper, hist.rebin(rebin) if rebin else None)
+        elif type(rebin) == int:
+            logger.info(f"Rebinning the axis '{ax}' by [{rebin}]")
+            sel[ax] = slice(None,None,hist.rebin(rebin))
+    return h[sel] if len(sel)>0 else h        
 
 def disableFlow(h, axis_name):
     # disable the overflow and underflow bins of a single axes, while keeping the flow bins of other axes
@@ -414,6 +428,20 @@ def rebinHist(h, axis_name, edges, flow=True):
         hnew.variances(flow=flow)[...] = np.add.reduceat(h.variances(flow=flow), edge_idx, 
                 axis=ax_idx).take(indices=range(new_ax.size+flow_add), axis=ax_idx)
     return hnew
+
+def get_rebin_actions(axes, ax_lim=[], ax_rebin=[], ax_absval=[], rename=False):
+    if len(ax_lim) % 2 or len(ax_lim)/2 > len(axes) or len(ax_rebin) > len(axes):
+        raise ValueError("Inconsistent rebin or axlim arguments. axlim must be at most two entries per axis, and rebin at most one")
+    actions=[]
+    if len(ax_lim)>0 or len(ax_rebin)>0:
+        actions.append(lambda h,axes=axes,rebins=ax_rebin,lows=ax_lim[::2],highs=ax_lim[1::2]: rebinHistMultiAx(h, axes, rebins, lows, highs))
+
+    for i, (var, absval) in enumerate(itertools.zip_longest(axes, ax_absval)):
+        if absval:
+            logger.info(f"Taking the absolute value of axis '{var}'")
+            actions.append(lambda h, ax=var: hh.makeAbsHist(h, ax, rename=rename))
+            axes[i] = f"abs{var}" if rename else var
+    return actions
 
 def mergeAxes(ax1, ax2):
     if ax1.edges[0] < ax2.edges[0]:
@@ -648,7 +676,7 @@ def set_flow(h, val="nearest"):
 
 # For converting the helicity scale hist to variations, keeping the gen axis to be fit
 # If swap_axes = True, the new axis takes the place of the old gen axis in the ordering
-def expand_hist_by_duplicate_axis(href, ref_ax_name, new_ax_name, swap_axes=False, flow=True):
+def expand_hist_by_duplicate_axis(href, ref_ax_name, new_ax_name, swap_axes=False, put_trailing=False, flow=True):
     if ref_ax_name not in href.axes.name:
         raise ValueError(f"Did not find axis {ref_ax_name} in hist!")
 
@@ -659,19 +687,28 @@ def expand_hist_by_duplicate_axis(href, ref_ax_name, new_ax_name, swap_axes=Fals
     new_ax = copy.deepcopy(ref_ax)
     new_ax._ax.metadata["name"] = new_ax_name
 
-    new_axes = [new_ax, *axes]
+    if put_trailing:
+        new_axes = [*axes, new_ax]
+        new_axis_idx=-1
+    else:
+        new_axes = [new_ax, *axes] 
+        new_axis_idx=0
     if swap_axes:
-        new_axes[0], new_axes[ref_ax_idx+1] = new_axes[ref_ax_idx+1], new_axes[0]
+        new_axes[new_axis_idx], new_axes[ref_ax_idx+1] = new_axes[ref_ax_idx+1], new_axes[new_axis_idx]
     hnew = hist.Hist(*new_axes, storage=href.storage_type())
 
+    # Temporarily move axis to duplicate first 
     data = np.moveaxis(href.values(flow=flow), ref_ax_idx, 0)
     # Copy data from other axis along the diagnoal, off-diagonals will be zero
     exp_data = data*np.reshape(np.identity(data.shape[0]), (data.shape[0], data.shape[0], *(1 for i in data.shape[1:])))
-    hnew.values(flow=flow)[...] = np.moveaxis(exp_data, 1, ref_ax_idx+1)
+    # Move original and duplicated axes to desired positions
+    exp_data = np.moveaxis(exp_data, 0, new_axis_idx)
+    hnew.values(flow=flow)[...] = np.moveaxis(exp_data, 0, ref_ax_idx)
     if href.storage_type == hist.storage.Weight:
         var = np.moveaxis(href.variances(flow=flow), ref_ax_idx, 0)
         exp_var = var*np.reshape(np.identity(var.shape[0]), (var.shape[0], var.shape[0], *(1 for i in var.shape[1:])))
-        hnew.variances(flow=flow)[...] = np.moveaxis(exp_var, 1, ref_ax_idx+1)
+        exp_var = np.moveaxis(exp_var, 0, new_axis_idx)
+        hnew.variances(flow=flow)[...] = np.moveaxis(exp_var, 0, ref_ax_idx)
 
     return hnew
 

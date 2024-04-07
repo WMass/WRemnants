@@ -7,6 +7,7 @@ from wremnants.datasets.datagroups import Datagroups
 from wremnants.helicity_utils import *
 import re
 import collections.abc
+import itertools
 
 logger = logging.child_logger(__name__)
 
@@ -229,57 +230,41 @@ def scale_helicity_hist_to_variations(scale_hist, sum_axes=[], pt_ax="ptVgen", g
 
     return scale_variation_hist
 
-def decorrelateByAxis(hvar, hnom, axisToDecorrName, decorrEdges, newDecorrAxisName=None):
+def decorrelateByAxis(hvar, hnom, axisToDecorrName, newDecorrAxisName=None, **kwargs):
+    return decorrelateByAxes(hvar, hnom, axesToDecorrNames=[axisToDecorrName], newDecorrAxesNames=[newDecorrAxisName], **kwargs)
 
-    commonMessage = f"Requested to decorrelate uncertainty in histogram {hvar.name} by {axisToDecorrName} axis"
-    if axisToDecorrName not in hnom.axes.name:
-        raise ValueError(f"{commonMessage}, but available axes for nominal histogram are {hnom.axes.name}")
-    
-    # for convenience, broadcast the nominal into the same shape as hvar
-    # hvar may often have the same dimension as hnom, but sometimes it might have been mirrored and thus have at least the mirror axis
-    hnomAsVar = hh.broadcastSystHist(hnom, hvar)
+def decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axlim=[], rebin=[], absval=[]):
 
-    ax = hnomAsVar.axes[axisToDecorrName]
-    axisToDecorrIndex = list(hnomAsVar.axes).index(ax)
-    logger.debug(f"Decorrelating versus axis {axisToDecorrName} with index {axisToDecorrIndex}")
+    commonMessage = f"Requested to decorrelate uncertainty in histogram {hvar.name} by {axesToDecorrNames} axes"
+    if any(a not in hvar.axes.name for a in axesToDecorrNames):
+        raise ValueError(f"{commonMessage}, but available axes for histogram are {hvar.axes.name}")
 
-    if len(decorrEdges):
-        if len(decorrEdges) < 3:
-            raise ValueError(f"{commonMessage}, but less than 3 edges (thus 2 bins) were specified.")
-        # check that the edges in decorrEdges correspond to a subset of the edges of axis names axisToDecorrName
-        badEdges = []
-        for edge in decorrEdges:
-            if all(not np.isclose(edge, j, atol=0.0001) for j in ax.edges):
-                badEdges.append(edge)
-        if len(badEdges):
-            raise ValueError(f"Inconsistent edges specified to decorrelate uncertainty versus axis {axisToDecorrName}\n"
-                             f"Original axis edges: {ax.edges}\n"
-                             f"Decorrelation edges: {decorrEdges}\n"
-                             f"Inconsistent edges:  {badEdges}")
-    else:
-        # empty array automatically uses all edges of the chosen axis
-        decorrEdges = [x for x in ax.edges]
+    if len(newDecorrAxesNames)==0:
+        newDecorrAxesNames = [f"{n}_decorr" for n in axesToDecorrNames]
+    elif len(axesToDecorrNames) != len(newDecorrAxesNames):
+        raise ValueError(f"If newDecorrAxisName are specified, they must have the same length than axisToDecorrName, but they are {newDecorrAxisName} and {axisToDecorrName}.")
 
-    # add new axis to the broadcasted nominal (then we will copy the syst in the relevant bins)
-    axis_decorr_name = newDecorrAxisName if newDecorrAxisName != None else f"{axisToDecorrName}_decorr"
-    axis_decorr = hist.axis.Variable(decorrEdges, underflow=False, overflow=False, name=axis_decorr_name)
-    hvarnew = hh.addGenericAxis(hnomAsVar, axis_decorr)
+    # subtract nominal hist to get variation only
+    hvar = hh.addHists(hvar, hnom, scale2=-1)
+    # expand edges for variations on diagonal elements
+    hvar = hh.expand_hist_by_duplicate_axes(hvar, axesToDecorrNames, newDecorrAxesNames, put_trailing=True)
+    # add back nominal histogram while broadcasting
+    hvar = hh.addHists(hvar, hnom)
+    if len(axlim) or len(rebin):
+        hvar = hh.rebinHistMultiAx(hvar, newDecorrAxesNames, rebin, axlim[::2], axlim[1::2])
 
-    for isyst in range(len(decorrEdges)-1):
-        indexLow = ax.index(decorrEdges[isyst] + 0.001) # add epsilon to ensure picking the bin on the right of the edge (note that the second bin index is excluded from the slice selection below)
-        # for the upper edge add an additional protection for the very last edge in case the axis doesn't have the overflow bin, since the edge lookup might be undefined in that case
-        # since the upper edge is no longer associated to the following bin, which would be the overflow bin, but to the inner bin (adding epsilon seems to work nonetheless, but it is probably by chance)
-        indexHigh = ax.index(decorrEdges[isyst+1] + 0.001) if decorrEdges[isyst+1] < ax.edges[-1] else ax.size # it seems hist.overflow doesn't work inside slice()
-        slices = [slice(None) if n != axisToDecorrIndex else slice(indexLow,indexHigh) for n in range(len(hnomAsVar.axes.name))]
-        hvarnew.values(flow=False)[*slices, isyst] = hvar.values(flow=False)[*slices] # use values instead of view, because hvar has storage=Double(), while hnom (and hence hvarnew) has storage=Weight
+    for var, absval in itertools.zip_longest(newDecorrAxesNames, absval):
+        if absval:
+            logger.info(f"Taking the absolute value of axis '{var}'")
+            hvar = hh.makeAbsHist(h, ax, rename=False)
 
     # if there is a mirror axis, put it at the end, since CardTool.py requires it like that
-    if "mirror" in hvarnew.axes.name:
-        sortedAxes = [n for n in hvarnew.axes.name if n != "mirror"]
+    if "mirror" in hvar.axes.name and hvar.axes.name.index("mirror") == len(hvar.shape)-1:
+        sortedAxes = [n for n in hvar.axes.name if n != "mirror"]
         sortedAxes.append("mirror")
-        hvarnew = hvarnew.project(*sortedAxes)
+        hvar = hvar.project(*sortedAxes)
 
-    return hvarnew
+    return hvar
 
 def make_fakerate_variation(href, fakerate_axes, fakerate_axes_syst, variation_fakerate=0.5, flow=False):
     # 1) calculate fakerate in bins of fakerate axes
