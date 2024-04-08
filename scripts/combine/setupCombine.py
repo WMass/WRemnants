@@ -689,7 +689,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
                                    action=syst_tools.decorrelateByAxis,
                                    actionArgs=dict(axisToDecorrName=decorrVarAxis,
                                                    # empty array automatically uses all edges of the axis named "axisToDecorrName"
-                                                   # rebin=[round(-2.4+i*0.1,1) for i in range(49)],
+                                                #    rebin=[round(-2.4+i*0.2,1) for i in range(25)],
                                                    newDecorrAxisName="decorrEta"
                                                    )
                                    )

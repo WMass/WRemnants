@@ -38,7 +38,7 @@ def cfgFigure(href, xlim=None, bin_density = 300,  width_scale=1, automatic_scal
 def figure(href, xlabel, ylabel, ylim=None, xlim=None,
     grid = False, plot_title = None, title_padding = 0,
     bin_density = 300, cms_label = None, logy=False, logx=False,
-    width_scale=1, automatic_scale=True
+    width_scale=1, height=8, automatic_scale=True
 ):
     if isinstance(href, hist.Hist):
         fig, xlim = cfgFigure(href, xlim, bin_density, width_scale, automatic_scale)
@@ -48,7 +48,7 @@ def figure(href, xlabel, ylabel, ylim=None, xlim=None,
             width = math.ceil(raw_width)
         else:
             width = 1
-        fig = plt.figure(figsize=(width_scale*8*width,8))
+        fig = plt.figure(figsize=(width_scale*height*width,height))
 
     ax1 = fig.add_subplot() 
     if cms_label: hep.cms.text(cms_label)

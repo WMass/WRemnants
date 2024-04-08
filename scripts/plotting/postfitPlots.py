@@ -75,6 +75,8 @@ translate_selection = {
 def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, suffix="", chi2=None, meta=None, saturated_chi2=False, lumi=None):
     axes_names = [a.name for a in axes]
     if len(h_data.axes) > 1:
+        if "eta" in axes_names[-1]:
+            axes_names = axes_names[::-1]
         # make unrolled 1D histograms
         h_data = hh.unrolledHist(h_data, binwnorm=1, obs=axes_names)
         h_inclusive = hh.unrolledHist(h_inclusive, binwnorm=1, obs=axes_names)

@@ -230,8 +230,8 @@ def scale_helicity_hist_to_variations(scale_hist, sum_axes=[], pt_ax="ptVgen", g
 
     return scale_variation_hist
 
-def decorrelateByAxis(hvar, hnom, axisToDecorrName, newDecorrAxisName=None, **kwargs):
-    return decorrelateByAxes(hvar, hnom, axesToDecorrNames=[axisToDecorrName], newDecorrAxesNames=[newDecorrAxisName], **kwargs)
+def decorrelateByAxis(hvar, hnom, axisToDecorrName, newDecorrAxisName=None, axlim=[], rebin=[], absval=False):
+    return decorrelateByAxes(hvar, hnom, axesToDecorrNames=[axisToDecorrName], newDecorrAxesNames=[newDecorrAxisName], axlim=[axlim], rebin=[rebin], absval=[absval])
 
 def decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axlim=[], rebin=[], absval=[]):
 
