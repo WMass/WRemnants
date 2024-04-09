@@ -351,7 +351,7 @@ def rebinHistMultiAx(h, axes, edges=[], lows=[], highs=[]):
         if ax not in h.axes.name:
             logger.debug(f"Did not find axis {ax} in hist. Skipping rebin.")
             continue
-        if rebin is not None and type(rebin) != int:
+        if rebin not in [None, []] and type(rebin) != int:
             h = rebinHist(h, ax, rebin)
         elif low is not None and high is not None:
             # in case high edge is upper edge of last bin we need to manually set the upper limit

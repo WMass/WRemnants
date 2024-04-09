@@ -7,7 +7,6 @@ from wremnants.datasets.datagroups import Datagroups
 from wremnants.helicity_utils import *
 import re
 import collections.abc
-import itertools
 
 logger = logging.child_logger(__name__)
 
@@ -253,7 +252,8 @@ def decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axli
     if len(axlim) or len(rebin):
         hvar = hh.rebinHistMultiAx(hvar, newDecorrAxesNames, rebin, axlim[::2], axlim[1::2])
 
-    for ax, absval in itertools.zip_longest(newDecorrAxesNames, absval):
+
+    for ax, absval in zip(newDecorrAxesNames, absval):
         if absval:
             logger.info(f"Taking the absolute value of axis '{ax}'")
             hvar = hh.makeAbsHist(hvar, ax, rename=False)
