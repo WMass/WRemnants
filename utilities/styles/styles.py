@@ -105,7 +105,7 @@ common_groups = [
     "stat",
     "binByBinStat",
     "luminosity",
-    "CMS_recoil",
+    "recoil",
     "CMS_background",
     "theory_ew",
     "normXsecW",

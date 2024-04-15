@@ -25,29 +25,27 @@ if __name__ == "__main__":
     met, analysis, flavor = functions.get_meta(groups)
     outDir = f"/home/submit/jaeyserm/public_html/recoil/{analysis}_{met}/plots_{flavor}/"
     functions.prepareDir(outDir, remove=False)
-    print(groups.flavor)
+    datasets = groups.getNames()
 
     groups.addGroup("Top",
-        members = list(filter(lambda y: y.group == "Top", groups.datasets.values())),
+        members = groups.get_members_from_results(startswith=["Top", "SingleT", "TT"]),
         label = "Top",
         color = "#DE5A6A",
-        selectOp = sel.signalHistABCD if flavor == "mu" else None,
     )
     groups.addGroup("EWK_Z",
-        members = [x for x in groups.datasets.values() if not x.is_data and x.group not in ["Zmumu", "Top"] and x.group != "QCD"],
+        members = groups.get_members_from_results(startswith=["Wplusmunu", "Wminusmunu", "Wmunu", "Wplustaunu", "Wminustaunu", "Ztautau", "Diboson", "WW", "WZ", "ZZ", "PhotonInduced"]),
         label = r"EWK (#tau^{#plus}#tau^{#minus}, VV)",
         color = "#64C0E8",
-        selectOp = sel.signalHistABCD if flavor == "mu" else None,
     )
     groups.addGroup("EWK_W",
-        members = [x for x in groups.datasets.values() if not x.is_data and x.group not in ["Wmunu", "Top"] and x.group != "QCD"],
+        members = groups.get_members_from_results(startswith=["Wplustaunu", "Wminustaunu", "DYlowMass", "DYJetsToMuMuMass10to50", "Zmumu", "Ztautau", "Diboson", "WW", "WZ", "ZZ", "PhotonInduced"]),
         label = r"EWK (#tau^{#plus}#tau^{#minus}, VV)",
         color = "#64C0E8",
-        selectOp = sel.signalHistABCD if flavor == "mu" else None,
     )
 
     groups.groups['Zmumu'].color = "#F8CE68"
     groups.groups['Zmumu'].label = "DY #rightarrow #mu^{#plus}#mu^{#minus} (MiNNLO)"
+
 
     from utilities import boostHistHelpers as hh
     import hist
@@ -258,6 +256,9 @@ if __name__ == "__main__":
         plotutils.stacked_plot_ratio(groups, "mt_corr_xy_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "XY corrected", "q_{T} reweighted"])
         plotutils.stacked_plot_ratio(groups, "mt_corr_rec", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "Recoil corrected"], yRatio=1.06)
         plotutils.stacked_plot_ratio(groups, "mt_corr_rec_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "Recoil corrected", "q_{T} reweighted"], yRatio=1.06)
+        plotutils.stacked_plot_ratio(groups, "mt_corr_rec", procs, outDir_, xMin=40, xMax=140, yMin=0, yMax=4e5, logY=False, xLabel="MT", rebin=1, dataNormProc=dataNormProc, labels=[met, "Recoil corrected"], yRatio=1.06, suffix="_noLog")
+        plotutils.stacked_plot_ratio(groups, "mt_corr_rec_qtrw", procs, outDir_, xMin=40, xMax=140, yMin=0, yMax=4e5, logY=False, xLabel="MT", rebin=1, dataNormProc=dataNormProc, labels=[met, "Recoil corrected", "q_{T} reweighted"], yRatio=1.06, suffix="_noLog")
+
 
         plotutils.plot_systs(groups, "mt_corr_rec", "recoil_syst", 'Zmumu', f"{outDir_}/unc_syst/", xMin=xMin, xMax=xMax, yMin=0, yMax=-1, xLabel="MT", rebin=mt_bins, extralabels=[met, "Recoil corrected"])
         #plotutils.plot_systs(groups, "mt_corr_rec", "recoil_stat", 'Zmumu', f"{outDir_}/unc_stat/", xMin=xMin, xMax=xMax, yMin=0, yMax=-1, xLabel="MT", rebin=mt_bins, extralabels=[met, "Recoil corrected"])
@@ -304,7 +305,9 @@ if __name__ == "__main__":
             bins_met = list(range(0, 20, 2)) + list(range(20, 50, 2)) + list(range(50, 70, 4)) + [70, 80, 90, 110, 120]
             xMin, xMax, yMin, yMax = 0, 120, 1e1, 1e8
         outDir_ = f"{outDir}/met_pt"
+        groups.set_histselectors(datasets, histToRead="met_uncorr_pt", fake_processes=None, mode="simple", smoothen=False, simultaneousABCD=False)
         plotutils.stacked_plot_ratio(groups, "met_uncorr_pt", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="METPT", rebin=bins_met, dataNormProc=dataNormProc, labels=[met, "Uncorrected"], yRatio=1.06, charge="combined")
+        #quit()
         plotutils.stacked_plot_ratio(groups, "met_corr_lep_pt", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="METPT", rebin=bins_met, dataNormProc=dataNormProc, labels=[met, "Lepton corrected"], yRatio=1.06, charge="combined")
         plotutils.stacked_plot_ratio(groups, "met_corr_xy_pt", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="METPT", rebin=bins_met, dataNormProc=dataNormProc, labels=[met, "XY corrected"], yRatio=1.06, charge="combined")
         plotutils.stacked_plot_ratio(groups, "met_corr_xy_pt_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="METPT", rebin=bins_met, dataNormProc=dataNormProc, labels=[met, "XY corrected", "q_{T} reweighted"], yRatio=1.06, charge="combined")
@@ -312,7 +315,6 @@ if __name__ == "__main__":
         plotutils.stacked_plot_ratio(groups, "met_corr_rec_pt_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, logY=True, xLabel="METPT", rebin=bins_met, dataNormProc=dataNormProc, labels=[met, "Recoil corrected", "q_{T} reweighted"], yRatio=1.06, charge="combined")
         #plotutils.plot_systs(groups, "met_corr_rec_pt", "recoil_syst", 'Zmumu', f"{outDir_}/unc_syst/", xMin=xMin, xMax=xMax, yMin=0, yMax=-1, xLabel="MT", rebin=bins_met, extralabels=[met, "Recoil corrected"])
         #plotutils.plot_systs(groups, "met_corr_rec_pt", "recoil_stat", 'Zmumu', f"{outDir_}/unc_stat/", xMin=xMin, xMax=xMax, yMin=0, yMax=-1, xLabel="MT", rebin=bins_met, extralabels=[met, "Recoil corrected"])
-
 
 
         if analysis == "lowPU":
@@ -328,6 +330,7 @@ if __name__ == "__main__":
         plotutils.stacked_plot_ratio(groups, "mt_corr_xy_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "XY corrected", "q_{T} reweighted"], yRatio=1.06, charge="combined")
         plotutils.stacked_plot_ratio(groups, "mt_corr_rec", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "Recoil corrected"], yRatio=1.06, charge="combined")
         plotutils.stacked_plot_ratio(groups, "mt_corr_rec_qtrw", procs, outDir_, xMin=xMin, xMax=xMax, yMin=yMin, yMax=yMax, xLabel="MT", rebin=mt_bins, dataNormProc=dataNormProc, labels=[met, "Recoil corrected", "q_{T} reweighted"], yRatio=1.06, charge="combined")
+
 
         if analysis == "lowPU":
             xMin, xMax, yMin, yMax = -60, 100, 1e0, 1e7

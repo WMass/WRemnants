@@ -9,7 +9,18 @@ def add_recoil_uncertainty(card_tool, samples, passSystToFakes=False, pu_type="h
     met = input_tools.args_from_metadata(card_tool, "met")
     if flavor == "":
         flavor = input_tools.args_from_metadata(card_tool, "flavor")
-    if pu_type == "highPU" and (met in ["RawPFMET", "DeepMETReso"]):
+    if pu_type == "highPU" and (met in ["RawPFMET", "DeepMETReso", "DeepMETPVRobust", "DeepMETPVRobustNoPUPPI"]):
+
+        '''
+        card_tool.addSystematic("recoil_syst",
+            processes=samples,
+            mirror = True,
+            group = "recoil" if group_compact else "recoil_syst",
+            splitGroup={"experimental": f".*"},
+            systAxes = ["recoil_unc"],
+            passToFakes=passSystToFakes,
+        )
+        '''
 
         card_tool.addSystematic("recoil_stat",
             processes=samples,
@@ -20,14 +31,6 @@ def add_recoil_uncertainty(card_tool, samples, passSystToFakes=False, pu_type="h
             passToFakes=passSystToFakes,
         )
 
-        card_tool.addSystematic("recoil_syst",
-            processes=samples,
-            mirror = True,
-            group = "recoil" if group_compact else "recoil_syst",
-            splitGroup={"experimental": f".*"},
-            systAxes = ["recoil_unc"],
-            passToFakes=passSystToFakes,
-        )
 
 def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_v_samples", passSystToFakes=True, wlike=False):
     info = dict(

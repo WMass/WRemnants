@@ -16,32 +16,32 @@ def makePlot(hist_data, hist_mc, fOut, xLabel, npv, outDir_):
 
     hist_data.Scale(1./hist_data.Integral())
     hist_mc.Scale(1./hist_mc.Integral())
-    
+
     hist_data.SetLineColor(ROOT.kBlack)
     hist_data.SetLineWidth(2)
-    
+
     hist_mc.SetLineColor(ROOT.kRed)
     hist_mc.SetLineWidth(2)
-    
+
     ## sigmas
     cfg = {
 
         'logy'              : True,
         'logx'              : False,
-        
+
         'xmin'              : -100,
         'xmax'              : 100,
         'ymin'              : 1e-5,
         'ymax'              : 1e0,
-            
+
         'xtitle'            : xLabel,
         'ytitle'            : "Events",
-            
+
         'topRight'          : lumi_header, 
         'topLeft'           : "#bf{CMS} #scale[0.7]{#it{Preliminary}}",
 
     } 
-    
+
 
     plotter.cfg = cfg
     canvas = plotter.canvas()
@@ -51,21 +51,21 @@ def makePlot(hist_data, hist_mc, fOut, xLabel, npv, outDir_):
     hist_data.Draw("SAME")
     hist_mc.Draw("SAME")
     plotter.aux()
-    
+
     latex = ROOT.TLatex()
     latex.SetNDC()
     latex.SetTextSize(0.030)
     latex.SetTextColor(1)
     latex.SetTextFont(42)
-    
+
     latex.DrawLatex(0.20, 0.90, "NPV = %d" % npv)
-    
+
     latex.DrawLatex(0.20, 0.85, "Data")
     latex.DrawLatex(0.20, 0.82, "Mean %.2f #pm %.2f GeV" % (hist_data.GetMean(), hist_data.GetMeanError()))
-    
+
     latex.DrawLatex(0.60, 0.85, "#color[2]{MC}")
     latex.DrawLatex(0.60, 0.82, "#color[2]{Mean %.2f #pm %.2f GeV}" % (hist_mc.GetMean(), hist_mc.GetMeanError()))
-    
+
     canvas.Modify()
     canvas.Update()
     canvas.Draw()
@@ -78,35 +78,35 @@ def makePlot_fit(hist_data, hist_mc, fOut, xLabel, npv, outDir_):
 
     hist_data.Scale(1./hist_data.Integral())
     hist_mc.Scale(1./hist_mc.Integral())
-    
+
     hist_data.SetLineColor(ROOT.kBlack)
     hist_data.SetLineWidth(2)
     
     hist_mc.SetLineColor(ROOT.kRed)
     hist_mc.SetLineWidth(2)
-    
+
     ## sigmas
     cfg = {
 
         'logy'              : True,
         'logx'              : False,
-        
+
         'xmin'              : -100,
         'xmax'              : 100,
         'ymin'              : 1e-5,
         'ymax'              : 1e0,
-            
+
         'xtitle'            : xLabel,
         'ytitle'            : "Events",
-            
+
         'topRight'          : lumi_header, 
         'topLeft'           : "#bf{CMS} #scale[0.7]{#it{Preliminary}}",
 
     } 
-    
+
     fit_mc = ROOT.TF1("fit_mc", "gaus", -100, 100)
     hist_mc.Fit("fit_mc")
-    
+
     fit_data = ROOT.TF1("fit_data", "gaus", -100, 100)
     hist_data.Fit("fit_data")
 
@@ -117,34 +117,34 @@ def makePlot_fit(hist_data, hist_mc, fOut, xLabel, npv, outDir_):
     dummy.Draw("HIST")
     hist_data.Draw("SAME")
     hist_mc.Draw("SAME")
-    
+
     fit_mc.Draw("SAME")
     fit_data.Draw("SAME")
     plotter.aux()
-    
+
     latex = ROOT.TLatex()
     latex.SetNDC()
     latex.SetTextSize(0.030)
     latex.SetTextColor(1)
     latex.SetTextFont(42)
-    
+
     latex.DrawLatex(0.20, 0.90, "NPV = %d" % npv)
-    
+
     latex.DrawLatex(0.20, 0.85, "Data")
     latex.DrawLatex(0.20, 0.82, "Mean %.2f #pm %.2f GeV" % (hist_data.GetMean(), hist_data.GetMeanError()))
     latex.DrawLatex(0.20, 0.79, "#color[2]{Mean %.2f #pm %.2f GeV}" % (fit_data.GetParameter(1), fit_data.GetParError(1)))
-    
+
     latex.DrawLatex(0.60, 0.85, "#color[2]{MC}")
     latex.DrawLatex(0.60, 0.82, "#color[2]{Mean %.2f #pm %.2f GeV}" % (hist_mc.GetMean(), hist_mc.GetMeanError()))
     latex.DrawLatex(0.60, 0.79, "#color[2]{Mean %.2f #pm %.2f GeV}" % (fit_mc.GetParameter(1), fit_mc.GetParError(1)))
-    
+
     canvas.Modify()
     canvas.Update()
     canvas.Draw()
     canvas.SaveAs("%s/%s.png" % (outDir_, fOut))
     canvas.SaveAs("%s/%s.pdf" % (outDir_, fOut))
     canvas.Delete()
-    
+
     return fit_data.GetParameter(1), fit_data.GetParError(1), fit_mc.GetParameter(1), fit_mc.GetParError(1)
 
 def met_xy_reweighting(direction = "x", corrType="uncorr", polyOrderData=-1, polyOrderMC=-1, procs=[], data="", yMin=-5, yMax=5):
@@ -153,9 +153,9 @@ def met_xy_reweighting(direction = "x", corrType="uncorr", polyOrderData=-1, pol
     outDir_ = "%s/%s" % (outDir, corrType)
     functions.prepareDir(outDir_, False)
 
-    h_data = functions.readBoostHist(groups, f"met_{corrType}_{direction}_npv", [data])
-    h_mc = functions.readBoostHist(groups, f"met_{corrType}_{direction}_npv", procs)
-    
+    h_data = functions.readBoostHist(groups, f"met_{corrType}_{direction}_npv", [data], abcd=False)
+    h_mc = functions.readBoostHist(groups, f"met_{corrType}_{direction}_npv", procs, abcd=False)
+
     g_data = ROOT.TGraphErrors()
     g_data.SetLineColor(ROOT.kBlack)
     g_data.SetMarkerStyle(20)
@@ -216,7 +216,7 @@ def met_xy_reweighting(direction = "x", corrType="uncorr", polyOrderData=-1, pol
 
         'xtitle'            : "Number of primary vertices",
         'ytitle'            : "#LT MET_{%s} #GT (Gev)" % direction,
-            
+
         'topRight'          : lumi_header, 
         'topLeft'           : "#bf{CMS} #scale[0.7]{#it{Preliminary}}",
 

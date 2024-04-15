@@ -8,7 +8,12 @@ import functions
 def readProc(groups, hName, procs):
     groups.setNominalName(hName)
     groups.loadHistsForDatagroups(hName, syst="", procsToRead=procs)
-    return sum([groups.groups[p].hists[hName] for p in procs])
+    
+    bhist = sum([groups.groups[p].hists[hName] for p in procs])
+    k = bhist.values()
+    k[bhist.values()<0] = 0 # remove negative values
+    bhist.view().value = k
+    return bhist
 
 
 if __name__ == "__main__":
@@ -30,8 +35,8 @@ if __name__ == "__main__":
         savedict['z_para_gen'] = readProc(groups, "recoil_corr_xy_para_gen_v_gen_pt", ['Zmumu' if flavor=='mumu' else 'Zee'])
         savedict['z_perp_gen'] = readProc(groups, "recoil_corr_xy_perp_gen_v_gen_pt", ['Zmumu' if flavor=='mumu' else 'Zee'])
 
-        savedict['bkg_para'] = readProc(groups, "recoil_corr_xy_para_v_pt", ['Ztautau', 'Other'])
-        savedict['bkg_perp'] = readProc(groups, "recoil_corr_xy_perp_v_pt", ['Ztautau', 'Other'])
+        savedict['bkg_para'] = readProc(groups, "recoil_corr_xy_para_v_pt", ['Ztautau', 'Other', 'PhotonInduced'])
+        savedict['bkg_perp'] = readProc(groups, "recoil_corr_xy_perp_v_pt", ['Ztautau', 'Other', 'PhotonInduced'])
 
         savedict['data_para'] = readProc(groups, "recoil_corr_xy_para_v_pt", ['Data'])
         savedict['data_perp'] = readProc(groups, "recoil_corr_xy_perp_v_pt", ['Data'])

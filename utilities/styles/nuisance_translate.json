@@ -10,7 +10,7 @@
     "QCDscaleZPtChargeHelicityMiNNLO": "$\\mu_\\mathrm{R} \\mu_\\mathrm{F} \\ \\mathrm{scale (Z)}$",
     "QCDscaleWPtChargeHelicityMiNNLO": "$\\mu_\\mathrm{R} \\mu_\\mathrm{F} \\ \\mathrm{scale (W)}$",
     "binByBinStat": "Bin-by-bin stat.",
-    "CMS_recoil": "recoil",
+    "recoil": "recoil",
     "CMS_background": "Bkg.",
     "FakeHighMT": "FakeHighMT",
     "FakeLowMT": "FakeLowMT",

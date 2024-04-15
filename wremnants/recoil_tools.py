@@ -20,7 +20,10 @@ logger = logging.getLogger("wremnants").getChild(__name__.split(".")[-1])
 
 
 def RecoilCalibrationHelper(fIn, args):
-
+    if not os.path.exists(fIn):
+        logger.warning(f"Cannot find recoil tflite model {fIn}")
+        logger.warning(f"Recoil corrections disabled")
+        return None, None
     with open(fIn, 'rb') as f:
         model = f.read()
         interpreter = tf.lite.Interpreter(model_content=model)
@@ -30,12 +33,29 @@ def RecoilCalibrationHelper(fIn, args):
     helper = ROOT.wrem.RecoilCalibrationHelper[nstat](fIn, "base_transform", args.recoilUnc)
     return helper, nstat
 
+def RecoilCalibrationUncertaintyHelper(fIn, name, args):
+    if not os.path.exists(fIn):
+        return None
+
+    try:
+        helper = ROOT.wrem.RecoilCalibrationUncertaintyHelper(fIn, name)
+    except:
+        logger.warning(f"Cannot find recoil systematic {name}, skip")
+        helper = None
+    return helper
+
 def VPTReweightHelper(fIn):
+    if not os.path.exists(fIn):
+        return None
     js = input_tools.read_json(fIn)
     helper = ROOT.wrem.VPTReweightHelper(js['vpt_bins'], js['weights'], min(js['vpt_bins']), max(js['vpt_bins']))
     return helper
 
 def METXYCorrectionHelper(fIn):
+    if not os.path.exists(fIn):
+        logger.warning(f"Cannot find MET XY corrector file {fIn}")
+        logger.warning(f"MET XY corrections disabled")
+        return None, None
     js = input_tools.read_json(fIn)
     helper_data = ROOT.wrem.METXYCorrectionHelper(js['x']['data']['nom'], js['y']['data']['nom'])
     helper_mc = ROOT.wrem.METXYCorrectionHelper(js['x']['mc']['nom'], js['y']['mc']['nom'])
@@ -49,52 +69,21 @@ class Recoil:
         self.flavor = flavor
         self.args = args
         self.storeHists = args.recoilHists
+        self.pu_type = pu_type
         self.isW = False
 
-        if self.met == "DeepMETReso" and pu_type == "highPU":
-            recoil_model = f"{common.data_dir}/recoil/highPU_DeepMETReso/model_mc_data.tflite"
-            self.recoilHelper, self.nstat = RecoilCalibrationHelper(recoil_model, args)
+        self.met_xy_helper_data, self.met_xy_helper_mc = METXYCorrectionHelper(f"{common.data_dir}/recoil/{pu_type}_{self.met}/met_xy_{self.flavor}.json")
+        self.vpt_reweight_helper_mc_data = VPTReweightHelper(f"{common.data_dir}/recoil/{pu_type}_{self.met}/vptrw_mc_data_mumu.json")
 
-            if args.recoilUnc:
-                self.recoil_syst_bkg_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "syst_bkg_para")
-                self.recoil_syst_bkg_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "syst_bkg_perp")
+        recoil_tflite = f"{common.data_dir}/recoil/{pu_type}_{self.met}/model_mc_data.tflite"
+        self.recoilHelper, self.nstat = RecoilCalibrationHelper(recoil_tflite, args)
+        self.recoil_syst_bkg_para = RecoilCalibrationUncertaintyHelper(recoil_tflite, "syst_bkg_para", args)
+        self.recoil_syst_bkg_perp = RecoilCalibrationUncertaintyHelper(recoil_tflite, "syst_bkg_perp", args)
 
-                self.recoil_pdf_data_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_data_para")
-                self.recoil_pdf_data_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_data_perp")
-                self.recoil_pdf_mc_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_mc_para")
-                self.recoil_pdf_mc_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_mc_perp")
-                self.recoil_pdf_gen_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_gen_para")
-                self.recoil_pdf_gen_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_gen_perp")
-
-            self.met_xy_helper_data, self.met_xy_helper_mc = METXYCorrectionHelper(f"{common.data_dir}/recoil/highPU_DeepMETReso/met_xy_{self.flavor}.json")
-            self.vpt_reweight_helper_mc_data = VPTReweightHelper(f"{common.data_dir}/recoil/highPU_DeepMETReso/vptrw_mc_data_mumu.json")
-        elif self.met == "RawPFMET" and pu_type == "highPU":
-            recoil_model = f"{common.data_dir}/recoil/highPU_RawPFMET/model_mc_data.tflite"
-            self.recoilHelper, self.nstat = RecoilCalibrationHelper(recoil_model, args)
-
-            if args.recoilUnc:
-                self.recoil_syst_bkg_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "syst_bkg_para")
-                self.recoil_syst_bkg_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "syst_bkg_perp")
-
-                self.recoil_pdf_data_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_data_para")
-                self.recoil_pdf_data_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_data_perp")
-                self.recoil_pdf_mc_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_mc_para")
-                self.recoil_pdf_mc_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_mc_perp")
-                self.recoil_pdf_gen_para = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_gen_para")
-                self.recoil_pdf_gen_perp = ROOT.wrem.RecoilCalibrationUncertaintyHelper(recoil_model, "pdf_gen_perp")
-
-            self.met_xy_helper_data, self.met_xy_helper_mc = METXYCorrectionHelper(f"{common.data_dir}/recoil/highPU_RawPFMET/met_xy_{self.flavor}.json")
-            self.vpt_reweight_helper_mc_data = VPTReweightHelper(f"{common.data_dir}/recoil/highPU_RawPFMET/vptrw_mc_data_mumu.json")
-
-        elif self.met == "DeepMETReso" and pu_type == "lowPU":
-            self.recoilHelper_para, self.recoilHelper_perp, self.nvars_para, self.nvars_per  = RecoilCalibrationHelper(f"{common.data_dir}/recoil/highPU/mumu_DeepMETReso/model_mc_data.tflite", args)
-            self.met_xy_helper_data, self.met_xy_helper_mc = METXYCorrectionHelper(f"{common.data_dir}/recoil/lowPU_DeepMETReso/met_xy_mumu.json")
-            self.vpt_reweight_helper_mc_data = VPTReweightHelper(f"{common.data_dir}/recoil/lowPU_DeepMETReso/vptrw_mc_data_mumu.json")
-
-        elif self.met == "RawPFMET" and pu_type == "lowPU":
-            self.recoilHelper_para, self.recoilHelper_perp, self.nvars_para, self.nvars_perp = RecoilCalibrationHelper(f"{common.data_dir}/recoil/highPU/mumu_RawPFMET/model_mc_data.tflite", args)
-            self.met_xy_helper_data, self.met_xy_helper_mc = METXYCorrectionHelper(f"{common.data_dir}/recoil/lowPU_RawPFMET/met_xy_mumu.json")
-            self.vpt_reweight_helper_mc_data = VPTReweightHelper(f"{common.data_dir}/recoil/lowPU_RawPFMET/vptrw_mc_data_mumu.json")
+        #self.recoil_pdf_data_para = RecoilCalibrationUncertaintyHelper(recoil_tflite, "pdf_data_para", args)
+        #self.recoil_pdf_data_perp = RecoilCalibrationUncertaintyHelper(recoil_tflite, "pdf_data_perp", args)
+        #self.recoil_pdf_mc_para = RecoilCalibrationUncertaintyHelper(recoil_tflite, "pdf_mc_para", args)
+        #self.recoil_pdf_mc_perp = RecoilCalibrationUncertaintyHelper(recoil_tflite, "pdf_mc_perp", args)
 
 
 
@@ -136,14 +125,14 @@ class Recoil:
 
 
 
-    def add_histo(self, name, cols, axes, nominal_weight="nominal_weight", with_fakes=False, coll_passMT="passMT_rec"):
+    def add_histo(self, name, cols, axes, nominal_weight="nominal_weight", with_fakes=False, col_mt="mt_corr_rec"):
         if self.isW and with_fakes:
-            if "mt" in [ax.name for ax in axes]: # remove passMT from axes_fakerate in case mT is in cols/axes
-                idx = [ax.name for ax in self.axes_fakerate].index("passMT")
+            if "mt" in [ax.name for ax in axes]: # remove "mt" from axes_fakerate in case mT is in cols/axes
+                idx = [ax.name for ax in self.axes_fakerate].index("mt")
                 cols_fakerate = self.cols_fakerate[:idx] + self.cols_fakerate[idx+1:]
                 axes_fakerate = self.axes_fakerate[:idx] + self.axes_fakerate[idx+1:]
             else:
-                cols_fakerate = [coll_passMT if x=="passMT" else x for x in self.cols_fakerate] # get correct passMT definition
+                cols_fakerate = [col_mt if x=="transverseMass" else x for x in self.cols_fakerate] # replace transverseMass with correct one
                 axes_fakerate = self.axes_fakerate
             self.results.append(self.df.HistoBoost(name, axes+axes_fakerate, cols+cols_fakerate+[nominal_weight]))
         else:
@@ -246,7 +235,11 @@ class Recoil:
         if self.met == "PFMET": met_pt, met_phi = "MET_pt", "MET_phi"
         elif self.met == "RawPFMET": met_pt, met_phi = "RawMET_pt", "RawMET_phi"
         elif self.met == "DeepMETReso": met_pt, met_phi = "DeepMETResolutionTune_pt", "DeepMETResolutionTune_phi"
-        else: raise Exception(f"MET type {self.met} not supported")
+        elif self.met == "DeepMETPVRobust" and self.pu_type == "highPU": met_pt, met_phi = "DeepMETPVRobust_pt", "DeepMETPVRobust_phi"
+        elif self.met == "DeepMETPVRobustNoPUPPI" and self.pu_type == "highPU": met_pt, met_phi = "DeepMETPVRobustNoPUPPI_pt", "DeepMETPVRobustNoPUPPI_phi"
+        else:
+            logger.warning(f"MET definition {self.met} not found, fall back to RawPFMET")
+            met_pt, met_phi = "RawMET_pt", "RawMET_phi"
 
         # uncorrected MET
         self.df = self.df.Define("met_uncorr_pt", f"return (std::isfinite({met_pt})) ? {met_pt} : 10000")
@@ -263,9 +256,13 @@ class Recoil:
 
 
         # phi corrected MET (XY corrections)
-        self.df = self.df.Define("met_corr_xy", self.met_xy_helper_data if self.dataset.is_data else self.met_xy_helper_mc, ["met_corr_lep_pt", "met_corr_lep_phi", "PV_npvs"])
-        self.df = self.df.Define("met_corr_xy_pt", "met_corr_xy[0]")
-        self.df = self.df.Define("met_corr_xy_phi", "met_corr_xy[1]")
+        if self.met_xy_helper_data != None and self.met_xy_helper_mc != None:
+            self.df = self.df.Define("met_corr_xy", self.met_xy_helper_data if self.dataset.is_data else self.met_xy_helper_mc, ["met_corr_lep_pt", "met_corr_lep_phi", "PV_npvs"])
+            self.df = self.df.Define("met_corr_xy_pt", "met_corr_xy[0]")
+            self.df = self.df.Define("met_corr_xy_phi", "met_corr_xy[1]")
+        else:
+            self.df = self.df.Alias("met_corr_xy_pt", "met_corr_lep_pt")
+            self.df = self.df.Alias("met_corr_xy_phi", "met_corr_lep_phi")
         self.df = self.df.Define("met_corr_xy_x", "met_corr_xy_pt*cos(met_corr_xy_phi)")
         self.df = self.df.Define("met_corr_xy_y", "met_corr_xy_pt*sin(met_corr_xy_phi)")
 
@@ -333,19 +330,19 @@ class Recoil:
             self.df = self.df.Define(f"recoil_{rec_corr}_magn", f"wrem::compute_recoil_from_met_and_lepton(met_{rec_corr}_pt, met_{rec_corr}_phi, lep_trg_pt, lep_trg_phi)")
             self.df = self.df.Define(f"mt_{rec_corr}", f"wrem::mt_2(lep_trg_pt, lep_trg_phi, met_{rec_corr}_pt, met_{rec_corr}_phi)")
             self.df = self.df.Define(f"dphi_{rec_corr}", f"std::abs(wrem::deltaPhi(lep_trg_phi, met_{rec_corr}_phi))")
-            self.df = self.df.Define(f"passMT_{rec_corr}", f"mt_{rec_corr} > {self.mtw_min}")
+            #self.df = self.df.Define(f"passMT_{rec_corr}", f"mt_{rec_corr} > {self.mtw_min}")
 
         if not self.storeHists: 
             return
 
         suffix = f"_{suffix}" if suffix != "" else suffix
-        self.add_histo(f"recoil_{rec_corr}_magn{suffix}", [f"recoil_{rec_corr}_magn"], [self.axis_recoil_magn], nominal_weight=nominal_weight, with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
+        self.add_histo(f"recoil_{rec_corr}_magn{suffix}", [f"recoil_{rec_corr}_magn"], [self.axis_recoil_magn], nominal_weight=nominal_weight, with_fakes=True, col_mt=f"mt_{rec_corr}")
 
-        self.add_histo(f"mt_{rec_corr}{suffix}", [f"mt_{rec_corr}"], [self.axis_mt], nominal_weight=nominal_weight, with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
-        self.add_histo(f"met_{rec_corr}_pt{suffix}", [f"met_{rec_corr}_pt"], [self.axis_MET_pt], nominal_weight=nominal_weight, with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
-        self.add_histo(f"met_{rec_corr}_phi{suffix}", [f"met_{rec_corr}_phi"], [self.axis_MET_phi], nominal_weight=nominal_weight, with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
-        self.add_histo(f"dphi_{rec_corr}{suffix}", [f"dphi_{rec_corr}"], [self.axis_dphi], nominal_weight=nominal_weight, with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
-        self.add_histo(f"lep_{rec_corr}_pt{suffix}", ["lep_trg_pt"], [self.axis_lep_pt_test], with_fakes=True, coll_passMT=f"passMT_{rec_corr}")
+        self.add_histo(f"mt_{rec_corr}{suffix}", [f"mt_{rec_corr}"], [self.axis_mt], nominal_weight=nominal_weight, with_fakes=True, col_mt=f"mt_{rec_corr}")
+        self.add_histo(f"met_{rec_corr}_pt{suffix}", [f"met_{rec_corr}_pt"], [self.axis_MET_pt], nominal_weight=nominal_weight, with_fakes=True, col_mt=f"mt_{rec_corr}")
+        self.add_histo(f"met_{rec_corr}_phi{suffix}", [f"met_{rec_corr}_phi"], [self.axis_MET_phi], nominal_weight=nominal_weight, with_fakes=True, col_mt=f"mt_{rec_corr}")
+        self.add_histo(f"dphi_{rec_corr}{suffix}", [f"dphi_{rec_corr}"], [self.axis_dphi], nominal_weight=nominal_weight, with_fakes=True, col_mt=f"mt_{rec_corr}")
+        self.add_histo(f"lep_{rec_corr}_pt{suffix}", ["lep_trg_pt"], [self.axis_lep_pt_test], with_fakes=True, col_mt=f"mt_{rec_corr}")
 
     def setup_recoil_Z(self):
 
@@ -381,7 +378,7 @@ class Recoil:
         self.add_histo("recoil_corr_xy_perp_v_pt", ["v_pt", "recoil_corr_xy_perp"], [self.axis_qt, self.axis_recoil_perp])
 
         self.add_histo("recoil_corr_xy_para_npv", ["PV_npvs", "recoil_corr_xy_para"], [self.axis_npv, self.axis_recoil_para])
-        self.add_histo("recoil_corr_xy_perp_npv", ["recoil_corr_xy_perp"], [self.axis_npv, self.axis_recoil_perp])
+        self.add_histo("recoil_corr_xy_perp_npv", ["PV_npvs", "recoil_corr_xy_perp"], [self.axis_npv, self.axis_recoil_perp])
 
         self.add_histo("recoil_corr_xy_para_y", ["v_y", "recoil_corr_xy_para"], [self.axis_rapidity, self.axis_recoil_para])
         self.add_histo("recoil_corr_xy_perp_y", ["v_y", "recoil_corr_xy_perp"], [self.axis_rapidity, self.axis_recoil_perp])
@@ -573,6 +570,8 @@ class Recoil:
         self.add_histo("recoil_corr_xy_para_gen_v_gen_pt", ["v_gen_pt", "recoil_corr_xy_para_gen"], [self.axis_qt, self.axis_recoil_para])
         self.add_histo("recoil_corr_xy_perp_gen_v_gen_pt", ["v_gen_pt", "recoil_corr_xy_perp_gen"], [self.axis_qt, self.axis_recoil_perp])
 
+        self.add_histo("recoil_corr_xy_para_gen_npv", ["PV_npvs", "recoil_corr_xy_para_gen"], [self.axis_npv, self.axis_recoil_para])
+        self.add_histo("recoil_corr_xy_perp_gen_npv", ["PV_npvs", "recoil_corr_xy_perp_gen"], [self.axis_npv, self.axis_recoil_perp])
 
     def apply_recoil_Z(self):
 
@@ -675,7 +674,7 @@ class Recoil:
 
 
 
-    def add_recoil_unc_Z(self, df, results, dataset, cols, axes, hName):
+    def add_recoil_unc_Z(self, df, results, dataset, cols, axes, hName, storage_type=hist.storage.Double()):
         if not dataset.name in self.datasets_to_apply:
             return df
         results.append(df.HistoBoost(f"{hName}_recoil_stat", axes if isinstance(axes, list) else [axes], (cols if isinstance(cols, list) else [cols]) + [self.recoil_unc_stat_weights_with_nom], tensor_axes=[self.recoil_var_ax_stat]))
@@ -683,7 +682,7 @@ class Recoil:
         return df
         
         
-    def add_recoil_unc_W(self, df, results, dataset, cols, axes, hName):
+    def add_recoil_unc_W(self, df, results, dataset, cols, axes, hName, storage_type=hist.storage.Double()):
         return self.add_recoil_unc_Z(df, results, dataset, cols, axes, hName) # currently use the Z implementation
 
     def setup_recoil_Z_unc(self):
@@ -702,12 +701,17 @@ class Recoil:
         self.df = self.df.Define(self.recoil_unc_stat_weights_with_nom, "auto res = recoil_unc_stat_weights; res = nominal_weight*res; return res;") # 
         self.recoil_var_ax_stat = hist.axis.Integer(0, self.nstat, name="recoil_unc", underflow=False, overflow=False)
 
-
         # systematic uncertainties
-        self.df = self.df.Define("recoil_syst_bkg_para_w", self.recoil_syst_bkg_para, ["v_pt", "recoil_corr_xy_para"])
-        self.df = self.df.Define("recoil_syst_bkg_perp_w", self.recoil_syst_bkg_perp, ["v_pt", "recoil_corr_xy_perp"])
+        recoil_systs = []
+        if self.recoil_syst_bkg_para != None:
+            self.df = self.df.Define("recoil_syst_bkg_para_w", self.recoil_syst_bkg_para, ["v_pt", "recoil_corr_xy_para"])
+            recoil_systs.append("recoil_syst_bkg_para_w")
+        if self.recoil_syst_bkg_perp != None:
+            self.df = self.df.Define("recoil_syst_bkg_perp_w", self.recoil_syst_bkg_perp, ["v_pt", "recoil_corr_xy_perp"])
+            recoil_systs.append("recoil_syst_bkg_perp_w")
 
         # reco-gen differences
+        '''
         self.df = self.df.Define("recoil_pdf_data_para_w_pert", self.recoil_pdf_data_para, ["v_gen_pt", "recoil_corr_xy_para"])
         self.df = self.df.Define("recoil_pdf_data_para_w_nom", self.recoil_pdf_data_para, ["v_pt", "recoil_corr_xy_para"])
         self.df = self.df.Define("recoil_pdf_data_para_w", "recoil_pdf_data_para_w_pert/recoil_pdf_data_para_w_nom")
@@ -725,9 +729,9 @@ class Recoil:
         self.df = self.df.Define("recoil_pdf_mc_perp_w", "recoil_pdf_mc_perp_w_pert/recoil_pdf_mc_perp_w_nom")
 
         self.df = self.df.Define("recoil_pdf_tot", "recoil_pdf_mc_perp_w*recoil_pdf_mc_para_w*recoil_pdf_data_perp_w*recoil_pdf_data_para_w")
+        recoil_systs.append("recoil_pdf_tot")
+        '''
 
-
-        recoil_systs = ["recoil_syst_bkg_para_w", "recoil_syst_bkg_perp_w", "recoil_pdf_tot"]
         self.nsyst = len(recoil_systs)
 
         self.recoil_unc_syst_weights_with_nom = "recoil_unc_syst_weights_with_nom"
@@ -754,12 +758,15 @@ class Recoil:
         self.df = self.df.Define(self.recoil_unc_stat_weights_with_nom, "auto res = recoil_unc_stat_weights; res = nominal_weight*res; return res;") # 
         self.recoil_var_ax_stat = hist.axis.Integer(0, self.nstat, name="recoil_unc", underflow=False, overflow=False)
 
-
         # systematic uncertainties
-        self.df = self.df.Define("recoil_syst_bkg_para_w", self.recoil_syst_bkg_para, ["v_gen_pt", "recoil_corr_xy_para_gen"])
-        self.df = self.df.Define("recoil_syst_bkg_perp_w", self.recoil_syst_bkg_perp, ["v_gen_pt", "recoil_corr_xy_perp_gen"])
+        recoil_systs = []
+        if self.recoil_syst_bkg_para != None:
+            self.df = self.df.Define("recoil_syst_bkg_para_w", self.recoil_syst_bkg_para, ["v_gen_pt", "recoil_corr_xy_para_gen"])
+            recoil_systs.append("recoil_syst_bkg_para_w")
+        if self.recoil_syst_bkg_perp != None:
+            self.df = self.df.Define("recoil_syst_bkg_perp_w", self.recoil_syst_bkg_perp, ["v_gen_pt", "recoil_corr_xy_perp_gen"])
+            recoil_systs.append("recoil_syst_bkg_perp_w")
 
-        recoil_systs = ["recoil_syst_bkg_para_w", "recoil_syst_bkg_perp_w"]
         self.nsyst = len(recoil_systs)
 
         self.recoil_unc_syst_weights_with_nom = "recoil_unc_syst_weights_with_nom"

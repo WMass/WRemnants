@@ -93,11 +93,11 @@ def drange(x, y, jump):
         #x += decimal.Decimal(jump)
         x += jump
 
-def readBoostHist(groups, hName, procs, charge="combined", boost=False, integrateAxes=[]): # readBoostHistProc
+def readBoostHist(groups, hName, procs, charge="combined", boost=False, integrateAxes=[], abcd=True):
 
-    groups.setNominalName(hName)
+    if abcd:
+        groups.set_histselectors(procs, hName, mode="simple", smoothen=False, simultaneousABCD=False, integrate_x=False if "mt" in hName else True)
     groups.loadHistsForDatagroups(hName, syst="", procsToRead=procs)
-    hists = groups.getDatagroups()
     bhist = sum([groups.groups[p].hists[hName] for p in procs])
 
     s = hist.tag.Slicer()
