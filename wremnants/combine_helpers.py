@@ -48,7 +48,7 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
     for ewUnc in ewUncs:
         if ewUnc == "default":
             if z_samples:
-                if mode in ["wmass", "wlike", "lowpu_w", "vgen"]:
+                if "wlike" in mode or mode[0] == "w":
                     ewUnc = "virtual_ew_wlike"
                 else:
                     ewUnc = "virtual_ew"

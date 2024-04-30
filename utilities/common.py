@@ -124,14 +124,40 @@ def get_binning_fakes_mt(mt_cut=40):
 def get_dilepton_ptV_binning(fine=False):
     return [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 20, 23, 27, 32, 40, 54, 100] if not fine else range(60)
 
-def get_gen_axes(flow=False, dilepton_ptV_binning=None):
+def get_gen_axes(flow=False, dilepton_ptV_binning=None, inclusive=False):
     if dilepton_ptV_binning is None:
         dilepton_ptV_binning = get_dilepton_ptV_binning()
+
     gen_axes = {
         "ptVGen": hist.axis.Variable(dilepton_ptV_binning, name = "ptVGen", underflow=False, overflow=flow),
-        "absYVGen": hist.axis.Regular(10, 0, 2.5, name = "absYVGen", underflow=False, overflow=flow),  
+        "absYVGen": hist.axis.Regular(10, 0, 2.5, name = "absYVGen", underflow=False, overflow=flow)
     }
+    if inclusive:
+        binning = (*gen_axes["absYVGen"].edges[:-1], 5.)
+        gen_axes["absYVGen"] = hist.axis.Variable(binning, name="absYVGen", underflow=False, overflow=flow)
     return gen_axes
+
+def get_default_ptbins(analysis_mode, unfolding=False, gen=False):
+    vals = [30,26.,56.] if analysis_mode[0] == "w" else [34,26.,60.]
+    if unfolding and gen:
+        raise ValueError("Inconsistent arguments for 'unfolding' and 'gen.' Must be unique")
+
+    if unfolding:
+        vals[0] += 2
+        vals[2] += 2
+    elif gen:
+        values[0] -= 2
+        values[1] += 2
+    return vals
+
+def get_default_etabins(analysis_mode=None):
+    return (48,-2.4,2.4)
+
+def get_default_mtcut(analysis_mode=None):
+    return 40. if analysis_mode[0] == "w" else 45.
+
+def get_default_mz_window():
+    return 60, 120
 
 # following list is used in other scripts to track what steps are charge dependent
 # but assumes the corresponding efficiencies were made that way
@@ -173,6 +199,7 @@ def set_subparsers(subparser, name):
                                help="Generator level definition for unfolding")
         subparser.add_argument("--genBins", type=int, nargs="+", default=[16, 0],
                                help="Number of generator level bins")
+        subparser.add_argument("--inclusive", action='store_true', help="No fiducial selection (mass window only)")
     elif "theoryAgnostic" in name:
         # specific for theory agnostic
         subparser.add_argument("--genAxes", type=str, nargs="+", default=["ptVgenSig", "absYVgenSig", "helicitySig"], choices=["qGen", "ptVgenSig", "absYVgenSig", "helicitySig"], help="Generator level variable")
@@ -256,8 +283,8 @@ def common_parser(for_reco_highPU=False):
         default=["winhacnloew", "virtual_ew_wlike", "pythiaew_ISR", "horaceqedew_FSR", "horacelophotosmecoffew_FSR", ],
         help="Add EW theory corrections without modifying the default theoryCorr list. Will be appended to args.theoryCorr")
     parser.add_argument("--skipHelicity", action='store_true', help="Skip the qcdScaleByHelicity histogram (it can be huge)")
-    parser.add_argument("--eta", nargs=3, type=float, help="Eta binning as 'nbins min max' (only uniform for now)", default=[48,-2.4,2.4])
-    parser.add_argument("--pt", nargs=3, type=float, help="Pt binning as 'nbins,min,max' (only uniform for now)", default=[30,26.,56.])
+    parser.add_argument("--eta", nargs=3, type=float, help="Eta binning as 'nbins min max' (only uniform for now)", default=get_default_etabins())
+    parser.add_argument("--pt", nargs=3, type=float, help="Pt binning as 'nbins,min,max' (only uniform for now)", default=get_default_ptbins("w_mass"))
     parser.add_argument("--noRecoil", action='store_true', help="Don't apply recoild correction")
     parser.add_argument("--recoilHists", action='store_true', help="Save all recoil related histograms for calibration and validation")
     parser.add_argument("--recoilUnc", action='store_true', help="Run the recoil calibration with uncertainties (slower)")

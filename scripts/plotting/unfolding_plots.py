@@ -41,8 +41,9 @@ outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eos
 fitresult = combinetf_input.get_fitresult(args.fitresult)
 
 datagroups = Datagroups(args.infile)
+isW = datagroups.mode[0] == "w"
 
-if datagroups.mode in ["wmass", "lowpu_w"]:
+if isW:
     base_group = "Wenu" if datagroups.flavor == "e" else "Wmunu"
 else:
     base_group = "Zee" if datagroups.flavor == "ee" else "Zmumu"
@@ -68,7 +69,7 @@ def plot(fittype, channel=None, data=True, stack=True, density=False, ratio=True
     for g_name in names:
         group = datagroups.groups[g_name]
         for member in group.members:
-            if datagroups.mode in ["wmass", "lowpu_w"] and (
+            if isW and (
                 (channel =="plus" and member.name.startswith("Wminus")) 
                 or (channel =="minus" and member.name.startswith("Wplus"))
             ):
@@ -79,7 +80,7 @@ def plot(fittype, channel=None, data=True, stack=True, density=False, ratio=True
                 histo = datagroups.results[member.name]["output"][args.baseName].get()
                 histo = histo.project(*args.axes)
 
-                if not datagroups.mode in ["wmass", "lowpu_w"] and "qGen" in args.axes:
+                if not isW and "qGen" in args.axes:
                     index_charge = 0 if channel == "minus" else 1
                     histo = histo[{"qGen": index_charge}]
 
@@ -154,7 +155,7 @@ def plot(fittype, channel=None, data=True, stack=True, density=False, ratio=True
     if density:
         ylabel = "a.u."    
     else:
-        if datagroups.mode in ["wmass", "lowpu_w"]:
+        if isW:
             process_label = "W"
         else:
             process_label = "Z"

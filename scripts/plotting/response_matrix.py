@@ -92,7 +92,7 @@ for g_name, group in datagroups.items():
         for axes_string in args.axes:
             axes = axes_string.split("-")
 
-            if groups.mode in ["wmass", "wlike"] and axes[0] == "pt":
+            if (groups.mode[0] == "w" or "wlike" in groups.mode) and axes[0] == "pt":
                 genFlow=True
             else:
                 genFlow=False
@@ -171,6 +171,12 @@ for g_name, group in datagroups.items():
             hep.hist2dplot(values, xbins=xbins, ybins=ybins, cmin=0)#, labels=(xlabels,ylabels))
 
             # calculate condition number
+            nans = np.isnan(values)
+            nancount = np.count_nonzero(nans)
+            if nancount:
+                logger.warning(f"Found {nancount} NaNs in positions {np.argwhere(nans)}. Setting to zero")
+                values[nans] = 0
+
             cond = np.linalg.cond(values)
             logger.info(f"Condition number: {cond}")
             plt.text(0.2, 0.94, round(cond,1), horizontalalignment='right', verticalalignment='top', transform=ax.transAxes, color="white")

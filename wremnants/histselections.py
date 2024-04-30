@@ -34,7 +34,7 @@ def get_selection_edges(axis_name, upper_bound=False):
             # low: passing, high: failing, no upper bound 
             return complex(0,ts[0]), complex(0,ts[1]), complex(0,ts[2]), (complex(0,ts[3]) if upper_bound else None)
     else:
-        raise RuntimeError(f"Can not find threshold for abcd axis {self.name_x}")
+        raise RuntimeError(f"Can not find threshold for abcd axis {axis_name}")
 
 
 # default abcd_variables to look for

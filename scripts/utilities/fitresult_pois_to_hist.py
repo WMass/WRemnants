@@ -1,5 +1,6 @@
 import h5py
 import os
+import narf
 
 from utilities import common, logging
 from utilities.io_tools.conversion_tools import fitresult_pois_to_hist
@@ -38,21 +39,19 @@ if not os.path.exists(args.outfolder):
     logger.info(f"Creating output folder {args.outfolder}")
     os.makedirs(args.outfolder)
 
+res_dict = {
+    "results" : result,
+    "combine_meta" : meta,
+    "meta_info" : narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir),
+}
+
 if args.h5py:
     from narf import ioutils
     with h5py.File(outfile, "w") as f:
         logger.debug(f"Pickle and dump results")
-        ioutils.pickle_dump_h5py("results", result, f)
-        if meta is not None:
-            ioutils.pickle_dump_h5py("meta", meta, f)
-        if meta_exp is not None:
-            ioutils.pickle_dump_h5py("meta_exp", meta_exp, f)
+        for k,v in res_dict.items():
+            ioutils.pickle_dump_h5py(k, v, f)
 else:
     import pickle
     with open(outfile, "wb") as f:
-        meta_info = {} 
-        if meta is not None:
-            meta_info["meta"] = meta
-        if meta_exp is not None:
-            meta_info["meta_exp"] = meta_exp
-        pickle.dump({"results": result, **meta_info}, f)
+        pickle.dump(res_dict, f)

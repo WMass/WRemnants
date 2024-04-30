@@ -26,7 +26,6 @@ class TheoryHelper(object):
         self.np_model = "Delta_Lambda"
         self.pdf_from_corr = False
         self.scale_pdf_unc = 1.
-        self.tnp_magnitude = 1.
         self.mirror_tnp = True
         self.minnlo_unc = 'byHelicityPt'
         self.skipFromSignal = False
@@ -42,7 +41,6 @@ class TheoryHelper(object):
     def configure(self, resumUnc, np_model,
             transitionUnc = True,
             propagate_to_fakes=True, 
-            tnp_magnitude=1,
             tnp_scale=1.,
             mirror_tnp=True,
             pdf_from_corr=False,
@@ -56,13 +54,11 @@ class TheoryHelper(object):
         self.set_minnlo_unc(minnlo_unc)
 
         self.transitionUnc = transitionUnc
-        self.tnp_magnitude = tnp_magnitude
         self.tnp_scale = tnp_scale
         self.mirror_tnp = mirror_tnp
         self.pdf_from_corr = pdf_from_corr
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
-        self.minnlo_unc = minnlo_unc
         self.samples = []
         self.skipFromSignal = False
 
@@ -70,7 +66,7 @@ class TheoryHelper(object):
         self.samples = samples
         self.skipFromSignal = skipFromSignal
         self.add_nonpert_unc(model=self.np_model)
-        self.add_resum_unc(magnitude=self.tnp_magnitude, mirror=self.mirror_tnp, scale=self.tnp_scale)
+        self.add_resum_unc(scale=self.tnp_scale)
         self.add_pdf_uncertainty(from_corr=self.pdf_from_corr, operation=self.pdf_operation, scale=self.scale_pdf_unc)
         try:
             self.add_quark_mass_vars()
@@ -95,22 +91,32 @@ class TheoryHelper(object):
         self.corr_hist = self.card_tool.getHistsForProcAndSyst(signal_samples[0], self.corr_hist_name)
 
         if resumUnc.startswith("tnp"):
-            self.tnp_nuisances = self.card_tool.match_str_axis_entries(self.corr_hist.axes[self.syst_ax], 
-                                    ["^gamma_.*[+|-]\d+", "^b_.*[+|-]\d+", "^s[+|-]\d+", "^h_.*\d+"])
+            self.tnp_nuisance_names = ['b_qg',
+                                   'b_qqDS',
+                                   'b_qqS',
+                                   'b_qqV',
+                                   'b_qqbarV',
+                                   'gamma_cusp',
+                                   'gamma_mu_q',
+                                   'gamma_nu',
+                                   'h_qqV',
+                                   's'
+            ]
+
+            self.tnp_nuisances = self.card_tool.match_str_axis_entries(self.corr_hist.axes[self.syst_ax], self.tnp_nuisance_names)
+                                    
             if not self.tnp_nuisances:
                 raise ValueError(f"Did not find TNP uncertainties in hist {self.corr_hist_name}")
 
-            self.tnp_names = set([x.split("+")[0].split("-")[0] for x in self.tnp_nuisances])
-            
         self.resumUnc = resumUnc
         
-    def add_resum_unc(self, magnitude=1, mirror=False, scale=1):
+    def add_resum_unc(self, scale=1):
         if not self.resumUnc:
             logger.warning("No resummation uncertainty will be applied!")
             return
 
         if self.resumUnc.startswith("tnp"):
-            self.add_resum_tnp_unc(magnitude, mirror, scale)
+            self.add_resum_tnp_unc(scale)
 
             fo_scale = self.resumUnc == "tnp"
             self.add_transition_fo_scale_uncertainties(transition = self.transitionUnc, scale = fo_scale)
@@ -188,6 +194,13 @@ class TheoryHelper(object):
             hscale = self.card_tool.getHistsForProcAndSyst(signal_samples[0], scale_hist)
             # A bit janky, but refer to the original ptVgen ax since the alt hasn't been added yet
             orig_binning = hscale.axes[pt_ax.replace("Alt", "")].edges
+            if not (np.isclose(binning[0], orig_binning[0]) and np.isclose(binning[-1], orig_binning[-1])):
+                if len(binning) == 2:
+                    binning = np.array((orig_binning[0], orig_binning[-1]))
+                else:
+                    binning = binning[(binning >= orig_binning[0]-1e-5) & (binning <= orig_binning[-1]+1e-6)]
+                logger.warning(f"Adjusting requested binning to {binning}")
+
             if not hh.compatibleBins(orig_binning, binning):
                 logger.warning(f"Requested binning {binning} is not compatible with hist binning {orig_binning}. Will not rebin!")
                 binning = orig_binning
@@ -196,11 +209,13 @@ class TheoryHelper(object):
                 pt_idx = np.argmax(binning >= pt_min)
                 skip_entries.extend([{pt_ax : complex(0, x)} for x in binning[:pt_idx]])
 
-            func = syst_tools.hist_to_variations
+            func = syst_tools.gen_hist_to_variations if pt_ax == "ptVgenAlt" else syst_tools.hist_to_variations
             preop_map = {proc : func for proc in expanded_samples}
             preop_args["gen_axes"] = [pt_ax]
             preop_args["rebin_axes"] = [pt_ax]
             preop_args["rebin_edges"] = [binning]
+            if pt_ax == "ptVgenAlt":
+                preop_args["gen_obs"] = ["ptVgen"]
 
         # Skip MiNNLO unc. 
         if self.resumUnc and not (pt_binned or helicity):
@@ -262,12 +277,16 @@ class TheoryHelper(object):
 
             def preop_func(h, *args, **kwargs):
                 hsel = h[{"vars" : ["pdf0"] + sel_vars}]
-                return syst_tools.hist_to_variations(hsel, *args, **kwargs)
+                func = syst_tools.gen_hist_to_variations if pt_ax == "ptVgenAlt" else syst_tools.hist_to_variations
+                return func(hsel, *args, **kwargs)
 
             preop_args = {}
             preop_args["gen_axes"] = [pt_ax]
             preop_args["rebin_axes"] = [pt_ax]
             preop_args["rebin_edges"] = [binning]
+
+            if pt_ax == "ptVgenAlt":
+                preop_args["gen_obs"] = ["ptVgen"]
 
             self.card_tool.addSystematic(name=self.scale_hist_name,
                 processes=[sample_group],
@@ -288,36 +307,21 @@ class TheoryHelper(object):
     def set_propagate_to_fakes(self, to_fakes):
         self.propagate_to_fakes = to_fakes
 
-    def add_resum_tnp_unc(self, magnitude, mirror, scale=1):
+    def add_resum_tnp_unc(self, magnitude, scale=1):
         syst_ax = self.corr_hist.axes[self.syst_ax]
 
-        np_mag = lambda x: x.split("+")[-1].split("-")[-1]
-        tnp_magnitudes = set([np_mag(x) for x in self.tnp_nuisances])
         tnp_has_mirror = ("+" in self.tnp_nuisances[0] and self.tnp_nuisances[0].replace("+", "-") in syst_ax) or \
-                            ("-" in self.tnp_nuisances[0] and self.tnp_nuisances[0].replace("-", "+") in syst_ax)
+                            ("-" in self.tnp_nuisances[0] and self.tnp_nuisances[0].replace("-", "") in syst_ax)
+        if not tnp_has_mirror and not self.mirror_tnp:
+            logger.warning("Up or down variation missing in TNP histogram. Will use mirroring")
+            self.mirror_tnp = True
 
-        if not any(np.isclose(float(x), magnitude) for x in tnp_magnitudes):
-            raise ValueError(f"TNP magnitude variation {magnitude} is not present in the histogram {self.corr_hist_name}. Options are {tnp_magnitudes}")
-
-        qqV_mag = magnitude/2.
-        if qqV_mag == 2.5:
-            qqV_mag = 2.0
-
-        selected_tnp_nuisances = [x for x in self.tnp_nuisances if np.isclose(magnitude, float(np_mag(x))) or ("h_qqV" in x and np.isclose(qqV_mag, float(np_mag(x))))]
         central_var = syst_ax[0]
         
-        if mirror:
-            name_replace = []
-            if tnp_has_mirror:
-                selected_tnp_nuisances = [x for x in selected_tnp_nuisances if "+" in x]
-        else:
-            if not tnp_has_mirror:
-                raise ValueError(f"Uncertainty hist {self.corr_hist_name} does not have double sided TNP nuisances. " \
-                                "mirror=False is therefore not defined")
-            name_replace = [(f"+{m}", "Up") for m in tnp_magnitudes]+[(f"-{m}", "Up") for m in tnp_magnitudes]
+        tnp_magnitudes = ["2.5", "0.5", "1."]
+        name_replace = [(f"-{x}", "Down") for x in tnp_magnitudes]+[(x, "Up") for x in tnp_magnitudes]
 
-        logger.debug(f"TNP nuisances in correction hist: {self.tnp_nuisances}")
-        logger.debug(f"Selected TNP nuisances: {selected_tnp_nuisances}")
+        logger.debug(f"Selected TNP nuisances: {self.tnp_nuisance_names}")
 
         self.card_tool.addSystematic(name=self.corr_hist_name,
             processes=['wtau_samples', 'single_v_nonsig_samples'] if self.skipFromSignal else ['single_v_samples'],
@@ -326,8 +330,8 @@ class TheoryHelper(object):
             systAxes=["vars"],
             passToFakes=self.propagate_to_fakes,
             systNameReplace=name_replace,
-            preOp=lambda h: h[{self.syst_ax : [central_var, *selected_tnp_nuisances]}],
-            mirror=mirror,
+            preOp=lambda h: h[{self.syst_ax : [central_var, *self.tnp_nuisances]}],
+            mirror=self.mirror_tnp,
             scale=scale,
             skipEntries=[{self.syst_ax : central_var},],
             rename=f"resumTNP",

@@ -17,7 +17,7 @@ def make_datagroups_lowPU(dg, combine=False, excludeGroups=None, filterGroups=No
         dg.addGroup("Zmumu",
             members = dg.get_members_from_results(startswith="Zmumu"),
         ) 
-        if dg.mode == "lowpu_w":
+        if dg.mode == "w_lowpu":
             dg.addGroup("Wmunu",
                 members = dg.get_members_from_results(startswith=["Wplusmunu", "Wminusmunu"]),
             )
@@ -26,12 +26,12 @@ def make_datagroups_lowPU(dg, combine=False, excludeGroups=None, filterGroups=No
         dg.addGroup("Zee",
             members = dg.get_members_from_results(startswith="Zee"),
         ) 
-        if dg.mode == "lowpu_w":
+        if dg.mode == "w_lowpu":
             dg.addGroup("Wenu",
                 members = dg.get_members_from_results(startswith=["Wplusenu", "Wminusenu"]),
             )
 
-    if dg.mode == "lowpu_w":
+    if dg.mode == "w_lowpu":
         dg.addGroup("Wtaunu",
             members = dg.get_members_from_results(startswith=["Wplustaunu", "Wminustaunu"]),
         )
@@ -49,7 +49,7 @@ def make_datagroups_lowPU(dg, combine=False, excludeGroups=None, filterGroups=No
     dg.filterGroups(filterGroups)
     dg.excludeGroups(excludeGroups)
 
-    if dg.mode == "lowpu_w":
+    if dg.mode == "w_lowpu":
         # add all processes to the fake contributions after filtered and excluded groups
         dg.addGroup(dg.fakeName,
             members = [member for sublist in [v.members for k, v in dg.groups.items() if k != "QCD"] for member in sublist],

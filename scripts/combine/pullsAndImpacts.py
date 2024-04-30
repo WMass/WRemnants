@@ -310,6 +310,7 @@ def parseArgs():
     parser.add_argument("--filters", nargs="*", type=str, help="Filter regexes to select nuisances by name")
     parser.add_argument("--grouping", type=str, default=None, help="Select nuisances by a predefined grouping", choices=groupings.keys())
     parser.add_argument("-t","--translate", type=str, default=None, help="Specify .json file to translate labels")
+    parser.add_argument("--noImpacts", action='store_true', help="Don't show impacts")
     parsers = parser.add_subparsers(dest='output_mode')
     interactive = parsers.add_parser("interactive", help="Launch and interactive dash session")
     interactive.add_argument("-i", "--interface", default="localhost", help="The network interface to bind to.")
@@ -319,7 +320,6 @@ def parseArgs():
     output.add_argument("--otherExtensions", default=[], type=str, nargs="*", help="Additional output file types to write")
     output.add_argument("-n", "--num", type=int, help="Number of nuisances to plot")
     output.add_argument("--noPulls", action='store_true', help="Don't show pulls (not defined for groups)")
-    output.add_argument("--noImpacts", action='store_true', help="Don't show impacts")
     output.add_argument("--eoscp", action='store_true', help="Use of xrdcp for eos output rather than the mount")
     
     return parser.parse_args()

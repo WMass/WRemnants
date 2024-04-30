@@ -315,7 +315,7 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: wmass plot response matrix
+      - name: wlike plot response matrix
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
           --axes "pt-ptGen" "abs(eta)-absEtaGen" --procFilters Zmumu -p mz_wlike -o $WEB_DIR -f $PLOT_DIR $HIST_FILE

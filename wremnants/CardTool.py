@@ -546,6 +546,7 @@ class CardTool(object):
                     if "systNameReplace" in systInfo and systInfo["systNameReplace"]:
                         for rep in systInfo["systNameReplace"]:
                             name = name.replace(*rep)
+                            logger.debug(f"Replacement {rep} yields new name {name}")
                     if name and "systNamePrepend" in systInfo and systInfo["systNamePrepend"]:
                         name = systInfo["systNamePrepend"]+name
                     # Obviously there is a nicer way to do this...

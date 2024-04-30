@@ -69,12 +69,12 @@ def divideHists(h1, h2, cutoff=1e-5, allowBroadcast=True, rel_unc=False, cutoff_
     cutoff_criteria = np.abs(h2vals) > cutoff
 
     # if denominator and nominator below cutoff, set to cutoff_val. By the argument that 0/0 = 1
-    cutoff_criteatia2 = (np.abs(h2vals) < cutoff) & (np.abs(h1vals) < cutoff)
-    out[cutoff_criteatia2] = cutoff_val
+    cutoff_criteria2 = (np.abs(h2vals) < cutoff) & (np.abs(h1vals) < cutoff)
+    out[cutoff_criteria2] = cutoff_val
     val = np.divide(h1vals, h2vals, out=out, where=cutoff_criteria)
 
-    if cutoff_criteatia2.sum():
-        logger.warning(f"Encountered {cutoff_criteatia2.sum()} values below {cutoff} in h1 and h2 in divideHists, these will be set to {cutoff_val}")
+    if cutoff_criteria2.sum():
+        logger.warning(f"Encountered {cutoff_criteria2.sum()} values below {cutoff} in h1 and h2 in divideHists, these will be set to {cutoff_val}")
     elif (~cutoff_criteria).sum():
         logger.warning(f"Encountered {(~cutoff_criteria).sum()} values below {cutoff} in h2 in divideHists, these will be set to h1")
 

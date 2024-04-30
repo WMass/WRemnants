@@ -109,13 +109,14 @@ def fitresult_pois_to_hist(infile, result=None, poi_types = ["mu", "pmaskedexp",
                 else:
                     gen_axes_permutations = [gen_axes_proc[:],]
 
-                if channel not in result[poi_key][channel]:
+                if proc not in result[poi_key][channel]:
                     result[poi_key][channel][proc] = {}
                 for axes in gen_axes_permutations:
                     shape = [a.extent for a in axes]
                     axes_names = [a.name for a in axes]
 
                     data = combinetf_input.select_pois(df, axes_names, base_processes=proc, flow=True)
+                    logger.debug(f"The values for the hist in poi {poi_key} are {data['value'].values}")
 
                     values = np.reshape(data["value"].values/channel_scale, shape)
                     variances = np.reshape( (data["err_total"].values/channel_scale)**2, shape)
@@ -150,7 +151,7 @@ def fitresult_pois_to_hist(infile, result=None, poi_types = ["mu", "pmaskedexp",
                         h_syst.values(flow=True)[...] = systs
                         hist_name_syst = f"{hist_name}_syst"
                         if hist_name_syst in result[poi_key][channel][proc]:
-                            logger.warning(f"Histogram {hist_name_syst} already in result, it will be overridden")
+                            logger.warning(f"Histogram {hist_name_syst} already in result, it will be overwritten")
                         result[poi_key][channel][proc][hist_name_syst] = h_syst
 
     return result, meta

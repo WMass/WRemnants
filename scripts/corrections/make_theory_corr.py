@@ -19,6 +19,7 @@ parser.add_argument("-p", "--postfix", type=str, help="Postfix for output file n
 parser.add_argument("--proc", type=str, required=True, choices=["z", "w", ], help="Process")
 parser.add_argument("--minnloh", default="nominal_gen", type=str, help="Reference hist in MiNNLO sample")
 parser.add_argument("--axes", nargs="*", type=str, default=None, help="Use only specified axes in hist")
+parser.add_argument("--axlim", type=float, default=[], nargs='*', help="Restrict axis to this range. Assumes pairs of values by axis (same order), with trailing axes optional")
 parser.add_argument("--debug", action='store_true', help="Print debug output")
 parser.add_argument("--selectVars", type=str, nargs="*", help="Select variations from corr hist")
 parser.add_argument("--noColorLogger", action="store_true", default=False, help="Do not use logging with colors")
@@ -108,6 +109,12 @@ for ax in minnloh.axes:
 numh = hh.sumHists([read_corr(procName, args.generator, corr_file) for procName, corr_file in filesByProc.items()])
 if args.selectVars:
     numh = numh[{"vars" : args.selectVars}]
+
+if args.axlim:
+    axes = [f"abs{x}" if x.lower() == "y" else x for x in args.axes]
+    if len(args.axlim) % 2:
+        raise ValueError("axlim must be in pairs of 2 (low limit, high limit)")
+    numh = hh.rebinHistMultiAx(numh, axes, numh.axes.edges, args.axlim[::2], args.axlim[1::2]) 
 
 if numh.ndim-1 < minnloh.ndim:
     axes = []

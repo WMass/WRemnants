@@ -67,6 +67,6 @@ output_dict = {
 }
 
 meta_dict = input_tools.get_metadata(args.inputFile)
-outfile = args.outpath+"/dataPtll"
+outfile = args.outpath+"/dataRecoPtll"
 output_tools.write_theory_corr_hist(outfile, args.proc.upper(), output_dict, args, meta_dict)
 logger.info(f"Average correction is {np.mean(corrh.values())}")

@@ -193,10 +193,11 @@ def getDatasets(maxFiles=default_nfiles, filt=None, excl=None, mode=None, base_p
     else:
         raise ValueError("Only NanoAODv9 is supported")
 
-    if mode == "gen":
-        dataDict.update(genDataDict)     
-    elif mode and "lowpu" in mode:
-        dataDict = dataDictLowPU
+    if mode:
+        if "gen" in mode:
+            dataDict.update(genDataDict)     
+        elif "lowpu" in mode:
+            dataDict = dataDictLowPU
 
     narf_datasets = []
     for sample,info in dataDict.items():

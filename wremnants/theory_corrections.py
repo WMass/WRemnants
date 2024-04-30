@@ -115,10 +115,7 @@ def compute_envelope(h, name, entries, axis_name="vars", slice_axis = None, slic
 def postprocess_corr_hist(corrh):
     # extend variations with some envelopes and special kinematic slices
 
-    if "vars" not in corrh.axes.name:
-        return corrh
-
-    if type(corrh.axes["vars"]) != hist.axis.StrCategory:
+    if "vars" not in corrh.axes.name or type(corrh.axes["vars"]) != hist.axis.StrCategory:
         return corrh
 
     additional_var_hists = {}
@@ -131,7 +128,7 @@ def postprocess_corr_hist(corrh):
     resum_scale_vars_exclusive = [var for var in corrh.axes["vars"] if any(resum_scale in var for resum_scale in resum_scales)]
     resum_scale_vars = ["pdf0"] + resum_scale_vars_exclusive
 
-    if len(resum_scale_vars) == 1:
+    if len(renorm_fact_scale_vars) == 1:
         return corrh
 
     transition_vars_exclusive = ["transition_points0.2_0.35_1.0", "transition_points0.2_0.75_1.0"]
@@ -158,7 +155,7 @@ def postprocess_corr_hist(corrh):
         additional_var_hists.update(compute_envelope(corrh, "renorm_fact_resum_scale_envelope", renorm_fact_resum_scale_vars))
     if all(var in corrh.axes["vars"] for var in renorm_fact_resum_transition_scale_vars):
         additional_var_hists.update(compute_envelope(corrh, "renorm_fact_resum_transition_scale_envelope", renorm_fact_resum_transition_scale_vars))
-    if all(var in corrh.axes["vars"] for var in resum_scale_vars):
+    if len(resum_scale_vars) > 1 and all(var in corrh.axes["vars"] for var in resum_scale_vars):
         additional_var_hists.update(compute_envelope(corrh, "resum_scale_envelope", resum_scale_vars))
 
 
@@ -184,7 +181,7 @@ def postprocess_corr_hist(corrh):
 def get_corr_name(generator):
     # Hack for now
     label = generator.replace("1D", "")
-    if "dataPtll" in generator:
+    if "dataPtll" in generator or "dataRecoPtll" in generator:
         return "MC_data_ratio"
     return f"{label}_minnlo_ratio" if "Helicity" not in generator else f"{label.replace('Helicity', '')}_minnlo_coeffs"
 

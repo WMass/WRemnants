@@ -11,7 +11,7 @@
 
   // additional extensions to link in card footer
   $additional_extensions = array(
-    "png", "pdf", "jpg", "jpeg", "gif", "eps", "svg", "root", "cxx", "txt", "rtf", "log", "csv",
+    "png", "pdf", "jpg", "jpeg", "gif", "eps", "svg", "root", "cxx", "txt", "rtf", "log", "csv", "html",
   );
 
   // search mode in case multiple search strings are used

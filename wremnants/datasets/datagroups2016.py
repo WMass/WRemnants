@@ -24,7 +24,7 @@ def make_datagroups_2016(dg, combine=False, pseudodata_pdfset = None, excludeGro
             label = f"pdf{pseudodata_pdfset.upper()}",
             color = "dimgray"
         )
-    if dg.mode in ["vgen", "wmass"]:
+    if dg.mode in ["vgen", "w_mass"]:
         dg.addGroup("Wmunu",
             members = dg.get_members_from_results(startswith=["Wplusmunu", "Wminusmunu", "Wmunu"]),
         )
@@ -51,7 +51,7 @@ def make_datagroups_2016(dg, combine=False, pseudodata_pdfset = None, excludeGro
     dg.filterGroups(filterGroups)
     dg.excludeGroups(excludeGroups)
 
-    if dg.mode == "wmass":
+    if dg.mode == "w_mass":
         # add all processes to the fake contributions after filtered and excluded groups
         dg.addGroup("Fake",
             members = [member for sublist in [v.members for k, v in dg.groups.items() if k != "QCD"] for member in sublist],

@@ -22,20 +22,20 @@ process_colors = {
 }
 
 process_supergroups = {
-    "wmass":{
+    "w_mass":{
         "Z": ["Ztautau", "Zmumu", "DYlowMass"],
         "Rare": ["PhotonInduced", "Top", "Diboson"],
     },
-    "dilepton":{
+    "z_dilepton":{
         "Other": ["Other","PhotonInduced", "Ztautau"],
     },
-    "lowpu_w":{
+    "w_lowpu":{
         "Z": ["Ztautau", "Zmumu", "Zee", "DYlowMass"],
         "Rare": ["PhotonInduced", "Top", "Diboson"],
     },
 }
-process_supergroups["wlike"]=process_supergroups["dilepton"]
-process_supergroups["lowpu_z"]=process_supergroups["dilepton"]
+process_supergroups["z_wlike"]=process_supergroups["z_dilepton"]
+process_supergroups["z_lowpu"]=process_supergroups["z_dilepton"]
 
 process_labels = {
     "Data": "Data",
