@@ -686,6 +686,8 @@ def setup(args, inputFile, fitvar, xnorm=False):
                                 passToFakes=passSystToFakes)
         ## TODO: implement second lepton veto for low PU (both electrons and muons)
         if not lowPU:
+            pass
+            '''
             # eta decorrelated nuisances
             decorrVarAxis = "eta"
             if "abseta" in fitvar:
@@ -717,6 +719,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
                                    passToFakes=passSystToFakes,
                                    scale=args.scaleZmuonVeto,
                                    )
+            '''
 
     else:
         cardTool.addLnNSystematic("CMS_background", processes=["Other"], size=1.15, group="CMS_background")
@@ -774,6 +777,50 @@ def setup(args, inputFile, fitvar, xnorm=False):
                     scale=scale,
                     splitGroup=splitGroupDict,
                 )
+
+            if wmass:
+                allEffTnP_veto = ["effStatTnP_veto_sf", "effSystTnP_veto"]
+                for name in allEffTnP_veto:
+                    if "Syst" in name:
+                        axes = ["veto_reco-veto_tracking-veto_idip", "n_syst_variations"]
+                        axlabels = ["WPSYST", "_etaDecorr"]
+                        nameReplace = [("WPSYST0", "reco"), ("WPSYST1", "tracking"), ("WPSYST2", "idip"), ("effSystTnP_veto", "effSyst_veto"), ("etaDecorr0", "fullyCorr") ]
+                        scale = 1.0
+                        mirror = True
+                        mirrorDownVarEqualToNomi=False
+                        groupName = "muon_eff_veto_syst"
+                        splitGroupDict = {f"{groupName}_{x}" : f".*effSyst_veto.*{x}" for x in list(["reco","tracking","idip"])}
+                    else:
+                        nameReplace = []
+                        mirror = True
+                        mirrorDownVarEqualToNomi=False
+                        if args.binnedScaleFactors:
+                            axes = ["SF eta", "nPtBins", "SF charge"]
+                        else:
+                            axes = ["SF eta", "nPtEigenBins", "SF charge"]
+                        axlabels = ["eta", "pt", "q"]
+                        nameReplace = nameReplace + [("effStatTnP_veto_sf_", "effStat_veto_")]           
+                        scale = 1.0
+                        groupName = "muon_eff_veto_stat"
+                        splitGroupDict = {}
+                    if args.effStatLumiScale and "Syst" not in name:
+                        scale /= math.sqrt(args.effStatLumiScale)
+
+                    cardTool.addSystematic(
+                        name, 
+                        mirror=mirror,
+                        mirrorDownVarEqualToNomi=mirrorDownVarEqualToNomi,
+                        group=groupName,
+                        systAxes=axes,
+                        labelsByAxis=axlabels,
+                        baseName=name+"_",
+                        processes=['Zveto_samples'],
+                        passToFakes=passSystToFakes,
+                        systNameReplace=nameReplace,
+                        scale=scale,
+                        splitGroup=splitGroupDict,
+                    )
+
         else:
             if datagroups.flavor in ["mu", "mumu"]:
                 lepEffs = ["muSF_HLT_DATA_stat", "muSF_HLT_DATA_syst", "muSF_HLT_MC_stat", "muSF_HLT_MC_syst", "muSF_ISO_stat", "muSF_ISO_DATA_syst", "muSF_ISO_MC_syst", "muSF_IDIP_stat", "muSF_IDIP_DATA_syst", "muSF_IDIP_MC_syst"]

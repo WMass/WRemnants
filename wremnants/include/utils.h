@@ -90,6 +90,14 @@ double deltaR2(float eta1, float phi1, float eta2, float phi2) {
     return deta*deta + dphi*dphi;
 }
 
+RVec<double> vectDeltaR2(RVec<float> eta1, RVec<float> phi1, RVec<float> eta2, RVec<float> phi2) {
+	RVec<double> vect;
+	for (unsigned int i=0U; i!=eta1.size(); i++) {
+    	vect.push_back(deltaR2(eta1[i],phi1[i],eta2[i],phi2[i]));
+	}
+	return vect;
+}
+
 Vec_i cleanJetsFromLeptons(const Vec_f& Jet_eta, const Vec_f& Jet_phi, const Vec_f& Muon_eta, const Vec_f& Muon_phi, const Vec_f& Electron_eta, const Vec_f& Electron_phi) {
 
    Vec_i res(Jet_eta.size(), 1); // initialize to true and set to false whenever the jet overlaps with a muon
@@ -215,6 +223,43 @@ RVec<Int_t> hasMatchDR2collWithSingle(const Vec_f &coll1_eta, const Vec_f &coll1
         if (tmp_dr < dr2) resDR[ic1] = 1;
     }
     return resDR;
+}
+
+int hasMatchDR2idx(const float& eta, const float& phi, const Vec_f& vec_eta, const Vec_f& vec_phi, const float dr2 = 0.09) {
+
+  for (unsigned int jvec = 0; jvec < vec_eta.size(); ++jvec) {
+    if (deltaR2(eta, phi, vec_eta[jvec], vec_phi[jvec]) < dr2) return jvec;
+  }
+  return -1;
+
+}
+
+bool veto_vector_sorting(std::pair<float,float> i,std::pair<float,float> j) { return (i.first>j.first); }
+
+float unmatched_postfsrMuon_var(const Vec_f& var, const Vec_f& pt, int hasMatchDR2idx) {
+
+  std::vector<std::pair<float,float> > ptsortingvector;
+  for (unsigned int i = 0; i < var.size(); i++) {
+    if (i!=hasMatchDR2idx) ptsortingvector.push_back(std::pair(pt[i],var[i]));
+  }
+  if (ptsortingvector.size() == 0) return -99;
+  std::sort(ptsortingvector.begin(),ptsortingvector.end(),veto_vector_sorting);
+  return ptsortingvector[0].second;
+
+}
+
+bool veto_vector_sorting_charge(std::pair<float,int> i,std::pair<float,int> j) { return (i.first>j.first); }
+
+int unmatched_postfsrMuon_charge(const Vec_i& var, const Vec_f& pt, int hasMatchDR2idx) {
+
+  std::vector<std::pair<float,int> > ptsortingvector;
+  for (unsigned int i = 0; i < var.size(); i++) {
+    if (i!=hasMatchDR2idx) ptsortingvector.push_back(std::pair(pt[i],var[i]));
+  }
+  if (ptsortingvector.size() == 0) return -99;
+  std::sort(ptsortingvector.begin(),ptsortingvector.end(),veto_vector_sorting_charge);
+  return ptsortingvector[0].second;
+
 }
 
 RVec<int> postFSRLeptonsIdx(RVec<bool> postFSRleptons) {

@@ -15,6 +15,7 @@ narf.clingutils.Declare('#include "syst_helicity_utils_polvar.h"')
 
 from .muon_prefiring import make_muon_prefiring_helpers
 from .muon_efficiencies_smooth import make_muon_efficiency_helpers_smooth
+from .muon_efficiencies_veto import make_muon_efficiency_helpers_veto
 from .muon_efficiencies_binned import make_muon_efficiency_helpers_binned
 from .muon_efficiencies_binned_vqt import make_muon_efficiency_helpers_binned_vqt
 from .muon_efficiencies_binned_vqt_integrated import make_muon_efficiency_helpers_binned_vqt_integrated

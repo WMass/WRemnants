@@ -595,6 +595,23 @@ def add_muon_efficiency_unc_hists(results, df, helper_stat, helper_syst, axes, c
     
     return df
 
+def add_muon_efficiency_veto_unc_hists(results, df, helper_stat, helper_syst, axes, cols, base_name="nominal", storage_type=hist.storage.Double()):
+    # TODO: update for dilepton
+    muon_columns_stat = ["unmatched_postfsrMuon_pt","unmatched_postfsrMuon_eta","unmatched_postfsrMuon_charge"]
+    muon_columns_syst = ["unmatched_postfsrMuon_pt","unmatched_postfsrMuon_eta","unmatched_postfsrMuon_charge"]
+            
+    df = df.Define("effStatTnP_veto_tensor", helper_stat, [*muon_columns_stat, "nominal_weight"])
+    name = Datagroups.histName(base_name, syst="effStatTnP_veto_sf")
+    effStatTnP = df.HistoBoost(name, axes, [*cols, "effStatTnP_veto_tensor"], tensor_axes = helper_stat.tensor_axes, storage=storage_type)
+    results.append(effStatTnP)
+    
+    df = df.Define("effSystTnP_veto_weight", helper_syst, [*muon_columns_syst, "nominal_weight"])
+    name = Datagroups.histName(base_name, syst="effSystTnP_veto")
+    effSystTnP = df.HistoBoost(name, axes, [*cols, "effSystTnP_veto_weight"], tensor_axes = helper_syst.tensor_axes, storage=storage_type)
+    results.append(effSystTnP)
+    
+    return df
+
 def add_L1Prefire_unc_hists(results, df, helper_stat, helper_syst, axes, cols, base_name="nominal", addhelicity=False, storage_type=hist.storage.Double()):
     df = df.Define("muonL1PrefireStat_tensor", helper_stat, ["Muon_correctedEta", "Muon_correctedPt", "Muon_correctedPhi", "Muon_correctedCharge", "Muon_looseId", "nominal_weight"])
     name = Datagroups.histName(base_name, syst=f"muonL1PrefireStat")    

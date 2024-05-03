@@ -10,16 +10,31 @@ def apply_met_filters(df):
 
     return df
 
+
 def select_good_secondary_vertices(df, dlenSig=4.0, ntracks=0):
     df = df.Define(f"goodSV", f"SV_dlenSig > {dlenSig} && SV_ntracks >= {ntracks}")
     return df
 
+'''
 def select_veto_muons(df, nMuons=1, condition="==", ptCut=10.0, etaCut=2.4):
 
     # n.b. charge = -99 is a placeholder for invalid track refit/corrections (mostly just from tracks below
     # the pt threshold of 8 GeV in the nano production)
     df = df.Define("vetoMuonsPre", "Muon_looseId && abs(Muon_dxybs) < 0.05 && Muon_correctedCharge != -99")
     df = df.Define("vetoMuons", f"vetoMuonsPre && Muon_correctedPt > {ptCut} && abs(Muon_correctedEta) < {etaCut}")
+    df = df.Filter(f"Sum(vetoMuons) {condition} {nMuons}")
+
+    return df
+
+'''
+
+def select_veto_muons(df, nMuons=1, condition="==", ptCut=15.0, etaCut=2.4):
+
+    # n.b. charge = -99 is a placeholder for invalid track refit/corrections (mostly just from tracks below
+    # the pt threshold of 8 GeV in the nano production)
+    df = df.Define("vetoMuonsPre", "Muon_looseId && abs(Muon_dxybs) < 0.05 && Muon_correctedCharge != -99")
+    df = df.Define("vetoMuonsPre2", "vetoMuonsPre && Muon_isGlobal && Muon_highPurity && Muon_standalonePt > 15 && Muon_standaloneNumberOfValidHits > 0 && wrem::vectDeltaR2(Muon_standaloneEta, Muon_standalonePhi, Muon_correctedEta, Muon_correctedPhi) < 0.09")
+    df = df.Define("vetoMuons", f"vetoMuonsPre2 && Muon_correctedPt > {ptCut} && abs(Muon_correctedEta) < {etaCut}")
     df = df.Filter(f"Sum(vetoMuons) {condition} {nMuons}")
 
     return df
