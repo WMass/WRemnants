@@ -8,7 +8,7 @@ parser,initargs = common.common_parser(analysis_label)
 
 import narf
 import wremnants
-from wremnants import theory_tools,syst_tools,theory_corrections,unfolding_tools
+from wremnants import theory_tools,syst_tools,theory_corrections,unfolding_tools,theoryAgnostic_tools
 from wremnants.datasets.dataset_tools import getDatasets
 import hist
 import math
@@ -281,7 +281,9 @@ def build_graph(df, dataset):
     if 'powheg' in dataset.name:
         return results, weightsum
 
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
+    nominal_cols = [col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen"]
+    nominal_axes = [axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen]
+    nominal_gen = df.HistoBoost("nominal_gen_herapdf20", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
     results.append(nominal_gen)
 
     if 'horace' not in dataset.name and 'winhac' not in dataset.name and \
@@ -290,6 +292,19 @@ def build_graph(df, dataset):
         qcdScaleByHelicity_helper = wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like = dataset.name[0] != "W") if args.helicity else None
 
         df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen")
+
+    axes_theoryAgnostic = [*nominal_axes, hist.axis.Variable(
+    axis_ptV_thag.edges, #same axis as theory agnostic norms, 
+    #common.ptV_binning,
+    name = "ptVgenSig", underflow=False,
+    ),hist.axis.Variable(
+        axis_yV_thag.edges, #same axis as theory agnostic norms
+        name = "absYVgenSig", underflow=False
+    )]
+    axis_helicity_multidim = hist.axis.Integer(-1, 8, name="helicitySig", overflow=False, underflow=False)
+    df = theoryAgnostic_tools.define_helicity_weights(df)
+    gen_theoryAgnostic = df.HistoBoost("nominal_gen_yieldsTheoryAgnostic", axes_theoryAgnostic, [*nominal_cols,"ptVgen",col_rapidity, "nominal_weight_helicity"], tensor_axes = [axis_helicity_multidim, *theory_tools.scale_tensor_axes],storage=hist.storage.Weight())
+    results.append(gen_theoryAgnostic)
 
     return results, weightsum
 

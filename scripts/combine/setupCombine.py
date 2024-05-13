@@ -181,7 +181,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
     constrainMass = args.forceConstrainMass or args.fitXsec or (dilepton and not "mll" in fitvar) or genfit
     logger.debug(f"constrainMass = {constrainMass}")
 
-    if wmass:
+    if wmass or datagroups.mode == "vgen":
         base_group = "Wenu" if datagroups.flavor == "e" else "Wmunu"
     else:
         base_group = "Zee" if datagroups.flavor == "ee" else "Zmumu"
@@ -239,7 +239,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
             # check if the out-of-acceptance signal process exists as an independent process
             if any(m.name.endswith("OOA") for m in datagroups.groups[base_group].members):
                 hasSeparateOutOfAcceptanceSignal = True
-                if wmass:
+                if wmass or datagroups.mode == "vgen":
                     # out of acceptance contribution
                     datagroups.copyGroup(base_group, f"{base_group}OOA", member_filter=lambda x: x.name.endswith("OOA"))
                     datagroups.groups[base_group].deleteMembers([m for m in datagroups.groups[base_group].members if m.name.endswith("OOA")])
@@ -253,7 +253,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
         constrainMass = False if isTheoryAgnostic else True
         datagroups.setGenAxes(args.genAxes)
         logger.info(f"GEN axes are {args.genAxes}")
-        if wmass and "qGen" in datagroups.gen_axes_names:
+        if (wmass or datagroups.mode == "vgen") and "qGen" in datagroups.gen_axes_names:
             # gen level bins, split by charge
             if "minus" in args.recoCharge:
                 datagroups.defineSignalBinsUnfolding(base_group, f"W_qGen0", member_filter=lambda x: x.name.startswith("Wminus") and not x.name.endswith("OOA"), axesToRead=[ax for ax in datagroups.gen_axes_names if ax!="qGen"])
@@ -331,7 +331,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
     if args.noHist:
         cardTool.skipHistograms()
     cardTool.setSpacing(28)
-    label = 'W' if wmass else 'Z'
+    label = 'W' if (wmass or datagroups.mode == "vgen") else 'Z'
     cardTool.setCustomSystGroupMapping({
         "theoryTNP" : f".*resum.*|.*TNP.*|mass.*{label}.*",
         "resumTheory" : f".*scetlib.*|.*resum.*|.*TNP.*|mass.*{label}.*",
@@ -416,7 +416,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
     if not (isTheoryAgnostic or isUnfolding) :
         logger.info(f"All MC processes {cardTool.procGroups['MCnoQCD']}")
         logger.info(f"Single V samples: {cardTool.procGroups['single_v_samples']}")
-        if wmass and not xnorm:
+        if (wmass or datagroups.mode == "vgen") and not xnorm:
             logger.info(f"Single V no signal samples: {cardTool.procGroups['single_v_nonsig_samples']}")
         logger.info(f"Signal samples: {cardTool.procGroups['signal_samples']}")
 
@@ -711,8 +711,8 @@ def setup(args, inputFile, fitvar, xnorm=False):
                             passToFakes=passSystToFakes,
     )
 
-    combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc], 
-        samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)
+    # combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc], 
+    #     samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)
 
     to_fakes = passSystToFakes and not args.noQCDscaleFakes and not xnorm
     
@@ -736,7 +736,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
     if xnorm:
         theorySystSamples = ["signal_samples"]
 
-    theory_helper.add_all_theory_unc(theorySystSamples, skipFromSignal=args.noPDFandQCDtheorySystOnSignal)
+    # theory_helper.add_all_theory_unc(theorySystSamples, skipFromSignal=args.noPDFandQCDtheorySystOnSignal)
 
     if xnorm or genfit:
         return cardTool
