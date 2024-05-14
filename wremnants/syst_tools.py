@@ -877,7 +877,7 @@ def scetlib_scale_unc_hist(h, obs, syst_ax="vars"):
     return hnew
 
 def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHelicity_helper, axes, cols, 
-    base_name="nominal", for_wmass=True, addhelicity=False, storage_type=hist.storage.Double()
+    base_name="nominal", propagateToHelicity=False, for_wmass=True, addhelicity=False, storage_type=hist.storage.Double()
 ):
     logger.debug(f"Make theory histograms for {dataset_name} dataset, histogram {base_name}")
     axis_ptVgen = hist.axis.Variable(
@@ -904,7 +904,7 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
     if isZ:
         df = define_sin2theta_weights(df, dataset_name)
 
-    add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
+    add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, base_name=base_name, propagateToHelicity=propagateToHelicity, addhelicity=addhelicity, storage_type=storage_type)
     add_qcdScale_hist(results, df, scale_axes, scale_cols, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
 
     theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]

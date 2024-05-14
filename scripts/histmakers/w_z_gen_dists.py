@@ -291,7 +291,7 @@ def build_graph(df, dataset):
 
         qcdScaleByHelicity_helper = wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like = dataset.name[0] != "W") if args.helicity else None
 
-        df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen")
+        df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen",propagateToHelicity= args.propagatePDFstoHelicity)
 
     axes_theoryAgnostic = [*nominal_axes, hist.axis.Variable(
     axis_ptV_thag.edges, #same axis as theory agnostic norms, 

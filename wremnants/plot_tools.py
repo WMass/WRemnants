@@ -386,7 +386,7 @@ def makePlotWithRatioToRef(
     )
 
     if len(hists) > 1:
-        ratio_hists = [hh.divideHists(h, hists[0], cutoff=cutoff, flow=False, rel_unc=True, by_ax_name=False) for h in hists]
+        ratio_hists = [hh.divideHists(h, hists[0], flow=False, rel_unc=True, by_ax_name=False) for h in hists]
         if fill_between != 0:
             for upr,downr,color in zip(ratio_hists[-fill_between::2], ratio_hists[-fill_between+1::2], colors[-fill_between::2]):
                 ax2.fill_between(upr.axes[0].edges, 
