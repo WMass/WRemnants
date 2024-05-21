@@ -138,7 +138,7 @@ def makeStackPlotWithRatio(
     plot_title = None, title_padding = 0, yscale=None, logy=False, logx=False, 
     fill_between=False, ratio_to_data=False, baseline=True, legtext_size=20, cms_decor="Preliminary", lumi=16.8,
     no_fill=False, no_stack=False, no_ratio=False, density=False, flow='none', bin_density=300, unstacked_linestyles=[],
-    ratio_error=True, normalize_to_data=False,
+    ratio_error=True, normalize_to_data=False, cutoff=1e-6,
 ):
     add_ratio = not (no_stack or no_ratio) 
     if ylabel is None:
@@ -255,7 +255,7 @@ def makeStackPlotWithRatio(
     
     if "Data" in histInfo and ratio_to_data and add_ratio:
         hep.histplot(
-            hh.divideHists(hh.sumHists(stack), data_hist, cutoff=1e-6, by_ax_name=False),
+            hh.divideHists(hh.sumHists(stack), data_hist, cutoff=cutoff, by_ax_name=False),
             histtype="step",
             color=histInfo[stackedProcs[-1]].color,
             label=histInfo[stackedProcs[-1]].label,
@@ -278,7 +278,7 @@ def makeStackPlotWithRatio(
         ratio_ref = data_hist if ratio_to_data else hh.sumHists(stack)
         if baseline and add_ratio:
             hep.histplot(
-                hh.divideHists(ratio_ref, ratio_ref, cutoff=1e-6, rel_unc=True, flow=False, by_ax_name=False),
+                hh.divideHists(ratio_ref, ratio_ref, cutoff=cutoff, rel_unc=True, flow=False, by_ax_name=False),
                 histtype="step",
                 color="grey",
                 alpha=0.5,
@@ -323,7 +323,7 @@ def makeStackPlotWithRatio(
             )
             if ratio_to_data and proc == "Data" or not add_ratio:
                 continue
-            stack_ratio = hh.divideHists(unstack, ratio_ref, cutoff=1e-6, rel_unc=True, flow=False, by_ax_name=False)
+            stack_ratio = hh.divideHists(unstack, ratio_ref, cutoff=cutoff, rel_unc=True, flow=False, by_ax_name=False)
             hep.histplot(stack_ratio,
                 histtype="errorbar" if style == "None" else "step",
                 color=histInfo[proc].color,
@@ -355,11 +355,11 @@ def makePlotWithRatioToRef(
     rrange=[0.9, 1.1], ylim=None, xlim=None, nlegcols=2, binwnorm=None, alpha=1.,
     baseline=True, dataIdx=None, autorrange=None, grid = False, extra_text=None, extra_text_loc=(0.8, 0.7),
     yerr=False, legtext_size=20, plot_title=None, x_ticks_ndp = None, bin_density = 300, yscale=None,
-    logy=False, logx=False, fill_between=0, title_padding = 0, cms_label = None, 
+    logy=False, logx=False, fill_between=0, title_padding = 0, cms_label = None, cutoff=1e-6,
 ):
     if len(hists) != len(labels) or len(hists) != len(colors):
         raise ValueError(f"Number of hists ({len(hists)}), colors ({len(colors)}), and labels ({len(labels)}) must agree!")
-    ratio_hists = [hh.divideHists(h, hists[0], cutoff=1e-6, flow=False, rel_unc=True, by_ax_name=False) for h in hists[not baseline:]]
+    ratio_hists = [hh.divideHists(h, hists[0], cutoff=cutoff, flow=False, rel_unc=True, by_ax_name=False) for h in hists[not baseline:]]
     fig, ax1, ax2 = figureWithRatio(
         hists[0], xlabel, ylabel, ylim, rlabel, rrange, xlim=xlim, 
         grid_on_ratio_plot = grid, plot_title = plot_title, title_padding=title_padding,
@@ -417,7 +417,7 @@ def makePlotWithRatioToRef(
             flow='none',
         )
         hep.histplot(
-            hh.divideHists(hists[dataIdx], hists[0], cutoff=1.e-8, flow=False, by_ax_name=False, rel_unc=True),
+            hh.divideHists(hists[dataIdx], hists[0], cutoff=cutoff, flow=False, by_ax_name=False, rel_unc=True),
             histtype="errorbar",
             color=colors[dataIdx],
             xerr=False,
@@ -546,14 +546,14 @@ def redo_axis_ticks(ax, axlabel, no_labels=False):
     fixedloc = ticker.FixedLocator(autoloc.tick_values(*getattr(ax, f"get_{axlabel}lim")()))
     getattr(ax, f"{axlabel}axis").set_major_locator(fixedloc)
     ticks = getattr(ax, f"get_{axlabel}ticks")()
-    labels = [format_axis_num(x) for x in ticks] if not no_labels else []
+    labels = [format_axis_num(x, ticks[-1]) for x in ticks] if not no_labels else []
     getattr(ax, f"set_{axlabel}ticklabels")(labels)
 
-def format_axis_num(val):
+def format_axis_num(val, maxval):
     if type(val) == int or val.is_integer():
         # This is kinda dumb and I might change it
-        return f"{val:.0f}" if val > 5 else f"{val:0.1f}"
-    return f"{val:0.3g}" if val > 10 else f"{val:0.2g}"
+        return f"{val:.0f}" if maxval > 5 else f"{val:0.1f}"
+    return f"{val:0.3g}" if maxval > 10 else f"{val:0.2g}"
 
 def save_pdf_and_png(outdir, basename, fig=None):
     fname = f"{outdir}/{basename}.pdf"
