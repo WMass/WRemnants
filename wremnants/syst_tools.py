@@ -465,8 +465,8 @@ def widthWeightNames(matches=None, proc=""):
 
 # weak weights from Powheg EW NanoLHE files
 def define_weak_weights(df, proc):
-    if proc != 'Zmumu_powheg-weak':
-        logger.debug("weakWeight_tensor only implemented for Zmumu_powheg-weak.")
+    if not 'Zmumu_powheg-weak' in proc:
+        logger.debug("weakWeight_tensor only implemented for Zmumu_powheg-weak samples.")
         return df
     if "weakWeight_tensor" in df.GetColumnNames():
         logger.debug("weakWeight_tensor already defined, do nothing here.")

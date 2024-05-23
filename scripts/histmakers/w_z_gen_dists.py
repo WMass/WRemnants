@@ -143,9 +143,9 @@ def build_graph(df, dataset):
     if args.singleLeptonHists and (isW or isZ):
         results.append(df.HistoBoost("nominal_genlep", lep_axes, [*lep_cols, "nominal_weight"], storage=hist.storage.Weight()))
 
-    if not args.skipEWHists and (isW or isZ) and dataset.name == 'Zmumu_powheg-weak':
+    if not args.skipEWHists and (isW or isZ) and 'Zmumu_powheg-weak' in dataset.name:
         if isZ:
-            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.010, bin_edges_low=[0,50,60], bin_edges_high=[120])
+            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.10, bin_edges_low=[0,46,50,60,70,80], bin_edges_high=[100,110,120,140,160,200])
         else:
             massBins = theory_tools.make_ew_binning(mass = 80.3815, width = 2.0904, initialStep=0.010)
         

@@ -445,7 +445,7 @@ def make_ew_binning(mass = 91.1535, width = 2.4932, initialStep = 0.1, bin_edges
     if bin_edges_low:
         bins = bin_edges_low + [b for b in bins if b > bin_edges_low[-1]][1:]
     if bin_edges_high:
-        bins = [b for b in bins if b < bin_edges_high[-1]][:-1] + bin_edges_high
+        bins = [b for b in bins if b < bin_edges_high[0]][:-1] + bin_edges_high
 
     return bins
 
