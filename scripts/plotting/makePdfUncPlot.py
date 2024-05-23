@@ -4,6 +4,7 @@ from utilities.io_tools import input_tools, output_tools
 import hist
 import utilities.common
 import matplotlib.pyplot as plt
+import mplhep as hep
 from matplotlib import cm
 import numpy as np
 import boost_histogram as bh
@@ -75,8 +76,21 @@ for dataset in args.datasets:
     colors = [[cmap(i)]*3 for i in range(len(args.pdfs))]
 
     if "unrolled_gen_hel" in args.obs:
-        moments = input_tools.read_all_and_scale(args.infile, args.datasets, ["nominal_gen_helicity_moments_scale"])
-        coeffs =  theory_tools.moments_to_helicities(moments[0].project('ptVgen','absYVgen','helicity','muRfact','muFfact'))
+        print(dataset)
+        moments = input_tools.read_all_and_scale(args.infile, [dataset], ["nominal_gen_helicity_moments"])
+        # coeffs =  theory_tools.moments_to_helicities(moments[0].project('ptVgen','absYVgen','helicity','muRfact','muFfact'))
+        moments_nom = input_tools.read_all_and_scale(args.infile, [dataset], ["nominal_gen_helicity_moments_scale"])
+        # moments_thag = input_tools.read_all_and_scale(args.infile, args.datasets, ["nominal_gen_helicity_moments_yieldsTheoryAgnostic"])
+        print(moments[0])
+        # hep.histplot(hh.unrolledHist(moments[0][{'helicity':-1.j, 'muRfact':1.j,'muFfact':1.j}],binwnorm=True))
+        # hep.histplot(hh.unrolledHist(moments_nom[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
+        hep.histplot(hh.unrolledHist(moments_nom[0].project('ptVgen','absYVgen','muRfact','muFfact','helicity')[{'helicity':-1.j,'muRfact':1.j,'muFfact':1.j}],binwnorm=True))
+        hep.histplot(hh.unrolledHist(moments[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
+        # hep.histplot(hh.unrolledHist(moments_thag[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
+        # hep.histplot(hh.unrolledHist(hh.divideHists(coeffs[{'helicity':4.j, 'muRfact':1.j,'muFfact':1.j}],moments_nom[0].project('ptVgen','absYVgen','helicity')[{'helicity':4.j}]),binwnorm=True))
+        plt.savefig("thagtest.png")
+        exit()
+        
         moments_pdf = input_tools.read_all_and_scale(args.infile, args.datasets, [f"helicity_{args.baseName}_{pdfName}" for pdfName in pdfNames])
         
         coeffs_pdf = []
@@ -134,9 +148,9 @@ for dataset in args.datasets:
         uncHists.append([coeffs[{"muRfact" : 2.j, "muFfact" : 2.j}],coeffs[{"muRfact" : 0.5j, "muFfact" : 0.5j}],coeffs[{"muRfact" : 2.j, "muFfact" : 1.j}], coeffs[{"muRfact" : 0.5j, "muFfact" : 1.j}],coeffs[{"muRfact" : 1.j, "muFfact" : 2.j}],coeffs[{"muRfact" : 1.j, "muFfact" : 0.5j}]])
         names.append(["QCDscale_muRmuFUp","QCDscale_muRmuFDown","QCDscale_muRUp","QCDscale_muRDown","QCDscale_muFUp","QCDscale_muFDown"])
         colors.append([[cmap(i)]*6 for i in range(2+len(args.pdfs))][0])
-        # uncHists.append([coeffs[{'muRfact':1.j,'muFfact':1.j}]])
-        # names.append(["QCDscale_central"])
-        # colors.append([[cmap(i)]*1 for i in range(2*len(args.pdfs),2*len(args.pdfs)+1)][0])
+        uncHists.append([coeffs[{'muRfact':1.j,'muFfact':1.j}]])
+        names.append(["QCDscale_central"])
+        colors.append([[cmap(i)]*1 for i in range(2*len(args.pdfs),2*len(args.pdfs)+1)][0])
 
     outdir = output_tools.make_plot_dir(args.outpath, args.outfolder)
     plot_names = copy.copy(args.pdfs)
@@ -158,7 +172,7 @@ for dataset in args.datasets:
                     action = lambda x: x.project(obs)
                     hists1D = [action(x) for x in hists]
                 else:
-                    obs2unroll = ["ptVgen","absYVgen"] if "unrolled_gen" in obs else ["pt","eta"]
+                    obs2unroll = ["absYVgen","ptVgen"] if "unrolled_gen" in obs else ["pt","eta"]
                     action = hh.unrolledHist
                     if not "hel" in obs:
                         hists1D = [action(x,obs2unroll,binwnorm=True) for x in hists]
@@ -183,7 +197,7 @@ for dataset in args.datasets:
             ax2.fill_between(hists1D[0].axes[0].centers,np.minimum.reduce([h.values() for h in hists1D])/hists1D[0].values(),np.maximum.reduce([h.values() for h in hists1D])/hists1D[0].values(),color="grey",alpha=0.5, label="theory agnostic variation")
             plot_tools.save_pdf_and_png(outdir, outfile)
             plot_tools.write_index_and_log(outdir, outfile)
-
+            exit()
             if ihel == -1:
                 variations.append(np.stack([0.5*np.ones_like(np.minimum.reduce([h.values() for h in hists1D])/hists1D[0].values()),1.5*np.ones_like(np.maximum.reduce([h.values() for h in hists1D])/hists1D[0].values())],axis=-1).reshape(len(uncHists[0][0].axes["ptVgen"]),len(uncHists[0][0].axes["absYVgen"]),2))
             # elif ihel == 4:
@@ -203,6 +217,6 @@ for dataset in args.datasets:
     hvariations = hist.Hist(axis_ptV,axis_yV,axis_helicity_multidim,utilities.common.down_up_axis, name=f"theorybands_{dataset}",data=variations_all)
     band_hists[dataset] = hvariations
 
-outfile = "theoryband_variations.hdf5"
-with h5py.File(outfile, 'w') as f:
-    narf.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
+# outfile = "theoryband_variations.hdf5"
+# with h5py.File(outfile, 'w') as f:
+#     narf.ioutils.pickle_dump_h5py("theorybands", band_hists, f)

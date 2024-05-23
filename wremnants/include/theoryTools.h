@@ -181,6 +181,8 @@ scale_tensor_t makeScaleTensor(const Vec_f &scale_weights, double thres) {
 }
 
 using helicity_scale_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY, 3, 3>>;
+using helicity_tensor_t = Eigen::TensorFixedSize<double,Eigen::Sizes<NHELICITY>>;
+using helicity_helicity_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY, NHELICITY>>;
 
   helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, const scale_tensor_t &scale_tensor, double original_weight = 1.0)
   {
@@ -196,6 +198,30 @@ using helicity_scale_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHEL
     Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1, 1>> moments = csAngularMoments(csvars).reshape(broadcasthelicities);
 
     return original_weight * scale_tensor.reshape(reshapescale).broadcast(broadcasthelicities) * moments.broadcast(broadcastscales);
+  }
+
+  helicity_helicity_tensor_t makeHelicityMomentHelicityTensor(const CSVars &csvars, const helicity_tensor_t &hel_tensor, double original_weight = 1.0)
+  {
+
+    constexpr Eigen::Index nhelicity = NHELICITY;
+
+    constexpr std::array<Eigen::Index, 2> broadcasthels = {nhelicity,1};
+    constexpr std::array<Eigen::Index, 2> broadcasthelicities = {1, nhelicity};
+    constexpr std::array<Eigen::Index, 2> reshapehelicities = {1, nhelicity};
+
+    Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1>> moments = csAngularMoments(csvars).reshape(broadcasthels);
+    helicity_helicity_tensor_t hel_hel_tensor = original_weight * hel_tensor.reshape(reshapehelicities).broadcast(broadcasthels) * moments.broadcast(broadcasthelicities);
+
+    // Set all off-diagonal elements to 1
+    for (int i = 0; i < NHELICITY; ++i) {
+        for (int j = 0; j < NHELICITY; ++j) {
+            if (i != j) {
+                hel_hel_tensor(i, j) = 0.0;
+            }
+        }
+    }
+    // std::cout<< hel_hel_tensor << std::endl;
+    return hel_hel_tensor;
   }
 
   template <Eigen::Index Npdfs>

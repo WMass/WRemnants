@@ -1,6 +1,6 @@
-from utilities import differential
+from utilities import logging, differential
 import wremnants
-from wremnants import syst_tools, theory_tools, logging, helicity_utils, helicity_utils_polvar
+from wremnants import syst_tools, theory_tools, helicity_utils, helicity_utils_polvar
 from copy import deepcopy
 import hist
 
