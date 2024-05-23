@@ -303,6 +303,22 @@ w_moments = None
 
 z_moments_lhe = None
 w_moments_lhe = None
+for dataset in datasets:
+        name = dataset.name
+
+        if not (name=="WminusmunuPostVFP" or name=="WplusmunuPostVFP"): continue
+
+        print(name)
+        moments_nominal = resultdict[name]["output"]["nominal_gen_helicity_moments"].get()
+        helicities_nominal =  theory_tools.moments_to_helicities(moments_nominal)
+    
+        moments_thag = resultdict[name]["output"]["nominal_gen_helicity_moments_yieldsTheoryAgnostic"].get()
+        helicities_thag =  theory_tools.moments_to_helicities(moments_thag)
+        
+        resultdict[name]["output"]["nominal_gen_helicity"] = narf.ioutils.H5PickleProxy(helicities_nominal)
+        resultdict[name]["output"]["nominal_gen_helicity_yieldsTheoryAgnostic"] = narf.ioutils.H5PickleProxy(helicities_thag)
+
+output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args)
 
 if not args.skipAngularCoeffs:
     for dataset in datasets:
@@ -331,18 +347,6 @@ if not args.skipAngularCoeffs:
                 w_moments = hh.addHists(w_moments, new_moments, createNew=False)
                 w_moments_lhe = hh.addHists(w_moments_lhe, new_moments_lhe, createNew=False)
 
-        if not (name=="WminusmunuPostVFP" or name=="WplusmunuPostVFP"): continue
-
-        print(name)
-        moments_nominal = resultdict[name]["output"]["nominal_gen_helicity_moments"].get()
-        helicities_nominal =  theory_tools.moments_to_helicities(moments_nominal)
-    
-        moments_thag = resultdict[name]["output"]["nominal_gen_helicity_moments_yieldsTheoryAgnostic"].get()
-        helicities_thag =  theory_tools.moments_to_helicities(moments_thag)
-        
-        resultdict[name]["output"]["nominal_gen_helicity"] = narf.ioutils.H5PickleProxy(helicities_nominal)
-        resultdict[name]["output"]["nominal_gen_helicity_yieldsTheoryAgnostic"] = narf.ioutils.H5PickleProxy(helicities_thag)
-
     moments_out={}
     if z_moments:
         moments_out["Z"] = z_moments
@@ -358,8 +362,4 @@ if not args.skipAngularCoeffs:
             outfname += "_theoryAgnosticBinning"
         outfname += ".hdf5"
         output_tools.write_analysis_output(moments_out, outfname, args)
-
-print(resultdict["WplusmunuPostVFP"]["output"]["nominal_gen_helicity"])
-print(resultdict["WminusmunuPostVFP"]["output"]["nominal_gen_helicity"])
-output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args)
 
