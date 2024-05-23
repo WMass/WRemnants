@@ -600,13 +600,25 @@ jobs:
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists etaAbsEta-mll mll -o $WEB_DIR -f $PLOT_DIR -p z $HIST_FILE variation --varName 'virtual_ewCorr' --selectEntries 2 --varLabel 'EW(virtual)' --selectAxis systIdx --color blue 
 
       - name: dilepton combine mll setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --fitvar etaAbsEta-mll cosThetaStarll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --fitvar etaAbsEta-mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData --hdf5
+
+      - name: dilepton combine mll_inc setup
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --fitvar mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData --hdf5
 
       - name: dilepton combine mll fit
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll ZMassDilepton_inclusive.txt 
+        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ dilepton $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll ZMassDilepton.hdf5
 
       - name: dilepton combine impacts
         run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsZ.html
+
+      - name: dilepton postfit mll-etaAbsEta plot
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults_123456789.root -o $WEB_DIR -f $PLOT_DIR --yscale 1.2
+
+      - name: dilepton mll_inc postfit2D
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py $WREMNANTS_OUTDIR/ZMassDilepton_mll/ZMassDilepton.hdf5 --externalPostfit $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults_123456789.hdf5 -o $WREMNANTS_OUTDIR/ZMassDilepton_mll/postfit_from2D.hdf5  --saveHists --binByBinStat --computeHistErrors
+
+      - name: dilepton postfit mll_inc plot
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py $WREMNANTS_OUTDIR/ZMassDilepton_mll/postfit_from2D.hdf5 -o $WEB_DIR -f $PLOT_DIR 
 
   dilepton:
     # The type of runner that the job will run on
