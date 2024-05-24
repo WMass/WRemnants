@@ -43,6 +43,7 @@ class TheoryHelper(object):
             propagate_to_fakes=True, 
             tnp_scale=1.,
             mirror_tnp=True,
+            as_from_corr=True,
             pdf_from_corr=False,
             pdf_operation=None,
             scale_pdf_unc=1.,
@@ -57,6 +58,7 @@ class TheoryHelper(object):
         self.tnp_scale = tnp_scale
         self.mirror_tnp = mirror_tnp
         self.pdf_from_corr = pdf_from_corr
+        self.as_from_corr = pdf_from_corr or as_from_corr
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
         self.samples = []
@@ -67,7 +69,7 @@ class TheoryHelper(object):
         self.skipFromSignal = skipFromSignal
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
-        self.add_pdf_uncertainty(from_corr=self.pdf_from_corr, operation=self.pdf_operation, scale=self.scale_pdf_unc)
+        self.add_pdf_uncertainty(operation=self.pdf_operation, scale=self.scale_pdf_unc)
         try:
             self.add_quark_mass_vars()
         except ValueError as e:
@@ -229,7 +231,7 @@ class TheoryHelper(object):
                 symmetrize = "quadratic",
                 processes=[sample_group],
                 group=group_name,
-                splitGroup={"QCDscale": ".*"},
+                splitGroup={"QCDscale": ".*", "pTModeling" : ".*", },
                 systAxes=syst_axes,
                 labelsByAxis=syst_ax_labels,
                 skipEntries=skip_entries,
@@ -291,7 +293,7 @@ class TheoryHelper(object):
             self.card_tool.addSystematic(name=self.scale_hist_name,
                 processes=[sample_group],
                 group="resumTransitionFOScale",
-                splitGroup={"resum": ".*"},
+                splitGroup={"resum": ".*", "pTModeling" : ".*", },
                 systAxes=[pt_ax, "vars"],
                 symmetrize = "quadratic",
                 passToFakes=self.propagate_to_fakes,
@@ -326,7 +328,7 @@ class TheoryHelper(object):
         self.card_tool.addSystematic(name=self.corr_hist_name,
             processes=['wtau_samples', 'single_v_nonsig_samples'] if self.skipFromSignal else ['single_v_samples'],
             group="resumTNP",
-            splitGroup={"resum": ".*"},
+            splitGroup={"resum": ".*", "pTModeling" : ".*", },
             systAxes=["vars"],
             passToFakes=self.propagate_to_fakes,
             systNameReplace=name_replace,
@@ -486,27 +488,26 @@ class TheoryHelper(object):
                     rename=rename,
                 )
 
-    def add_pdf_uncertainty(self, operation=None, from_corr=False, scale=1):
+    def add_pdf_uncertainty(self, operation=None, scale=1):
         pdf = input_tools.args_from_metadata(self.card_tool, "pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
         scale = scale if scale != 1.0 else pdfInfo["inflationFactor"]
         pdf_hist = pdfName
+        pdf_corr_hist = f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr" 
         symmetrize = "quadratic"
 
-        if from_corr:
+        if self.pdf_from_corr:
             theory_unc = input_tools.args_from_metadata(self.card_tool, "theoryCorr")
             if not theory_unc:
                 logger.error("Can not add resummation uncertainties. No theory correction was applied!")
-            #pdf_hist = f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}OnlyUL" 
-            pdf_hist = f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}Vars" 
-            if pdf_hist not in theory_unc:
+            if pdf_hist[:-4] not in theory_unc:
                 logger.error(f"Did not find {pdf_hist} correction in file! Cannot use SCETlib+DYTurbo PDF uncertainties")
-            pdf_hist += "Corr"
+            pdf_hist = pdf_corr_hist
 
         logger.info(f"Using PDF hist {pdf_hist}, apply scaling of {scale}")
 
-        pdf_ax = self.syst_ax if from_corr else "pdfVar"
+        pdf_ax = self.syst_ax if self.pdf_from_corr else "pdfVar"
         symHessian = pdfInfo["combine"] == "symHessian"
         pdf_args = dict(
             processes=['wtau_samples', 'single_v_nonsig_samples'] if self.skipFromSignal else ['single_v_samples'],
@@ -519,7 +520,7 @@ class TheoryHelper(object):
             symmetrize=symmetrize,
             systAxes=[pdf_ax],
         )
-        if from_corr:
+        if self.pdf_from_corr:
             self.card_tool.addSystematic(pdf_hist, 
                 outNames=[""]+theory_tools.pdfNamesAsymHessian(pdfInfo['entries'], pdfset=pdfName)[1:],
                 **pdf_args
@@ -544,19 +545,19 @@ class TheoryHelper(object):
                 )
 
         asRange = pdfInfo['alphasRange']
-        asname = f"{pdfName}alphaS{asRange}" if not from_corr else pdf_hist.replace("Vars", "_pdfas")
+        asname = f"{pdfName}alphaS{asRange}" if not self.as_from_corr else pdf_corr_hist.replace("Vars", "_pdfas")
         as_replace = [("as", "pdfAlphaS")]+[("0116", "Down"), ("0120", "Up")] if asRange == "002" else [("0117", "Down"), ("0119", "Up")]
         as_args = dict(name=asname,
             processes=['wtau_samples', 'single_v_nonsig_samples'] if self.skipFromSignal else ['single_v_samples'],
             mirror=False,
             group=pdfName,
             splitGroup={f"{pdfName}AlphaS": '.*'},
-            systAxes=["vars" if from_corr else "alphasVar"],
+            systAxes=["vars" if self.as_from_corr else "alphasVar"],
             scale=(0.75 if asRange == "002" else 1.5)*scale,
             symmetrize=symmetrize,
             passToFakes=self.propagate_to_fakes,
         )
-        if from_corr:
+        if self.as_from_corr:
             as_args["outNames"] = ['', "pdfAlphaSDown", "pdfAlphaSUp"]
         else:
             as_args["systNameReplace"] = as_replace
@@ -590,7 +591,7 @@ class TheoryHelper(object):
             self.card_tool.addSystematic(name=self.corr_hist_name,
                 processes=[sample_group],
                 group="resumTransitionFOScale",
-                splitGroup={"resum": ".*"},
+                splitGroup={"resum": ".*", "pTModeling" : ".*", },
                 systAxes=["vars"],
                 symmetrize = "quadratic",
                 passToFakes=self.propagate_to_fakes,
@@ -621,6 +622,7 @@ class TheoryHelper(object):
             systAxes=[syst_ax],
             symmetrize = "quadratic",
             group="bcQuarkMass",
+            splitGroup={"pTModeling" : ".*", },
             passToFakes=self.propagate_to_fakes,
             outNames=["", "pdfMSHT20mbrangeDown",]+[""]*4+["pdfMSHT20mbrangeUp"],
         )
@@ -630,6 +632,7 @@ class TheoryHelper(object):
             systAxes=[syst_ax],
             symmetrize = "quadratic",
             group="bcQuarkMass",
+            splitGroup={"pTModeling" : ".*", },
             passToFakes=self.propagate_to_fakes,
             outNames=["", "pdfMSHT20mcrangeDown",]+[""]*6+["pdfMSHT20mcrangeUp"],
         )

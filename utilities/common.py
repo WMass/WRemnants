@@ -146,8 +146,8 @@ def get_default_ptbins(analysis_label, unfolding=False, gen=False):
         vals[0] += 2
         vals[2] += 2
     elif gen:
-        values[0] -= 2
-        values[1] += 2
+        vals[0] -= 2
+        vals[1] += 2
     return vals
 
 def get_default_etabins(analysis_label=None):
@@ -291,7 +291,7 @@ def common_parser(analysis_label=""):
     parser.add_argument("-p", "--postfix", type=str, help="Postfix for output file name", default=None)
     parser.add_argument("--forceDefaultName", action='store_true', help="Don't modify the name of the output file with some default strings")
     parser.add_argument("--theoryCorr", nargs="*", type=str, action=NoneFilterAction,
-        default=["scetlib_dyturbo", ], choices=theory_corrections.valid_theory_corrections(), 
+        default=["scetlib_dyturbo", "scetlib_dyturboCT18ZVars", "scetlib_dyturboCT18Z_pdfas"], choices=theory_corrections.valid_theory_corrections(), 
         help="Apply corrections from indicated generator. First will be nominal correction.")
     parser.add_argument("--theoryCorrAltOnly", action='store_true', help="Save hist for correction hists but don't modify central weight")
     parser.add_argument("--ewTheoryCorr", nargs="*", type=str, action=NoneFilterAction, choices=theory_corrections.valid_ew_theory_corrections(), 
