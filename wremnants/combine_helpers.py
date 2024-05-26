@@ -46,7 +46,6 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
     mode = card_tool.datagroups.mode
     
     for ewUnc in ewUncs:
-        print("ewUnc", ewUnc)
         if ewUnc == "default":
             if w_samples:
                 # add winhac (approximate virtual EW) uncertainty on W samples
