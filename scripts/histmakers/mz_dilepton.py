@@ -281,7 +281,7 @@ def build_graph(df, dataset):
 
     df = df.Define("csSineCosThetaPhill", "wrem::csSineCosThetaPhi(muonsPlus_mom4, muonsMinus_mom4)")
     df = df.Define("cosThetaStarll", "csSineCosThetaPhill.costheta")
-    df = df.Define("phiStarll", "std::atan2(csSineCosThetaPhill.sinphi, csSineCosThetaPhill.cosphi)")
+    df = df.Define("phiStarll", "csSineCosThetaPhill.phi()")
 
     # TODO might need to add an explicit cut on trigMuons_pt0 in case nominal pt range
     # extends below 26 GeV e.g. for calibration test purposes

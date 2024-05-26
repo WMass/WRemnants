@@ -108,6 +108,8 @@ def build_graph(df, dataset):
     isW = dataset.name.startswith("W") and dataset.name[1] not in ["W", "Z"] #in common.wprocs
     isZ = dataset.name.startswith("Z") and dataset.name[1] not in ["W", "Z"] #in common.zprocs
 
+    axis_chargeVgen = axis_chargeZgen if isZ else axis_chargeWgen
+
     weight_expr = "std::copysign(1.0, genWeight)"
 
     if "reweight_h2" in dataset.name:
@@ -154,13 +156,25 @@ def build_graph(df, dataset):
         df = syst_tools.define_weak_weights(df, dataset.name)
         axis_lheMV = hist.axis.Variable(massBins, name = "massVlhe", underflow=False)
         axis_lhePtV = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ptVlhe") 
-        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, name = "absYVlhe")
+        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, underflow=False, name = "absYVlhe")
+        axis_lheYV = hist.axis.Regular(100, -5., 5., name = "YVlhe")
+        axis_lhechargeZ = hist.axis.Integer(0, 1, underflow=False, overflow=False, name = "chargeVlhe")
+        axis_lhechargeW = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "chargeVlhe")
+        axis_lhechargeV = axis_lhechargeZ if isZ else axis_lhechargeW
         axis_lheCosTheta = hist.axis.Regular(50, -1, 1, name = "lheCosTheta")
+        axis_weak = hist.axis.StrCategory(syst_tools.weakWeightNames(), name="weak")
+        axis_helicity = wremnants.helicity_utils.axis_helicity
         results.append(df.HistoBoost("lhe_massVptV", [axis_lheMV, axis_lhePtV], ["massVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
         results.append(df.HistoBoost("lhe_absYVptV", [axis_lheAbsYV, axis_lhePtV], ["absYVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
         results.append(df.HistoBoost("lhe_absYVmassV", [axis_lheAbsYV, axis_lheMV], ["absYVlhe", "massVlhe", "nominal_weight"], storage=hist.storage.Weight()))
         results.append(df.HistoBoost("lhe_massVcosTheta", [axis_lheMV, axis_lheCosTheta], ["massVlhe", "csCosThetalhe", "nominal_weight"], storage=hist.storage.Weight()))
         syst_tools.add_weakweights_hist(results, df, [axis_lheMV, axis_lheCosTheta], ["massVlhe", "csCosThetalhe"], proc=dataset.name, base_name='lhe_massVcosTheta')
+
+        hist_lhe_helicity = df.HistoBoost("lhe_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csAngularMomentslhe_wnom"], tensor_axes = [axis_helicity])
+        results.append(hist_lhe_helicity)
+
+        hist_lhe_weak_helicity = df.HistoBoost("lhe_weak_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "weakWeight_tensor_helicity"], tensor_axes = [axis_helicity, axis_weak])
+        results.append(hist_lhe_weak_helicity)
 
     if not args.skipEWHists and (isW or isZ) and "GenPart_status" in df.GetColumnNames():
         if isZ:

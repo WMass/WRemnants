@@ -93,7 +93,7 @@ def make_parser(parser=None):
     parser.add_argument("--scalePdf", default=1, type=float, help="Scale the PDF hessian uncertainties by this factor")
     parser.add_argument("--pdfUncFromCorr", action='store_true', help="Take PDF uncertainty from correction hist (Requires having run that correction)")
     parser.add_argument("--massVariation", type=float, default=100, help="Variation of boson mass")
-    parser.add_argument("--ewUnc", type=str, nargs="*", default=["default"], help="Include EW uncertainty (other than pure ISR or FSR)", 
+    parser.add_argument("--ewUnc", type=str, nargs="*", default=["default", "powhegFOEWHelicity"], help="Include EW uncertainty (other than pure ISR or FSR)",
         choices=[x for x in theory_corrections.valid_theory_corrections() if "ew" in x and "ISR" not in x and "FSR" not in x])
     parser.add_argument("--isrUnc", type=str, nargs="*", default=["pythiaew_ISR",], help="Include ISR uncertainty", 
         choices=[x for x in theory_corrections.valid_theory_corrections() if "ew" in x and "ISR" in x])

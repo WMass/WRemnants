@@ -33,12 +33,16 @@ Vector unitBoostedVector(ROOT::Math::Boost& boostOp, PxPyPzEVector& vec) {
     return Vector(boostvec.x(), boostvec.y(), boostvec.z()).Unit();
 }
 
-struct CSVars {
+class CSVars {
 
+public:
   double sintheta;
   double costheta;
   double sinphi;
   double cosphi;
+
+  double theta() const { return std::atan2(sintheta, costheta); }
+  double phi() const { return std::atan2(sinphi, cosphi); }
 
 };
 

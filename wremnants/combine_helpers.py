@@ -46,19 +46,8 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
     mode = card_tool.datagroups.mode
     
     for ewUnc in ewUncs:
+        print("ewUnc", ewUnc)
         if ewUnc == "default":
-            if z_samples:
-                if "wlike" in mode or mode[0] == "w":
-                    ewUnc = "virtual_ew_wlike"
-                else:
-                    ewUnc = "virtual_ew"
-                # add virtual EW uncertainty on Z samples
-                card_tool.addSystematic(f"{ewUnc}Corr", **info, 
-                    processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
-                    scale=1,
-                    skipEntries=[(1, -1), (2, -1)],
-                )                
             if w_samples:
                 # add winhac (approximate virtual EW) uncertainty on W samples
                 card_tool.addSystematic(f"winhacnloewCorr", **info, 
@@ -67,6 +56,30 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
                     scale=1,
                     skipEntries=[(0, -1), (2, -1)],
                 )                     
+        elif ewUnc == "powhegFOEWHelicity":
+            if z_samples:
+                card_tool.addSystematic(f"{ewUnc}Corr",
+                    preOp = lambda h : h[{"weak": ["weak_ps", "weak_aem"]}],
+                    processes=z_samples,
+                    labelsByAxis=[f"{ewUnc}Corr"],
+                    scale=1.,
+                    systAxes=["weak"],
+                    mirror=True,
+                    group="theory_ew",
+                    passToFakes=passSystToFakes,
+                    rename = "ewScheme",
+                )
+                card_tool.addSystematic(f"{ewUnc}Corr",
+                    preOp = lambda h : h[{"weak": ["weak_no_ew"]}],
+                    processes=z_samples,
+                    labelsByAxis=[f"{ewUnc}Corr"],
+                    scale=1.,
+                    systAxes=["weak"],
+                    mirror=True,
+                    group="theory_ew",
+                    passToFakes=passSystToFakes,
+                    rename = "ew",
+                )
         else:
             if "FSR" in ewUnc:
                 if flavor == "e":
