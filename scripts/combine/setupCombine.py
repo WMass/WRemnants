@@ -377,7 +377,8 @@ def setup(args, inputFile, fitvar, xnorm=False):
     signalMatch = WMatch if wmass else ZMatch
 
     cardTool.addProcessGroup("single_v_samples", lambda x: assertSample(x, startsWith=[*WMatch, *ZMatch], excludeMatch=dibosonMatch))
-    cardTool.addProcessGroup("z_samples", lambda x: assertSample(x, startsWith=[*ZMatch, "DYlowMass"], excludeMatch=dibosonMatch))
+    # TODO consistently treat low mass drell yan as signal across full analysis
+    cardTool.addProcessGroup("z_samples", lambda x: assertSample(x, startsWith=ZMatch, excludeMatch=dibosonMatch))
     if wmass:
         cardTool.addProcessGroup("w_samples", lambda x: assertSample(x, startsWith=WMatch, excludeMatch=dibosonMatch))
         cardTool.addProcessGroup("Zveto_samples", lambda x: assertSample(x, startsWith=[*ZMatch, "DYlowMass"], excludeMatch=dibosonMatch))
