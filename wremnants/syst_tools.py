@@ -476,7 +476,7 @@ def define_weak_weights(df, proc):
     df = df.Define("weakWeight_tensor_wnom", "auto res = weakWeight_tensor; res = LHEWeight_originalXWGTUP*res; return res;")
 
     # note that makeHelicityMomentPdfTensor is actually generic for any variation along one axis
-    # and note specific to PDFs
+    # and not specific to PDFs
     var_helper = ROOT.wrem.makeHelicityMomentPdfTensor[nweights]()
     df = df.Define("LHEWeight_originalXWGTUP_D", "static_cast<double>(LHEWeight_originalXWGTUP)")
     df = df.Define("weakWeight_tensor_helicity", var_helper, ["csSineCosThetaPhilhe", "weakWeight_tensor", "LHEWeight_originalXWGTUP_D"])
