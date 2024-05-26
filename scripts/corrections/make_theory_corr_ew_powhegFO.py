@@ -67,17 +67,35 @@ for ihel in range(5, 8):
 
 # EW corrections for NLO helicity contributions are not meaningful, so just preserve the corresponding
 # angular coefficients
+uncorr_UL = hcorr[{"uncorr_corr" : "uncorr", "helicity" : -1.j}].values(flow=True)
+corr_UL = hcorr[{"uncorr_corr" : "corr", "helicity" : -1.j}].values(flow=True)
 for ihel in range(0, 4):
-    uncorr_vals = hcorr[{"uncorr_corr" : "uncorr", "helicity" : -1.j}].values(flow=True)
-    corr_vals = hcorr[{"uncorr_corr" : "corr", "helicity" : -1.j}].values(flow=True)
-    hcorr[{"uncorr_corr" : "corr", "helicity" : ihel*1.j}] = np.where(uncorr_vals == 0., 0., corr_vals/uncorr_vals)
+    corr = hcorr[{"uncorr_corr" : "corr", "helicity" : ihel*1.j}].values(flow=True)
+    uncorr = hcorr[{"uncorr_corr" : "uncorr", "helicity" : ihel*1.j}].values(flow=True)
+    hcorr[{"uncorr_corr" : "corr", "helicity" : ihel*1.j}] = np.where(uncorr_UL == 0., corr, corr_UL/uncorr_UL*uncorr)
 
 # extreme bins are not populated, "extend" the corrections from the neighboring mass bins
 hcorr[{"massVlhe" : 0}] = hcorr[{"massVlhe" : 1}].values(flow=True)
 hcorr[{"massVlhe" : -1}] = hcorr[{"massVlhe" : -2}].values(flow=True)
 hcorr[{"massVlhe" : hist.overflow}] = hcorr[{"massVlhe" : -2}].values(flow=True)
 
-print(hcorr)
+if args.debug:
+    print(hcorr)
+
+    hnumUL = hcorr[{"uncorr_corr" : "corr", "ptVlhe" : 0, "absYVlhe" : 0, "chargeVlhe" : 0.j, "helicity" : -1.j, "weak" : 0}]
+    hdenUL = hcorr[{"uncorr_corr" : "uncorr", "ptVlhe" : 0, "absYVlhe" : 0, "chargeVlhe" : 0.j, "helicity" : -1.j, "weak" : 0}]
+    hrUL = hh.divideHists(hnumUL, hdenUL)
+
+    for ihel in range(-1, 8):
+        hnum = hcorr[{"uncorr_corr" : "corr", "ptVlhe" : 0, "absYVlhe" : 0, "chargeVlhe" : 0.j, "helicity" : ihel*1.j, "weak" : 0}]
+        hden = hcorr[{"uncorr_corr" : "uncorr", "ptVlhe" : 0, "absYVlhe" : 0, "chargeVlhe" : 0.j, "helicity" : ihel*1.j, "weak" :0 }]
+
+        hr = hh.divideHists(hnum, hden)
+        hr2 = hh.divideHists(hr, hrUL)
+
+        print("ihel", ihel)
+        print(hr)
+        print(hr2)
 
 # hack output name to comply with correction code
 correction_name = "powhegFOEWHelicity"
