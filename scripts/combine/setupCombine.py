@@ -93,7 +93,7 @@ def make_parser(parser=None):
     parser.add_argument("--scalePdf", default=1, type=float, help="Scale the PDF hessian uncertainties by this factor")
     parser.add_argument("--pdfUncFromCorr", action='store_true', help="Take PDF uncertainty from correction hist (Requires having run that correction)")
     parser.add_argument("--massVariation", type=float, default=100, help="Variation of boson mass")
-    parser.add_argument("--ewUnc", type=str, nargs="*", default=["default"], help="Include EW uncertainty (other than pure ISR or FSR)", 
+    parser.add_argument("--ewUnc", type=str, nargs="*", default=["default", "powhegFOEWHelicity"], help="Include EW uncertainty (other than pure ISR or FSR)",
         choices=[x for x in theory_corrections.valid_theory_corrections() if "ew" in x and "ISR" not in x and "FSR" not in x])
     parser.add_argument("--isrUnc", type=str, nargs="*", default=["pythiaew_ISR",], help="Include ISR uncertainty", 
         choices=[x for x in theory_corrections.valid_theory_corrections() if "ew" in x and "ISR" in x])
@@ -377,6 +377,8 @@ def setup(args, inputFile, fitvar, xnorm=False):
     signalMatch = WMatch if wmass else ZMatch
 
     cardTool.addProcessGroup("single_v_samples", lambda x: assertSample(x, startsWith=[*WMatch, *ZMatch], excludeMatch=dibosonMatch))
+    # TODO consistently treat low mass drell yan as signal across full analysis
+    cardTool.addProcessGroup("z_samples", lambda x: assertSample(x, startsWith=ZMatch, excludeMatch=dibosonMatch))
     if wmass:
         cardTool.addProcessGroup("w_samples", lambda x: assertSample(x, startsWith=WMatch, excludeMatch=dibosonMatch))
         cardTool.addProcessGroup("Zveto_samples", lambda x: assertSample(x, startsWith=[*ZMatch, "DYlowMass"], excludeMatch=dibosonMatch))
@@ -653,6 +655,17 @@ def setup(args, inputFile, fitvar, xnorm=False):
                             passToFakes=passSystToFakes,
     )
 
+
+    cardTool.addSystematic(f"sin2thetaWeightZ",
+                            rename=f"Sin2thetaZ0p00003",
+                            processes= ['z_samples'],
+                            action=lambda h: h[{"sin2theta" : ['sin2thetaZ0p23151', 'sin2thetaZ0p23157']}],
+                            group=f"sin2thetaZ",
+                            mirror=False,
+                            systAxes=["sin2theta"],
+                            outNames=[f"sin2thetaZDown", f"sin2thetaZUp"],
+                            passToFakes=passSystToFakes,
+    )
 
     combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc], 
         samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)

@@ -36,7 +36,7 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
     info = dict(
         systAxes=["systIdx"],
         mirror=True,
-        group="theory_ew",
+        splitGroup={f"theory_ew" : f".*"},
         passToFakes=passSystToFakes,
     )
     # different uncertainty for W and Z samples
@@ -47,18 +47,6 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
     
     for ewUnc in ewUncs:
         if ewUnc == "default":
-            if z_samples:
-                if "wlike" in mode or mode[0] == "w":
-                    ewUnc = "virtual_ew_wlike"
-                else:
-                    ewUnc = "virtual_ew"
-                # add virtual EW uncertainty on Z samples
-                card_tool.addSystematic(f"{ewUnc}Corr", **info, 
-                    processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
-                    scale=1,
-                    skipEntries=[(1, -1), (2, -1)],
-                )                
             if w_samples:
                 # add winhac (approximate virtual EW) uncertainty on W samples
                 card_tool.addSystematic(f"winhacnloewCorr", **info, 
@@ -66,7 +54,32 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
                     labelsByAxis=[f"winhacnloewCorr"],
                     scale=1,
                     skipEntries=[(0, -1), (2, -1)],
+                    group = f"theory_ew_virtW",
                 )                     
+        elif ewUnc == "powhegFOEWHelicity":
+            if z_samples:
+                card_tool.addSystematic(f"{ewUnc}Corr",
+                    preOp = lambda h : h[{"weak": ["weak_ps", "weak_aem"]}],
+                    processes=z_samples,
+                    labelsByAxis=[f"{ewUnc}Corr"],
+                    scale=1.,
+                    systAxes=["weak"],
+                    mirror=True,
+                    group="theory_ew_virtZ_scheme",
+                    passToFakes=passSystToFakes,
+                    rename = "ewScheme",
+                )
+                card_tool.addSystematic(f"{ewUnc}Corr",
+                    preOp = lambda h : h[{"weak": ["weak_no_ew"]}],
+                    processes=z_samples,
+                    labelsByAxis=[f"{ewUnc}Corr"],
+                    scale=1.,
+                    systAxes=["weak"],
+                    mirror=True,
+                    group="theory_ew_virtZ_corr",
+                    passToFakes=passSystToFakes,
+                    rename = "ew",
+                )
         else:
             if "FSR" in ewUnc:
                 if flavor == "e":
@@ -93,6 +106,7 @@ def add_electroweak_uncertainty(card_tool, ewUncs, flavor="mu", samples="single_
                 labelsByAxis=[f"{ewUnc}Corr"],
                 scale=scale,
                 skipEntries=[(1, -1), (2, -1)] if ewUnc.startswith("virtual_ew") else [(0, -1), (2, -1)],
+                group = f"theory_ew_{ewUnc}",
             )  
 
 def projectABCD(cardTool, h, return_variances=False, dtype="float64"):

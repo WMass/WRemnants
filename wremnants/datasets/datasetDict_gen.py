@@ -213,11 +213,24 @@ genDataDict.update({
 })
 
 # NanoLHE
+# The Powheg EW LHE samples have negative weights but "genWeight" is always just 1, so we will use LHEWeight_originalXWGTUP instead. That also gives us the total cross section for each subsample, so we set that to 1 in this dict.
 genDataDict.update({
-    'Zmumu_powheg-weak' : { 
+    'Zmumu_powheg-weak-low' : {
                    'filepaths' :
-                    ["{BASE_PATH}/NanoLHE/Zmumu_powheg-weak/test"],
-                   'xsec' : 1815.82,
+                    ["{BASE_PATH}/NanoLHE/Zmumu_powheg-weak/46mll80"],
+                   'xsec' : 1,
+                   'group': "Zmumu",
+    },
+    'Zmumu_powheg-weak-peak' : {
+                   'filepaths' :
+                    ["{BASE_PATH}/NanoLHE/Zmumu_powheg-weak/80mll100"],
+                   'xsec' : 1,
+                   'group': "Zmumu",
+    },
+    'Zmumu_powheg-weak-high' : {
+                   'filepaths' :
+                    ["{BASE_PATH}/NanoLHE/Zmumu_powheg-weak/100mll150"],
+                   'xsec' : 1,
                    'group': "Zmumu",
     },
 })

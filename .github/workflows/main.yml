@@ -597,7 +597,7 @@ jobs:
           -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --axes etaAbsEta mll --forceDefaultName --postfix mll
 
       - name: dilepton plotting mll
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists etaAbsEta-mll mll -o $WEB_DIR -f $PLOT_DIR -p z $HIST_FILE variation --varName 'virtual_ewCorr' --selectEntries 2 --varLabel 'EW(virtual)' --selectAxis systIdx --color blue 
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --baseName nominal --nominalRef nominal --hists etaAbsEta-mll mll -o $WEB_DIR -f $PLOT_DIR -p z $HIST_FILE variation --varName 'powhegFOEWHelicityCorr' --selectEntries weak_no_ew --varLabel no_EW_virtual --selectAxis weak --color blue
 
       - name: dilepton combine mll setup
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --fitvar etaAbsEta-mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData --hdf5
