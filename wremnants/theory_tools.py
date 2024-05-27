@@ -571,6 +571,7 @@ def define_nominal_weight(df):
     return df.Define(f"nominal_weight", build_weight_expr(df))
 
 def define_ew_theory_corr(df, dataset_name, helpers, generators, modify_central_weight=False):
+    logger.debug("define_ew_theory_corr")
     df = df.Define(f"nominal_weight_ew_uncorr", build_weight_expr(df, exclude_weights=["ew_theory_corr_weight"]))
 
     dataset_helpers = helpers.get(dataset_name, [])
@@ -600,6 +601,7 @@ def define_ew_theory_corr(df, dataset_name, helpers, generators, modify_central_
     return df
 
 def define_theory_corr(df, dataset_name, helpers, generators, modify_central_weight):
+    logger.debug("define_theory_corr")
     df = df.Define(f"nominal_weight_uncorr", build_weight_expr(df, exclude_weights=["theory_corr_weight"]))
 
     dataset_helpers = helpers.get(dataset_name, [])
@@ -616,6 +618,7 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
         helper = dataset_helpers[generator]
 
         if "Helicity" in generator:
+            # TODO check carefully if the weight below should instead be f"{generator}_corr_weight"  (though it's irrelevant as long as there's only one theory correction)
             df = df.Define(f"{generator}Weight_tensor", helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", "csSineCosThetaPhigen", "nominal_weight_uncorr"])
         else:
             df = define_theory_corr_weight_column(df, generator)
