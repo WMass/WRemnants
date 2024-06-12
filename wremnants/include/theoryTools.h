@@ -115,7 +115,7 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
   constexpr size_t NHELICITY = 9;
   using helicity_tensor = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY>> ;
 
-  helicity_tensor csAngularFactors(const CSVars &csvars)
+  helicity_tensor csAngularFactors(const CSVars &csvars, double original_weight = 1.0)
   {
     const double sinThetaCS = csvars.sintheta;
     const double cosThetaCS = csvars.costheta;
@@ -136,10 +136,10 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
     angular(6) = sinThetaCS * sinThetaCS * sin2PhiCS;
     angular(7) = sin2ThetaCS * sinPhiCS;
     angular(8) = sinThetaCS * sinPhiCS;
-    return angular;
+    return original_weight*angular;
   }
 
-  helicity_tensor csAngularMoments(const CSVars &csvars) {
+  helicity_tensor csAngularMoments(const CSVars &csvars, double original_weight = 1.0) {
     const helicity_tensor &angular = csAngularFactors(csvars);
 
     // using definition from arxiv:1606.00689 Eq. 1 and 5 to align with ATLAS
@@ -149,7 +149,7 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
     helicity_tensor offsets;
     offsets.setValues({ 1., 2./3., 0., 0., 0., 0., 0., 0., 0. });
 
-    const helicity_tensor moments = scales*angular + offsets;
+    const helicity_tensor moments = original_weight*(scales*angular + offsets);
 
     return moments;
   }

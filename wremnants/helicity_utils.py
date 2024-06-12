@@ -30,8 +30,8 @@ axis_helicity_multidim = hist.axis.Integer(-1, 8, name="helicitySig", overflow=F
 #creates the helicity weight tensor
 def makehelicityWeightHelper(is_w_like = False, filename=None):
     if filename is None:
-        # filename = f"{common.data_dir}/angularCoefficients/w_z_moments_theoryAgnosticBinning.hdf5"
-        filename = "/work/submit/emanca/WRemnants/gendistr_bands/w_z_moments_theoryAgnosticBinning_scetlib_dyturboCorr.hdf5"
+        filename = f"{common.data_dir}/angularCoefficients/w_z_moments_theoryAgnosticBinning_scetlib_dyturboCorr_msht20.hdf5"
+        
     with h5py.File(filename, "r") as ff:
         out = input_tools.load_results_h5py(ff)
 
