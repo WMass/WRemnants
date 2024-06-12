@@ -36,14 +36,19 @@ def updateImpactsDict(args, fitresult, df, lumiscale, poi='Wmass'):
         df.loc[len(df)] = new_row
 
     else:
-        plot_labels = ['Total', 'Background', 'Theory', 'PDF', 'Data stat.', 'Luminosity']
-        plot_vals = [impacts[list(labels).index('Total')], impacts[list(labels).index('CMS_background')], \
-                    impacts[list(labels).index('theory')], impacts[list(labels).index('pdfCT18Z')], \
+        # plot_labels = ['Total', 'Background', 'Theory', 'PDF', 'Data stat.', 'Luminosity']
+        # plot_vals = [impacts[list(labels).index('Total')], impacts[list(labels).index('CMS_background')], \
+        #             impacts[list(labels).index('theory')], impacts[list(labels).index('pdfCT18Z')], \
+        #             impacts[list(labels).index('stat')], lumiVal]
+        plot_labels = ['Total', 'Theory', 'Theory EW', 'PT Modeling', 'QCD Scale', 'PDF', 'Data Stat.', 'Luminosity']
+        plot_vals = [impacts[list(labels).index('Total')], impacts[list(labels).index('theory')], \
+                    impacts[list(labels).index('theory_ew')], impacts[list(labels).index('pTModeling')], \
+                    impacts[list(labels).index('QCDscale')], impacts[list(labels).index('pdfCT18Z')], \
                     impacts[list(labels).index('stat')], lumiVal]
+        print(impacts)
 
-
-        new_row = {k: v for k, v in zip(plot_labels, plot_vals)}
-        df.loc[len(df)] = new_row
+        # new_row = {k: v for k, v in zip(plot_labels, plot_vals)}
+        # df.loc[len(df)] = new_row
 
 def sortFileNames(inputFiles): # natural sorting
     convert = lambda text: int(text) if text.isdigit() else text.lower()
@@ -60,7 +65,7 @@ if __name__ == '__main__':
     if args.nuisance:
         df = pd.DataFrame(columns=[args.nuisance, 'Luminosity'])
     else:
-        df = pd.DataFrame(columns=['Total', 'Background', 'Theory', 'PDF', 'Data stat.', 'Luminosity'])
+        df = pd.DataFrame(columns=['Total', 'Theory', 'Theory EW', 'PT Modeling', 'QCD Scale', 'PDF', 'Data Stat.', 'Luminosity'])
 
     for i in range(len(lumiscales)):
         inputFile = inFolder + '/' + inputFiles[i]
@@ -69,17 +74,17 @@ if __name__ == '__main__':
             updateImpactsDict(args, fitresult, df, lumiscales[i], poi)
 
 
-    plt.figure(figsize=(8, 8))
-    hep.cms.label(fontsize=20, data=False, label="Projection", com=13.6)
-    for column in df.columns:
-        if column != 'Luminosity':  # Exclude the Luminosity column from plotting
-            plt.plot(df['Luminosity'], df[column], label=column, marker='o')
+    # plt.figure(figsize=(8, 8))
+    # hep.cms.label(fontsize=20, data=False, label="Projection", com=13.6)
+    # for column in df.columns:
+    #     if column != 'Luminosity':  # Exclude the Luminosity column from plotting
+    #         plt.plot(df['Luminosity'], df[column], label=column, marker='o')
 
-    plt.xlabel("Integrated luminosity (fb$^{-1})$")
-    plt.ylabel("Uncertainty in $m_{W}$ (MeV)")
-    plt.legend()
+    # plt.xlabel("Integrated luminosity (fb$^{-1})$")
+    # plt.ylabel("Uncertainty in $m_{W}$ (MeV)")
+    # plt.legend()
 
-    plt.savefig(args.outfile)
-    if args.addPDF:
-        pdfFileName = (args.outfile).split('.')[0] + ".pdf"
-        plt.savefig(pdfFileName, format = 'pdf')
+    # plt.savefig(args.outfile)
+    # if args.addPDF:
+    #     pdfFileName = (args.outfile).split('.')[0] + ".pdf"
+    #     plt.savefig(pdfFileName, format = 'pdf')
