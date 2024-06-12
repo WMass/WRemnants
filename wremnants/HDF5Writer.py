@@ -125,7 +125,8 @@ class HDF5Writer(object):
     def get_flat_values(self, h, chanInfo, axes, return_variances=True):
         # check if variances are available
         if return_variances and (h.storage_type != hist.storage.Weight):
-            raise RuntimeError(f"Sumw2 not filled for {h} but needed for binByBin uncertainties")
+            # raise RuntimeError(f"Sumw2 not filled for {h} but needed for binByBin uncertainties")
+            logger.Info(f"Sumw2 not filled for {h} but needed for binByBin uncertainties, variances are set to 0")
 
         if chanInfo.simultaneousABCD and set(chanInfo.getFakerateAxes()) != set(chanInfo.fit_axes[:len(chanInfo.getFakerateAxes())]):
             h = projectABCD(chanInfo, h, return_variances=return_variances)
@@ -134,7 +135,10 @@ class HDF5Writer(object):
 
         if return_variances:
             val = h.values(flow=False).flatten().astype(self.dtype)
-            var = h.variances(flow=False).flatten().astype(self.dtype)
+            if (h.storage_type != hist.storage.Weight):
+                var = np.zeros_like(val)
+            else:
+                var = h.variances(flow=False).flatten().astype(self.dtype)
             return val, var
         else:
             return h.values(flow=False).flatten().astype(self.dtype)
@@ -246,6 +250,12 @@ class HDF5Writer(object):
 
                 # nominal histograms of prediction
                 norm_proc_hist = dg.groups[proc].hists[chanInfo.nominalName]
+                if "helicity" in channel_info[chan]["axes"]:
+                    def exponential(h):
+                        h.values()[...] = np.exp(h.values()/100000)
+                        return h
+
+                    norm_proc_hist = exponential(norm_proc_hist)
 
                 if not masked:                
                     norm_proc, sumw2_proc = self.get_flat_values(norm_proc_hist, chanInfo, axes)
@@ -364,7 +374,6 @@ class HDF5Writer(object):
                 # Needed to avoid always reading the variation for the fakes, even for procs not specified
                 forceToNominal=[x for x in dg.getProcNames() if x not in 
                     dg.getProcNames([p for g in procs_syst for p in chanInfo.expandProcesses(g) if p != dg.fakeName])]
-
                 dg.loadHistsForDatagroups(
                     chanInfo.nominalName, systName, label="syst",
                     procsToRead=procs_syst, 
@@ -382,14 +391,24 @@ class HDF5Writer(object):
 
                     hvar = dg.groups[proc].hists["syst"]
                     hnom = dg.groups[proc].hists[chanInfo.nominalName]
+                    
+                    # print(hnom)
+                    # print(hvar)
 
                     var_map = chanInfo.systHists(hvar, systKey, hnom)
+                    # print(var_map['normWplus_PtV0YVBin0Helicity3Down'])
+                    # print(var_map['normWplus_PtV0YVBin0Helicity3Down'][{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
+                    # print(var_map['normWplus_PtV0YVBin0Helicity3Up'][{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
+                    # print(hnom[{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
+                    # print("here")
 
                     var_names = [x[:-2] if "Up" in x[-2:] else (x[:-4] if "Down" in x[-4:] else x) 
                         for x in filter(lambda x: x != "", var_map.keys())]
                     # Deduplicate while keeping order
                     var_names = list(dict.fromkeys(var_names))
                     norm_proc = self.dict_norm[chan][proc]
+                    if "helicity" in channel_info[chan]["axes"]:
+                        norm_proc = 100000*np.log(norm_proc)
 
                     for var_name in var_names:
                         kfac=syst["scale"]
@@ -404,6 +423,8 @@ class HDF5Writer(object):
 
                             # check if there is a sign flip between systematic and nominal
                             _logk = kfac*np.log(_syst/norm_proc)
+                            if "helicity" in channel_info[chan]["axes"]:
+                                _logk = kfac*(_syst - norm_proc)/100000
                             _logk_view = np.where(np.equal(np.sign(norm_proc*_syst),1), _logk, self.logkepsilon*np.ones_like(_logk))
                             _syst = None
 
