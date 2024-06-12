@@ -335,6 +335,32 @@ ROOT::Math::PxPyPzEVector ewGenVPhos(const ROOT::VecOps::RVec<PxPyPzEVector>& le
 }
 
 
+int selectGenPart(const ROOT::VecOps::RVec<int>& status, const ROOT::VecOps::RVec<int>& pdgId, const int absPdgIdMin, const int absPdgIdMax, const int statusMin, const int statusMax, bool require = true) {
+
+
+  const std::size_t ngenparts = status.size();
+
+  int selidx = -1;
+  int selstatus = -1;
+  for (std::size_t i = 0; i < ngenparts; ++i) {
+    const int &istatus = status[i];
+    const int &iabsPdgId = std::abs(pdgId[i]);
+
+    if (iabsPdgId >= absPdgIdMin && iabsPdgId <= absPdgIdMax && istatus >= statusMin && istatus <= statusMax && istatus > selstatus) {
+      selidx = i;
+      selstatus = istatus;
+    }
+  }
+
+  if (require and selidx == -1) {
+    throw std::runtime_error("Expected to find a gen particle matching the criteria, but did not.");
+  }
+
+  return selidx;
+
+}
+
+
 } 
 
 #endif

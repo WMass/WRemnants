@@ -280,8 +280,14 @@ def define_lhe_vars(df, mode=None):
     df = df.Define("lheLeps", "LHEPart_status == 1 && abs(LHEPart_pdgId) >= 11 && abs(LHEPart_pdgId) <= 16")
     df = df.Define("lheLep", "lheLeps && LHEPart_pdgId>0")
     df = df.Define("lheAntiLep", "lheLeps && LHEPart_pdgId<0")
-    df = df.Define("lheLep_idx",     "ROOT::VecOps::ArgMax(lheLep)")
-    df = df.Define("lheAntiLep_idx", "ROOT::VecOps::ArgMax(lheAntiLep)")
+    df = df.Define("lheLep_idx", 'if (Sum(lheLep) != 1) throw std::runtime_error("lhe lepton not found."); return ROOT::VecOps::ArgMax(lheLep);')
+    df = df.Define("lheAntiLep_idx", 'if (Sum(lheAntiLep) != 1) throw std::runtime_error("lhe anti-lepton not found."); return ROOT::VecOps::ArgMax(lheAntiLep);')
+
+    df = df.Define("lheVs", "abs(LHEPart_pdgId) >=23 && abs(LHEPart_pdgId)<=24")
+    df = df.Define("lheV_idx", 'if (Sum(lheVs) != 1) throw std::runtime_error("LHE V not found."); return ROOT::VecOps::ArgMax(lheVs);')
+    df = df.Define("lheV_pdgId", "LHEPart_pdgId[lheV_idx]")
+    df = df.Define("lheV_pt", "LHEPart_pt[lheV_idx]")
+
 
     df = df.Define("lheLep_mom", "ROOT::Math::PtEtaPhiMVector(LHEPart_pt[lheLep_idx], LHEPart_eta[lheLep_idx], LHEPart_phi[lheLep_idx], LHEPart_mass[lheLep_idx])")
     df = df.Define("lheAntiLep_mom", "ROOT::Math::PtEtaPhiMVector(LHEPart_pt[lheAntiLep_idx], LHEPart_eta[lheAntiLep_idx], LHEPart_phi[lheAntiLep_idx], LHEPart_mass[lheAntiLep_idx])")
@@ -295,6 +301,13 @@ def define_lhe_vars(df, mode=None):
     df = df.Define("chargeVlhe", "LHEPart_pdgId[lheLep_idx] + LHEPart_pdgId[lheAntiLep_idx]")
     df = df.Define("csSineCosThetaPhilhe", "wrem::csSineCosThetaPhi(lheAntiLep_mom, lheLep_mom)")
     df = df.Define("csCosThetalhe", "csSineCosThetaPhilhe.costheta")
+    df = df.Define("csPhilhe", "csSineCosThetaPhilhe.phi()")
+    df = df.Define("csAngularMomentslhe", "wrem::csAngularMoments(csSineCosThetaPhilhe)")
+
+    if "LHEWeight_originalXWGTUP" in df.GetColumnNames():
+        df = df.Define("csAngularMomentslhe_wnom", "auto res = csAngularMomentslhe; res = LHEWeight_originalXWGTUP*res; return res;")
+    else:
+        df = df.Alias("csAngularMomentslhe_wnom", "csAngularMomentslhe")
 
     return df
 
@@ -317,6 +330,8 @@ def define_prefsr_vars(df, mode=None):
     df = df.Define("absYVgen", "std::fabs(yVgen)")
     df = df.Define("chargeVgen", "GenPart_pdgId[prefsrLeps[0]] + GenPart_pdgId[prefsrLeps[1]]")
     df = df.Define("csSineCosThetaPhigen", "wrem::csSineCosThetaPhi(genlanti, genl)")
+    df = df.Define("csCosThetagen", "csSineCosThetaPhigen.costheta")
+    df = df.Define("csPhigen", "csSineCosThetaPhigen.phi()")
 
     # define w and w-like variables 
     df = df.Define("qgen", "isEvenEvent ? -1 : 1")
@@ -327,6 +342,21 @@ def define_prefsr_vars(df, mode=None):
     df = df.Define("etaOthergen", "isEvenEvent ? genlanti.eta() : genl.eta()")
     df = df.Define("absetaOthergen", "std::fabs(etaOthergen)")
     df = df.Define("mTVgen", "wrem::mt_2(genl.pt(), genl.phi(), genlanti.pt(), genlanti.phi())")   
+
+    return df
+
+def define_intermediate_gen_vars(df, label, statusMin, statusMax):
+    # define additional variables corresponding to intermediate states in the pythia history
+    df = df.Define(f"idxV{label}", f"wrem::selectGenPart(GenPart_status, GenPart_pdgId, 23, 24, {statusMin}, {statusMax})")
+    df = df.Define(f"mom4V{label}", f"ROOT::Math::PtEtaPhiMVector(GenPart_pt[idxV{label}], GenPart_eta[idxV{label}], GenPart_phi[idxV{label}], GenPart_mass[idxV{label}])")
+    df = df.Define(f"ptV{label}", f"mom4V{label}.pt()")
+    df = df.Define(f"massV{label}", f"mom4V{label}.mass()")
+    df = df.Define(f"ptqV{label}",  f"mom4V{label}.pt()/mom4V{label}.mass()")
+    df = df.Define(f"yV{label}", f"mom4V{label}.Rapidity()")
+    df = df.Define(f"phiV{label}", f"mom4V{label}.Phi()")
+    df = df.Define(f"absYV{label}", f"std::fabs(yV{label})")
+    df = df.Define(f"chargeV{label}", "chargeVgen")
+    df = df.Define(f"csSineCosThetaPhi{label}", f"wrem::csSineCosThetaPhiTransported(genlanti, genl, mom4V{label})")
 
     return df
 
@@ -445,7 +475,7 @@ def make_ew_binning(mass = 91.1535, width = 2.4932, initialStep = 0.1, bin_edges
     if bin_edges_low:
         bins = bin_edges_low + [b for b in bins if b > bin_edges_low[-1]][1:]
     if bin_edges_high:
-        bins = [b for b in bins if b < bin_edges_high[-1]][:-1] + bin_edges_high
+        bins = [b for b in bins if b < bin_edges_high[0]][:-1] + bin_edges_high
 
     return bins
 
@@ -520,9 +550,15 @@ def define_central_pdf_weight(df, dataset_name, pdf):
     return df.Define("central_pdf_weight", f"std::clamp<float>({pdfBranch}[{first_entry}], -theory_weight_truncate, theory_weight_truncate)")
 
 def define_theory_weights_and_corrs(df, dataset_name, helpers, args):
+    if "LHEPart_status" in df.GetColumnNames():
+        df = define_lhe_vars(df)
+
     if not 'powheg' in dataset_name:
         # no preFSR particles in powheg samples
         df = define_prefsr_vars(df)
+        df = define_intermediate_gen_vars(df, "hardProcess", 21, 29)
+        df = define_intermediate_gen_vars(df, "postShower", 21, 59)
+        df = define_intermediate_gen_vars(df, "postBeamRemnants", 21, 69)
 
     if "GenPart_status" in df.GetColumnNames():
         df = define_ew_vars(df)
@@ -531,7 +567,7 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args):
     df = define_central_pdf_weight(df, dataset_name, args.pdfs[0] if len(args.pdfs) >= 1 else None)
     df = define_theory_corr(df, dataset_name, helpers, generators=args.theoryCorr, 
         modify_central_weight=not args.theoryCorrAltOnly)
-    df = define_ew_theory_corr(df, dataset_name, helpers, generators=args.ewTheoryCorr)
+    df = define_ew_theory_corr(df, dataset_name, helpers, generators=args.ewTheoryCorr, modify_central_weight=False)
 
     if args.highptscales:
         df = df.Define("extra_weight", "MEParamWeightAltSet3[0]")
@@ -568,12 +604,14 @@ def define_nominal_weight(df):
     return df.Define(f"nominal_weight", build_weight_expr(df))
 
 def define_ew_theory_corr(df, dataset_name, helpers, generators, modify_central_weight=False):
+    logger.debug("define_ew_theory_corr")
+
+    if modify_central_weight:
+        raise ValueError("Modifying central weight not currently supported for EW corrections.")
+
     df = df.Define(f"nominal_weight_ew_uncorr", build_weight_expr(df, exclude_weights=["ew_theory_corr_weight"]))
 
     dataset_helpers = helpers.get(dataset_name, [])
-
-    if not modify_central_weight or not generators or generators[0] not in dataset_helpers:
-        df = df.DefinePerSample("ew_theory_corr_weight", "1.0")
 
     for i, generator in enumerate(generators):
         if generator not in dataset_helpers:
@@ -582,14 +620,25 @@ def define_ew_theory_corr(df, dataset_name, helpers, generators, modify_central_
         logger.debug(f"Now at generator {i}: {generator}")
         helper = dataset_helpers[generator]
         df = df.Define(f"ew_{generator}corr_weight", build_weight_expr(df))
-        df = df.Define(f"{generator}Weight_tensor", helper, [*helper.hist.axes.name[:-2], "chargeVgen", f"ew_{generator}corr_weight"]) # multiplying with nominal QCD weight
+        # hack for column names
+        if generator == "powhegFOEW":
+            ew_cols = ["massVgen", "absYVgen", "csCosThetagen", "chargeVgen", f"ew_{generator}corr_weight"]
+        else:
+            ew_cols = [*helper.hist.axes.name[:-2], "chargeVgen", f"ew_{generator}corr_weight"]
 
-        if i == 0 and modify_central_weight:
+        df = df.Define(f"{generator}Weight_tensor", helper, ew_cols) # multiplying with nominal QCD weight
+
+        if generator in ["renesanceEW", "powhegFOEW"] and modify_central_weight:
+            logger.debug(f"applying central value correction for {generator}")
             df = df.Define("ew_theory_corr_weight", f"nominal_weight_ew_uncorr == 0 ? 0 : {generator}Weight_tensor(0)/nominal_weight_ew_uncorr")
+
+    if "ew_theory_corr_weight" not in df.GetColumnNames():
+        df = df.DefinePerSample("ew_theory_corr_weight", "1.0")
 
     return df
 
 def define_theory_corr(df, dataset_name, helpers, generators, modify_central_weight):
+    logger.debug("define_theory_corr")
     df = df.Define(f"nominal_weight_uncorr", build_weight_expr(df, exclude_weights=["theory_corr_weight"]))
 
     dataset_helpers = helpers.get(dataset_name, [])
@@ -606,12 +655,14 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
         helper = dataset_helpers[generator]
 
         if "Helicity" in generator:
+            # TODO check carefully if the weight below should instead be f"{generator}_corr_weight"  (though it's irrelevant as long as there's only one theory correction)
             df = df.Define(f"{generator}Weight_tensor", helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", "csSineCosThetaPhigen", "nominal_weight_uncorr"])
         else:
             df = define_theory_corr_weight_column(df, generator)
             df = df.Define(f"{generator}Weight_tensor", helper, ["massVgen", "absYVgen", "ptVgen", "chargeVgen", f"{generator}_corr_weight"])
 
-        if i == 0 and modify_central_weight:
+        if (i == 0) and modify_central_weight:
+            logger.debug(f"applying central value correction for {generator}")
             df = df.Define("theory_corr_weight", f"nominal_weight_uncorr == 0 ? 0 : {generator}Weight_tensor(0)/nominal_weight_uncorr")
 
     return df

@@ -108,6 +108,8 @@ def build_graph(df, dataset):
     isW = dataset.name.startswith("W") and dataset.name[1] not in ["W", "Z"] #in common.wprocs
     isZ = dataset.name.startswith("Z") and dataset.name[1] not in ["W", "Z"] #in common.zprocs
 
+    axis_chargeVgen = axis_chargeZgen if isZ else axis_chargeWgen
+
     weight_expr = "std::copysign(1.0, genWeight)"
 
     if "reweight_h2" in dataset.name:
@@ -143,24 +145,43 @@ def build_graph(df, dataset):
     if args.singleLeptonHists and (isW or isZ):
         results.append(df.HistoBoost("nominal_genlep", lep_axes, [*lep_cols, "nominal_weight"], storage=hist.storage.Weight()))
 
-    if not args.skipEWHists and (isW or isZ) and dataset.name == 'Zmumu_powheg-weak':
+    if not args.skipEWHists and (isW or isZ) and 'Zmumu_powheg-weak' in dataset.name:
         if isZ:
-            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.010, bin_edges_low=[0,50,60], bin_edges_high=[120])
+            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.10, bin_edges_low=[0,46,50,60,70,80], bin_edges_high=[100,110,120,140,160,200])
         else:
             massBins = theory_tools.make_ew_binning(mass = 80.3815, width = 2.0904, initialStep=0.010)
         
         # LHE level
-        df = theory_tools.define_lhe_vars(df)
         df = syst_tools.define_weak_weights(df, dataset.name)
         axis_lheMV = hist.axis.Variable(massBins, name = "massVlhe", underflow=False)
         axis_lhePtV = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ptVlhe") 
-        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, name = "absYVlhe")
-        axis_lheCosTheta = hist.axis.Regular(50, -1, 1, name = "lheCosTheta")
+        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, underflow=False, name = "absYVlhe")
+        axis_lheYV = hist.axis.Regular(100, -5., 5., name = "YVlhe")
+        axis_lhechargeZ = hist.axis.Integer(0, 1, underflow=False, overflow=False, name = "chargeVlhe")
+        axis_lhechargeW = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "chargeVlhe")
+        axis_lhechargeV = axis_lhechargeZ if isZ else axis_lhechargeW
+        axis_lheCosThetaStar = hist.axis.Regular(50, -1, 1, name = "cosThetaStarlhe")
+        axis_lhePhiStar = hist.axis.Regular(8, -np.pi, np.pi, circular=True, name="phiStarlhe")
+        axis_weak = hist.axis.StrCategory(syst_tools.weakWeightNames(), name="weak")
+        axis_helicity = wremnants.helicity_utils.axis_helicity
+
         results.append(df.HistoBoost("lhe_massVptV", [axis_lheMV, axis_lhePtV], ["massVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
         results.append(df.HistoBoost("lhe_absYVptV", [axis_lheAbsYV, axis_lhePtV], ["absYVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
         results.append(df.HistoBoost("lhe_absYVmassV", [axis_lheAbsYV, axis_lheMV], ["absYVlhe", "massVlhe", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("lhe_massVcosTheta", [axis_lheMV, axis_lheCosTheta], ["massVlhe", "csCosThetalhe", "nominal_weight"], storage=hist.storage.Weight()))
-        syst_tools.add_weakweights_hist(results, df, [axis_lheMV, axis_lheCosTheta], ["massVlhe", "csCosThetalhe"], proc=dataset.name, base_name='lhe_massVcosTheta')
+        results.append(df.HistoBoost("lhe_massVcosTheta", [axis_lheMV, axis_lheCosThetaStar], ["massVlhe", "csCosThetalhe", "nominal_weight"], storage=hist.storage.Weight()))
+        syst_tools.add_weakweights_hist(results, df, [axis_lheMV, axis_lheCosThetaStar], ["massVlhe", "csCosThetalhe"], proc=dataset.name, base_name='lhe_massVcosTheta')
+
+        results.append(df.HistoBoost("lhe",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "nominal_weight"], storage=hist.storage.Weight()))
+
+        results.append(df.HistoBoost("lhe_angular",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV, axis_lheCosThetaStar, axis_lhePhiStar], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csCosThetalhe", "csPhilhe", "nominal_weight"], storage=hist.storage.Weight()))
+
+        hist_lhe_helicity = df.HistoBoost("lhe_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csAngularMomentslhe_wnom"], tensor_axes = [axis_helicity])
+        results.append(hist_lhe_helicity)
+
+        hist_lhe_weak_helicity = df.HistoBoost("lhe_weak_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "weakWeight_tensor_helicity"], tensor_axes = [axis_helicity, axis_weak])
+        results.append(hist_lhe_weak_helicity)
+
+        results.append(df.HistoBoost("lhe_weak_angular",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV, axis_lheCosThetaStar, axis_lhePhiStar], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csCosThetalhe", "csPhilhe", "weakWeight_tensor_wnom"], storage=hist.storage.Weight(), tensor_axes=[axis_weak]))
 
     if not args.skipEWHists and (isW or isZ) and "GenPart_status" in df.GetColumnNames():
         if isZ:
@@ -279,6 +300,9 @@ logger.info("computing angular coefficients")
 z_moments = None
 w_moments = None
 
+z_moments_lhe = None
+w_moments_lhe = None
+
 if not args.skipAngularCoeffs:
     for dataset in datasets:
         name = dataset.name
@@ -286,30 +310,33 @@ if not args.skipAngularCoeffs:
             logger.warning(f"Failed to find helicity_moments_scale hist for proc {name}. Skipping!")
             continue
         moments = resultdict[name]["output"]["nominal_gen_helicity_moments_scale"].get()
-        if name in common.zprocs:
+        moments_lhe = resultdict[name]["output"]["nominal_gen_helicity_moments_scale_lhe"].get()
+        if name in ["ZmumuPostVFP"]:
             if z_moments is None:
                 z_moments = moments
+                z_moments_lhe = moments_lhe
             else:
                 new_moments = moments
+                new_moments_lhe = moments_lhe
                 z_moments = hh.addHists(z_moments, new_moments, createNew=False)
-        elif name in common.wprocs:
+                z_moments_lhe = hh.addHists(z_moments_lhe, new_moments_lhe, createNew=False)
+        elif name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]:
             if w_moments is None:
                 w_moments = moments
+                w_moments_lhe = moments_lhe
             else:
                 new_moments = moments
+                new_moments_lhe = moments_lhe
                 w_moments = hh.addHists(w_moments, new_moments, createNew=False)
+                w_moments_lhe = hh.addHists(w_moments_lhe, new_moments_lhe, createNew=False)
 
     moments_out={}
-    # Common.ptV_binning is the approximate 5% quantiles, rounded to integers. Rebin for approx 10% quantiles
     if z_moments:
-        if not args.useTheoryAgnosticBinning:
-            z_moments = hh.rebinHist(z_moments, axis_ptVgen.name, common.ptV_binning[::2])
-            z_moments = hh.rebinHist(z_moments, axis_massZgen.name, axis_massZgen.edges[::2])
         moments_out["Z"] = z_moments
+        moments_out["Z_lhe"] = z_moments_lhe
     if w_moments:
-        if not args.useTheoryAgnosticBinning:
-            w_moments = hh.rebinHist(w_moments, axis_ptVgen.name, common.ptV_binning[::2])
         moments_out["W"] = w_moments
+        moments_out["W_lhe"] = w_moments_lhe
     if moments_out:
         outfname = "w_z_moments"
         if args.signedY:

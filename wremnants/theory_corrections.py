@@ -22,7 +22,7 @@ def valid_theory_corrections():
     return [m[1] for m in matches if m]+["none"]
 
 def valid_ew_theory_corrections():
-    corr_files = glob.glob(common.data_dir+"TheoryCorrections/*ew*Corr*.pkl.lz4")
+    corr_files = glob.glob(common.data_dir+"TheoryCorrections/*[eE][wW]*Corr*.pkl.lz4")
     matches = [re.match("(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files]
     return [m[1] for m in matches if m]+["none"]
 
@@ -268,6 +268,17 @@ def make_qcd_uncertainty_helper_by_helicity(is_w_like = False, filename=None):
     with h5py.File(filename, "r") as h5file:
         results = input_tools.load_results_h5py(h5file)
         moments = results["Z"] if is_w_like else results["W"]
+        moments_lhe = results["Z_lhe"] if is_w_like else results["W_lhe"]
+
+
+    # Common.ptV_binning is the approximate 5% quantiles, rounded to integers
+    moments = hh.rebinHist(moments, "ptVgen", common.ptV_binning)
+    moments_lhe = hh.rebinHist(moments_lhe, "ptVgen", common.ptV_binning)
+
+    if is_w_like:
+        axis_massVgen = moments.axes["massVgen"]
+        moments = hh.rebinHist(moments, "massVgen", axis_massVgen.edges[::2])
+        moments_lhe = hh.rebinHist(moments_lhe, "massVgen", axis_massVgen.edges[::2])
 
     moments_nom = moments[{"muRfact" : 1.j, "muFfact" : 1.j}].values()
 
@@ -292,6 +303,8 @@ def make_qcd_uncertainty_helper_by_helicity(is_w_like = False, filename=None):
     for ihel in range(-1, 8):
         var_names.extend(get_names(ihel))
 
+    var_names.append("pythia_shower_kt")
+
     vars_ax = hist.axis.StrCategory(var_names, name="vars")
 
     axes_no_scale = moments.axes[:-2]
@@ -309,6 +322,9 @@ def make_qcd_uncertainty_helper_by_helicity(is_w_like = False, filename=None):
 
         corr_coeffs.values()[..., ihel+1, 1, var_names.index(downvar)] = moments_min[..., ihel+1]
         corr_coeffs.values()[..., ihel+1, 1, var_names.index(upvar)] = moments_max[..., ihel+1]
+
+    corr_coeffs[{"corr" : False, "vars" : "pythia_shower_kt"}] = moments[{"muRfact" : 1.j, "muFfact" : 1.j}].values()/moments[{"muRfact" : 1.j, "muFfact" : 1.j, "helicity" : -1.j}].values()[..., None]
+    corr_coeffs[{"corr" : True, "vars" : "pythia_shower_kt"}] = moments_lhe[{"muRfact" : 1.j, "muFfact" : 1.j}].values()/moments_lhe[{"muRfact" : 1.j, "muFfact" : 1.j, "helicity" : -1.j}].values()[..., None]
 
     helper = makeCorrectionsTensor(corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3)
 

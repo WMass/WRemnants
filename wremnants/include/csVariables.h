@@ -33,12 +33,16 @@ Vector unitBoostedVector(ROOT::Math::Boost& boostOp, PxPyPzEVector& vec) {
     return Vector(boostvec.x(), boostvec.y(), boostvec.z()).Unit();
 }
 
-struct CSVars {
+class CSVars {
 
+public:
   double sintheta;
   double costheta;
   double sinphi;
   double cosphi;
+
+  double theta() const { return std::atan2(sintheta, costheta); }
+  double phi() const { return std::atan2(sinphi, cosphi); }
 
 };
 
@@ -48,8 +52,10 @@ CSVars csSineCosThetaPhi(const PtEtaPhiMVector &antilepton, const PtEtaPhiMVecto
     PxPyPzEVector dilepton = lepton_v + PxPyPzEVector(antilepton);
     const int zsign = std::copysign(1.0, dilepton.z());
     const double energy = 6500.;
-    PxPyPzEVector proton1(0., 0., zsign * energy, energy);
-    PxPyPzEVector proton2(0., 0., -1. * zsign * energy, energy);
+    const double mp = 0.93827208816;
+    const double pbeam = std::sqrt(energy*energy - mp*mp);
+    PxPyPzEVector proton1(0., 0., zsign * pbeam, energy);
+    PxPyPzEVector proton2(0., 0., -1. * zsign * pbeam, energy);
 
     auto dilepCM = dilepton.BoostToCM();
     ROOT::Math::Boost dilepCMBoost(dilepCM);
@@ -70,6 +76,31 @@ CSVars csSineCosThetaPhi(const PtEtaPhiMVector &antilepton, const PtEtaPhiMVecto
 
     CSVars angles = {sintheta, costheta, sinphi, cosphi};
     return angles;
+}
+
+CSVars csSineCosThetaPhiTransported(const PtEtaPhiMVector &antilepton, const PtEtaPhiMVector &lepton, const PtEtaPhiMVector &targetV) {
+    const PxPyPzEVector lepton_v(lepton);
+    const PxPyPzEVector anti_lepton_v(antilepton);
+    const PxPyPzEVector dilepton = lepton_v + anti_lepton_v;
+
+    // boost to rest frame of dilepton system
+    auto const dilepCM = dilepton.BoostToCM();
+    const ROOT::Math::Boost dilepCMBoost(dilepCM);
+
+    auto const lepton_boost = dilepCMBoost(lepton_v);
+    auto const antilepton_boost = dilepCMBoost(anti_lepton_v);
+
+    // boost from rest frame of target back to lab frame
+    auto const targetCM = targetV.BoostToCM();
+    const ROOT::Math::Boost labBoost(-targetCM);
+
+    auto const lepton_target = labBoost(lepton_boost);
+    auto const antilepton_target = labBoost(antilepton_boost);
+
+    // finally compute cs variables
+    return csSineCosThetaPhi(PtEtaPhiMVector(antilepton_target), PtEtaPhiMVector(lepton_target));
+
+
 }
 
 }

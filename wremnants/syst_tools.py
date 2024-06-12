@@ -463,17 +463,56 @@ def widthWeightNames(matches=None, proc=""):
 
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
 
+def define_sin2theta_weights(df, proc):
+    if "sin2thetaWeight_tensor" in df.GetColumnNames():
+        logger.debug("sin2thetaWeight_tensor already defined, do nothing here.")
+        return df
+
+    if proc[0] != "Z":
+        raise RuntimeError("sin2theta weights are only defined for Z")
+
+    nweights = 11
+    df = df.Define("sin2thetaWeight_tensor", f"wrem::vec_to_tensor_t<double, {nweights}>(MEParamWeightAltSet4)")
+    df = df.Define("sin2thetaWeight_tensor_wnom", "auto res = sin2thetaWeight_tensor; res = nominal_weight*res; return res;")
+    return df
+
+def add_sin2thetaweights_hist(results, df, axes, cols, base_name="nominal", proc="", storage_type=hist.storage.Double()):
+    name = Datagroups.histName(base_name, syst="sin2thetaWeight"+(proc[0] if len(proc) else proc))
+    sin2thetaWeight = df.HistoBoost(name, axes, [*cols, "sin2thetaWeight_tensor_wnom"],
+                    tensor_axes=[hist.axis.StrCategory(sin2thetaWeightNames(proc=proc), name="sin2theta")],
+                    storage=storage_type)
+    results.append(sin2thetaWeight)
+
+def sin2thetaWeightNames(matches=None, proc=""):
+    if proc[0] != "Z":
+        raise RuntimeError("sin2theta weights are only defined for Z")
+
+    sin2thetas = (0.23151, 0.23154, 0.23157, 0.2230, 0.2300, 0.2305, 0.2310, 0.2315, 0.2320, 0.2325, 0.2330)
+
+    # 1 is the central value
+    # 0 and 2 are Down, Up from uncertainty in EW fit
+    names = [f"sin2theta{proc[0]}{str(sin2theta).replace('.','p')}" for sin2theta in sin2thetas]
+
+    return [x if not matches or any(y in x for y in matches) else "" for x in names]
+
 # weak weights from Powheg EW NanoLHE files
 def define_weak_weights(df, proc):
-    if proc != 'Zmumu_powheg-weak':
-        logger.debug("weakWeight_tensor only implemented for Zmumu_powheg-weak.")
+    if not 'Zmumu_powheg-weak' in proc:
+        logger.debug("weakWeight_tensor only implemented for Zmumu_powheg-weak samples.")
         return df
     if "weakWeight_tensor" in df.GetColumnNames():
         logger.debug("weakWeight_tensor already defined, do nothing here.")
         return df
-    nweights = 20
+    nweights = 24
     df = df.Define("weakWeight_tensor", f"wrem::vec_to_tensor_t<double, {nweights}>(LHEReweightingWeight)")
     df = df.Define("weakWeight_tensor_wnom", "auto res = weakWeight_tensor; res = LHEWeight_originalXWGTUP*res; return res;")
+
+    # note that makeHelicityMomentPdfTensor is actually generic for any variation along one axis
+    # and not specific to PDFs
+    var_helper = ROOT.wrem.makeHelicityMomentPdfTensor[nweights]()
+    df = df.Define("LHEWeight_originalXWGTUP_D", "static_cast<double>(LHEWeight_originalXWGTUP)")
+    df = df.Define("weakWeight_tensor_helicity", var_helper, ["csSineCosThetaPhilhe", "weakWeight_tensor", "LHEWeight_originalXWGTUP_D"])
+
     return df
 
 def add_weakweights_hist(results, df, axes, cols, base_name="nominal", proc="", storage_type=hist.storage.Double()):
@@ -525,6 +564,14 @@ def weakWeightNames(matches=None, proc=""):
         'weak_s2eff_0p23205',
         # no_ew=0d0, weak-only=1d0, ew_ho=1d0, use-s2effin=0.23255d0
         'weak_s2eff_0p23255',
+        # no_ew=0d0, weak-only=1d0, ew_ho=1d0, use-s2effin=0.23355d0
+        'weak_s2eff_0p23355',
+        # no_ew=0d0, weak-only=1d0, ew_ho=1d0, use-s2effin=0.23455d0
+        'weak_s2eff_0p23455',
+        # no_ew=0d0, weak-only=1d0, ew_ho=1d0, use-s2effin=0.22955d0
+        'weak_s2eff_0p22955',
+        # no_ew=0d0, weak-only=1d0, ew_ho=1d0, use-s2effin=0.22655d0
+        'weak_s2eff_0p22655',
     ]
 
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
@@ -849,14 +896,16 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
         scale_axes = axes
         scale_cols = cols
 
+    isZ = dataset_name in common.zprocs_all
+
     df = theory_tools.define_scale_tensor(df)
     df = define_mass_weights(df, dataset_name)
     df = define_width_weights(df, dataset_name)
+    if isZ:
+        df = define_sin2theta_weights(df, dataset_name)
 
     add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
     add_qcdScale_hist(results, df, scale_axes, scale_cols, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
-
-    isZ = dataset_name in common.zprocs_all
 
     theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
     if theory_corrs and dataset_name in corr_helpers:
@@ -868,6 +917,29 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
         df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhigen, scaleWeights_tensor, nominal_weight)")
         helicity_moments_scale = df.HistoBoost("nominal_gen_helicity_moments_scale", axes, [*cols, "helicity_moments_scale_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
         results.append(helicity_moments_scale)
+
+        # below logic only valid for specific columns
+        if cols == ["massVgen", "absYVgen", "ptVgen", "chargeVgen"]:
+
+            df = df.Define("helicity_moments_scale_lhe_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhilhe, scaleWeights_tensor, nominal_weight)")
+            lhe_cols = ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe"]
+            helicity_moments_scale_lhe = df.HistoBoost("nominal_gen_helicity_moments_scale_lhe", axes, [*lhe_cols, "helicity_moments_scale_lhe_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
+            results.append(helicity_moments_scale_lhe)
+
+            df = df.Define("helicity_moments_scale_hardProcess_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhihardProcess, scaleWeights_tensor, nominal_weight)")
+            hardProcess_cols = ["massVhardProcess", "absYVhardProcess", "ptVhardProcess", "chargeVhardProcess"]
+            helicity_moments_scale_hardProcess = df.HistoBoost("nominal_gen_helicity_moments_scale_hardProcess", axes, [*hardProcess_cols, "helicity_moments_scale_hardProcess_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
+            results.append(helicity_moments_scale_hardProcess)
+
+            df = df.Define("helicity_moments_scale_postShower_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhipostShower, scaleWeights_tensor, nominal_weight)")
+            postShower_cols = ["massVpostShower", "absYVpostShower", "ptVpostShower", "chargeVpostShower"]
+            helicity_moments_scale_postShower = df.HistoBoost("nominal_gen_helicity_moments_scale_postShower", axes, [*postShower_cols, "helicity_moments_scale_postShower_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
+            results.append(helicity_moments_scale_postShower)
+
+            df = df.Define("helicity_moments_scale_postBeamRemnants_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhipostBeamRemnants, scaleWeights_tensor, nominal_weight)")
+            postBeamRemnants_cols = ["massVpostBeamRemnants", "absYVpostBeamRemnants", "ptVpostBeamRemnants", "chargeVpostBeamRemnants"]
+            helicity_moments_scale_postBeamRemnants = df.HistoBoost("nominal_gen_helicity_moments_scale_postBeamRemnants", axes, [*postBeamRemnants_cols, "helicity_moments_scale_postBeamRemnants_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
+            results.append(helicity_moments_scale_postBeamRemnants)
 
     if for_wmass or isZ:
         logger.debug(f"Make QCD scale histograms for {dataset_name}")
@@ -881,5 +953,7 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
         # TODO: Should have consistent order here with the scetlib correction function
         add_massweights_hist(results, df, axes, cols, proc=dataset_name, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
         add_widthweights_hist(results, df, axes, cols, proc=dataset_name, base_name=base_name, storage_type=storage_type)
+        if isZ:
+            add_sin2thetaweights_hist(results, df, axes, cols, proc=dataset_name, base_name=base_name, storage_type=storage_type)
 
     return df

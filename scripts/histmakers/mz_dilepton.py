@@ -28,7 +28,6 @@ parser.add_argument("--addRunAxis", action="store_true", help="Add axis with sli
 
 
 parser = common.set_parser_default(parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"])
-parser = common.set_parser_default(parser, "ewTheoryCorr", ["virtual_ew", "pythiaew_ISR", "horaceqedew_FSR", "horacelophotosmecoffew_FSR",])
 parser = common.set_parser_default(parser, "excludeProcs", ["QCD"])
 parser = common.set_parser_default(parser, "pt", common.get_default_ptbins(analysis_label))
 
@@ -288,7 +287,7 @@ def build_graph(df, dataset):
 
     df = df.Define("csSineCosThetaPhill", "wrem::csSineCosThetaPhi(muonsPlus_mom4, muonsMinus_mom4)")
     df = df.Define("cosThetaStarll", "csSineCosThetaPhill.costheta")
-    df = df.Define("phiStarll", "std::atan2(csSineCosThetaPhill.sinphi, csSineCosThetaPhill.cosphi)")
+    df = df.Define("phiStarll", "csSineCosThetaPhill.phi()")
 
     # TODO might need to add an explicit cut on trigMuons_pt0 in case nominal pt range
     # extends below 26 GeV e.g. for calibration test purposes
