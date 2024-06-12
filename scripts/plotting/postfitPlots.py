@@ -83,7 +83,14 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, suff
     else:
         binwnorm = None
         ylabel="Events/bin"
+    
+    histtype_data = "errorbar"
+    histtype_mc = "fill"
 
+    if any(x in axes_names for x in ["ptVgen","absYVgen","helicity"]):
+        histtype_data = "step"
+        histtype_mc = "errorbar"
+    
     if len(h_data.axes) > 1:
         if "eta" in axes_names[-1]:
             axes_names = axes_names[::-1]
@@ -107,7 +114,7 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, suff
         h_stack,
         xerr=False,
         yerr=False,
-        histtype="fill",
+        histtype=histtype_mc,
         color=colors,
         label=labels,
         stack=True,
@@ -122,7 +129,7 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, suff
         hep.histplot(
             h_data,
             yerr=True,
-            histtype="errorbar",
+            histtype=histtype_data,
             color="black",
             label="Data",
             binwnorm=binwnorm,
@@ -266,6 +273,15 @@ if combinetf2:
         hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
         hist_stack = fitresult[f"hist_{fittype}"][channel].get()
         hist_stack = [hist_stack[{"processes" : p}] for p in procs]
+        
+        if any(x in hist_data.axes.name for x in ["helicity"]):
+            or_vals = np.copy(hist_inclusive.values())
+            hist_inclusive.values()[...] = 100000*np.log(hist_inclusive.values())
+            hist_inclusive.variances()[...] = 100000*100000*(hist_inclusive.variances())/np.square(or_vals)
+            for h in hist_stack:
+                or_vals = np.copy(h.values())
+                h.values()[...] = 100000*np.log(h.values())
+                h.variances()[...] = 100000*100000*(h.variances())/np.square(or_vals)
 
         make_plots(hist_data, hist_inclusive, hist_stack, info["axes"], channel=channel, colors=colors, labels=labels, chi2=chi2, meta=meta, lumi=info["lumi"])
 else:
