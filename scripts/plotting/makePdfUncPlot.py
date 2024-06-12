@@ -77,21 +77,10 @@ for dataset in args.datasets:
 
     if "unrolled_gen_hel" in args.obs:
         print(dataset)
-        moments = input_tools.read_all_and_scale(args.infile, [dataset], ["nominal_gen_helicity_moments"])
-        # coeffs =  theory_tools.moments_to_helicities(moments[0].project('ptVgen','absYVgen','helicity','muRfact','muFfact'))
-        moments_nom = input_tools.read_all_and_scale(args.infile, [dataset], ["nominal_gen_helicity_moments_scale"])
-        # moments_thag = input_tools.read_all_and_scale(args.infile, args.datasets, ["nominal_gen_helicity_moments_yieldsTheoryAgnostic"])
-        print(moments[0])
-        # hep.histplot(hh.unrolledHist(moments[0][{'helicity':-1.j, 'muRfact':1.j,'muFfact':1.j}],binwnorm=True))
-        # hep.histplot(hh.unrolledHist(moments_nom[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
-        hep.histplot(hh.unrolledHist(moments_nom[0].project('ptVgen','absYVgen','muRfact','muFfact','helicity')[{'helicity':-1.j,'muRfact':1.j,'muFfact':1.j}],binwnorm=True))
-        hep.histplot(hh.unrolledHist(moments[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
-        # hep.histplot(hh.unrolledHist(moments_thag[0].project('ptVgen','absYVgen','helicity')[{'helicity':-1.j}],binwnorm=True))
-        # hep.histplot(hh.unrolledHist(hh.divideHists(coeffs[{'helicity':4.j, 'muRfact':1.j,'muFfact':1.j}],moments_nom[0].project('ptVgen','absYVgen','helicity')[{'helicity':4.j}]),binwnorm=True))
-        plt.savefig("thagtest.png")
-        exit()
+        moments = input_tools.read_all_and_scale(args.infile, [dataset], ["nominal_gen_helicity_moments_scale"])
+        coeffs =  theory_tools.moments_to_helicities(moments[0].project('ptVgen','absYVgen','helicity','muRfact','muFfact'))
         
-        moments_pdf = input_tools.read_all_and_scale(args.infile, args.datasets, [f"helicity_{args.baseName}_{pdfName}" for pdfName in pdfNames])
+        moments_pdf = input_tools.read_all_and_scale(args.infile, [dataset], [f"helicity_{args.baseName}_{pdfName}" for pdfName in pdfNames])
         
         coeffs_pdf = []
         for moments in moments_pdf:
@@ -99,7 +88,7 @@ for dataset in args.datasets:
         uncHists = [[h[{axis_label : 0}], *theory_tools.hessianPdfUnc(h, axis_label, unc, scale)] for h,unc,scale in zip(coeffs_pdf, uncType, uncScale)]
 
         coeffs_heraext = []
-        moments_heraext = input_tools.read_all_and_scale(args.infile, args.datasets, [f"helicity_{args.baseName}_pdfHERAPDF20ext"])
+        moments_heraext = input_tools.read_all_and_scale(args.infile, [dataset], [f"helicity_{args.baseName}_pdfHERAPDF20ext"])
         for moments in moments_heraext:
             coeffs_heraext.append(theory_tools.moments_to_helicities(moments.project('ptVgen','absYVgen','helicity',axis_label)))
         
@@ -160,7 +149,8 @@ for dataset in args.datasets:
     axis_ptV = theoryAgnostic_axes[0]
     axis_yV = theoryAgnostic_axes[1]
 
-    variations = []
+    variations = np.zeros((len(axis_ptV.centers)+1,len(axis_yV.centers)+1,9))
+    print(variations.shape)
     for ihel in coeffs.axes["helicity"].edges[:-1]:
         for obs in args.obs:
             all_hists = []
@@ -172,7 +162,7 @@ for dataset in args.datasets:
                     action = lambda x: x.project(obs)
                     hists1D = [action(x) for x in hists]
                 else:
-                    obs2unroll = ["absYVgen","ptVgen"] if "unrolled_gen" in obs else ["pt","eta"]
+                    obs2unroll = ["ptVgen","absYVgen"] if "unrolled_gen" in obs else ["pt","eta"]
                     action = hh.unrolledHist
                     if not "hel" in obs:
                         hists1D = [action(x,obs2unroll,binwnorm=True) for x in hists]
@@ -189,34 +179,47 @@ for dataset in args.datasets:
             plot_cols = [colors[0][0], *all_colors]
             plot_labels = ["", *all_names]
             # print([h.values() for h in hists1D])
+
+            lower = np.minimum.reduce([h.values() for h in hists1D])/np.abs(hists1D[0].values())
+            upper = np.maximum.reduce([h.values() for h in hists1D])/np.abs(hists1D[0].values())
+            
+            symm = np.where(np.abs(lower-1.)>np.abs(upper-1.),lower,upper)
+            if ihel==-1:
+                symm = 0.5*np.ones_like(symm)
+            elif ihel==4:
+                symm = 2*np.ones_like(symm)
+
             fig = plot_tools.makePlotWithRatioToRef(hists1D, colors=plot_cols, labels=plot_labels, alpha=0.7,
-                rrange=args.rrange, ylabel="$\sigma$/bin", xlabel=xlabels[obs], rlabel=f"x/{args.pdfs[0].upper()}", binwnorm=None, nlegcols=1)
-            outfile = f"{name}Hist_{obs}_{args.channel}_sigma{ihel}"
-            ax1, ax2 = fig.axes
-            ax1.fill_between(hists1D[0].axes[0].centers,np.minimum.reduce([h.values() for h in hists1D]),np.maximum.reduce([h.values() for h in hists1D]),color="grey",alpha=0.5, label="theory agnostic variation")
-            ax2.fill_between(hists1D[0].axes[0].centers,np.minimum.reduce([h.values() for h in hists1D])/hists1D[0].values(),np.maximum.reduce([h.values() for h in hists1D])/hists1D[0].values(),color="grey",alpha=0.5, label="theory agnostic variation")
+                rrange=args.rrange, ylabel="$\sigma$/bin", xlabel=xlabels[obs], rlabel=f"x/{args.pdfs[0].upper()}", binwnorm=None, nlegcols=1, only_ratio=True)
+            outfile = f"{name}Hist_{obs}_{dataset}_sigma{ihel}"
+            ax2 = fig.axes
+            # print(ihel,symm, (1-symm)+1)
+            # ax1.fill_between(hists1D[0].axes[0].centers,np.minimum.reduce([h.values() for h in hists1D]),np.maximum.reduce([h.values() for h in hists1D]),color="grey",alpha=0.5, label="theory agnostic variation")
+            ax2[0].fill_between(hists1D[0].axes[0].centers,symm, 2-symm,color="grey",alpha=0.3, label="theory agnostic variation",hatch="//")
+            ax2[0].set_xticklabels([])
+            ax2[0].set_xticks([])
+            min_val = np.min(np.concatenate((symm,2-symm)))
+            max_val = np.max(np.concatenate((symm,2-symm)))
+            if not ihel ==-1:
+                ax2[0].set_ylim(min_val,max_val)
+            else:
+                ax2[0].set_ylim(0,2)
             plot_tools.save_pdf_and_png(outdir, outfile)
             plot_tools.write_index_and_log(outdir, outfile)
-            exit()
-            if ihel == -1:
-                variations.append(np.stack([0.5*np.ones_like(np.minimum.reduce([h.values() for h in hists1D])/hists1D[0].values()),1.5*np.ones_like(np.maximum.reduce([h.values() for h in hists1D])/hists1D[0].values())],axis=-1).reshape(len(uncHists[0][0].axes["ptVgen"]),len(uncHists[0][0].axes["absYVgen"]),2))
-            # elif ihel == 4:
-            #     variations.append(np.stack([0.8*np.ones_like(np.minimum.reduce([h.values() for h in hists1D])/hists1D[0].values()),2.2*np.ones_like(np.maximum.reduce([h.values() for h in hists1D])/hists1D[0].values())],axis=-1).reshape(len(uncHists[0][0].axes["ptVgen"]),len(uncHists[0][0].axes["absYVgen"]),2))
-            else:
-                lower = np.minimum.reduce([h.values() for h in hists1D])/np.abs(hists1D[0].values())
-                upper = np.maximum.reduce([h.values() for h in hists1D])/np.abs(hists1D[0].values())
-                
-                variations.append(np.stack([lower,upper],axis=-1).reshape(len(uncHists[0][0].axes["ptVgen"]),len(uncHists[0][0].axes["absYVgen"]),2))
-                print("helicity", ihel)
-                print("down",lower)
-                print("up",upper)
 
-    variations_all = np.stack(variations,axis=-2)
-    print(variations_all.shape)
+            vars = np.ones((len(axis_ptV.centers)+1,len(axis_yV.centers)+1))
+            # symm = symm-1
+            print(symm)
+            vars[:-1,:-1] = symm.reshape((len(axis_ptV.centers),len(axis_yV.centers)))
+            # print(vars)
+            variations[...,int(ihel)+1]=vars
 
-    hvariations = hist.Hist(axis_ptV,axis_yV,axis_helicity_multidim,utilities.common.down_up_axis, name=f"theorybands_{dataset}",data=variations_all)
+    print(variations.shape)
+
+    hvariations = hist.Hist(axis_ptV,axis_yV,axis_helicity_multidim, name=f"theorybands_{dataset}",data=variations)
     band_hists[dataset] = hvariations
 
-# outfile = "theoryband_variations.hdf5"
-# with h5py.File(outfile, 'w') as f:
-#     narf.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
+outfile = "theoryband_variations.hdf5"
+with h5py.File(outfile, 'w') as f:
+    narf.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
+

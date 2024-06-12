@@ -738,7 +738,7 @@ def setup(args, inputFile, fitvar, xnorm=False):
     if xnorm:
         theorySystSamples = ["signal_samples"]
 
-    # theory_helper.add_all_theory_unc(theorySystSamples, skipFromSignal=args.noPDFandQCDtheorySystOnSignal)
+    theory_helper.add_all_theory_unc(theorySystSamples, skipFromSignal=args.noPDFandQCDtheorySystOnSignal)
 
     if xnorm or genfit:
         return cardTool
