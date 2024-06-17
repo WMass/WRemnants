@@ -941,7 +941,7 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
             postBeamRemnants_cols = ["massVpostBeamRemnants", "absYVpostBeamRemnants", "ptVpostBeamRemnants", "chargeVpostBeamRemnants"]
             helicity_moments_scale_postBeamRemnants = df.HistoBoost("nominal_gen_helicity_moments_scale_postBeamRemnants", axes, [*postBeamRemnants_cols, "helicity_moments_scale_postBeamRemnants_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
             results.append(helicity_moments_scale_postBeamRemnants)
-        nominal_cols = ["absYVgen", "ptVgen"]
+
         #helicity moments x theory agnostic
         nominal_cols = ["ptVgen","absYVgen", "chargeVgen"]
 

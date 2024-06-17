@@ -285,17 +285,17 @@ def build_graph(df, dataset):
     if 'powheg' in dataset.name:
         return results, weightsum
 
-    # nominal_cols = [col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen"]
-    # nominal_axes = [axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen]
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
-    results.append(nominal_gen)
-
     if 'horace' not in dataset.name and 'winhac' not in dataset.name and \
             "LHEScaleWeight" in df.GetColumnNames() and "LHEPdfWeight" in df.GetColumnNames() and "MEParamWeight" in df.GetColumnNames():
 
         qcdScaleByHelicity_helper = wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like = dataset.name[0] != "W") if args.helicity else None
 
         df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen",propagateToHelicity= args.propagatePDFstoHelicity)
+    
+    nominal_cols = [col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen"]
+    nominal_axes = [axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen]
+    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
+    results.append(nominal_gen)
 
     return results, weightsum
 

@@ -392,15 +392,7 @@ class HDF5Writer(object):
                     hvar = dg.groups[proc].hists["syst"]
                     hnom = dg.groups[proc].hists[chanInfo.nominalName]
                     
-                    # print(hnom)
-                    # print(hvar)
-
                     var_map = chanInfo.systHists(hvar, systKey, hnom)
-                    # print(var_map['normWplus_PtV0YVBin0Helicity3Down'])
-                    # print(var_map['normWplus_PtV0YVBin0Helicity3Down'][{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
-                    # print(var_map['normWplus_PtV0YVBin0Helicity3Up'][{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
-                    # print(hnom[{"helicity":1.j, "chargeVgen":1.j,'absYVgen':0.j}].values())
-                    # print("here")
 
                     var_names = [x[:-2] if "Up" in x[-2:] else (x[:-4] if "Down" in x[-4:] else x) 
                         for x in filter(lambda x: x != "", var_map.keys())]
