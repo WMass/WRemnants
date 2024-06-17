@@ -559,7 +559,12 @@ class CardTool(object):
                 raise RuntimeError(f"Did not find any valid variations for syst {syst}")
 
         variations = [hvar[{ax : binnum for ax,binnum in zip(axNames, entry)}] for entry in entries]
-
+        
+        if hvar.axes[-1].name == "mirror" and len(variations) == 2*len(systInfo["outNames"]):
+            systInfo["outNames"] = [n + d for n in systInfo["outNames"] for d in ["Up", "Down"]]
+        elif len(variations) != len(systInfo["outNames"]):
+            logger.warning(f"The number of variations doesn't match the number of names for "
+                f"syst {syst}. Found {len(systInfo['outNames'])} names and {len(variations)} variations.")
         return {name : var for name,var in zip(systInfo["outNames"], variations) if name}
 
     def getLogk(self, hvar, hnom, kfac=1., logkepsilon=math.log(1e-3)):
