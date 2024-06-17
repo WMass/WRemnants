@@ -713,8 +713,8 @@ def setup(args, inputFile, fitvar, xnorm=False):
                             passToFakes=passSystToFakes,
     )
 
-    # combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc], 
-    #     samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)
+    combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc], 
+        samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)
 
     to_fakes = passSystToFakes and not args.noQCDscaleFakes and not xnorm
     
