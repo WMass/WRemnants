@@ -25,15 +25,23 @@ def updateImpactsDict(args, fitresult, df, lumiscale, poi='Wmass'):
     Update dictionary for the labels and values, for one lumiscale
     """
     impacts,labels,_ = combinetf_input.read_impacts_poi(fitresult, not args.ungroup, sort=args.sort, poi=poi, normalize = False)
-    print(labels)
+    # print(labels)
 
-    lumiVal = lumiscale * 0.200181002
+    lumiVal = lumiscale * 0.200181002 / 100
     if args.nuisance:
         if args.nuisance not in labels:
             raise ValueError(f"Invalid nuisance {args.nuisance}. Options are {labels}")
         nuisanceImpact = impacts[list(labels).index(args.nuisance)]*100
         new_row = {args.nuisance: nuisanceImpact, 'Lumi': lumiVal}
         df.loc[len(df)] = new_row
+
+        '''
+        Nuisance options:
+        ['bcQuarkMass' 'CMS_background' 'CMS_lepton_eff' 'experiment' 'Fake'
+        'luminosity' 'pdfCT18Z' 'pdfCT18ZAlphaS' 'pdfCT18ZNoAlphaS' 'pTModeling'
+        'QCDscale' 'QCDscaleWMiNNLO' 'QCDscaleZMiNNLO' 'resum' 'resumNonpert'
+        'resumTNP' 'resumTransitionFOScale' 'theory' 'theory_ew' 'widthW'
+        'ZmassAndWidth' 'stat' 'binByBinStat' 'Total'] '''
 
     else:
         # plot_labels = ['Total', 'Background', 'Theory', 'PDF', 'Data stat.', 'Luminosity']
@@ -45,12 +53,11 @@ def updateImpactsDict(args, fitresult, df, lumiscale, poi='Wmass'):
                     impacts[list(labels).index('theory_ew')], impacts[list(labels).index('pTModeling')], \
                     impacts[list(labels).index('QCDscale')], impacts[list(labels).index('pdfCT18Z')], \
                     impacts[list(labels).index('stat')], lumiVal]
-        print(impacts)
 
-        # new_row = {k: v for k, v in zip(plot_labels, plot_vals)}
-        # df.loc[len(df)] = new_row
+        new_row = {k: v*100 for k, v in zip(plot_labels, plot_vals)}
+        df.loc[len(df)] = new_row
 
-def sortFileNames(inputFiles): # natural sorting
+def sortFileNames(inputFiles): # natural sorting for fit result files (if lumi inputted in any order)
     convert = lambda text: int(text) if text.isdigit() else text.lower()
     alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
     return sorted(inputFiles, key=alphanum_key)
@@ -66,7 +73,7 @@ if __name__ == '__main__':
         df = pd.DataFrame(columns=[args.nuisance, 'Luminosity'])
     else:
         df = pd.DataFrame(columns=['Total', 'Theory', 'Theory EW', 'PT Modeling', 'QCD Scale', 'PDF', 'Data Stat.', 'Luminosity'])
-
+        # df = pd.DataFrame(columns=['Total', 'Background', 'Theory', 'PDF', 'Data stat.', 'Luminosity'])
     for i in range(len(lumiscales)):
         inputFile = inFolder + '/' + inputFiles[i]
         fitresult = combinetf_input.get_fitresult(inputFile)
@@ -74,17 +81,17 @@ if __name__ == '__main__':
             updateImpactsDict(args, fitresult, df, lumiscales[i], poi)
 
 
-    # plt.figure(figsize=(8, 8))
-    # hep.cms.label(fontsize=20, data=False, label="Projection", com=13.6)
-    # for column in df.columns:
-    #     if column != 'Luminosity':  # Exclude the Luminosity column from plotting
-    #         plt.plot(df['Luminosity'], df[column], label=column, marker='o')
+    plt.figure(figsize=(8, 8))
+    hep.cms.label(fontsize=20, data=False, label="Projection", com=13.6)
+    for column in df.columns:
+        if column != 'Luminosity':  # Exclude the Luminosity column from plotting
+            plt.plot(df['Luminosity'], df[column], label=column, marker='o')
 
-    # plt.xlabel("Integrated luminosity (fb$^{-1})$")
-    # plt.ylabel("Uncertainty in $m_{W}$ (MeV)")
-    # plt.legend()
+    plt.xlabel("Integrated luminosity (fb$^{-1})$")
+    plt.ylabel("Uncertainty in $m_{W}$ (MeV)")
+    plt.legend()
 
-    # plt.savefig(args.outfile)
-    # if args.addPDF:
-    #     pdfFileName = (args.outfile).split('.')[0] + ".pdf"
-    #     plt.savefig(pdfFileName, format = 'pdf')
+    plt.savefig(args.outfile)
+    if args.addPDF:
+        pdfFileName = (args.outfile).split('.')[0] + ".pdf"
+        plt.savefig(pdfFileName, format = 'pdf')
