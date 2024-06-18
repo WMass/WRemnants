@@ -163,6 +163,12 @@ public:
             (*helper_no_unc_)(inputs, outputs);
             ret.unc_weights.setConstant(1.);
         }
+        for(int k=0; k<N_UNC; k++) {
+        //if(ret.unc_weights[k] < 0.99999 or ret.unc_weights[k] > 1.00001)
+            if(std::isnan(ret.unc_weights[k]) or std::isinf(ret.unc_weights[k])) {
+            cout << k << " INF/NAN " << std::isnan(ret.unc_weights[k]) << " " << std::isinf(ret.unc_weights[k]) << "  " <<  pt << " " << ut_para << " " << ut_perp << endl;
+            }
+        }
         return ret;
     }
 

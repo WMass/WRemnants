@@ -251,8 +251,8 @@ def met_xy_reweighting(direction = "x", corrType="uncorr", polyOrderData=-1, pol
     leg.SetBorderSize(0)
     leg.SetFillStyle(0)
     leg.SetTextSize(0.035)
-    leg.AddEntry(g_data, "Data", "LP")
-    leg.AddEntry(g_mc, "MC", "LP")
+    leg.AddEntry(g_data, "Data (order=%d)"%polyOrderData, "LP")
+    leg.AddEntry(g_mc, "MC (order=%d)"%polyOrderMC, "LP")
     leg.Draw("SAME")
 
     line = ROOT.TLine(0, 0, npv_max, 0)
@@ -273,6 +273,7 @@ def met_xy_reweighting(direction = "x", corrType="uncorr", polyOrderData=-1, pol
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, help="Input hdf5 file")
+    parser.add_argument("-s", "--save", action='store_true', help="Save to wremnants-data")
     args = parser.parse_args()
 
     groups = datagroups.Datagroups(args.input)
@@ -290,6 +291,16 @@ if __name__ == "__main__":
             yMin_x, yMax_x, yMin_y, yMax_y = -5, 5, -5, 5
             polyOrderData_x, polyOrderData_y = 2, 2
             polyOrderMC_x, polyOrderMC_y = 2, 2
+        else:
+            procs, data = ["Zmumu", "Ztautau", "Wtaunu", "Wmunu", "Top", "Diboson"], "Data"
+
+            npv_max, npv_fit_min, npv_fit_max = 10, 0, 10
+            yMin_x, yMax_x, yMin_y, yMax_y = -5, 5, -5, 5
+            polyOrderData_x, polyOrderData_y = 3, 2
+            polyOrderMC_x, polyOrderMC_y = 3, 2
+
+            for g in groups.groups:
+                groups.groups[g].selectOp = None
 
     else:
         npv_max, npv_fit_min, npv_fit_max = 60, 5, 55
@@ -318,9 +329,10 @@ if __name__ == "__main__":
     dictX = met_xy_reweighting(direction="x", corrType="corr_lep", polyOrderData=polyOrderData_x, polyOrderMC=polyOrderMC_x, procs=procs, data=data, yMin=yMin_x, yMax=yMax_x)
     dictY = met_xy_reweighting(direction="y", corrType="corr_lep", polyOrderData=polyOrderData_y, polyOrderMC=polyOrderMC_y, procs=procs, data=data, yMin=yMin_y, yMax=yMax_y)
 
-    outDict['x'] = dictX
-    outDict['y'] = dictY
-    functions.writeJSON(fOut, outDict)
+    if args.save:
+        outDict['x'] = dictX
+        outDict['y'] = dictY
+        functions.writeJSON(fOut, outDict)
 
     met_xy_reweighting(direction="x", corrType="corr_xy", polyOrderData=polyOrderData_x, polyOrderMC=polyOrderMC_x, procs=procs, data=data, yMin=yMin_x, yMax=yMax_x)
     met_xy_reweighting(direction="y", corrType="corr_xy", polyOrderData=polyOrderData_y, polyOrderMC=polyOrderMC_y, procs=procs, data=data, yMin=yMin_y, yMax=yMax_y)

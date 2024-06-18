@@ -11,10 +11,11 @@ ROOT.gStyle.SetOptTitle(0)
 
 def translate(word):
     if "METPT" in word: return word.replace("METPT", "p_{T}^{miss} (GeV)")
+    if "METWLIKEPT" in word: return word.replace("METWLIKEPT", "p_{T}^{miss} (W-like) (GeV)")
     if "METPHI" in word: return word.replace("METPHI", "#phi^{miss} (GeV)")
     if "METX" in word: return word.replace("METX", "p_{T,x}^{miss} (GeV)")
     if "METY" in word: return word.replace("METY", "p_{T,y}^{miss} (GeV)")
-    if "UPARAQT" in word: return word.replace("UPARAQT", "U_{#parallel} #minus q_{T} (GeV)")
+    if "UPARAQT" in word: return word.replace("UPARAQT", "U_{#parallel} #plus q_{T} (GeV)")
     if "UPARA" in word: return word.replace("UPARA", "U_{#parallel} (GeV)")
     if "UPERP" in word: return word.replace("UPERP", "U_{#perp}   (GeV)")
     if "UMAGN" in word: return word.replace("UMAGN", "|U| (GeV)")

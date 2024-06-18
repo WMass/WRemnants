@@ -6,7 +6,7 @@ import hist as bh
 import narf
 import math
 
-def stacked_plot_ratio(groups, hName, procs, outDir, suffix="", xMin=0, xMax=100, yMin=0, yMax=100, xLabel="xLabel", yLabel="Events", logX=False, logY=False, rebin=1, legPos=[], yRatio=1.15, blind=False, dataNormProc="", labels=[], charge=None):
+def stacked_plot_ratio(groups, hName, procs, outDir, suffix="", xMin=0, xMax=100, yMin=0, yMax=-1.75, xLabel="xLabel", yLabel="Events", logX=False, logY=False, rebin=1, legPos=[], yRatio=1.15, blind=False, dataNormProc="", labels=[], charge=None, extraRatios=[]):
 
     functions.prepareDir(outDir, remove=False)
 
@@ -44,6 +44,29 @@ def stacked_plot_ratio(groups, hName, procs, outDir, suffix="", xMin=0, xMax=100
         leg.AddEntry(bkg_hists[proc], groups.groups[proc].label if proc != "WJetsToMuNu" else "W^{{#{q}}} #rightarrow #mu^{{#{q}}}#nu".format(q=charge if charge != "combined" else "pm"), "F")
         st.Add(bkg_hists[proc])
         h_bkg.Add(bkg_hists[proc])
+
+    hists_extraRatios = []
+    colors = [ROOT.kRed, ROOT.kBlue, ROOT.kGreen+1, ROOT.kOrange]
+    for ig,gr_er in enumerate(extraRatios):
+        n = gr_er[0]
+        h_tot = h_data.Clone(f"h_tot_{n}")
+        h_tot.Reset("ACE")
+        for i,proc in enumerate(procs[1:]):
+            hist = functions.readBoostHist(gr_er[1], hName, [proc], charge=charge)
+            hist = functions.rebin(hist, rebin)
+            if proc == dataNormProc:
+                hist.Scale((h_data.Integral()-normMC)/hist.Integral())
+            h_tot.Add(hist)
+
+        h_ratio = h_data.Clone(f"h_extraratio_{n}")
+        for i in range(h_tot .GetNbinsX()+1): h_tot.SetBinError(i, 0) # set MC errors to zero
+        h_ratio.Divide(h_tot)
+        h_ratio.SetMarkerStyle(20)
+        h_ratio.SetMarkerSize(0.5)
+        h_ratio.SetMarkerColor(colors[ig])
+        h_ratio.SetLineColor(colors[ig])
+        h_ratio.SetLineWidth(1)
+        hists_extraRatios.append(h_ratio)
 
     h_bkg.SetLineColor(ROOT.kBlack)
     h_bkg.SetFillColor(0)
@@ -87,7 +110,7 @@ def stacked_plot_ratio(groups, hName, procs, outDir, suffix="", xMin=0, xMax=100
         'xmin'              : xMin,
         'xmax'              : xMax,
         'ymin'              : yMin,
-        'ymax'              : yMax,
+        'ymax'              : yMax if yMax > 0 else -yMax*h_data.GetMaximum(),
 
         'xtitle'            : xLabel,
         'ytitle'            : yLabel,
@@ -150,8 +173,21 @@ def stacked_plot_ratio(groups, hName, procs, outDir, suffix="", xMin=0, xMax=100
     dummyB.Draw("HIST")
     dummyL.Draw("SAME")
 
+    if len(hists_extraRatios) > 0:
+        leg_extraRatios = ROOT.TLegend(.35, 0.83, 0.35+0.175*len(hists_extraRatios), .93)
+        leg_extraRatios.SetBorderSize(0)
+        leg_extraRatios.SetFillStyle(0)
+        leg_extraRatios.SetTextSize(0.1)
+        leg_extraRatios.SetNColumns(len(hists_extraRatios))
+
+    for ig,h in enumerate(hists_extraRatios):
+        leg_extraRatios.AddEntry(h, extraRatios[ig][0], "PE")
+        h.Draw("PE0 SAME")
     h_ratio.Draw("PE0 SAME") # E2 SAME
     h_err_ratio.Draw("E2 SAME")
+
+    if len(hists_extraRatios) > 0:
+        leg_extraRatios.Draw("SAME")
 
     ROOT.gPad.SetTickx()
     ROOT.gPad.SetTicky()
@@ -316,13 +352,15 @@ def stacked_2d(groups, hName, proc, outDir, suffix="", xMin=0, xMax=100, yMin=0,
     canvas.Close()
 
 
-def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax=100, yMin=0, yMax=100, xLabel="xLabel", yLabel="Events", logX=False, logY=False, rebin=1, legPos=[], yRatio=1.15, extralabels=[], lumi_label="", doRatio=True):
+def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax=100, yMin=0, yMax=100, xLabel="xLabel", yLabel="Events", logX=False, logY=False, rebin=1, legPos=[], yRatio=1.15, extralabels=[], doRatio=True, plotSysts=False):
 
     functions.prepareDir(outDir, remove=False)
-    hist_nom = functions.readBoostHist(groups, histName, [proc])
+    hist_nom = functions.readBoostHist(groups, histName, [proc], boost=False)
     hist_nom = functions.rebin(hist_nom, rebin)
 
+    hist_unc = functions.readBoostHist(groups, f"{histName}_{systName}", [proc], boost=True)
     try:
+    #    #hist_unc = functions.readBoostHist(groups, f"{histName}_{systName}", [proc], boost=True, abcd=False, applySelection=False)
         hist_unc = functions.readBoostHist(groups, f"{histName}_{systName}", [proc], boost=True)
     except:
         return
@@ -332,7 +370,7 @@ def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax
     hist_syst_tot = hist_nom.Clone("syst_tot")
     hist_systs = []
     doubleSide = False
-    
+
     def addUnc(hTarget, hNom, hUp, hDw=None):
         for k in range(1, hTarget.GetNbinsX()+1):
             c_orig = hNom.GetBinContent(k)
@@ -359,7 +397,9 @@ def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax
             hUp = functions.rebin(hUp, rebin)
             addUnc(hist_syst_tot, hist_nom, hUp)
             hist_systs.append(hUp)
-    hist_systs.append(hist_syst_tot)
+            #if i == 0:
+            #    hist_nom = hUp.Clone("hist_nom")
+    #hist_systs.append(hist_syst_tot)
 
 
 
@@ -371,12 +411,12 @@ def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax
         'xmin'              : xMin,
         'xmax'              : xMax,
         'ymin'              : yMin,
-        'ymax'              : yMax if yMax != -1 else 1.25*hist_nom.GetMaximum(),
+        'ymax'              : yMax if yMax != -1 else 1.3*hist_nom.GetMaximum(),
 
         'xtitle'            : xLabel,
         'ytitle'            : yLabel,
 
-        'topRight'          : lumi_label,
+        'topRight'          : functions.getLumiLabel(groups),
         'topLeft'           : "#bf{CMS} #scale[0.7]{#it{Preliminary}}",
 
         'ratiofraction'     : 0.3,
@@ -386,75 +426,164 @@ def plot_systs(groups, histName, systName, proc, outDir, suffix="", xMin=0, xMax
         'ymaxR'             : yRatio,
     }
 
-    for iSyst,hist_syst in enumerate(hist_systs):
-        leg = ROOT.TLegend(.50, 0.88-(3)*0.05, .8, .88)
-        leg.SetBorderSize(0)
-        leg.SetFillStyle(0)
-        leg.SetTextSize(0.040)
-        if not logY:
-            ROOT.TGaxis.SetMaxDigits(3)
-            ROOT.TGaxis.SetExponentOffset(-0.075, 0.01, "y")
+    if plotSysts:
+        for iSyst,hist_syst in enumerate(hist_systs):
+            leg = ROOT.TLegend(.50, 0.88-(3)*0.05, .8, .88)
+            leg.SetBorderSize(0)
+            leg.SetFillStyle(0)
+            leg.SetTextSize(0.040)
+            if not logY:
+                ROOT.TGaxis.SetMaxDigits(3)
+                ROOT.TGaxis.SetExponentOffset(-0.075, 0.01, "y")
 
-        plotter.cfg = cfg
-        canvas, padT, padB = plotter.canvasRatio()
-        dummyT, dummyB, dummyL = plotter.dummyRatio()
+            plotter.cfg = cfg
+            canvas, padT, padB = plotter.canvasRatio()
+            dummyT, dummyB, dummyL = plotter.dummyRatio()
 
-        ## top panel
-        canvas.cd()
-        padT.Draw()
-        padT.cd()
-        padT.SetGrid()
-        dummyT.Draw("HIST")
+            ## top panel
+            canvas.cd()
+            padT.Draw()
+            padT.cd()
+            padT.SetGrid()
+            dummyT.Draw("HIST")
 
-        hist_nom.SetLineColor(ROOT.kBlack)
-        hist_nom.SetLineWidth(2)
-        hist_nom.SetLineStyle(1)
-        leg.AddEntry(hist_nom, "Nominal", "L")
-        hist_nom.Draw("SAME HIST")
+            hist_nom.SetLineColor(ROOT.kBlack)
+            hist_nom.SetLineWidth(2)
+            hist_nom.SetLineStyle(1)
+            leg.AddEntry(hist_nom, "Nominal", "L")
+            hist_nom.Draw("SAME HIST")
 
-        hist_syst.SetLineColor(ROOT.kBlue)
-        hist_syst.SetLineWidth(2)
-        hist_syst.SetLineStyle(1)
-        leg.AddEntry(hist_syst, "Up", "L")
-        hist_syst.Draw("SAME HIST")
+            hist_syst.SetLineColor(ROOT.kBlue)
+            hist_syst.SetLineWidth(2)
+            hist_syst.SetLineStyle(1)
+            leg.AddEntry(hist_syst, "Up", "L")
+            hist_syst.Draw("SAME HIST")
 
-        h_ratio = hist_syst.Clone(hist_syst.GetName() + "_ratio")
-        h_ratio.Divide(hist_nom)
+            h_ratio = hist_syst.Clone(hist_syst.GetName() + "_ratio")
+            h_ratio.Divide(hist_nom)
 
-        rMin, rMax = functions.getMinMaxRange(h_ratio, xMin, xMax)
-        ratio_range = 1.02*(1. + max(rMax-1, 1-rMin))
-        leg.Draw("SAME")
+            rMin, rMax = functions.getMinMaxRange(h_ratio, xMin, xMax)
+            ratio_range = 1.02*(1. + max(rMax-1, 1-rMin))
+            leg.Draw("SAME")
 
-        latex = ROOT.TLatex()
-        latex.SetNDC()
-        latex.SetTextSize(0.040)
-        latex.SetTextColor(1)
-        latex.SetTextFont(42)
-        for il, label in enumerate(extralabels):
-            latex.DrawLatex(0.20, 0.85-il*0.05, label)
-        latex.DrawLatex(0.20, 0.85-(il+1)*0.05, f"Total uncertainty" if iSyst == len(hist_systs)-1 else f"Unc idx = {iSyst}")
-
-
-        plotter.auxRatio()
-        ROOT.gPad.SetTickx()
-        ROOT.gPad.SetTicky()
-        ROOT.gPad.RedrawAxis()
+            latex = ROOT.TLatex()
+            latex.SetNDC()
+            latex.SetTextSize(0.040)
+            latex.SetTextColor(1)
+            latex.SetTextFont(42)
+            for il, label in enumerate(extralabels):
+                latex.DrawLatex(0.20, 0.85-il*0.05, label)
+            latex.DrawLatex(0.20, 0.85-(il+1)*0.05, f"Total uncertainty" if iSyst == len(hist_systs)-1 else f"Unc idx = {iSyst}")
 
 
-        ## bottom panel
-        canvas.cd()
-        padB.Draw()
-        padB.SetFillStyle(0)
-        padB.cd()
-        dummyB.GetYaxis().SetRangeUser(2-ratio_range, ratio_range)
-        dummyB.Draw("HIST")
-        dummyL.Draw("SAME")
-        h_ratio.Draw("SAME HIST")
-        ROOT.gPad.SetTickx()
-        ROOT.gPad.SetTicky()
-        ROOT.gPad.RedrawAxis()
+            plotter.auxRatio()
+            ROOT.gPad.SetTickx()
+            ROOT.gPad.SetTicky()
+            ROOT.gPad.RedrawAxis()
 
-        canvas.SaveAs(f"{outDir}/{histName}_{systName}_{iSyst}{suffix}.png")
-        canvas.SaveAs(f"{outDir}/{histName}_{systName}_{iSyst}{suffix}.pdf")
-        canvas.Close()
-        del canvas, padB, padT, dummyB, dummyT, dummyL, leg
+
+            ## bottom panel
+            canvas.cd()
+            padB.Draw()
+            padB.SetFillStyle(0)
+            padB.cd()
+            dummyB.GetYaxis().SetRangeUser(2-ratio_range, ratio_range)
+            dummyB.Draw("HIST")
+            dummyL.Draw("SAME")
+            h_ratio.Draw("SAME HIST")
+            ROOT.gPad.SetTickx()
+            ROOT.gPad.SetTicky()
+            ROOT.gPad.RedrawAxis()
+
+            canvas.SaveAs(f"{outDir}/{histName}_{systName}_{iSyst}{suffix}.png")
+            canvas.SaveAs(f"{outDir}/{histName}_{systName}_{iSyst}{suffix}.pdf")
+            canvas.Close()
+            del canvas, padB, padT, dummyB, dummyT, dummyL, leg
+
+
+    ## envelope
+    leg = ROOT.TLegend(.60, 0.88-(3)*0.05, .9, .88)
+    leg.SetBorderSize(0)
+    leg.SetFillStyle(0)
+    leg.SetTextSize(0.040)
+    if not logY:
+        ROOT.TGaxis.SetMaxDigits(3)
+        ROOT.TGaxis.SetExponentOffset(-0.075, 0.01, "y")
+
+    plotter.cfg = cfg
+    canvas, padT, padB = plotter.canvasRatio()
+    dummyT, dummyB, dummyL = plotter.dummyRatio()
+
+    ## top panel
+    canvas.cd()
+    padT.Draw()
+    padT.cd()
+    padT.SetGrid()
+    dummyT.Draw("HIST")
+
+    hist_nom.SetLineColor(ROOT.kBlack)
+    hist_nom.SetLineWidth(2)
+    hist_nom.SetLineStyle(1)
+    leg.AddEntry(hist_nom, "Nominal", "L")
+    hist_nom.Draw("SAME HIST")
+
+    hist_syst_tot_dw = hist_nom.Clone("hist_syst_tot_dw")
+    hist_syst_tot_dw.Scale(2)
+    hist_syst_tot_dw.Add(hist_syst_tot, -1)
+    hist_syst_tot_dw.SetLineColor(ROOT.kBlue)
+    hist_syst_tot_dw.SetLineWidth(2)
+    hist_syst_tot_dw.SetLineStyle(1)
+    #leg.AddEntry(hist_syst_tot_dw, "Down", "L")
+    hist_syst_tot_dw.Draw("SAME HIST")
+
+    hist_syst_tot.SetLineColor(ROOT.kBlue)
+    hist_syst_tot.SetLineWidth(2)
+    hist_syst_tot.SetLineStyle(1)
+    leg.AddEntry(hist_syst_tot, "Uncertainty", "L")
+    hist_syst_tot.Draw("SAME HIST")
+
+    h_ratio = hist_syst_tot.Clone(hist_syst_tot.GetName() + "_ratio")
+    h_ratio.Divide(hist_nom)
+    h_ratio_dw = hist_syst_tot_dw.Clone(hist_syst_tot_dw.GetName() + "_ratio_dw")
+    h_ratio_dw.Divide(hist_nom)
+
+    rMin, rMax = functions.getMinMaxRange(h_ratio, xMin, xMax)
+    ratio_range = 1.02*(1. + max(rMax-1, 1-rMin))
+    if ratio_range > 1.1:
+        ratio_range = 1.1
+    leg.Draw("SAME")
+
+    latex = ROOT.TLatex()
+    latex.SetNDC()
+    latex.SetTextSize(0.040)
+    latex.SetTextColor(1)
+    latex.SetTextFont(42)
+
+    for il, label in enumerate(extralabels):
+        latex.DrawLatex(0.20, 0.85-il*0.05, label)
+    latex.DrawLatex(0.20, 0.85-(il+1)*0.05, f"Total uncertainty")
+
+
+    plotter.auxRatio()
+    ROOT.gPad.SetTickx()
+    ROOT.gPad.SetTicky()
+    ROOT.gPad.RedrawAxis()
+
+
+    ## bottom panel
+    canvas.cd()
+    padB.Draw()
+    padB.SetFillStyle(0)
+    padB.cd()
+    dummyB.GetYaxis().SetRangeUser(2-ratio_range, ratio_range)
+    dummyB.Draw("HIST")
+    dummyL.Draw("SAME")
+    h_ratio.Draw("SAME HIST")
+    h_ratio_dw.Draw("SAME HIST")
+    ROOT.gPad.SetTickx()
+    ROOT.gPad.SetTicky()
+    ROOT.gPad.RedrawAxis()
+
+    canvas.SaveAs(f"{outDir}/{histName}_{systName}_envelope{suffix}.png")
+    canvas.SaveAs(f"{outDir}/{histName}_{systName}_envelope{suffix}.pdf")
+    canvas.Close()

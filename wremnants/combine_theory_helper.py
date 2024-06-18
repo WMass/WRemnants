@@ -9,7 +9,7 @@ logger = logging.child_logger(__name__)
 
 class TheoryHelper(object):
     valid_np_models = ["Lambda", "Omega", "Delta_Lambda", "Delta_Omega", "binned_Omega", "none"]
-    def __init__(self, card_tool, hasNonsigSamples=False):
+    def __init__(self, card_tool, args, hasNonsigSamples=False):
         toCheck = ['signal_samples', 'signal_samples_inctau', 'single_v_samples']
         if hasNonsigSamples:
             toCheck.extend(['single_v_nonsig_samples', 'wtau_samples'])
@@ -25,10 +25,11 @@ class TheoryHelper(object):
         self.resumUnc = None
         self.np_model = "Delta_Lambda"
         self.pdf_from_corr = False
-        self.scale_pdf_unc = 1.
+        self.scale_pdf_unc = -1.
         self.mirror_tnp = True
         self.minnlo_unc = 'byHelicityPt'
         self.skipFromSignal = False
+        self.args = args
 
     def sample_label(self, sample_group):
         if sample_group not in self.card_tool.procGroups:
@@ -46,7 +47,7 @@ class TheoryHelper(object):
             as_from_corr=True,
             pdf_from_corr=False,
             pdf_operation=None,
-            scale_pdf_unc=1.,
+            scale_pdf_unc=-1.,
             minnlo_unc='byHelicityPt'):
 
         self.set_resum_unc_type(resumUnc)
@@ -142,13 +143,25 @@ class TheoryHelper(object):
                 if self.card_tool.procGroups.get(sample_group, None):
                     # two sets of nuisances, one binned in ~10% quantiles, and one inclusive in pt
                     # to avoid underestimating the correlated part of the uncertainty
-                    self.add_minnlo_scale_uncertainty(sample_group, extra_name = "fine", rebin_pt=common.ptV_binning[::2], helicities_to_exclude=helicities_to_exclude)
-                    self.add_minnlo_scale_uncertainty(sample_group, extra_name = "inclusive", rebin_pt=[common.ptV_binning[0], common.ptV_binning[-1]], helicities_to_exclude=helicities_to_exclude)
+                    # (but scale it down to avoid double counting)
+                    if self.args.muRmuFPolVar:
+                        # TODO avoid hardcoding this, which corresponds to the number of nodes
+                        # in the chebychev polynomials (number of degrees + 1)
+                        nptfine = 6
+                    else:
+                        fine_pt_binning = common.ptV_binning[::2]
+                        nptfine = len(fine_pt_binning) - 1
+
+                        self.add_minnlo_scale_uncertainty(sample_group, extra_name = "fine", rebin_pt=fine_pt_binning, helicities_to_exclude=helicities_to_exclude)
+
+
+                    scale_inclusive = 1./np.sqrt(1. + 1./nptfine)
+                    self.add_minnlo_scale_uncertainty(sample_group, extra_name = "inclusive", rebin_pt=[common.ptV_binning[0], common.ptV_binning[-1]], helicities_to_exclude=helicities_to_exclude, scale = scale_inclusive)
 
             # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
             self.add_helicity_shower_kt_uncertainty()
 
-    def add_minnlo_scale_uncertainty(self, sample_group, extra_name="", use_hel_hist=True, rebin_pt=None, helicities_to_exclude=None, pt_min = None):
+    def add_minnlo_scale_uncertainty(self, sample_group, extra_name="", use_hel_hist=True, rebin_pt=None, helicities_to_exclude=None, pt_min = None, scale = 1.0):
         if not sample_group or sample_group not in self.card_tool.procGroups:
             logger.warning(f"Skipping QCD scale syst '{self.minnlo_unc}' for group '{sample_group}.' No process to apply it to")
             return
@@ -244,6 +257,7 @@ class TheoryHelper(object):
                 baseName=base_name+"_",
                 formatWithValue=format_with_values,
                 passToFakes=self.propagate_to_fakes,
+                scale = scale,
                 rename=base_name, # Needed to allow it to be called multiple times
             )
 
@@ -419,7 +433,7 @@ class TheoryHelper(object):
             preOp=lambda h: h[{self.syst_ax : var_vals}],
             outNames=var_names,
             group="resumNonpert",
-            splitGroup={"resum": ".*", "theory": ".*"},
+            splitGroup={"resum": ".*", "pTModeling" : ".*", "theory": ".*"},
             rename="scetlibNP",
         )
 
@@ -437,7 +451,7 @@ class TheoryHelper(object):
         card_tool.addSystematic(name=theory_hist,
             processes=self.samples,
             group="resumScale",
-            splitGroup={"resum": ".*", "theory": ".*"},
+            splitGroup={"resum": ".*", "pTModeling" : ".*", "theory": ".*"},
             passToFakes=to_fakes,
             skipEntries=[{syst_ax : x} for x in both_exclude+tnp_nuisances],
             systAxes=["downUpVar"], # Is added by the preOpMap
@@ -450,7 +464,7 @@ class TheoryHelper(object):
         card_tool.addSystematic(name=theory_hist,
             processes=self.samples,
             group="resumScale",
-            splitGroup={"resum": ".*", "theory": ".*"},
+            splitGroup={"resum": ".*", "pTModeling" : ".*", "theory": ".*"},
             passToFakes=to_fakes,
             systAxes=["vars"],
             preOpMap={s : lambda h: h[{"vars" : ["kappaFO0.5-kappaf2.", "kappaFO2.-kappaf0.5", "mufdown", "mufup",]}] for s in expanded_samples},
@@ -501,7 +515,7 @@ class TheoryHelper(object):
                 self.card_tool.addSystematic(name=self.np_hist_name,
                     processes=[sample_group],
                     group="resumNonpert",
-                    splitGroup={"resum": ".*", "theory": ".*"},
+                    splitGroup={"resum": ".*", "pTModeling" : ".*", "theory": ".*"},
                     systAxes=syst_axes,
                     passToFakes=self.propagate_to_fakes,
                     preOp=operation,
@@ -512,11 +526,11 @@ class TheoryHelper(object):
                     rename=rename,
                 )
 
-    def add_pdf_uncertainty(self, operation=None, scale=1):
+    def add_pdf_uncertainty(self, operation=None, scale=-1.):
         pdf = input_tools.args_from_metadata(self.card_tool, "pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
-        scale = scale if scale != 1.0 else pdfInfo["inflationFactor"]
+        scale = scale if scale != -1. else pdfInfo["inflationFactor"]
         pdf_hist = pdfName
         pdf_corr_hist = f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr" 
         symmetrize = "quadratic"

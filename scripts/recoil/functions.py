@@ -10,6 +10,8 @@ ROOT.gStyle.SetOptTitle(0)
 import narf
 import hist
 import numpy as np
+from wremnants.datasets import datagroups
+from utilities import boostHistHelpers as hh
 
 
 def loadJSON(jsIn):
@@ -75,7 +77,7 @@ def parseProc(groups, histCfg, procName, syst="", rebin=1):
     print("Get histogram %s, yield=%d" % (label, rhist.Integral()))
     return rhist
 
-def rebin(h, newbins, binWidth=True):
+def rebin(h, newbins, binWidth=False):
     if isinstance(newbins, int):
         h.Rebin(newbins)
         if binWidth: h.Scale(1, "width")
@@ -93,12 +95,15 @@ def drange(x, y, jump):
         #x += decimal.Decimal(jump)
         x += jump
 
-def readBoostHist(groups, hName, procs, charge="combined", boost=False, integrateAxes=[], abcd=True):
+def readBoostHist(groups, hName, procs, charge="combined", boost=False, integrateAxes=[], abcd=True, rebin=None, applySelection=True):
 
     if abcd:
         groups.set_histselectors(procs, hName, mode="simple", smoothen=False, simultaneousABCD=False, integrate_x=False if "mt" in hName else True)
-    groups.loadHistsForDatagroups(hName, syst="", procsToRead=procs)
+    groups.loadHistsForDatagroups(hName, syst="", procsToRead=procs, applySelection=applySelection)
     bhist = sum([groups.groups[p].hists[hName] for p in procs])
+
+    if rebin !=None:
+        bhist = hh.rebinHist(bhist, rebin['axName'], rebin['edges'])
 
     s = hist.tag.Slicer()
     axes = [ax.name for ax in bhist.axes]
@@ -148,5 +153,5 @@ def get_meta(groups):
     analysis = "lowPU" if "lowpu" in groups.mode else "highPU"
     flavor = groups.flavor
     if flavor == None:
-        flavor = "mu" if groups.mode=="wmass" else "mumu"
+        flavor = "mu" if groups.mode=="w_mass" else "mumu"
     return met, analysis, flavor

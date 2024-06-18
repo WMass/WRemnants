@@ -56,6 +56,37 @@ class TheoryAgnosticHelper(object):
                                        #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
                                        )
 
+    def add_muRmuF_polVar_uncertainty(self):
+        coeffs = [f"A{i}" for i in range(8)]
+        signalGroupName = "muRmuFPolVarW" if self.label == "W" else "muRmuFPolVarZ"
+        nonSignalGroupName = "muRmuFPolVarZ" if self.label == "W" else "muRmuFPolVarW"
+        for coeffKey in coeffs:
+            self.card_tool.addSystematic(f"{signalGroupName}_{coeffKey}",
+                                   group=signalGroupName,
+                                   mirror=False,
+                                   passToFakes=self.passSystToFakes,
+                                   processes=["signal_samples_inctau_noOutAcc" if self.separateOutOfAccSignal else "signal_samples_inctau"],
+                                   baseName=f"{signalGroupName}_{coeffKey}_",
+                                   noConstraint=False,
+                                   systAxes=["nPolVarSyst", "downUpVar"], 
+                                   labelsByAxis=["v", "downUpVar"],
+                                   #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
+                                   )
+        
+        for coeffKey in coeffs:
+            self.card_tool.addSystematic(f"{nonSignalGroupName}_{coeffKey}",
+                                   group=nonSignalGroupName,
+                                   mirror=False,
+                                   passToFakes=self.passSystToFakes,
+                                   processes=["nonsignal_samples_inctau_noOutAcc" if self.separateOutOfAccSignal else "nonsignal_samples_inctau"],
+                                   baseName=f"{nonSignalGroupName}_{coeffKey}_",
+                                   noConstraint=False,
+                                   systAxes=["nPolVarSyst", "downUpVar"], 
+                                   labelsByAxis=["v", "downUpVar"],
+                                   #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
+                                   )
+        
+
     def add_theoryAgnostic_normVar_uncertainty(self, flow=True):
 
         common_noi_args = dict(
@@ -166,5 +197,7 @@ class TheoryAgnosticHelper(object):
     def add_theoryAgnostic_uncertainty(self):
         if self.args.analysisMode == "theoryAgnosticPolVar":
             self.add_theoryAgnostic_polVar_uncertainty()
+        elif self.args.muRmuFPolVar == True:
+            self.add_muRmuF_polVar_uncertainty()
         else:
             self.add_theoryAgnostic_normVar_uncertainty()

@@ -48,7 +48,7 @@ Vec_d compute_recoil_from_met(const double met_pt, const double met_phi, const V
     double Uperp = - (- pUx*sin(v_phi) + pUy*cos(v_phi));
 
     Vec_d res(2, 0);
-    res[0] = Upara + v_pt;
+    res[0] = Upara;
     res[1] = Uperp;
 
     return res;
@@ -63,18 +63,12 @@ Vec_d compute_recoil_from_met(const double met_pt, const double met_phi, const d
     double Uperp = - (- pUx*sin(v_phi) + pUy*cos(v_phi));
 
     Vec_d res(2, 0);
-    res[0] = Upara + v_pt;
+    res[0] = Upara;
     res[1] = Uperp;
 
     return res;
 }
 
-double recoil_from_met_and_lepton(const double met_pt, const double met_phi, const double lep_pt, const double lep_phi) {
-
-    double pUx = met_pt*cos(met_phi) + lep_pt*cos(lep_phi);
-    double pUy = met_pt*sin(met_phi) + lep_pt*sin(lep_phi);
-    return std::hypot(pUx, pUy);
-}
 
 Vec_d met_lepton_correction(const double met_pt, const double met_phi, const Vec_d lep_pt_uncorr, const Vec_d lep_phi_uncorr, const Vec_d lep_pt_corr, const Vec_d lep_phi_corr) {
 
@@ -119,26 +113,15 @@ Vec_d met_lepton_correction(const double met_pt, const double met_phi, const dou
 }
 
 
-Vec_d compute_met_from_recoil_(const double rec_para, const double rec_perp, const double v_phi) {
 
-    Vec_d res(2, 0);
-    double lMX = - rec_para*cos(v_phi) + rec_perp*sin(v_phi);
-    double lMY = - rec_para*sin(v_phi) - rec_perp*cos(v_phi);
-
-    res[0] = std::hypot(rec_para, rec_perp);
-    res[1] = std::atan2(lMY, lMX);
-
-    return res;
-}
 
 Vec_d compute_met_from_recoil(const double rec_para, const double rec_perp, const Vec_d lep_pt, const Vec_d lep_phi, const double v_pt, const double v_phi) {
 
     Vec_d res(2, 0);
-    double rec_para_ = rec_para - v_pt;
-    double lMX = - (rec_para_*cos(v_phi) - rec_perp*sin(v_phi) + lep_pt[0]*cos(lep_phi[0]) + lep_pt[1]*cos(lep_phi[1]));
-    double lMY = - (rec_para_*sin(v_phi) + rec_perp*cos(v_phi) + lep_pt[0]*sin(lep_phi[0]) + lep_pt[1]*sin(lep_phi[1]));
+    double lMX = - (rec_para*cos(v_phi) - rec_perp*sin(v_phi) + lep_pt[0]*cos(lep_phi[0]) + lep_pt[1]*cos(lep_phi[1]));
+    double lMY = - (rec_para*sin(v_phi) + rec_perp*cos(v_phi) + lep_pt[0]*sin(lep_phi[0]) + lep_pt[1]*sin(lep_phi[1]));
 
-    res[0] = std::hypot(lMY, lMX); // == rec_para_, rec_perp ??
+    res[0] = std::hypot(lMY, lMX);
     res[1] = std::atan2(lMY, lMX);
 
     return res;
@@ -186,9 +169,8 @@ Vec_d recoilComponentsGen(double MET_pt, double MET_phi, double lep_pt, double l
 Vec_d compute_met_from_recoil(const double rec_para, const double rec_perp, const double lep_pt, const double lep_phi, const double v_pt, const double v_phi) {
 
     Vec_d res(2, 0);
-    double rec_para_ = rec_para - v_pt;
-    double lMX = - (rec_para_*cos(v_phi) - rec_perp*sin(v_phi) + lep_pt*cos(lep_phi));
-    double lMY = - (rec_para_*sin(v_phi) + rec_perp*cos(v_phi) + lep_pt*sin(lep_phi));
+    double lMX = - (rec_para*cos(v_phi) - rec_perp*sin(v_phi) + lep_pt*cos(lep_phi));
+    double lMY = - (rec_para*sin(v_phi) + rec_perp*cos(v_phi) + lep_pt*sin(lep_phi));
 
     res[0] = std::hypot(lMX, lMY);
     res[1] = std::atan2(lMY, lMX);

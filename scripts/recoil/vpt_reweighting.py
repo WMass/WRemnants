@@ -21,12 +21,11 @@ if __name__ == "__main__":
     groups = datagroups.Datagroups(args.input)
     met, analysis, flavor = functions.get_meta(groups)
     fOut = f"wremnants-data/data/recoil/{analysis}_{met}/vptrw_{args.mode}_{flavor}.json"
-
+    print(flavor)
     ####################################################################
     if analysis == "lowPU":
         
         if args.mode == "mc_data":
-            groups = datagroups.Datagroups(f"mz_lowPU_{flavor}_{met}.hdf5")
             h_source = functions.readBoostHist(groups, "v_pt", ['Zmumu' if flavor=='mumu' else 'Zee'])
             h_target =functions.readBoostHist(groups, "v_pt", ['Data'])
             h_bkgs = functions.readBoostHist(groups, "v_pt", ['Ztautau', 'Other'])
