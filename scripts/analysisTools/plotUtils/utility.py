@@ -1073,7 +1073,7 @@ def drawSingleTH1(h1,
     h1.GetYaxis().SetTickSize(0.01)
     if setXAxisRangeFromUser: h1.GetXaxis().SetRangeUser(xmin,xmax)
     h1.Draw("HIST")
-    h1err = h1.Clone("h1err")
+    h1err = copy.deepcopy(h1.Clone("h1err"))
     h1err.SetFillColor(ROOT.kGray)
     h1err.SetFillStyle(1001)  # 3001 is better than 3002 for pdf, while 3002 is perfect for png
     #h1err.SetFillStyle(3002)

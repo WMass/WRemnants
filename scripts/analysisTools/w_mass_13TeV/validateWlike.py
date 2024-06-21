@@ -53,16 +53,17 @@ if __name__ == "__main__":
     parser = common_plot_parser()
     parser.add_argument("inputfile", type=str, nargs=1, help="Input file with histograms (pkl.lz4 or hdf5 file)")
     parser.add_argument("outdir",   type=str, nargs=1, help="Output folder")
-    parser.add_argument("-n", "--baseName", type=str, help="Histogram name in the file (it depends on what study you run)", default="nominal_muonsonly")
+    parser.add_argument("-n", "--baseName", type=str, help="Histogram name in the file (it depends on what study you run)", default="nominal_bothMuons")
     parser.add_argument('-p','--processes', default=None, nargs='*', type=str,
                         help='Choose what processes to plot, otherwise all are done')
     #parser.add_argument("--mtRange", type=float, nargs=2, default=[0,40], choices=[-1.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 120.], help="Apply mT cut, if upper edge is negative integrate the overflow")
     parser.add_argument("-c", "--charges", type=int, default=[-1, 1], nargs='+', choices=[-1, 1], help="Charge selection for chosen muon")
     parser.add_argument("--rr", "--ratio-range", dest="ratioRange", default=(0.95,1.05), type=float, nargs=2, help="Range for ratio plot")
-    parser.add_argument('--plotNonTrig', action='store_true', help='Plot non triggering muon (with the veto selection), otherwise plot triggering muon')
+    parser.add_argument('--plotNonTrig', action='store_true', help='Plot non triggering muon, otherwise plot triggering muon')
     parser.add_argument('--passMT', action='store_true', help='Make plots with mt cut')
     parser.add_argument('--scaleProc', default=None, nargs='*', type=str,
                         help='Apply scaling factor to process by name, with syntax proc=scale=charge (=charge can be omitted, if given it must be plus or minus). Can specify multiple times')
+    parser.add_argument("--rebinEta", type=int, default=-1, help="Rebin eta by this factor")
     args = parser.parse_args()
 
     logger = logging.setup_logger(os.path.basename(__file__), args.verbose)
@@ -137,12 +138,16 @@ if __name__ == "__main__":
                          "eta" : s[::hist.sum],
                          "passMT" : True if args.passMT else s[::hist.sum]
                          }]
+                if args.rebinEta > 0:
+                    h = h[{"etaNonTrig" : s[::hist.rebin(args.rebinEta)]}]
             else:
                 h = hin[{"charge": s[chargeBin],
                          "ptNonTrig" : s[::hist.sum],
                          "etaNonTrig" : s[::hist.sum],
                          "passMT" : True if args.passMT else s[::hist.sum]
                          }]
+                if args.rebinEta > 0:
+                    h = h[{"eta" : s[::hist.rebin(args.rebinEta)]}]
 
             ###
             logger.debug(h.axes)
