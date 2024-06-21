@@ -166,14 +166,15 @@ if __name__ == "__main__":
     tree = safeGetObject(infile, "fitresults", detach=False)
     tree.GetEntry(0)
     postfit_2deltaLL = 2.0 * (tree.nllvalfull - tree.satnllvalfull)
-    postfit_chi2prob = scipy.stats.chi2.sf(postfit_2deltaLL, nbins)
+    ndof = nbins - tree.nois_ndof
+    postfit_chi2prob = scipy.stats.chi2.sf(postfit_2deltaLL, ndof)
     logger.warning(f"-loglikelihood_{{full}} = {tree.nllvalfull}")
     logger.warning(f"-loglikelihood_{{saturated}} = {tree.satnllvalfull}")
     logger.warning(f"2*(nllfull-nllsat) = {postfit_2deltaLL}")
     logger.warning(f"nbins = {nbins}")
     logger.warning(f"chi2 probability = {postfit_chi2prob}")
     #
-    textForUnrolled = f"2 * (nllfull - nllsat) = {round(postfit_2deltaLL,1)}     nbins(+/-) = {nbins}     #chi^{{2}} prob = {round(100.0*postfit_chi2prob,1)}%::0.3,0.96,0.08,0.04"
+    textForUnrolled = f"2 * (nllfull - nllsat) = {round(postfit_2deltaLL,1)}     ndof(+/-) = {ndof}     #chi^{{2}} prob = {round(100.0*postfit_chi2prob,1)}%::0.3,0.96,0.08,0.04"
 
     shifts = chargeUnrolledBinShifts(h1d, nCharges, nMaskedChanPerCharge)
     # get process names:
@@ -529,7 +530,10 @@ if __name__ == "__main__":
             ratioYlabel = "data/pred::" + (f"{args.ratioRangePrefit[0]},{args.ratioRangePrefit[1]}" if prepost == "prefit" or args.unrolledRatioRangeAsPrefit else f"{args.ratioRangePostfit[0]},{args.ratioRangePostfit[1]}")
 
             pp = prepost.capitalize()
-            fullTextForUnrolled = f"#bf{{{pp}}}:     {textForUnrolled}"
+            if prepost == "postfit":
+                fullTextForUnrolled = f"#bf{{{pp}}}:     {textForUnrolled}"
+            else:
+                fullTextForUnrolled = f"#bf{{{pp}}}"
             logger.info(fullTextForUnrolled)
             
             cnameUnroll = f"unrolled_{chfl}{suffix}"

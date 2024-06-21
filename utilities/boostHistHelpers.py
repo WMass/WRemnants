@@ -359,7 +359,7 @@ def rebinHistMultiAx(h, axes, edges=[], lows=[], highs=[]):
             upper = hist.overflow if high==h.axes[ax].edges[-1] else complex(0, high) 
             logger.info(f"Restricting the axis '{ax}' to range [{low}, {high}]")
             sel[ax] = slice(complex(0, low), upper, hist.rebin(rebin) if rebin else None)
-        elif type(rebin) == int:
+        elif type(rebin) == int and rebin > 1:
             logger.info(f"Rebinning the axis '{ax}' by [{rebin}]")
             sel[ax] = slice(None,None,hist.rebin(rebin))
     return h[sel] if len(sel)>0 else h        

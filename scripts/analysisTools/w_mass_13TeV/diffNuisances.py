@@ -72,6 +72,8 @@ def sortParameters(params):
         params = sorted(params, key = lambda x: (sortByCharge(x), 8, utilities.getNFromString(x,chooseIndex=0)) if "_UL_" in x else (sortByCharge(x), utilities.getNFromString(x,chooseIndex=0), utilities.getNFromString(x,chooseIndex=1)))
     elif any(re.match('.*ZmuonVeto.*',x) for x in params):
         params = sorted(params, key= lambda x: utilities.getNFromString(x), reverse=False)
+    elif any(re.match('.*FakeRate.*',x) for x in params):
+        params = sorted(params, key = lambda x: (utilities.getNFromString(x,chooseIndex=1), utilities.getNFromString(x,chooseIndex=0), utilities.getNFromString(x,chooseIndex=2)))
     return params
 
 if __name__ == "__main__":
