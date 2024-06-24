@@ -559,33 +559,33 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, xnorm=False):
                         ) for g in cardTool.procGroups[signal_samples_forMass[0]] for m in cardTool.datagroups.groups[g].members},
                 )
 
-    # if cardTool.getFakeName() != "QCD" and cardTool.getFakeName() in datagroups.groups.keys() and not xnorm and (not args.binnedFakeEstimation or (args.fakeEstimation in ["extrapolate"] and "mt" in fitvar)):
-    #     syst_axes = ["eta", "charge"] if (not args.binnedFakeEstimation or args.fakeEstimation not in ["extrapolate"]) else ["eta", "pt", "charge"]
-    #     info=dict(
-    #         name=inputBaseName,
-    #         group="Fake",
-    #         processes=cardTool.getFakeName(),
-    #         noConstraint=False,
-    #         mirror=False,
-    #         scale=1,
-    #         applySelection=False, # don't apply selection, all regions will be needed for the action
-    #         action=cardTool.datagroups.groups[cardTool.getFakeName()].histselector.get_hist,
-    #         systAxes=[f"_{x}" for x in syst_axes if x in args.fakerateAxes]+["_param", "downUpVar"])
-    #     subgroup = f"{cardTool.getFakeName()}Rate"
-    #     cardTool.addSystematic(**info,
-    #         rename=subgroup,
-    #         splitGroup = {subgroup: f".*", "experiment": ".*"},
-    #         systNamePrepend=subgroup,
-    #         actionArgs=dict(variations_frf=True),
-    #     )
-    #     if args.fakeEstimation in ["extended2D",]:
-    #         subgroup = f"{cardTool.getFakeName()}Shape"
-    #         cardTool.addSystematic(**info,
-    #             rename=subgroup,
-    #             splitGroup = {subgroup: f".*", "experiment": ".*"},
-    #             systNamePrepend=subgroup,
-    #             actionArgs=dict(variations_scf=True),
-    #         )
+    if cardTool.getFakeName() != "QCD" and cardTool.getFakeName() in datagroups.groups.keys() and not xnorm and (not args.binnedFakeEstimation or (args.fakeEstimation in ["extrapolate"] and "mt" in fitvar)):
+        syst_axes = ["eta", "charge"] if (not args.binnedFakeEstimation or args.fakeEstimation not in ["extrapolate"]) else ["eta", "pt", "charge"]
+        info=dict(
+            name=inputBaseName,
+            group="Fake",
+            processes=cardTool.getFakeName(),
+            noConstraint=False,
+            mirror=False,
+            scale=1,
+            applySelection=False, # don't apply selection, all regions will be needed for the action
+            action=cardTool.datagroups.groups[cardTool.getFakeName()].histselector.get_hist,
+            systAxes=[f"_{x}" for x in syst_axes if x in args.fakerateAxes]+["_param", "downUpVar"])
+        subgroup = f"{cardTool.getFakeName()}Rate"
+        cardTool.addSystematic(**info,
+            rename=subgroup,
+            splitGroup = {subgroup: f".*", "experiment": ".*"},
+            systNamePrepend=subgroup,
+            actionArgs=dict(variations_frf=True),
+        )
+        if args.fakeEstimation in ["extended2D",]:
+            subgroup = f"{cardTool.getFakeName()}Shape"
+            cardTool.addSystematic(**info,
+                rename=subgroup,
+                splitGroup = {subgroup: f".*", "experiment": ".*"},
+                systNamePrepend=subgroup,
+                actionArgs=dict(variations_scf=True),
+            )
 
     # this appears within doStatOnly because technically these nuisances should be part of it
     if isPoiAsNoi:
@@ -652,6 +652,10 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, xnorm=False):
                                              )
         muRmuFPolVar_helper.add_theoryAgnostic_uncertainty()
 
+    if args.doStatOnly:
+        # print a card with only mass weights
+        logger.info("Using option --doStatOnly: the card was created with only mass nuisance parameter")
+        return cardTool
 
     if wmass and not xnorm:
         cardTool.addSystematic(f"massWeightZ",
@@ -696,21 +700,18 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, xnorm=False):
                                 passToFakes=passSystToFakes,
         )
 
-    if args.doStatOnly:
-        # print a card with only mass weights
-        logger.info("Using option --doStatOnly: the card was created with only mass nuisance parameter")
-        return cardTool
 
-    # cardTool.addSystematic(f"sin2thetaWeightZ",
-    #                         rename=f"Sin2thetaZ0p00003",
-    #                         processes= ['z_samples'],
-    #                         action=lambda h: h[{"sin2theta" : ['sin2thetaZ0p23151', 'sin2thetaZ0p23157']}],
-    #                         group=f"sin2thetaZ",
-    #                         mirror=False,
-    #                         systAxes=["sin2theta"],
-    #                         outNames=[f"sin2thetaZDown", f"sin2thetaZUp"],
-    #                         passToFakes=passSystToFakes,
-    # )
+
+    cardTool.addSystematic(f"sin2thetaWeightZ",
+                            rename=f"Sin2thetaZ0p00003",
+                            processes= ['z_samples'],
+                            action=lambda h: h[{"sin2theta" : ['sin2thetaZ0p23151', 'sin2thetaZ0p23157']}],
+                            group=f"sin2thetaZ",
+                            mirror=False,
+                            systAxes=["sin2theta"],
+                            outNames=[f"sin2thetaZDown", f"sin2thetaZUp"],
+                            passToFakes=passSystToFakes,
+    )
 
     combine_helpers.add_electroweak_uncertainty(cardTool, [*args.ewUnc, *args.fsrUnc, *args.isrUnc],
         samples="single_v_samples", flavor=datagroups.flavor, passSystToFakes=passSystToFakes)
