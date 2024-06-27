@@ -8,7 +8,7 @@ parser,initargs = common.common_parser(analysis_label)
 
 import narf
 import wremnants
-from wremnants import theory_tools,syst_tools,theory_corrections,unfolding_tools
+from wremnants import theory_tools,syst_tools,theory_corrections,unfolding_tools,theoryAgnostic_tools
 from wremnants.datasets.dataset_tools import getDatasets
 import hist
 import math
@@ -26,12 +26,16 @@ parser.add_argument("--fiducial", choices=["masswindow", "dilepton", "singlelep"
 parser.add_argument("--auxiliaryHistograms", action="store_true", help="Safe auxiliary histograms (mainly for ew analysis)")
 parser.add_argument("--ptqVgen", action='store_true', help="To store qt by Q variable instead of ptVgen, GEN only ", default=None)
 parser.add_argument("--helicity", action='store_true', help="Make qcdScaleByHelicity hist")
+parser.add_argument("--theoryCorrections", action='store_true', help="Apply default theory corrections")
 
 parser = common.set_parser_default(parser, "filterProcs", common.vprocs)
-parser = common.set_parser_default(parser, "theoryCorr", [])
-parser = common.set_parser_default(parser, "ewTheoryCorr", [])
-
 args = parser.parse_args()
+
+if not args.theoryCorrections:
+    parser = common.set_parser_default(parser, "theoryCorr", [])
+    parser = common.set_parser_default(parser, "ewTheoryCorr", [])
+
+
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -281,20 +285,21 @@ def build_graph(df, dataset):
     if 'powheg' in dataset.name:
         return results, weightsum
 
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
-    results.append(nominal_gen)
-
     if 'horace' not in dataset.name and 'winhac' not in dataset.name and \
             "LHEScaleWeight" in df.GetColumnNames() and "LHEPdfWeight" in df.GetColumnNames() and "MEParamWeight" in df.GetColumnNames():
 
         qcdScaleByHelicity_helper = wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like = dataset.name[0] != "W") if args.helicity else None
 
-        df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen")
+        df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen",propagateToHelicity= args.propagatePDFstoHelicity)
+    
+    nominal_cols = [col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen"]
+    nominal_axes = [axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen]
+    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
+    results.append(nominal_gen)
 
     return results, weightsum
 
 resultdict = narf.build_and_run(datasets, build_graph)
-output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args)
 
 logger.info("computing angular coefficients")
 z_moments = None
@@ -302,6 +307,31 @@ w_moments = None
 
 z_moments_lhe = None
 w_moments_lhe = None
+for dataset in datasets:
+        name = dataset.name
+
+        if not (name=="WminusmunuPostVFP" or name=="WplusmunuPostVFP"): continue
+
+        if not "nominal_gen_helicity_moments" in resultdict[name]["output"]:
+            
+            logger.warning(f"Failed to find nominal_gen_helicity_moments hist for proc {name}. Skipping!")
+            continue
+        if not "nominal_gen_helicity_moments_yieldsTheoryAgnostic" in resultdict[name]["output"]:
+
+            logger.warning(f"Failed to find nominal_gen_helicity_moments_yieldsTheoryAgnostic hist for proc {name}. Skipping!")
+            continue
+
+        moments_nominal = resultdict[name]["output"]["nominal_gen_helicity_moments"].get()
+        helicities_nominal =  theory_tools.moments_to_helicities(moments_nominal)
+    
+        moments_thag = resultdict[name]["output"]["nominal_gen_helicity_moments_yieldsTheoryAgnostic"].get()
+        helicities_thag =  theory_tools.moments_to_helicities(moments_thag).project('ptVgen','absYVgen','helicity','chargeVgen','ptVgenSig','absYVgenSig','helicitySig')
+
+        resultdict[name]["output"]["nominal_gen_helicity"] = narf.ioutils.H5PickleProxy(helicities_nominal)
+        resultdict[name]["output"]["nominal_gen_helicity_yieldsTheoryAgnostic"] = narf.ioutils.H5PickleProxy(helicities_thag)
+
+
+output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args)
 
 if not args.skipAngularCoeffs:
     for dataset in datasets:
@@ -319,8 +349,7 @@ if not args.skipAngularCoeffs:
                 new_moments = moments
                 new_moments_lhe = moments_lhe
                 z_moments = hh.addHists(z_moments, new_moments, createNew=False)
-                z_moments_lhe = hh.addHists(z_moments_lhe, new_moments_lhe, createNew=False)
-        elif name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]:
+        elif name in ["WminusmunuPostVFP","WplusmunuPostVFP"]:
             if w_moments is None:
                 w_moments = moments
                 w_moments_lhe = moments_lhe
@@ -345,3 +374,4 @@ if not args.skipAngularCoeffs:
             outfname += "_theoryAgnosticBinning"
         outfname += ".hdf5"
         output_tools.write_analysis_output(moments_out, outfname, args)
+

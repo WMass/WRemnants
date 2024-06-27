@@ -115,7 +115,7 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
   constexpr size_t NHELICITY = 9;
   using helicity_tensor = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY>> ;
 
-  helicity_tensor csAngularFactors(const CSVars &csvars)
+  helicity_tensor csAngularFactors(const CSVars &csvars, double original_weight = 1.0)
   {
     const double sinThetaCS = csvars.sintheta;
     const double cosThetaCS = csvars.costheta;
@@ -136,10 +136,10 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
     angular(6) = sinThetaCS * sinThetaCS * sin2PhiCS;
     angular(7) = sin2ThetaCS * sinPhiCS;
     angular(8) = sinThetaCS * sinPhiCS;
-    return angular;
+    return original_weight*angular;
   }
 
-  helicity_tensor csAngularMoments(const CSVars &csvars) {
+  helicity_tensor csAngularMoments(const CSVars &csvars, double original_weight = 1.0) {
     const helicity_tensor &angular = csAngularFactors(csvars);
 
     // using definition from arxiv:1606.00689 Eq. 1 and 5 to align with ATLAS
@@ -149,7 +149,7 @@ Eigen::TensorFixedSize<int, Eigen::Sizes<2>> prefsrLeptons(const ROOT::VecOps::R
     helicity_tensor offsets;
     offsets.setValues({ 1., 2./3., 0., 0., 0., 0., 0., 0., 0. });
 
-    const helicity_tensor moments = scales*angular + offsets;
+    const helicity_tensor moments = original_weight*(scales*angular + offsets);
 
     return moments;
   }
@@ -181,6 +181,8 @@ scale_tensor_t makeScaleTensor(const Vec_f &scale_weights, double thres) {
 }
 
 using helicity_scale_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY, 3, 3>>;
+using helicity_tensor_t = Eigen::TensorFixedSize<double,Eigen::Sizes<NHELICITY>>;
+using helicity_helicity_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHELICITY, NHELICITY>>;
 
   helicity_scale_tensor_t makeHelicityMomentScaleTensor(const CSVars &csvars, const scale_tensor_t &scale_tensor, double original_weight = 1.0)
   {
@@ -196,6 +198,30 @@ using helicity_scale_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NHEL
     Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1, 1>> moments = csAngularMoments(csvars).reshape(broadcasthelicities);
 
     return original_weight * scale_tensor.reshape(reshapescale).broadcast(broadcasthelicities) * moments.broadcast(broadcastscales);
+  }
+
+  helicity_helicity_tensor_t makeHelicityMomentHelicityTensor(const CSVars &csvars, const helicity_tensor_t &hel_tensor, double original_weight = 1.0)
+  {
+
+    constexpr Eigen::Index nhelicity = NHELICITY;
+
+    constexpr std::array<Eigen::Index, 2> broadcasthels = {nhelicity,1};
+    constexpr std::array<Eigen::Index, 2> broadcasthelicities = {1, nhelicity};
+    constexpr std::array<Eigen::Index, 2> reshapehelicities = {1, nhelicity};
+
+    Eigen::TensorFixedSize<double, Eigen::Sizes<nhelicity, 1>> moments = csAngularMoments(csvars).reshape(broadcasthels);
+    helicity_helicity_tensor_t hel_hel_tensor = original_weight * hel_tensor.reshape(reshapehelicities).broadcast(broadcasthels) * moments.broadcast(broadcasthelicities);
+
+    // Set all off-diagonal elements to 1
+    for (int i = 0; i < NHELICITY; ++i) {
+        for (int j = 0; j < NHELICITY; ++j) {
+            if (i != j) {
+                hel_hel_tensor(i, j) = 0.0;
+            }
+        }
+    }
+    // std::cout<< hel_hel_tensor << std::endl;
+    return hel_hel_tensor;
   }
 
   template <Eigen::Index Npdfs>

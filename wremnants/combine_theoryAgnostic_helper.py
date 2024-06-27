@@ -87,6 +87,33 @@ class TheoryAgnosticHelper(object):
                                    )
         
 
+    def apply_theoryAgnostic_normVar_uncertainty(self, sign, scale_hists):
+        
+        def apply_transformations(h, scale_hist):
+            sum2nom = {ax: hist.tag.Slicer()[::hist.sum] for ax in self.poi_axes}
+            nom_hist = h[sum2nom]
+            
+            scaled_hist = hh.multiplyHists(h, scale_hist-1, flow=True)
+            summed_hist = hh.addHists(nom_hist, scaled_hist)
+
+            return summed_hist
+    
+        def slice_histogram(h):
+            transformed_hists = {ax: hist.tag.Slicer()[::hist.sum] for ax in self.poi_axes}
+            return h[transformed_hists]
+
+        result = {}
+        
+        for g in self.card_tool.procGroups["signal_samples"]:
+            for m in self.card_tool.datagroups.groups[g].members:
+                if sign in m.name:
+                    scale_hist = scale_hists[m.name]
+                    result[m.name] = lambda h, scale_hist=scale_hist: apply_transformations(h, scale_hist)
+                else:
+                    result[m.name] = lambda h: slice_histogram(h)
+        
+        return result
+    
     def add_theoryAgnostic_normVar_uncertainty(self, flow=True):
 
         common_noi_args = dict(
@@ -97,31 +124,27 @@ class TheoryAgnosticHelper(object):
         # open file with theory bands
         with h5py.File(f"{common.data_dir}/angularCoefficients/theoryband_variations.hdf5", "r") as ff:
             scale_hists = narf.ioutils.pickle_load_h5py(ff["theorybands"])
-            for tt in scale_hists:
-                scale_hists[tt].values()[...,1] = scale_hists[tt].values()[...,1]-np.ones_like(scale_hists[tt].values()[...,1])
-                scale_hists[tt].values()[...,0] = np.where(scale_hists[tt].values()[...,0]>0,scale_hists[tt].values()[...,0]*(-1.0),-np.ones_like(scale_hists[tt].values()[...,0])+scale_hists[tt].values()[...,0])
-
+                
         # First do in acceptance bins, then OOA later (for OOA we need to group bins into macro regions)
         nuisanceBaseName = f"norm{self.label}"
         for sign in ["plus", "minus"]:
             self.card_tool.addSystematic("yieldsTheoryAgnostic",
                                 rename=f"{nuisanceBaseName}{sign}",
                                 **common_noi_args,
-                                mirror=False,
-                                symmetrize = "quadratic",
-                                systAxes=self.poi_axes+["downUpVar"],
+                                mirror=True,
+                                symmetrize = None,
+                                systAxes=self.poi_axes,
                                 processes=["signal_samples"],
                                 baseName=f"{nuisanceBaseName}{sign}_",
                                 noConstraint=True if self.args.priorNormXsec < 0 else False,
                                 scale=1,
                                 formatWithValue=[None,None,"low",None],
                                 #customizeNuisanceAttributes={".*AngCoeff4" : {"scale" : 1, "shapeType": "shapeNoConstraint"}},
-                                labelsByAxis=["PtV", "YVBin", "Helicity","downUpVar"],
+                                labelsByAxis=["PtV", "YVBin", "Helicity"],
                                 systAxesFlow=[], # only bins in acceptance in this call
                                 skipEntries=[{"helicitySig" : [6,7,8]}], # removing last three indices out of 9 (0,1,...,7,8) corresponding to A5,6,7
-                                preOpMap={
-                                    m.name: (
-                                        lambda h, scale_hist=scale_hists[m.name]: hh.addHists(h[{ax: hist.tag.Slicer()[::hist.sum] for ax in self.poi_axes}], hh.multiplyHists(hh.addGenericAxis(h,common.down_up_axis, flow=flow), hh.rescaleBandVariation(scale_hist,self.args.theoryAgnosticBandSize),flow=flow))) if sign in m.name else (lambda h: h[{ax: hist.tag.Slicer()[::hist.sum] for ax in self.poi_axes}]) for g in self.card_tool.procGroups["signal_samples"] for m in self.card_tool.datagroups.groups[g].members},
+                                preOpMap=
+                                    self.apply_theoryAgnostic_normVar_uncertainty(sign, scale_hists),
                                 )
             # now OOA
             nuisanceBaseNameOOA = f"{nuisanceBaseName}OOA_"
@@ -193,7 +216,7 @@ class TheoryAgnosticHelper(object):
                                                 ) if sign in m.name else (lambda h: h[{ax: hist.tag.Slicer()[::hist.sum] for ax in self.poi_axes}]) for g in self.card_tool.procGroups["signal_samples"] for m in self.card_tool.datagroups.groups[g].members
                                 },
                                 )
-
+            
     def add_theoryAgnostic_uncertainty(self):
         if self.args.analysisMode == "theoryAgnosticPolVar":
             self.add_theoryAgnostic_polVar_uncertainty()

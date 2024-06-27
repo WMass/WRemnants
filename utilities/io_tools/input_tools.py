@@ -64,7 +64,7 @@ def load_and_scale(res_dict, proc, histname, calculate_lumi=False, scale=1., app
         if apply_xsec:
             scale = res_dict[proc]["dataset"]["xsec"]/res_dict[proc]["weight_sum"]*scale
         if calculate_lumi:
-            data_keys = [p for p in res_dict.keys() if "dataset" in res_dict[p] and res_dict[p]["dataset"]["is_data"]]
+            data_keys = [p for p in res_dict.keys() if "dataset" in res_dict[p] and "is_data" in res_dict[p]["dataset"] and res_dict[p]["dataset"]["is_data"]]
             lumi = sum([res_dict[p]["lumi"] for p in data_keys])*1000
             if not lumi:
                 logger.warning("Did not find a data hist! Skipping calculate_lumi option")

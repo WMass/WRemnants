@@ -75,38 +75,46 @@ def figure(href, xlabel, ylabel, ylim=None, xlim=None,
 def figureWithRatio(href, xlabel, ylabel, ylim, rlabel, rrange, xlim=None,
     grid_on_main_plot = False, grid_on_ratio_plot = False, plot_title = None, title_padding = 0,
     x_ticks_ndp = None, bin_density = 300, cms_label = None, logy=False, logx=False,
-    width_scale=1, automatic_scale=True
+    width_scale=1, automatic_scale=True, only_ratio=False
 ):
     fig, xlim = cfgFigure(href, xlim, bin_density, width_scale, automatic_scale)
     
-    ax1 = fig.add_subplot(4, 1, (1, 3)) 
+    if not only_ratio:
+        ax1 = fig.add_subplot(4, 1, (1, 3)) 
+        ax1.set_xlabel(" ")
+        ax1.set_ylabel(ylabel)
+        ax1.set_xlim(xlim)
+
+        if ylim:
+            ax1.set_ylim(ylim)
+        else:
+            ax1.autoscale(axis='y')
+
+        if logy:
+            ax1.set_yscale('log')
+        if grid_on_main_plot:  ax1.grid(which = "both")
+        if plot_title: ax1.set_title(plot_title, pad = title_padding)
+
     if cms_label: hep.cms.text(cms_label)
     ax2 = fig.add_subplot(4, 1, 4) 
 
     ax2.set_xlabel(xlabel)
-    ax1.set_xlabel(" ")
-    ax1.set_ylabel(ylabel)
-    ax1.set_xlim(xlim)
+    
     ax2.set_xlim(xlim)
     if x_ticks_ndp: ax2.xaxis.set_major_formatter(StrMethodFormatter('{x:.' + str(x_ticks_ndp) + 'f}'))
     ax2.set_ylabel(rlabel, fontsize=22)
     ax2.set_ylim(rrange)
 
-    if ylim:
-        ax1.set_ylim(ylim)
-    else:
-        ax1.autoscale(axis='y')
-
-    if logy:
-        ax1.set_yscale('log')
     if logx:
-        ax1.set_xscale('log')
+        if not only_ratio:
+            ax1.set_xscale('log')
         ax2.set_xscale('log')
 
-    if grid_on_main_plot:  ax1.grid(which = "both")
     if grid_on_ratio_plot: ax2.grid(which = "both")
-    if plot_title: ax1.set_title(plot_title, pad = title_padding)
-    return fig,ax1,ax2
+    if not only_ratio:
+        return fig,ax1,ax2
+    else:
+        return fig,ax2
 
 def addLegend(ax, ncols=2, extra_text=None, extra_text_loc=(0.8, 0.7), text_size=20, loc='upper right'):
     handles, labels = ax.get_legend_handles_labels()
@@ -356,37 +364,44 @@ def makePlotWithRatioToRef(
     rrange=[0.9, 1.1], ylim=None, xlim=None, nlegcols=2, binwnorm=None, alpha=1.,
     baseline=True, dataIdx=None, autorrange=None, grid = False, extra_text=None, extra_text_loc=(0.8, 0.7),
     yerr=False, legtext_size=20, plot_title=None, x_ticks_ndp = None, bin_density = 300, yscale=None,
-    logy=False, logx=False, fill_between=0, title_padding = 0, cms_label = None, cutoff=1e-6,
+    logy=False, logx=False, fill_between=0, title_padding = 0, cms_label = None, cutoff=1e-6, only_ratio = False
 ):
     if len(hists) != len(labels) or len(hists) != len(colors):
         raise ValueError(f"Number of hists ({len(hists)}), colors ({len(colors)}), and labels ({len(labels)}) must agree!")
     ratio_hists = [hh.divideHists(h, hists[0], cutoff=cutoff, flow=False, rel_unc=True, by_ax_name=False) for h in hists[not baseline:]]
-    fig, ax1, ax2 = figureWithRatio(
-        hists[0], xlabel, ylabel, ylim, rlabel, rrange, xlim=xlim, 
-        grid_on_ratio_plot = grid, plot_title = plot_title, title_padding=title_padding,
-        bin_density = bin_density, cms_label = cms_label, logy=logy, logx=logx
-    )
+    
+    if not only_ratio:
+        fig, ax1, ax2 = figureWithRatio(
+        logy=False, logx=False, fill_between=0, title_padding = 0, cms_label = None, only_ratio = False
+        )
+    else:
+        fig, ax2 = figureWithRatio(
+            hists[0], xlabel, ylabel, ylim, rlabel, rrange, xlim=xlim, 
+            grid_on_ratio_plot = grid, plot_title = plot_title, title_padding=title_padding,
+            bin_density = bin_density, cms_label = cms_label, logy=logy, logx=logx, only_ratio=only_ratio
+        )
 
     linestyles = linestyles+['solid']*(len(hists)-len(linestyles))
 
     exclude_data = lambda x: [j for i,j in enumerate(x) if i != dataIdx]
     
-    hep.histplot(
-        exclude_data(hists),
-        histtype="step",
-        color=exclude_data(colors),
-        label=exclude_data(labels),
-        linestyle=exclude_data(linestyles),
-        stack=False,
-        ax=ax1,
-        yerr=yerr,
-        binwnorm=binwnorm,
-        alpha=alpha,
-        flow='none',
-    )
+    if not only_ratio:
+        hep.histplot(
+            exclude_data(hists),
+            histtype="step",
+            color=exclude_data(colors),
+            label=exclude_data(labels),
+            linestyle=exclude_data(linestyles),
+            stack=False,
+            ax=ax1,
+            yerr=yerr,
+            binwnorm=binwnorm,
+            alpha=alpha,
+            flow='none',
+        )
 
     if len(hists) > 1:
-        ratio_hists = [hh.divideHists(h, hists[0], cutoff=cutoff, flow=False, rel_unc=True, by_ax_name=False) for h in hists]
+        ratio_hists = [hh.divideHists(h, hists[0], flow=False, rel_unc=True, by_ax_name=False) for h in hists]
         if fill_between != 0:
             for upr,downr,color in zip(ratio_hists[-fill_between::2], ratio_hists[-fill_between+1::2], colors[-fill_between::2]):
                 ax2.fill_between(upr.axes[0].edges, 
@@ -428,14 +443,14 @@ def makePlotWithRatioToRef(
             alpha=alpha,
             flow='none',
         )
-
-    addLegend(ax1, nlegcols, extra_text=extra_text, extra_text_loc=extra_text_loc, text_size=legtext_size)
-    
-    # This seems like a bug, but it's needed
-    if not xlim:
-        xlim = [hists[0].axes[0].edges[0], hists[0].axes[0].edges[-1]]
-    fix_axes(ax1, ax2, yscale=yscale, logy=logy)
-    if x_ticks_ndp: ax2.xaxis.set_major_formatter(StrMethodFormatter('{x:.' + str(x_ticks_ndp) + 'f}'))
+    if not only_ratio:
+        addLegend(ax1, nlegcols, extra_text=extra_text, extra_text_loc=extra_text_loc, text_size=legtext_size)
+        
+        # This seems like a bug, but it's needed
+        if not xlim:
+            xlim = [hists[0].axes[0].edges[0], hists[0].axes[0].edges[-1]]
+        fix_axes(ax1, ax2, yscale=yscale, logy=logy)
+        if x_ticks_ndp: ax2.xaxis.set_major_formatter(StrMethodFormatter('{x:.' + str(x_ticks_ndp) + 'f}'))
     return fig
 
 def makeHistPlot2D(h2d, flow=False, **kwargs):
@@ -564,6 +579,7 @@ def save_pdf_and_png(outdir, basename, fig=None):
     else:
         plt.savefig(fname, bbox_inches='tight')
         plt.savefig(fname.replace(".pdf", ".png"), bbox_inches='tight')
+    print(f"Wrote file(s) {fname}(.png)")
     logger.info(f"Wrote file(s) {fname}(.png)")
 
 def write_index_and_log(outpath, logname, template_dir=f"{pathlib.Path(__file__).parent}/Templates", 

@@ -47,7 +47,7 @@ def broadcastSystHist(h1, h2, flow=True, by_ax_name=True):
         new_vars = np.broadcast_to(h1.variances(flow=flow), broadcast_shape)
         new_vars = np.moveaxis(new_vars, np.arange(len(moves)), list(moves.keys()))
         new_vals = np.stack((new_vals, new_vars), axis=-1)
-
+    
     return hist.Hist(*h2.axes, data=new_vals, storage=h1.storage_type())
 
 def divideHists(h1, h2, cutoff=1e-5, allowBroadcast=True, rel_unc=False, cutoff_val=1., flow=True, createNew=True, by_ax_name=True):
@@ -822,3 +822,5 @@ def rssHistsMid(h, syst_axis, scale=1.):
     hDown = addHists(hnom, hrss[{"downUpVar" : -1j}], scale2=-1.)
 
     return hUp, hDown
+
+

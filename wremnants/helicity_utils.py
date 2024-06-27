@@ -30,7 +30,8 @@ axis_helicity_multidim = hist.axis.Integer(-1, 8, name="helicitySig", overflow=F
 #creates the helicity weight tensor
 def makehelicityWeightHelper(is_w_like = False, filename=None):
     if filename is None:
-        filename = f"{common.data_dir}/angularCoefficients/w_z_moments_theoryAgnosticBinning.hdf5"
+        filename = f"{common.data_dir}/angularCoefficients/w_z_moments_theoryAgnosticBinning_scetlib_dyturboCorr_msht20.hdf5"
+        
     with h5py.File(filename, "r") as ff:
         out = input_tools.load_results_h5py(ff)
 
@@ -46,7 +47,7 @@ def makehelicityWeightHelper(is_w_like = False, filename=None):
     axes_names = ['massVgen','absYVgen','ptVgen','chargeVgen', 'helicity']
     if not list(corrh.axes.name) == axes_names:
         raise ValueError (f"Axes [{corrh.axes.name}] are not the ones this functions expects ({axes_names})")
-    
+
     if np.count_nonzero(corrh[{"helicity" : -1.j}] == 0):
         logger.warning("Zeros in sigma UL for the angular coefficients will give undefined behaviour!")
     # histogram has to be without errors to load the tensor directly

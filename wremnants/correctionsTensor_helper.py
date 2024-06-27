@@ -25,4 +25,5 @@ def makeCorrectionsTensor(corrh, tensor=None, tensor_rank=1, weighted_corr=False
     helper = tensor[type(corrhConv).__cpp_name__](ROOT.std.move(corrhConv))
     helper.hist = corrh
     helper.tensor_axes = corrh.axes[-1*tensor_rank:]
+
     return helper

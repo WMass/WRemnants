@@ -1,8 +1,8 @@
 import ROOT
 import hist
 import numpy as np
-from utilities import boostHistHelpers as hh, common, logging
-from wremnants import theory_tools
+from utilities import boostHistHelpers as hh, common, logging, differential
+from wremnants import theory_tools, theoryAgnostic_tools
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.helicity_utils import *
 import re
@@ -621,8 +621,8 @@ def add_pdf_hists(results, df, dataset, axes, cols, pdfs, base_name="nominal", a
                 df = df.Define(f"helicity_moments_{tensorName}_tensor", pdfhelper, ["csSineCosThetaPhigen", f"{tensorName}", "unity"])
                 alphahelper = ROOT.wrem.makeHelicityMomentPdfTensor[3]()
                 df = df.Define(f"helicity_moments_{tensorASName}_tensor", alphahelper, ["csSineCosThetaPhigen", f"{tensorASName}", "unity"])
-                pdfHist_hel = df.HistoBoost(f"helicity_{pdfHistName}", axes, [*cols, f"helicity_moments_{tensorName}_tensor"], tensor_axes=[axis_helicity,pdf_ax], storage=storage_type)
-                alphaSHist_hel = df.HistoBoost(f"helicity_{alphaSHistName}", axes, [*cols, f"helicity_moments_{tensorASName}_tensor"], tensor_axes=[axis_helicity,as_ax], storage=storage_type)
+                pdfHist_hel = df.HistoBoost(f"nominal_gen_helicity_{pdfName}", axes, [*cols, f"helicity_moments_{tensorName}_tensor"], tensor_axes=[axis_helicity,pdf_ax], storage=storage_type)
+                alphaSHist_hel = df.HistoBoost(f"nominal_gen_helicity_AS{pdfName}", axes, [*cols, f"helicity_moments_{tensorASName}_tensor"], tensor_axes=[axis_helicity,as_ax], storage=storage_type)
                 results.extend([pdfHist_hel, alphaSHist_hel])
 
         results.extend([pdfHist, alphaSHist])
@@ -877,7 +877,7 @@ def scetlib_scale_unc_hist(h, obs, syst_ax="vars"):
     return hnew
 
 def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHelicity_helper, axes, cols, 
-    base_name="nominal", for_wmass=True, addhelicity=False, storage_type=hist.storage.Double()
+    base_name="nominal", propagateToHelicity=False, for_wmass=True, addhelicity=False, storage_type=hist.storage.Double()
 ):
     logger.debug(f"Make theory histograms for {dataset_name} dataset, histogram {base_name}")
     axis_ptVgen = hist.axis.Variable(
@@ -904,7 +904,7 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
     if isZ:
         df = define_sin2theta_weights(df, dataset_name)
 
-    add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
+    add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, base_name=base_name, propagateToHelicity=propagateToHelicity, addhelicity=addhelicity, storage_type=storage_type)
     add_qcdScale_hist(results, df, scale_axes, scale_cols, base_name=base_name, addhelicity=addhelicity, storage_type=storage_type)
 
     theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
@@ -914,6 +914,7 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
         )
 
     if "gen" in base_name:
+        #helicity moments x qcd scales
         df = df.Define("helicity_moments_scale_tensor", "wrem::makeHelicityMomentScaleTensor(csSineCosThetaPhigen, scaleWeights_tensor, nominal_weight)")
         helicity_moments_scale = df.HistoBoost("nominal_gen_helicity_moments_scale", axes, [*cols, "helicity_moments_scale_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
         results.append(helicity_moments_scale)
@@ -940,6 +941,42 @@ def add_theory_hists(results, df, args, dataset_name, corr_helpers, qcdScaleByHe
             postBeamRemnants_cols = ["massVpostBeamRemnants", "absYVpostBeamRemnants", "ptVpostBeamRemnants", "chargeVpostBeamRemnants"]
             helicity_moments_scale_postBeamRemnants = df.HistoBoost("nominal_gen_helicity_moments_scale_postBeamRemnants", axes, [*postBeamRemnants_cols, "helicity_moments_scale_postBeamRemnants_tensor"], tensor_axes = [axis_helicity, *theory_tools.scale_tensor_axes], storage=hist.storage.Double())
             results.append(helicity_moments_scale_postBeamRemnants)
+
+        #helicity moments x theory agnostic
+        nominal_cols = ["ptVgen","absYVgen", "chargeVgen"]
+
+        theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes()
+        axis_ptV_thag = theoryAgnostic_axes[0]
+        axis_yV_thag = theoryAgnostic_axes[1]
+
+        axis_absYVgen_thag = hist.axis.Variable(
+        axis_yV_thag.edges, #same axis as theory agnostic norms
+        name = "absYVgen", underflow=False
+        )
+
+        axis_ptVgen_thag = hist.axis.Variable(
+        axis_ptV_thag.edges, #same axis as theory agnostic norms, 
+        #common.ptV_binning,
+        name = "ptVgen", underflow=False,
+        )
+        
+        axis_chargeWgen = hist.axis.Regular(
+        2, -2, 2, name="chargeVgen", underflow=False, overflow=False
+        )
+        nominal_axes = [axis_ptVgen_thag,axis_absYVgen_thag,axis_chargeWgen]
+
+        df = df.Define("helicity_moments_tensor", "wrem::csAngularMoments(csSineCosThetaPhigen, nominal_weight)")
+        helicity_moments_scale = df.HistoBoost("nominal_gen_helicity_moments", nominal_axes, [*nominal_cols, "helicity_moments_tensor"], tensor_axes = [axis_helicity], storage=hist.storage.Weight())
+        results.append(helicity_moments_scale)
+
+        axis_helicity_multidim = hist.axis.Integer(-1, 8, name="helicitySig", overflow=False, underflow=False)
+        df = theoryAgnostic_tools.define_helicity_weights(df)
+
+        df = df.Define("helicity_moments_helicity_tensor", "wrem::makeHelicityMomentHelicityTensor(csSineCosThetaPhigen, helWeight_tensor, nominal_weight)")
+
+        gen_theoryAgnostic = df.HistoBoost("nominal_gen_helicity_moments_yieldsTheoryAgnostic", [*nominal_axes, axis_ptVgen_thag, axis_absYVgen_thag], [*nominal_cols,"ptVgen","absYVgen", "helicity_moments_helicity_tensor"], tensor_axes = [axis_helicity, axis_helicity_multidim],storage=hist.storage.Double())
+    
+        results.append(gen_theoryAgnostic)
 
     if for_wmass or isZ:
         logger.debug(f"Make QCD scale histograms for {dataset_name}")
