@@ -173,50 +173,6 @@ text_dict = {
     "WminusToMuNu": r"$\mathrm{W}^-\rightarrow\mu\nu$"
 }
 
-axis_labels = {
-    "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
-    "ewMll": r"$\mathrm{Post\ FSR}\ m^{\ell\ell}$", 
-    "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\ell\ell}$",
-    "ewAbsYll": r"$\mathrm{Post\ FSR}\ |Y^{\ell\ell}|$",
-    "ptgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell}$",
-    "etagen": r"$\mathrm{Pre\ FSR}\ \eta^{\ell}$", 
-    "ptVgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
-    "absYVgen": r"$\mathrm{Pre\ FSR}\ |Y^{\ell\ell}|$", 
-    "massVgen": r"$\mathrm{Pre\ FSR}\ m^{\ell\ell}$", 
-    "qT" : r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
-    "Q" : r"$\mathrm{Pre\ FSR}\ m^{\ell\ell}$", 
-    "absY" : r"$\mathrm{Pre\ FSR}\ Y^{\ell\ell}$",
-    "charge" : r"$\mathrm{Pre\ FSR\ charge}$", 
-}
-
-syst_labels = {
-    "powhegnloewew" : {0: "nominal", 1: "powheg EW NLO / LO"},
-    "powhegnloewew_ISR" : {0: "nominal", 1: "powheg EW NLO / NLO QED veto"},
-    "horacenloew" : {0: "nominal", 1: "horace EW NLO / LO", 2: "horace EW NLO / LO doubled", },
-    "winhacnloew" : {0: "nominal", 1: "winhac EW NLO / LO", 2: "winhac EW NLO / LO doubled", },
-    "matrix_radish" : "MATRIX+RadISH",
-    "virtual_ew" : {
-        0: r"NLOEW + HOEW, CMS, ($G_\mu, m_\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme",
-        1: r"NLOEW + HOEW, PS, ($G_\mu, m_\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme", 
-        2: r"NLOEW + HOEW, CMS, ($\alpha(m_\mathrm{Z}),m _\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme", }
-}
-
-syst_labels["virtual_ew_wlike"] = syst_labels["virtual_ew"]
-
-systematics_labels = {
-    "massShiftZ100MeV": '$\Delta m_\mathrm{Z} = \pm 100\mathrm{MeV}$',
-    "massShiftW100MeV": '$\Delta m_\mathrm{W} = \pm 100\mathrm{MeV}$',
-    "widthZ": '$\Delta \Gamma_\mathrm{Z} = \pm 0.8\mathrm{MeV}$',
-    "widthW": '$\Delta \Gamma_\mathrm{W} = \pm 0.6\mathrm{MeV}$',
-}
-
-def get_systematics_label(key):
-    if key in systematics_labels:
-        return systematics_labels[key]
-    
-    # custom formatting
-
-
 poi_types = {
     "mu": "$\mu$",
     "nois": "$\mathrm{NOI}$",
@@ -226,6 +182,97 @@ poi_types = {
     "sumpoisnorm": "1/$\sigma$ d$\sigma$",
 }
 
+axis_labels = {
+    "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
+    "ewMll": r"$\mathrm{Post\ FSR}\ m^{\ell\ell}$", 
+    "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\ell\ell}$",
+    "ewAbsYll": r"$\mathrm{Post\ FSR}\ |Y^{\ell\ell}|$",
+    "csCosTheta" : r"$\mathrm{Post\ FSR\ \cos{\theta^{\star}_{\ell\ell}}}$", 
+    "ptgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell}$",
+    "etagen": r"$\mathrm{Pre\ FSR}\ \eta^{\ell}$", 
+    "ptVgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
+    "absYVgen": r"$\mathrm{Pre\ FSR}\ |Y^{\ell\ell}|$", 
+    "massVgen": r"$\mathrm{Pre\ FSR}\ m^{\ell\ell}$", 
+    "csCosThetagen" : r"$\mathrm{Pre\ FSR\ \cos{\theta^{\star}_{\ell\ell}}}$", 
+    "ptlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\ell}$",
+    "etalhe": r"$\mathrm{LHE}\ \eta^{\ell}$", 
+    "ptVlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\ell\ell}$",
+    "absYVlhe": r"$\mathrm{LHE}\ |Y^{\ell\ell}|$", 
+    "massVlhe": r"$\mathrm{LHE}\ m^{\ell\ell}$", 
+    "cosThetaStarlhe" : r"$\mathrm{LHE\ \cos{\theta^{\star}_{\ell\ell}}}$", 
+    "qT" : r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\ell\ell}$",
+    "Q" : r"$\mathrm{Pre\ FSR}\ m^{\ell\ell}$", 
+    "absY" : r"$\mathrm{Pre\ FSR}\ Y^{\ell\ell}$",
+    "charge" : r"$\mathrm{Pre\ FSR\ charge}$", 
+}
+
+systematics_labels = {
+    "massShiftZ100MeV": '$\Delta m_\mathrm{Z} = \pm 100\mathrm{MeV}$',
+    "massShiftW100MeV": '$\Delta m_\mathrm{W} = \pm 100\mathrm{MeV}$',
+    "widthZ": '$\Delta \Gamma_\mathrm{Z} = \pm 0.8\mathrm{MeV}$',
+    "widthW": '$\Delta \Gamma_\mathrm{W} = \pm 0.6\mathrm{MeV}$',
+    # powhegFOEW variations
+    'weak_no_ew': "no EW", 
+    'weak_no_ho': "no HO", 
+    'weak_default': "nominal", 
+    'weak_ps': "PS", 
+    'weak_mt_dn': '$m_\mathrm{t}^\mathrm{down}$', 
+    'weak_mt_up': '$m_\mathrm{t}^\mathrm{up}$', 
+    'weak_mz_dn': '$m_\mathrm{Z}^\mathrm{down}$', 
+    'weak_mz_up': '$m_\mathrm{Z}^\mathrm{up}$', 
+    'weak_gmu_dn': '$G_\mu^\mathrm{up}$', 
+    'weak_gmu_up': '$G_\mu^\mathrm{down}$', 
+    'weak_aem': r'$\alpha_\mathrm{EM}$',  
+    'weak_fs': 'FS',  
+    'weak_mh_dn': '$m_\mathrm{H}^\mathrm{down}$',  
+    'weak_mh_up': '$m_\mathrm{H}^\mathrm{up}$',   
+    'weak_s2eff_0p23125': '$\mathrm{sin}^2_\mathrm{eff}=0.23125$',  
+    'weak_s2eff_0p23105': '$\mathrm{sin}^2_\mathrm{eff}=0.23105$',   
+    'weak_s2eff_0p22155': '$\mathrm{sin}^2_\mathrm{eff}=0.22155$',  
+    'weak_s2eff_0p23185': '$\mathrm{sin}^2_\mathrm{eff}=0.23185$',  
+    'weak_s2eff_0p23205': '$\mathrm{sin}^2_\mathrm{eff}=0.23205$', 
+    'weak_s2eff_0p23255': '$\mathrm{sin}^2_\mathrm{eff}=0.23255$',  
+    'weak_s2eff_0p23355': '$\mathrm{sin}^2_\mathrm{eff}=0.23355$',  
+    'weak_s2eff_0p23455': '$\mathrm{sin}^2_\mathrm{eff}=0.23455$',  
+    'weak_s2eff_0p22955': '$\mathrm{sin}^2_\mathrm{eff}=0.22955$',  
+    'weak_s2eff_0p22655': '$\mathrm{sin}^2_\mathrm{eff}=0.22655$',
+    # EW
+    'pythiaew_ISRCorr1': 'Pythia ISR on / off',
+    'horacelophotosmecoffew_FSRCorr1': 'Photos MEC off / on',
+    'horaceqedew_FSRCorr1': 'Horace FSR / Photos',
+    'nlo_ew_virtual': 'EW virtual',
+    'weak_default': 'EW virtual',
+    # alternative generators
+    "matrix_radish" : "MATRIX+RadISH",
+}
+
+systematics_labels_idxs = {
+    "powhegnloewew" : {0: "nominal", 1: "powheg EW NLO / LO"},
+    "powhegnloewew_ISR" : {0: "nominal", 1: "powheg EW NLO / NLO QED veto"},
+    "pythiaew" : {0: "nominal", 1: "pythia ISR EW on / off"},
+    "horaceqedew" : {0: "nominal", 1: "Horace / Photos", },
+    "horacenloew" : {0: "nominal", 1: "Horace EW NLO / LO", 2: "Horace EW NLO / LO doubled", },
+    "winhacnloew" : {0: "nominal", 1: "Winhac EW NLO / LO", 2: "Wnhac EW NLO / LO doubled", },
+    "horacelophotosmecoffew": {0: "nominal", 1: "Photos MEC off / on"},
+    "virtual_ew" : {
+        0: r"NLOEW + HOEW, CMS, ($G_\mu, m_\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme",
+        1: r"NLOEW + HOEW, PS, ($G_\mu, m_\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme", 
+        2: r"NLOEW + HOEW, CMS, ($\alpha(m_\mathrm{Z}),m _\mathrm{Z}, \mathrm{sin}^2\Theta_\mathrm{eff}$) scheme", }
+}
+systematics_labels_idxs["virtual_ew_wlike"] = systematics_labels_idxs["virtual_ew"]
+
+
+def get_systematics_label(key, idx=0):
+    if key in systematics_labels:
+        return systematics_labels[key]
+    
+    # custom formatting
+    if key in systematics_labels_idxs:
+        return systematics_labels_idxs[key][idx]
+
+    # default return key
+    logger.info(f"No label found for {key}")
+    return key
 
 
 def get_labels_colors_procs_sorted(procs):

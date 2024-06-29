@@ -453,7 +453,7 @@ def get_metadata(infile):
         logger.warning("Failed to find results dict. Note that only pkl, hdf5, and pkl.lz4 file types are supported")
         return None
 
-    return results["meta_info"] if "meta_info" in results else results["meta_data"]
+    return results.get("meta_info", results.get("meta_data", results.get("meta", None)))
 
 def get_scetlib_config(infile):
     if infile.endswith(".pkl"):

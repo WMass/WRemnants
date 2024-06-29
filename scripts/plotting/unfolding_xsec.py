@@ -678,4 +678,4 @@ for poi_type, poi_result in result.items():
                         #         normalize=args.normalize, relative_uncertainty=not args.absolute, logy=args.logy, process_label = process_label, axes=channel_axes)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

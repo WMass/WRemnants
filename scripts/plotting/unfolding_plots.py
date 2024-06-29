@@ -278,4 +278,4 @@ for fit_type in args.plots:
         # plot(fit_type, channel, data=False, stack=False, ratio=False, backgrounds=False, density=True)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

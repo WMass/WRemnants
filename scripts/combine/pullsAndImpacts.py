@@ -467,7 +467,7 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
         fig = plotImpacts(df, pulls=not args.noPulls and not group, impact_title=impact_title, normalize=not args.absolute, oneSidedImpacts=args.oneSidedImpacts)
         writeOutput(fig, outfile, extensions[0:], postfix=postfix, args=args, meta_info=meta)      
         if args.eoscp and output_tools.is_eosuser_path(args.outFolder):
-            output_tools.copy_to_eos(args.outFolder, "")
+            output_tools.copy_to_eos(outdir, args.outFolder, "")
     else:
         raise ValueError("Must select mode 'interactive' or 'output'")
 

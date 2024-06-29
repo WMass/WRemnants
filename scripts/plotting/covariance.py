@@ -162,4 +162,4 @@ for plot_type in args.plots:
                     gen_axes=axes, selections=selection, base_processes=[base_process,], covariance=covariance, flow=args.flow)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

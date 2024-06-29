@@ -227,4 +227,4 @@ if args.plotdir:
             plot_tools.write_index_and_log(outdir, plot_name, args=args,
                 analysis_meta_info=meta_dict)
     if output_tools.is_eosuser_path(args.plotdir) and args.eoscp:
-        output_tools.copy_to_eos(args.plotdir)
+        output_tools.copy_to_eos(outdir, args.plotdir)

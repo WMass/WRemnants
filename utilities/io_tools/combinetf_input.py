@@ -19,7 +19,7 @@ def get_fitresult(fitresult_filename):
     elif fitresult_filename.endswith(".hdf5"):
         return h5py.File(fitresult_filename, mode='r')
     else:
-        raise IOError(f"Unknown format of fitresult {fitresult}")
+        raise IOError(f"Unknown format of fitresult {fitresult_filename}")
 
 def is_root_file(fileobject):
     return isinstance(fileobject, uproot.ReadOnlyDirectory)
@@ -33,7 +33,7 @@ def get_poi_names(fitresult_file, poi_type="mu"):
     elif is_root_file(fitresult_file):
         names = get_poi_names_root(fitresult_file, poi_type)
     else:
-        raise IOError(f"Unknown format of fitresult {fitresult}")
+        raise IOError(f"Unknown format of fitresult {fitresult_filename}")
 
     if len(names)==0:
         logger.warning('No free parameters found (neither signal strenght(s), nor W mass)')
@@ -89,7 +89,7 @@ def read_impacts_poi(fileobject, group, poi, sort=True, add_total=True, stat=0.0
     elif is_root_file(fileobject):
         impacts, labels, norm, total = read_impacts_poi_root(fileobject, group, poi=poi)
     else:
-        raise IOError(f"Unknown format of fitresult {fitresult}")
+        raise IOError(f"Unknown format of fitresult {fileobject}")
 
     if sort:
         order = np.argsort(impacts)

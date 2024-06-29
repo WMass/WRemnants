@@ -45,7 +45,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-    outdir = output_tools.make_plot_dir(args.outpath, args.outfolder)
+    outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
     colors = mpl.colormaps["tab10"]
 
@@ -168,3 +168,5 @@ if __name__ == '__main__':
         args=args,
     )
 
+    if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
+        output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

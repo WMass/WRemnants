@@ -1160,6 +1160,6 @@ if __name__ == '__main__':
         outdir = output_tools.make_plot_dir(args.outpath, f"{args.outfolder}/plots_{args.xAxisName}_"+"_".join(args.procFilters), eoscp=args.eoscp)
         plot_xAxis(hists, pars, covs, frfs, colors[:len(hists)], args.procFilters, outdir)
 
-if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
-    # output_tools.copy_to_eos(args.outpath, f"{args.outfolder}/fakerate_factor/")
+    if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
+        output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)
+        # output_tools.copy_to_eos(outdir, args.outpath, f"{args.outfolder}/fakerate_factor/")

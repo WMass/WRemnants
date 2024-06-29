@@ -14,6 +14,8 @@ parser = common.plot_parser()
 parser.add_argument("infile", help="Output file of the analysis stage, containing ND boost histogrdams")
 parser.add_argument("--procFilters", type=str, nargs="*", default="Zmumu", help="Filter to plot (default no filter, only specify if you want a subset")
 parser.add_argument("--axes", type=str, nargs="+", default=["pt-ptGen","abs(eta)-absEtaGen"], help="Define for which axes the response matrix to be plotted")
+parser.add_argument("-n", "--baseName", type=str, help="Histogram base name in the file (e.g., 'nominal')", default="nominal")
+parser.add_argument("--histName", type=str, help="Histogram name in the file (e.g., 'nominal')", default="nominal")
 parser.add_argument("-c", "--channels", type=str, nargs="+", choices=["plus", "minus", "all"], default=["all"], help="Select channel to plot")
 
 args = parser.parse_args()
@@ -39,7 +41,7 @@ if "Zmumu" in groups.groups:
 datasets = groups.getNames()
 logger.info(f"Will plot datasets {datasets}")
 
-groups.loadHistsForDatagroups("nominal", syst="nominal", procsToRead=datasets)
+groups.loadHistsForDatagroups(args.baseName, syst=args.histName, procsToRead=datasets)
 
 datagroups = groups.getDatagroups()
 
@@ -84,7 +86,7 @@ def get_stability(matrix, xbins, ybins):
 
 
 for g_name, group in datagroups.items():
-    hist = group.hists["nominal"]
+    hist = group.hists[args.histName]
 
     for channel in args.channels:
         select = {} if channel == "all" else {"charge" : -1.j if channel == "minus" else 1.j}
@@ -199,3 +201,6 @@ for g_name, group in datagroups.items():
                 analysis_meta_info={args.infile : groups.getMetaInfo()},
                 args=args,
             )
+
+if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

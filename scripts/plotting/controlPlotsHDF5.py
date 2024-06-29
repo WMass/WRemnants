@@ -28,12 +28,12 @@ parser.add_argument("--noRatio", action='store_true', help="Don't plot the ratio
 parser.add_argument("--noStack", action='store_true', help="Don't plot the individual processes")
 parser.add_argument("--processes", type=str, nargs='*', default=[], help="Select processes")
 parser.add_argument("--splitByProcess", action='store_true', help="Make a separate plot for each of the selected processes")
-
-subparsers = parser.add_subparsers(dest="variation")
-variation = subparsers.add_parser("variation", help="Arguments for adding variation hists")
-variation.add_argument("--varName", type=str, nargs='+', required=True, help="Name of variation hist")
-variation.add_argument("--varLabel", type=str, nargs='*', default=[], help="Label(s) of variation hist for plotting")
-variation.add_argument("--colors", type=str, nargs='*', default=[], help="Variation colors")
+parser.add_argument("--selectionAxes", type=str, default=["charge", "passIso", "passMT"], 
+    help="List of axes where for each bin a seperate plot is created")
+# variations
+parser.add_argument("--varName", type=str, nargs='+', required=True, help="Name of variation hist")
+parser.add_argument("--varLabel", type=str, nargs='*', default=[], help="Label(s) of variation hist for plotting")
+parser.add_argument("--varColor", type=str, nargs='*', default=[], help="Variation colors")
 
 args = parser.parse_args()
 
@@ -46,7 +46,7 @@ debug = combineutils.FitDebugData(indata)
 systematics=[]
 colors_syst=[]
 labels_syst=[]
-for syst, color, label in itertools.zip_longest(args.varName, args.colors, args.varLabel):
+for syst, color, label in itertools.zip_longest(args.varName, args.varColor, args.varLabel):
     if syst not in indata.systs.astype(str):
         logger.error(f"Syst {syst} not available, skip!")
         continue
@@ -55,36 +55,32 @@ for syst, color, label in itertools.zip_longest(args.varName, args.colors, args.
     labels_syst.append(label if label is not None else styles.get_systematics_label(syst))
 
 add_ratio=not args.noRatio
-legtext_size=20
-density=False
-rlabel="1/Pred."
 
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
-for channel, channel_info in indata.channel_info.items():
-    logger.info(f"Make plots for channel: {channel}")
 
-    hist_proc = debug.nominal_hists[channel]
-    procs = [p for p in hist_proc.axes["processes"]]
+def make_plots(hists_proc, hist_data, *opts, **info):
+    # make full unrollsed plot and lower dimensional projections
 
-    if len(args.processes):
-        procs_tmp = procs[:]
-        procs=[]
-        for p in args.processes:
-            if p not in procs_tmp:
-                logger.warning(f"Process {p} requested but not found, skip")
-                continue
-            procs.append(p)
-
-    labels, colors, procs = styles.get_labels_colors_procs_sorted(procs)
-
-    hists_proc = [hist_proc[{"processes": p}] for p in procs]
-
-    axes_names = hists_proc[0].axes.name
+    all_axes_names = [n for n in hists_proc[0].axes.name]
     if args.invertAxes:
         logger.info("invert axes order")
-        axes_names = axes_names[::-1]
+        all_axes_names = all_axes_names[::-1]
 
+    axes_combinations = all_axes_names[:]
+    # make lower dimensional combinations of axes 
+    for n in range(2, len(all_axes_names)+1):
+        axes_combinations += [k for k in itertools.combinations(axes_combinations, n)]
+
+    for axes_names in axes_combinations:
+        if isinstance(axes_names, str):
+            axes_names = [axes_names]
+        logger.info(f"Make plot(s) with axes {axes_names}")
+
+        make_plot(hists_proc, hist_data, axes_names=axes_names, *opts, **info)
+
+
+def make_plot(hists_proc, hist_data, hists_syst_up, hists_syst_dn, axes_names, suffix="", channel="", colors=[], labels=[], procs=[], rlabel="1/Pred.", density=False, legtext_size=20):
     if any(x in axes_names for x in ["ptll", "mll", "ptVgen", "ptVGen"]):
         # in case of variable bin width normalize to unit
         binwnorm = 1.0
@@ -93,42 +89,28 @@ for channel, channel_info in indata.channel_info.items():
         binwnorm = None
         ylabel="Events/bin"
 
-    # make unrolled 1D histograms
-    h_stack = [hh.unrolledHist(h, binwnorm=binwnorm, obs=axes_names) for h in hists_proc]
-    h_inclusive = hh.sumHists(h_stack)
-
-    if len(systematics):
-        hist_syst = debug.syst_hists[channel]
-        hists_syst_dn = [hist_syst[{"DownUp": "Down", "systs":s}] for s in systematics]
-        hists_syst_up = [hist_syst[{"DownUp": "Up", "systs":s}] for s in systematics]
+    if len(axes_names) == 1:
+        fu = lambda h: h.project(*axes_names)
     else:
-        hists_syst_dn = []
-        hists_syst_up = []
+        fu = lambda h: hh.unrolledHist(h, binwnorm=binwnorm, obs=axes_names)
 
-    # setup data histogram
-    if channel.endswith("masked") or args.noData or args.splitByProcess:
-        has_data = False
-    else:
-        has_data = True
-        hist_data = debug.data_obs_hists[channel]
-        h_data_tmp = hh.unrolledHist(hist_data, binwnorm=binwnorm, obs=axes_names)
-        
-        # poisson errors on data hist for correct errors in ratio plot
-        h_data = hist.Hist(*h_data_tmp.axes, storage=hist.storage.Weight())
-        h_data.values(flow=True)[...] = h_data_tmp.values(flow=True)
-        h_data.variances(flow=True)[...] = h_data_tmp.values(flow=True)
+    # make 1D histograms
+    h_stack = [fu(h) for h in hists_proc]
+
+    if hist_data is not None:
+        h_data = fu(hist_data)
 
     if len(axes_names) > 1:
         xlabel=f"{'-'.join([styles.xlabels.get(s,s).replace('(GeV)','') for s in axes_names])} bin"
     else:
-        xlabel=styles.xlabels.get(axes_names, axes_names)
+        xlabel=styles.xlabels.get(axes_names[0], axes_names[0])
 
     if args.splitByProcess:
         hists_pred = h_stack    
     else:
-        hists_pred = [hist_inclusive]
+        hists_pred = [hh.sumHists(h_stack)]
 
-
+    # loop over all processes if plots for each process is requested, or inclusive otherwise
     for i, h_pred in enumerate(hists_pred):
 
         infos_figure = dict(xlabel=xlabel, ylabel=ylabel, logy=args.logy, logx=args.logx, xlim=args.xlim, ylim=args.ylim)
@@ -145,6 +127,7 @@ for channel, channel_info in indata.channel_info.items():
                 histtype="step",
                 color="black",
                 label=labels[i] if args.splitByProcess else "Prediction",
+                binwnorm=binwnorm,
                 ax=ax1,
                 zorder=1,
                 flow='none',
@@ -165,7 +148,7 @@ for channel, channel_info in indata.channel_info.items():
                 flow='none',
             )
 
-        if has_data:
+        if hist_data is not None:
             hep.histplot(
                 h_data,
                 yerr=True,
@@ -187,8 +170,8 @@ for channel, channel_info in indata.channel_info.items():
                 hup = hup[{"processes": hist.sum}]
                 hdn = hdn[{"processes": hist.sum}]
 
-            hup = hh.unrolledHist(hup, binwnorm=binwnorm, obs=axes_names)
-            hdn = hh.unrolledHist(hdn, binwnorm=binwnorm, obs=axes_names)
+            hup = fu(hup)
+            hdn = fu(hdn)
 
             hep.histplot(
                 hup,
@@ -197,6 +180,7 @@ for channel, channel_info in indata.channel_info.items():
                 histtype="step",
                 color=color,
                 label=label,
+                binwnorm=binwnorm,
                 ax=ax1,
                 zorder=1,
                 flow='none',
@@ -207,6 +191,8 @@ for channel, channel_info in indata.channel_info.items():
                 yerr=False,
                 histtype="step",
                 color=color,
+                linestyle="--",
+                binwnorm=binwnorm,
                 ax=ax1,
                 zorder=1,
                 flow='none',
@@ -219,6 +205,7 @@ for channel, channel_info in indata.channel_info.items():
                     yerr=False,
                     histtype="step",
                     color=color,
+                    linestyle=["-","--"],
                     ax=ax2,
                     linewidth=2,
                     flow='none',
@@ -237,7 +224,7 @@ for channel, channel_info in indata.channel_info.items():
                 flow='none',
             )
 
-            if has_data:
+            if hist_data is not None:
                 hep.histplot(
                     hh.divideHists(h_data, h_pred, cutoff=0.01, rel_unc=True),
                     histtype="errorbar",
@@ -263,7 +250,7 @@ for channel, channel_info in indata.channel_info.items():
             lumi = float(f"{channel_info['lumi']:.3g}") if not density else None
             scale = max(1, np.divide(*ax1.get_figure().get_size_inches())*0.3)
             hep.cms.label(ax=ax1, lumi=lumi, fontsize=legtext_size*scale, 
-                label= args.cmsDecor, data=has_data)
+                label= args.cmsDecor, data=hist_data is not None)
 
         outfile = "hist_"
         if not args.noStack:
@@ -272,6 +259,8 @@ for channel, channel_info in indata.channel_info.items():
             outfile += f"{procs[i]}_"
         outfile += "_".join(axes_names)
         outfile += f"_{channel}"
+        if suffix:
+            outfile += f"_{suffix}"
         if args.postfix:
             outfile += f"_{args.postfix}"
         plot_tools.save_pdf_and_png(outdir, outfile)
@@ -285,18 +274,70 @@ for channel, channel_info in indata.channel_info.items():
         )
 
 
+for channel, channel_info in indata.channel_info.items():
+    logger.info(f"Make plots for channel: {channel}")
+
+    hist_proc = debug.nominal_hists[channel]
+    procs = [p for p in hist_proc.axes["processes"]]
+
+    if len(args.processes):
+        procs_tmp = procs[:]
+        procs=[]
+        for p in args.processes:
+            if p not in procs_tmp:
+                logger.warning(f"Process {p} requested but not found, skip")
+                continue
+            procs.append(p)
+
+    labels, colors, procs = styles.get_labels_colors_procs_sorted(procs)
+
+    hists_proc = [hist_proc[{"processes": p}] for p in procs]
+
+    if len(systematics):
+        hist_syst = debug.syst_hists[channel]
+        hists_syst_dn = [hist_syst[{"DownUp": "Down", "systs":s}] for s in systematics]
+        hists_syst_up = [hist_syst[{"DownUp": "Up", "systs":s}] for s in systematics]
+    else:
+        hists_syst_dn = []
+        hists_syst_up = []
+
+    # setup data histogram
+    if channel.endswith("masked") or args.noData or args.splitByProcess:
+        hist_data = None
+    else:
+        hist_data_tmp = debug.data_obs_hists[channel]
+        
+        # poisson errors on data hist for correct errors in ratio plot
+        hist_data = hist.Hist(*hist_data_tmp.axes, storage=hist.storage.Weight())
+        hist_data.values(flow=True)[...] = hist_data_tmp.values(flow=True)
+        hist_data.variances(flow=True)[...] = hist_data_tmp.values(flow=True)
+
+    info = dict(channel=channel, labels=labels,colors=colors, procs=procs)
+
+    # make plots in slices (e.g. for charge plus an minus separately)
+    selection_axes = [a for a in hists_proc[0].axes if a.name in args.selectionAxes]
+    if len(selection_axes) > 0:
+        selection_bins = [np.arange(a.size) for a in hists_proc[0].axes if a.name in args.selectionAxes]
+        other_axes = [a for a in hists_proc[0].axes if a not in selection_axes]
+
+        for bins in itertools.product(*selection_bins):
+            idxs = {a.name: i for a, i in zip(selection_axes, bins) }
+
+            hs_proc = [h[idxs] for h in hists_proc]
+
+            if hist_data is not None:
+                h_data = hist_data[idxs]
+            else:
+                h_data = None
+
+            if len(systematics):
+                hs_syst_dn = [h[idxs] for h in hists_syst_dn]
+                hs_syst_up = [h[idxs] for h in hists_syst_up]
+
+            suffix = "_".join([f"{a}{i}" for a, i in idxs.items()])
+            make_plots(hs_proc, h_data, hs_syst_dn, hs_syst_up, suffix=suffix, **info)
+    else:
+        make_plots(hists_proc, hist_data, hists_syst_dn, hists_syst_up, **info)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
-
-
-# logger.info(f"Processes: {indata.procs}")
-
-
-# test = debug.nonzeroSysts(procs = ["Diboson"], channels = ["ch0"])
-# test2 = debug.channelsForNonzeroSysts(procs = ["Zmumu"])
-# test3 = debug.procsForNonzeroSysts(systs = ["effStat_idip_eta12pt1q1"])
-
-# logger.info(test)
-# logger.info(test2)
-# logger.info(test3)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)
