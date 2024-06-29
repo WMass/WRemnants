@@ -151,4 +151,22 @@ def projectABCD(cardTool, h, return_variances=False, dtype="float64"):
 
     return flat, flat_variances
 
+def add_ratio_xsec_groups(writer, nums=["qGen1", "W"], dens=["qGen0", "Z"], prefixes=["r_qGen_", "r_WZ"]):
+    # add ratio groups across different card tools, 
+    # it doesn't matter which card tool to add the ratio groups, just use first one
+    cardTool = next(iter(writer.channels.values()))
 
+    sum_groups_all = list(set([k for n, c in writer.channels.items() if not n.endswith("masked") for k in c.cardSumXsecGroups.keys()]))
+    for group in sum_groups_all:
+        # add charge ratios
+        for num, den, prefix in zip(nums, dens, prefixes):
+            if num not in group:
+                continue
+            group_den = group.replace(num, den)
+            if group_den not in sum_groups_all:
+                continue
+            name_ratio = f"{prefix}{group.replace(num, '')}"
+            name_ratio = name_ratio.replace("__", "_")
+            if name_ratio.endswith("_"):
+                name_ratio = name_ratio[:-1]
+            cardTool.cardRatioXsecGroups[name_ratio] = [group, group_den]

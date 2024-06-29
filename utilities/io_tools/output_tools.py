@@ -12,6 +12,7 @@ import glob
 import shutil
 import lz4.frame
 import pickle
+import tempfile
 
 logger = logging.child_logger(__name__)
 
@@ -105,9 +106,11 @@ def is_eosuser_path(path):
     path = os.path.realpath(path)
     return path.startswith("/eos/user") or path.startswith("/eos/home-")
 
-def make_plot_dir(outpath, outfolder=None, eoscp=False, tmpFolder="temp", allowCreateLocalFolder=True):
+def make_plot_dir(outpath, outfolder=None, eoscp=False, allowCreateLocalFolder=True):
+    # Create a unique temporary directory
+    unique_temp_dir = tempfile.mkdtemp()
     if eoscp and is_eosuser_path(outpath):
-        outpath = os.path.join(tmpFolder, split_eos_path(outpath)[1])
+        outpath = os.path.join(unique_temp_dir, split_eos_path(outpath)[1])
         if not os.path.isdir(outpath):
             logger.info(f"Making temporary directory {outpath}")
             os.makedirs(outpath)
@@ -136,19 +139,17 @@ def make_plot_dir(outpath, outfolder=None, eoscp=False, tmpFolder="temp", allowC
 
     return full_outpath
 
-def copy_to_eos(outpath, outfolder=None, tmpFolder="temp", deleteFullTmp=False):
+def copy_to_eos(tmpFolder, outpath, outfolder=None, deleteFullTmp=False):
     eospath, outpath = split_eos_path(outpath)
     fullpath = outpath
     if outfolder:
         fullpath = os.path.join(outpath, outfolder)
-    logger.info(f"Copying {fullpath} to {eospath}")
+    logger.info(f"Copying {tmpFolder} to {eospath}")
 
-    tmppath = os.path.join(tmpFolder, fullpath)
-
-    for f in glob.glob(tmppath+"/*"):
+    for f in glob.glob(tmpFolder+"/*"):
         if not (os.path.isfile(f) or os.path.isdir(f)):
             continue
-        outPathForCopy = "/".join(["root://eosuser.cern.ch", eospath, f.replace(f"{tmpFolder}/", "")])
+        outPathForCopy = "/".join(["root://eosuser.cern.ch", eospath, f.replace(tmpFolder, f"{fullpath}/")])
         if os.path.isdir(f):
             # remove last folder to do "xrdcp -fr /path/to/folder/ root://eosuser.cern.ch//eos/cms/path/to/"
             # in this way one can copy the whole subfolder through xrdcp without first creating the structure
@@ -160,7 +161,7 @@ def copy_to_eos(outpath, outfolder=None, tmpFolder="temp", deleteFullTmp=False):
             raise IOError("Failed to copy the files to eos! Perhaps you are missing a kerberos ticket and need to run kinit <user>@CERN.CH?"
                 " from lxplus you can run without eoscp and take your luck with the mount.")
 
-    shutil.rmtree(f"{tmpFolder}/" if deleteFullTmp else tmppath)
+    shutil.rmtree(tmpFolder.replace(fullpath, ""))
 
 def write_theory_corr_hist(output_name, process, output_dict, args=None, file_meta_data=None): 
     outname = output_name

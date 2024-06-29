@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-outdir = output_tools.make_plot_dir(args.outpath, args.outfolder)
+outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
 fitresult = get_fitresult(args.infile)
 meta_info = input_tools.get_metadata(args.infile)
@@ -136,30 +136,30 @@ for plot_type in args.plots:
             continue
 
         # TODO, get axis information from meta data
-        if base_process == "W":
-            selections=({"qGen":0}, {"qGen":1})
+        if args.poiType.startswith("sum"):
+            axes_combinations = (("qGen","absEtaGen"), ("qGen","ptGen"), )#("ptGen"), ("absEtaGen"))
+        else:
+            axes_combinations = (("qGen","ptGen","absEtaGen"),)
 
-            if args.poiType.startswith("sum"):
-                axes_combinations = (("qGen","absEtaGen"), ("qGen","ptGen"))
-            else:
-                axes_combinations = (("qGen","ptGen","absEtaGen"),)
+        # elif base_process == "Z":
+        #     if args.poiType.startswith("sum"):
+        #         axes_combinations = ("ptVGen", "absYVGen")
+        #     else:
+        #         axes_combinations = (("ptVGen", "absYVGen"),)
 
-        elif base_process == "Z":
-            # selections = ({}, )
-            selections=({"qGen":0}, {"qGen":1})
-            if args.poiType.startswith("sum"):
-                # axes_combinations = ("ptVGen", "absYVGen")
-                axes_combinations = (("qGen","absEtaGen"), ("qGen","ptGen"))
-            else:
-                # axes_combinations = (("ptVGen", "absYVGen"),)
-                axes_combinations = (("qGen","ptGen","absEtaGen"),)
+        for channel in args.channels:
+            if channel == "all":
+                selection = {}
+            elif channel == "plus":
+                selection = {"qGen":1}
+            elif channel == "minus":
+                selection = {"qGen":1}
 
-        for axes in axes_combinations:
-            if isinstance(axes, str):
-                axes = [axes]
-            for selection in selections:
+            for axes in axes_combinations:
+                if isinstance(axes, str):
+                    axes = [axes]
                 plot_matrix_poi(hist_cov, names, args.poiType, cms_decor=args.cmsDecor, clean_triangle = True, condition_number=covariance,
                     gen_axes=axes, selections=selection, base_processes=[base_process,], covariance=covariance, flow=args.flow)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

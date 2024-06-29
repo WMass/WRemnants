@@ -217,5 +217,5 @@ if __name__ == '__main__':
             args=args,
         )
 
-if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
+        output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

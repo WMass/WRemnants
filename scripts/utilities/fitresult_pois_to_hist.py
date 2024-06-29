@@ -10,6 +10,7 @@ import pdb
 parser = common.base_parser()
 parser.add_argument("--observed", type=str, default=None, help="fitresult file with observed results")
 parser.add_argument("--expected", type=str, default=None, help="fitresult file with expected results")
+parser.add_argument("--initial", type=str, default=None, help="fitresult file with initial results when using iterative unfolding (e.g. NOI as POI)")
 parser.add_argument("-o", "--outfolder", type=str, default="./", help="Output folder")
 parser.add_argument("--outputFile", type=str, default="results_unfolded", help="Output file name")
 parser.add_argument("--override", action="store_true", help="Override output file if it exists")
@@ -21,9 +22,9 @@ if not args.observed and not args.expected:
     raise IOError(f"Result from expected or observed fit must be specified with '--observed' or '--expected'")
 result = {}
 meta = None
-
+meta_exp = None
 if args.observed:
-    result, meta = fitresult_pois_to_hist(args.observed.replace(".root",".hdf5"), result, uncertainties=None)
+    result, meta = fitresult_pois_to_hist(args.observed.replace(".root",".hdf5"), result, uncertainties=None, initial=args.initial.replace(".root",".hdf5") if args.initial else None)
 if args.expected:
     result, meta_exp = fitresult_pois_to_hist(args.expected.replace(".root",".hdf5"), result, uncertainties=None, expected=True)
     if not args.observed:

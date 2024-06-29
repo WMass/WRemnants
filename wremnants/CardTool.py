@@ -43,7 +43,8 @@ class CardTool(object):
         self.channels = ["inclusive"]
         self.cardContent = {}
         self.cardGroups = {}
-        self.cardSumGroups = {} # POI sum groups
+        self.cardSumXsecGroups = {} # cross section sum groups
+        self.cardRatioXsecGroups = {} # cross section ratio groups
         self.nominalTemplate = f"{pathlib.Path(__file__).parent}/../scripts/combine/Templates/datacard.txt"
         self.spacing = 28
         self.systTypeSpacing = 16
@@ -288,7 +289,7 @@ class CardTool(object):
     # preOp is a function to apply per process, preOpMap can be used with a dict for a speratate function for each process, 
     #   it is executed before summing the processes. Arguments can be specified with preOpArgs 
     # action will be applied to the sum of all the individual samples contributing, arguments can be specified with actionArgs
-    def addSystematic(self, name, systAxes=[], systAxesFlow=[], outNames=None, skipEntries=None, labelsByAxis=None, 
+    def addSystematic(self, name, nominalName=None, systAxes=[], systAxesFlow=[], outNames=None, skipEntries=None, labelsByAxis=None, 
                       baseName="", mirror=False, mirrorDownVarEqualToUp=False, mirrorDownVarEqualToNomi=False, symmetrize = "average",
                       scale=1, processes=None, group=None, noi=False, noConstraint=False, noProfile=False,
                       preOp=None, preOpMap=None, preOpArgs={}, action=None, actionArgs={}, actionRequiresNomi=False, selectionArgs={},
@@ -313,6 +314,9 @@ class CardTool(object):
 
         if preOp and preOpMap:
             raise ValueError("Only one of preOp and preOpMap args are allowed")
+
+        if nominalName is None:
+            nominalName = self.nominalName
 
         if isinstance(processes, str):
             processes = [processes]
@@ -340,6 +344,7 @@ class CardTool(object):
                 "outNames" : [] if not outNames else outNames,
                 "outNamesFinal" : [] if not outNames else outNames,
                 "baseName" : baseName,
+                "nominalName": nominalName,
                 "processes" : procs_to_add,
                 "systAxes" : systAxes,
                 "systAxesFlow" : systAxesFlow,
@@ -813,6 +818,7 @@ class CardTool(object):
         processes = self.expandProcesses(processes)
 
         processesFromNomi = [x for x in datagroups.groups.keys() if x != self.getDataName() and not self.pseudoDataProcsRegexp.match(x)]
+
         hdatas = []
         for idx, pseudoData in enumerate(self.pseudoData):
             if pseudoData in ["closure", "truthMC"]:
@@ -846,10 +852,11 @@ class CardTool(object):
             logger.warning(f"Making pseudodata summing these processes: {processes}")
             if len(processesFromNomi):
                 # only load nominal histograms that are not already loaded
-                processesFromNomiToLoad = [proc for proc in processesFromNomi if self.nominalName not in procDictFromNomi[proc].hists]
-                logger.warning(f"These processes are taken from nominal datagroups: {processesFromNomi}")
                 datagroupsFromNomi = self.datagroups
+                procDictFromNomi = datagroupsFromNomi.getDatagroups()
+                processesFromNomiToLoad = [proc for proc in processesFromNomi if self.nominalName not in procDictFromNomi[proc].hists]
                 if len(processesFromNomiToLoad):
+                    logger.warning(f"These processes are taken from nominal datagroups: {processesFromNomi}")
                     datagroupsFromNomi.loadHistsForDatagroups(
                         baseName=self.nominalName, syst=self.nominalName,
                         procsToRead=processesFromNomiToLoad, 
@@ -954,7 +961,7 @@ class CardTool(object):
             forceToNominal=[x for x in self.datagroups.getProcNames() if x not in 
                 self.datagroups.getProcNames([p for g in processes for p in self.expandProcesses(g) if p != self.getFakeName()])]
             self.datagroups.loadHistsForDatagroups(
-                self.nominalName, systName, label="syst",
+                systMap["nominalName"], systName, label="syst",
                 procsToRead=processes, 
                 forceNonzero=forceNonzero and systName != "qcdScaleByHelicity",
                 preOpMap=systMap["preOpMap"], preOpArgs=systMap["preOpArgs"], applySelection=systMap["applySelection"],
@@ -980,7 +987,7 @@ class CardTool(object):
                 card.write(self.cardContent[chan])
                 card.write("\n")
                 card.write(self.cardGroups[chan])
-                card.write(self.writePOISumGroupToText())
+                card.write(self.writeXsecSumGroupToText())
 
     def addSystToGroup(self, groupName, chan, members, groupLabel="group"):
         group_expr = f"{groupName} {groupLabel} ="
@@ -990,55 +997,60 @@ class CardTool(object):
         else:
             self.cardGroups[chan] += f"\n{group_expr} {members}"                                              
 
-    def addPOISumGroups(self, gen_axes=None, additional_axes=None, genCharge=None):
+    def addSumXsecGroups(self, gen_axes=None, additional_axes=None, genCharge=None, all_param_names=None):
+        if all_param_names is None:
+            all_param_names = self.unconstrainedProcesses
         if gen_axes is None:
             gen_axes = self.datagroups.gen_axes_names.copy()
         if additional_axes is not None:
             gen_axes += additional_axes
-        # if only one or none gen axes, it is already included as main POI and no sumGroups are needed
-        if len(gen_axes) <= 1:
-            return
-        # make a sum group for each gen axis
-        axes_combinations = gen_axes
+        # make a sum group for inclusive cross section
+        axes_combinations = [[]]
+        # if only one or none gen axes, it is already included as main Param and no further sumXsecGroups are needed
+        if len(gen_axes) > 1:
+            # make a sum group for each gen axis
+            axes_combinations.extend(gen_axes)
         # also include combinations of axes in case there are more than 2 axes
         for n in range(2, len(self.datagroups.gen_axes_names)):
             axes_combinations += [k for k in itertools.combinations(self.datagroups.gen_axes_names, n)]
+        
         for axes in axes_combinations:
             logger.debug(f"Add sum group for {axes}{' with ' + genCharge if genCharge else ''}")
 
             if isinstance(axes, str):
                 axes = [axes]
 
-            pois_axis = [x for x in self.unconstrainedProcesses if all([a in x for a in axes])]
-
+            param_names = [x for x in all_param_names if all([a in x for a in axes])]
+            
             # in case of multiple base processes (e.g. in simultaneous unfoldings) loop over all base processes
-            base_processes = set(map(lambda x: x.split("_")[0], pois_axis))
+            base_processes = set(map(lambda x: x.split("_")[0], param_names))
+
             for base_process in base_processes:
-                pois = [x for x in pois_axis if base_process in x.split("_")]
-
-                sum_groups = set(["_".join([a + p.split(a)[1].split("_")[0] for a in axes]) for p in pois])
-
+                params = [x for x in param_names if base_process in x.split("_")]
+                sum_groups = set(["_".join([base_process, *[a + p.split(a)[1].split("_")[0] for a in axes]]) for p in params])
                 for sum_group in sorted(sum_groups):
-                    membersList = [p for p in pois if all([g in p.split("_") for g in sum_group.split("_")])]
-                    sum_group_name = f"{base_process}_{sum_group}"
+                    membersList = [p for p in params if all([g in p.split("_") for g in sum_group.split("_")])]
+                    sum_group_name = sum_group
                     if genCharge is not None:                
                         membersList = list(filter(lambda x: genCharge in x, membersList))
                         sum_group_name += f"_{genCharge}"
-                    if len(membersList):                            
-                        self.addPOISumGroup(sum_group_name, membersList)
-                        
-    def addPOISumGroup(self, groupName, members):
-        if groupName in self.cardSumGroups:
-            self.cardSumGroups[groupName].append(members)
-        else:
-            self.cardSumGroups[groupName] = members
 
-    def writePOISumGroupToText(self, groupLabel="sumGroup"):
-        # newName sumGroup = poi_bin1 poi_bin2 poi_bin3
+                    if len(membersList):                            
+                        self.addSumXsecGroup(sum_group_name, membersList)
+                        
+    def addSumXsecGroup(self, groupName, members):
+        logger.debug(f"Add xsec sum group {groupName}")
+        if groupName in self.cardSumXsecGroups:
+            self.cardSumXsecGroups[groupName].append(members)
+        else:
+            self.cardSumXsecGroups[groupName] = members
+
+    def writeXsecSumGroupToText(self, groupLabel="sumGroup"):
+        # newName sumGroup = param_bin1 param_bin2 param_bin3
         text = ""
-        for groupName, membersList in self.cardSumGroups.items():
+        for groupName, membersList in self.cardSumXsecGroups.items():
             members = " ".join(membersList)
-            logger.debug(f"Write POI sum group {groupName} with members {members}")
+            logger.debug(f"Write X sec sum group {groupName} with members {members}")
             text += f"\n{groupName} {groupLabel} = {members}"
         return text
         

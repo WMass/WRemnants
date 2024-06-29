@@ -143,10 +143,21 @@ if isUnfolding:
     min_pt_unfolding = template_minpt+template_wpt
     max_pt_unfolding = template_maxpt-template_wpt
     npt_unfolding = args.genBins[0]-2
-    unfolding_axes, unfolding_cols = differential.get_pt_eta_axes(npt_unfolding, min_pt_unfolding, max_pt_unfolding, args.genBins[1] if "absEtaGen" in args.genAxes else None , flow_eta=isPoiAsNoi)
+    unfolding_axes, unfolding_cols = differential.get_pt_eta_axes(
+        npt_unfolding, 
+        min_pt_unfolding, 
+        max_pt_unfolding, 
+        args.genBins[1] if "absEtaGen" in args.genAxes else None, 
+        flow_eta=isPoiAsNoi,
+        add_out_of_acceptance_axis=isPoiAsNoi,
+    )
     if not isPoiAsNoi:
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Wmunu")
         # datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Wtaunu")
+
+    if args.fitresult:
+        noi_axes = [a for a in unfolding_axes if a.name != "acceptance"]
+        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult, noi_axes, process = "W", poi_type = "nois")
 
 elif isTheoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = differential.get_theoryAgnostic_axes(ptV_bins=args.genPtVbinEdges, absYV_bins=args.genAbsYVbinEdges, ptV_flow=isPoiAsNoi, absYV_flow=isPoiAsNoi)
@@ -238,7 +249,6 @@ if not args.noRecoil:
     from wremnants import recoil_tools
     recoilHelper = recoil_tools.Recoil("highPU", args, flavor="mu")
 
-
 ######################################################
 ######################################################
 ######################################################
@@ -264,7 +274,7 @@ def setTheoryAgnosticGraph(df, results, dataset, reco_sel_GF, era, nominal_axes_
 ######################################################
 ######################################################
 ######################################################
-    
+
 smearing_weights_procs = []
 
 def build_graph(df, dataset):
@@ -295,6 +305,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
+    df = df.DefinePerSample("unity", "1.0")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     weightsum = df.SumAndCount("weight")
@@ -305,18 +316,31 @@ def build_graph(df, dataset):
     if isUnfolding and isWmunu:
         df = unfolding_tools.define_gen_level(df, args.genLevel, dataset.name, mode=analysis_label)
 
-        cutsmap = {"pt_min" : template_minpt, "pt_max" : template_maxpt, "mtw_min" : args.mtCut, "abseta_max" : template_maxeta}
+        cutsmap = {
+            "pt_min" : template_minpt, 
+            "pt_max" : template_maxpt, 
+            "abseta_max" : template_maxeta, 
+            "mtw_min" : None
+            }
         if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
             df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=False, **cutsmap)
         else:
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=True, select=not isPoiAsNoi, **cutsmap)
+
+            if args.fitresult:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define("unfoldingWeight_tensor", unfolding_corr_helper, [*unfolding_corr_helper.hist.axes.name[:-1], "unity"])
+                df = df.Define("central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity")
+
+            if isPoiAsNoi:
+                df_xnorm = df.Filter("acceptance")
+            else:
+                df_xnorm = df
+
+            unfolding_tools.add_xnorm_histograms(results, df_xnorm, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
             if not isPoiAsNoi:
-                logger.debug("Select events in fiducial phase space")
-                df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=True, **cutsmap)
                 axes = [*nominal_axes, *unfolding_axes] 
                 cols = [*nominal_cols, *unfolding_cols]
-            
-            unfolding_tools.add_xnorm_histograms(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
 
     if isWorZ:
         df = theory_tools.define_prefsr_vars(df)
@@ -467,7 +491,7 @@ def build_graph(df, dataset):
         df = df.Define("goodMuons_pt", "Muon_correctedPt[goodMuons]")
         df = df.Define("goodMuons_charge", "Muon_correctedCharge[goodMuons]")
         df = df.Define(f"goodMuons_{cvhName}NValidPixelHits", f"Muon_{cvhName}NValidPixelHits[goodMuons]")
-        df = df.Define("goodMuons_triggerCat", "ROOT::VecOps::RVec<wrem::TriggerCat>(goodMuons_eta.size(), wrem::TriggerCat::triggering)");
+        df = df.Define("goodMuons_triggerCat", "ROOT::VecOps::RVec<wrem::TriggerCat>(goodMuons_eta.size(), wrem::TriggerCat::triggering)")
 
         pixel_multiplicity_cols = ["goodMuons_triggerCat", "goodMuons_eta", "goodMuons_pt", "goodMuons_charge", f"goodMuons_{cvhName}NValidPixelHits"]
 
@@ -603,7 +627,7 @@ def build_graph(df, dataset):
                         noiAsPoiWithPolHistName = Datagroups.histName("nominal", syst=f"theoryAgnosticWithPol_{coeffKey}_{genVcharge}")
                         results.append(df.HistoBoost(noiAsPoiWithPolHistName, nominal_axes, [*nominal_cols, f"theoryAgnostic_{coeffKey}_{genVcharge}_tensor"], tensor_axes=helperQ.tensor_axes, storage=hist.storage.Double()))
 
-        if isUnfolding:
+        if isUnfolding and isWmunu:
             noiAsPoiHistName = Datagroups.histName("nominal", syst="yieldsUnfolding")
             logger.debug(f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs")
             results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))       

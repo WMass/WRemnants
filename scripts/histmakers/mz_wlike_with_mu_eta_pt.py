@@ -26,12 +26,13 @@ parser.add_argument("--muonIsolation", type=int, nargs=2, default=[1,1], choices
 initargs,_ = parser.parse_known_args()
 logger = logging.setup_logger(__file__, initargs.verbose, initargs.noColorLogger)
 
-isUnfolding = initargs.analysisMode == "unfolding"
-
 parser = common.set_parser_default(parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"])
 parser = common.set_parser_default(parser, "excludeProcs", ["QCD"])
 
 args = parser.parse_args()
+
+isUnfolding = args.analysisMode == "unfolding"
+isPoiAsNoi = isUnfolding and args.poiAsNoi
 
 thisAnalysis = ROOT.wrem.AnalysisType.Wlike
 isoBranch = muon_selections.getIsoBranch(args.isolationDefinition)
@@ -72,9 +73,23 @@ if isUnfolding:
     min_pt_unfolding = template_minpt+template_wpt
     max_pt_unfolding = template_maxpt-template_wpt
     npt_unfolding = args.genBins[0]-2
-    unfolding_axes, unfolding_cols = differential.get_pt_eta_charge_axes(npt_unfolding, min_pt_unfolding, max_pt_unfolding, args.genBins[1])
-    datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Zmumu")
-    datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Ztautau")
+    unfolding_axes, unfolding_cols = differential.get_pt_eta_charge_axes(
+        npt_unfolding, 
+        min_pt_unfolding, 
+        max_pt_unfolding, 
+        args.genBins[1], 
+        flow_pt=True, 
+        flow_eta=isPoiAsNoi,
+        add_out_of_acceptance_axis=isPoiAsNoi,
+    )
+    if not isPoiAsNoi:
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Zmumu")
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Ztautau")
+
+    if args.fitresult:
+        noi_axes = [a for a in unfolding_axes if a.name != "acceptance"]
+        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult, noi_axes, process = "Z", poi_type = "nois")
+
 
 # axes for mT measurement
 axis_mt = hist.axis.Regular(200, 0., 200., name = "mt",underflow=False, overflow=True)
@@ -138,7 +153,6 @@ if not args.noRecoil:
     from wremnants import recoil_tools
     recoilHelper = recoil_tools.Recoil("highPU", args, flavor="mumu")
 
-
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
@@ -152,6 +166,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
+    df = df.DefinePerSample("unity", "1.0")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     weightsum = df.SumAndCount("weight")
@@ -165,15 +180,24 @@ def build_graph(df, dataset):
                    "mass_min" : mass_min, "mass_max" : mass_max}
 
         if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
             df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=False, **cutsmap)
         else:
-            logger.debug("Select events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=True, **cutsmap)
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, accept=True, select=not isPoiAsNoi, **cutsmap)
 
-            unfolding_tools.add_xnorm_histograms(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
-            axes = [*nominal_axes, *unfolding_axes] 
-            cols = [*nominal_cols, *unfolding_cols]
+            if args.fitresult:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define("unfoldingWeight_tensor", unfolding_corr_helper, [*unfolding_corr_helper.hist.axes.name[:-1], "unity"])
+                df = df.Define("central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity")
+
+            if isPoiAsNoi:
+                df_xnorm = df.Filter("acceptance")
+            else:
+                df_xnorm = df
+
+            unfolding_tools.add_xnorm_histograms(results, df_xnorm, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
+            if not isPoiAsNoi:
+                axes = [*nominal_axes, *unfolding_axes] 
+                cols = [*nominal_cols, *unfolding_cols]
 
     if isZ:
         df = theory_tools.define_prefsr_vars(df)
@@ -328,18 +352,24 @@ def build_graph(df, dataset):
     nominal = df.HistoBoost("nominal", axes, [*cols, "nominal_weight"])
     results.append(nominal)
 
-    if isZ and not hasattr(dataset, "out_of_acceptance"):
-        theoryAgnostic_helpers_cols = ["qtOverQ", "absYVgen", "chargeVgen", "csSineCosThetaPhigen", "nominal_weight"]
-        # assume to have same coeffs for plus and minus (no reason for it not to be the case)
-        if dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
-            helpers_class = muRmuFPolVar_helpers_Z
-            process_name = "Z"
-        for coeffKey in helpers_class.keys():
-            logger.debug(f"Creating muR/muF histograms with polynomial variations for {coeffKey}")
-            helperQ = helpers_class[coeffKey]
-            df = df.Define(f"muRmuFPolVar_{coeffKey}_tensor", helperQ, theoryAgnostic_helpers_cols)
-            noiAsPoiWithPolHistName = Datagroups.histName("nominal", syst=f"muRmuFPolVar{process_name}_{coeffKey}")
-            results.append(df.HistoBoost(noiAsPoiWithPolHistName, nominal_axes, [*nominal_cols, f"muRmuFPolVar_{coeffKey}_tensor"], tensor_axes=helperQ.tensor_axes, storage=hist.storage.Double()))
+    if isPoiAsNoi and isZ:
+        if not hasattr(dataset, "out_of_acceptance"): # TODO: might add Wtaunu at some point, not yet
+            theoryAgnostic_helpers_cols = ["qtOverQ", "absYVgen", "chargeVgen", "csSineCosThetaPhigen", "nominal_weight"]
+            # assume to have same coeffs for plus and minus (no reason for it not to be the case)
+            if dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
+                helpers_class = muRmuFPolVar_helpers_Z
+                process_name = "Z"
+            for coeffKey in helpers_class.keys():
+                logger.debug(f"Creating muR/muF histograms with polynomial variations for {coeffKey}")
+                helperQ = helpers_class[coeffKey]
+                df = df.Define(f"muRmuFPolVar_{coeffKey}_tensor", helperQ, theoryAgnostic_helpers_cols)
+                noiAsPoiWithPolHistName = Datagroups.histName("nominal", syst=f"muRmuFPolVar{process_name}_{coeffKey}")
+                results.append(df.HistoBoost(noiAsPoiWithPolHistName, nominal_axes, [*nominal_cols, f"muRmuFPolVar_{coeffKey}_tensor"], tensor_axes=helperQ.tensor_axes, storage=hist.storage.Double()))
+
+        if isUnfolding and dataset.name == "ZmumuPostVFP":
+            noiAsPoiHistName = Datagroups.histName("nominal", syst="yieldsUnfolding")
+            logger.debug(f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs")
+            results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))      
 
     if not args.noRecoil and args.recoilUnc:
         df = recoilHelper.add_recoil_unc_Z(df, results, dataset, cols, axes, "nominal")

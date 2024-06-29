@@ -189,7 +189,8 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, suff
     hep.cms.label(ax=ax1, lumi=float(f"{lumi:.3g}") if lumi is not None else None, fontsize=20*args.scaleleg*scale, 
         label=args.cmsDecor, data=data)
 
-    plot_tools.addLegend(ax1, ncols=np.ceil(len(h_stack)/3), text_size=20*args.scaleleg*scale)
+    if len(h_stack) < 10:
+        plot_tools.addLegend(ax1, ncols=np.ceil(len(h_stack)/3), text_size=20*args.scaleleg*scale)
     plot_tools.fix_axes(ax1, ax2, yscale=args.yscale)
 
     to_join = [fittype, args.postfix, axis_name, suffix]
@@ -252,6 +253,8 @@ if combinetf2:
         chi2 = fitresult[f"chi2_{fittype}"], fitresult[f"ndf_{fittype}"]
 
     for channel, info in meta_input["channel_info"].items():
+        if channel.endswith("masked"):
+            continue
         hist_data = fitresult["hist_data_obs"][channel].get()
         hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
         hist_stack = fitresult[f"hist_{fittype}"][channel].get()
@@ -270,6 +273,8 @@ else:
         meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
         ch_start=0
         for channel, info in meta["channel_info"].items():
+            if channel.endswith("masked"):
+                continue
             shape = [len(a) for a in info["axes"]]
 
             ch_end = ch_start+np.product(shape) # in combinetf1 the channels are concatenated and we need to index one after the other
@@ -370,4 +375,4 @@ else:
         make_plots(hist_data, hist_inclusive, hist_stack, axes, colors=colors, labels=labels, chi2=chi2, saturated_chi2=True)
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
-    output_tools.copy_to_eos(args.outpath, args.outfolder)
+    output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

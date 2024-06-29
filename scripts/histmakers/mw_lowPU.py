@@ -126,11 +126,9 @@ def build_graph(df, dataset):
         df = unfolding_tools.define_gen_level(df, args.genLevel, dataset.name, mode=analysis_label)
 
         if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
             df = unfolding_tools.select_fiducial_space(df, mode="wmass", pt_min=args.pt[1], pt_max=args.pt[2], 
                 mtw_min=mtw_min, selections=unfolding_selections, accept=False)
         else:
-            logger.debug("Select events in fiducial phase space")
             df = unfolding_tools.select_fiducial_space(df, mode="wmass", pt_min=args.pt[1], pt_max=args.pt[2], 
                 mtw_min=mtw_min, selections=unfolding_selections, accept=True)
 

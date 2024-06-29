@@ -432,6 +432,9 @@ def define_postfsr_vars(df, mode=None):
             df = df.Define('postfsrYV', 'postfsrGenV_mom4.Rapidity()')
             df = df.Define('postfsrabsYV', 'std::fabs(postfsrYV)')
             df = df.Define('postfsrPTV', 'postfsrGenV_mom4.pt()')
+            df = df.DefinePerSample('postfsrChargeV', '0')
+        else:
+            df = df.Define('postfsrChargeV', 'postfsrLep_charge')
 
     return df
 
@@ -597,7 +600,10 @@ def build_weight_expr(df, exclude_weights=[]):
 
 def define_nominal_weight(df):
     logger.debug("Defining nominal weight")
-    return df.Define(f"nominal_weight", build_weight_expr(df))
+    if "central_weight" in df.GetColumnNames():
+        return df.Define(f"nominal_weight", build_weight_expr(df) + " * central_weight")
+    else:
+        return df.Define(f"nominal_weight", build_weight_expr(df))
 
 def define_ew_theory_corr(df, dataset_name, helpers, generators, modify_central_weight=False):
     logger.debug("define_ew_theory_corr")

@@ -287,7 +287,7 @@ class Datagroups(object):
     def loadHistsForDatagroups(self, 
         baseName, syst, procsToRead=None, label=None, nominalIfMissing=True, 
         applySelection=True, forceNonzero=False, preOpMap=None, preOpArgs={}, 
-                               scaleToNewLumi=1, lumiScaleVarianceLinearly=[], excludeProcs=None, forceToNominal=[], sumFakesPartial=True,
+        scaleToNewLumi=1, lumiScaleVarianceLinearly=[], excludeProcs=None, forceToNominal=[], sumFakesPartial=True,
     ):
         logger.debug("Calling loadHistsForDatagroups()")
         logger.debug(f"The basename and syst is: {baseName}, {syst}")
@@ -560,6 +560,7 @@ class Datagroups(object):
             return
 
         self.all_gen_axes = args.get("genAxes", [])
+        self.all_gen_axes = [n for n in self.all_gen_axes]
 
         if self.mode[0] == "w":
             self.all_gen_axes = ["qGen", *self.all_gen_axes]
@@ -567,7 +568,7 @@ class Datagroups(object):
         self.gen_axes_names = list(gen_axes_names) if gen_axes_names != None else self.all_gen_axes
         self.sum_gen_axes = list(sum_gen_axes) if sum_gen_axes != None else self.all_gen_axes
 
-        logger.debug(f"Gen axes are now {self.gen_axes_names}")
+        logger.debug(f"Gen axes names are now {self.gen_axes_names}")
 
     def getGenBinIndices(self, h, axesToRead=None):
         gen_bins = []
@@ -583,11 +584,9 @@ class Datagroups(object):
             gen_bins.append(gen_bin_list)
         return gen_bins
 
-    def defineSignalBinsUnfolding(self, group_name, new_name=None, member_filter=None, histToReadAxes="xnorm", axesToRead=None):
+    def getHistForUnfolding(self, group_name, member_filter=None, histToReadAxes="xnorm"):
         if group_name not in self.groups.keys():
             raise RuntimeError(f"Base group {group_name} not found in groups {self.groups.keys()}!")
-        if axesToRead is None:
-            axesToRead = self.gen_axes_names
         base_members = self.groups[group_name].members[:]
         if member_filter is not None:
             base_members = [m for m in filter(lambda x, f=member_filter: f(x), base_members)]            
@@ -595,29 +594,45 @@ class Datagroups(object):
         if histToReadAxes not in self.results[base_members[0].name]["output"]:
             raise ValueError(f"Results for member {base_members[0].name} does not include xnorm. Found {self.results[base_members[0].name]['output'].keys()}")
         nominal_hist = self.results[base_members[0].name]["output"][histToReadAxes].get()
+        return nominal_hist
+
+    def getPOINames(self, gen_bin_indices, axes, base_name, flow=True):
+        poi_names = []
+        for indices in itertools.product(*gen_bin_indices):
+            poi_name = base_name
+            for idx, var in zip(indices, axes):
+                if idx in [hist.overflow, hist.underflow] and not flow:
+                    break
+                elif idx == hist.underflow:
+                    idx_str = "U"
+                elif idx == hist.overflow:
+                    idx_str = "O"
+                else:
+                    idx_str = str(idx)
+                poi_name += f"_{var}{idx_str}"
+            else:
+                poi_names.append(poi_name)
+        
+        return poi_names
+
+    def defineSignalBinsUnfolding(self, group_name, new_name=None, member_filter=None, histToReadAxes="xnorm", axesToRead=None):
+        nominal_hist = self.getHistForUnfolding(group_name, member_filter, histToReadAxes)
+        if axesToRead is None:
+            axesToRead = self.gen_axes_names
 
         self.gen_axes[new_name] = [ax for ax in nominal_hist.axes if ax.name in axesToRead]
         logger.debug(f"New gen axes are: {self.gen_axes}")
 
         gen_bin_indices = self.getGenBinIndices(nominal_hist, axesToRead=axesToRead)
 
-        for indices in itertools.product(*gen_bin_indices):
-
-            proc_name = group_name if new_name is None else new_name
-            for idx, var in zip(indices, axesToRead):
-                if idx == hist.underflow:
-                    idx_str = "U"
-                elif idx == hist.overflow:
-                    idx_str = "O"
-                else:
-                    idx_str = str(idx)
-                proc_name += f"_{var}{idx_str}"
-
-
+        for indices, proc_name in zip(
+            itertools.product(*gen_bin_indices), 
+            self.getPOINames(gen_bin_indices, axesToRead, base_name=group_name if new_name is None else new_name)
+        ):
             self.copyGroup(group_name, proc_name, member_filter=member_filter)
 
             memberOp = lambda x, indices=indices, genvars=axesToRead: x[{var : i for var, i in zip(genvars, indices)}]
-            self.groups[proc_name].memberOp = [memberOp for m in base_members]
+            self.groups[proc_name].memberOp = [memberOp for m in self.groups[group_name].members[:]]
 
             self.unconstrainedProcesses.append(proc_name)
 

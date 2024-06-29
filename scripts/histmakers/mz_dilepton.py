@@ -9,7 +9,7 @@ parser,initargs = common.common_parser(analysis_label)
 import ROOT
 import narf
 import wremnants
-from wremnants import theory_tools,syst_tools,theory_corrections, muon_validation, muon_calibration, muon_selections, unfolding_tools
+from wremnants import theory_tools,syst_tools,theory_corrections, muon_validation, muon_calibration, muon_selections, unfolding_tools, theoryAgnostic_tools
 from wremnants.histmaker_tools import scale_to_data, aggregate_groups
 from wremnants.datasets.dataset_tools import getDatasets
 import hist
@@ -35,8 +35,6 @@ args = parser.parse_args()
 isUnfolding = args.analysisMode == "unfolding"
 isPoiAsNoi = isUnfolding and args.poiAsNoi
 
-args = parser.parse_args()
-
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 
@@ -61,8 +59,10 @@ dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
 all_axes = {
     # "mll": hist.axis.Regular(60, 60., 120., name = "mll", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
     "mll": hist.axis.Variable([60,70,75,78,80,82,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,100,102,105,110,120], name = "mll", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
-    "yll": hist.axis.Regular(20, -2.5, 2.5, name = "yll", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
-    "absYll": hist.axis.Regular(10, 0., 2.5, name = "absYll", underflow=False, overflow=not args.excludeFlow),
+    # "yll": hist.axis.Regular(20, -2.5, 2.5, name = "yll", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
+    "yll": hist.axis.Variable([-2.5, -1.4, -0.8, -0.4, 0, 0.4, 0.8, 1.4, 2.5], name = "yll", underflow=not args.excludeFlow, overflow=not args.excludeFlow),
+    # "absYll": hist.axis.Regular(10, 0., 2.5, name = "absYll", underflow=False, overflow=not args.excludeFlow),
+    "absYll": hist.axis.Variable([0, 0.4, 0.8, 1.4, 2.5], name = "absYll", underflow=False, overflow=not args.excludeFlow),
     "ptll": hist.axis.Variable(dilepton_ptV_binning, name = "ptll", underflow=False, overflow=not args.excludeFlow),
     "etaPlus": hist.axis.Variable([-2.4,-1.2,-0.3,0.3,1.2,2.4], name = "etaPlus"),
     "etaMinus": hist.axis.Variable([-2.4,-1.2,-0.3,0.3,1.2,2.4], name = "etaMinus"),
@@ -75,8 +75,8 @@ all_axes = {
     "etaDiff": hist.axis.Variable([-4.8, -1.0, -0.6, -0.2, 0.2, 0.6, 1.0, 4.8], name = "etaDiff"),
     "ptPlus": hist.axis.Regular(int(args.pt[0]), args.pt[1], args.pt[2], name = "ptPlus"),
     "ptMinus": hist.axis.Regular(int(args.pt[0]), args.pt[1], args.pt[2], name = "ptMinus"),
-    "cosThetaStarll": hist.axis.Regular(20, -1., 1., name = "cosThetaStarll", underflow=False, overflow=False),
-    "phiStarll": hist.axis.Regular(20, -math.pi, math.pi, circular = True, name = "phiStarll"),
+    "cosThetaStarll": hist.axis.Regular(6, -1., 1., name = "cosThetaStarll", underflow=False, overflow=False),
+    "phiStarll": hist.axis.Regular(6, -math.pi, math.pi, circular = True, name = "phiStarll"),
     #"charge": hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "charge") # categorical axes in python bindings always have an overflow bin, so use a regular
     "massVgen": hist.axis.Variable(ewMassBins, name = "massVgen", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
     "ewMll": hist.axis.Variable(ewMassBins, name = "ewMll", overflow=not args.excludeFlow, underflow=not args.excludeFlow),
@@ -106,9 +106,17 @@ nominal_axes = [all_axes[a] for a in nominal_cols]
 inclusive = hasattr(args, "inclusive") and args.inclusive
 
 if isUnfolding:
-    unfolding_axes, unfolding_cols, unfolding_selections = differential.get_dilepton_axes(args.genAxes, common.get_gen_axes(isPoiAsNoi, dilepton_ptV_binning, inclusive), add_out_of_acceptance_axis=isPoiAsNoi)
+    unfolding_axes, unfolding_cols, unfolding_selections = differential.get_dilepton_axes(
+        args.genAxes, 
+        common.get_gen_axes(dilepton_ptV_binning, inclusive, flow=isPoiAsNoi), 
+        add_out_of_acceptance_axis=isPoiAsNoi,
+    )
     if not isPoiAsNoi:
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Zmumu")
+        
+    if args.fitresult:
+        noi_axes = [a for a in unfolding_axes if a.name != "acceptance"]
+        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult, noi_axes, process = "Z", poi_type = "nois")
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = wremnants.make_muon_prefiring_helpers(era = era)
@@ -182,6 +190,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
+    df = df.DefinePerSample("unity", "1.0")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     weightsum = df.SumAndCount("weight")
@@ -203,12 +212,31 @@ def build_graph(df, dataset):
             cutsmap = {"fiducial" : "masswindow"}
 
         if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=[], accept=False, **cutsmap)
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=unfolding_selections, accept=False, **cutsmap)
         else:
-            logger.debug("Select events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=[], select=not isPoiAsNoi, accept=True, **cutsmap)
-            unfolding_tools.add_xnorm_histograms(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=unfolding_selections, select=not isPoiAsNoi, accept=True, **cutsmap)
+
+            if args.fitresult:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define("unfoldingWeight_tensor", unfolding_corr_helper, [*unfolding_corr_helper.hist.axes.name[:-1], "unity"])
+                df = df.Define("central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity")
+
+            if isPoiAsNoi:
+                df_xnorm = df.Filter("acceptance")
+            else:
+                df_xnorm = df
+
+            unfolding_tools.add_xnorm_histograms(
+                results, 
+                df_xnorm, 
+                args, 
+                dataset.name, 
+                corr_helpers, 
+                qcdScaleByHelicity_helper, 
+                unfolding_axes, 
+                unfolding_cols, 
+                add_helicity_axis="helicitySig" in args.genAxes,
+            )
             if not isPoiAsNoi:
                 axes = [*nominal_axes, *unfolding_axes] 
                 cols = [*nominal_cols, *unfolding_cols]
@@ -361,6 +389,9 @@ def build_graph(df, dataset):
         results.append(df.HistoBoost("weight", [hist.axis.Regular(100, -2, 2)], ["nominal_weight"], storage=hist.storage.Double()))
         results.append(df.HistoBoost("nominal", axes, [*cols, "nominal_weight"]))
 
+        if "helicitySig" in args.genAxes:
+            df = theoryAgnostic_tools.define_helicity_weights(df)
+
     # histograms for corrections/uncertainties for pixel hit multiplicity
 
     # hNValidPixelHitsTrig = df.HistoBoost("hNValidPixelHitsTrig", [axis_eta, axis_nvalidpixel], ["trigMuons_eta0", f"trigMuons_{cvhName}NValidPixelHits0", "nominal_weight"])
@@ -378,7 +409,11 @@ def build_graph(df, dataset):
     if isUnfolding and isPoiAsNoi and dataset.name == "ZmumuPostVFP":
         noiAsPoiHistName = Datagroups.histName("nominal", syst="yieldsUnfolding")
         logger.debug(f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs")
-        results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))       
+        if "helicitySig" in args.genAxes:
+            from wremnants.helicity_utils import axis_helicity_multidim
+            results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight_helicity"], tensor_axes=[axis_helicity_multidim]))  
+        else:
+            results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))  
 
     for obs in ["ptll", "mll", "yll", "cosThetaStarll", "phiStarll", "etaPlus", "etaMinus", "ptPlus", "ptMinus"]:
         if dataset.is_data:

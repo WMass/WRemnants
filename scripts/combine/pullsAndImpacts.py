@@ -10,13 +10,17 @@ import dash_daq as daq
 from dash import html
 from dash.dependencies import Input, Output
 from utilities import logging
-from utilities.io_tools import input_tools, output_tools, combinetf_input
+from utilities.io_tools import input_tools, output_tools, combinetf_input, conversion_tools
 from wremnants import plot_tools
 import os
 import re
 import json
 
+from narf import ioutils
+
 from utilities.styles.styles import nuisance_groupings as groupings
+
+logger = logging.child_logger(__name__)
 
 def writeOutput(fig, outfile, extensions=[], postfix=None, args=None, meta_info=None):
     name, ext = os.path.splitext(outfile)
@@ -87,11 +91,11 @@ def plotImpacts(df, impact_title="", pulls=False, normalize=False, oneSidedImpac
 
     if impacts and include_ref:
         # append numerical values of impacts on nuisance name; fill up empty room with spaces to align numbers
-        frmt = "{:0"+str(int(np.log10(max(df[impact_str])))+2)+".2f}"
+        frmt = "{:0"+str(int(np.log10(max(df[impact_str])) if max(df[f"{impact_str}_ref"])>0 else 0)+2)+".2f}"
         nval = df[impact_str].apply(lambda x,frmt=frmt: frmt.format(x)) #.astype(str)
         nspace = nval.apply(lambda x, n=nval.apply(len).max(): " "*(n - len(x))) 
         if include_ref:
-            frmt_ref = "{:0"+str(int(np.log10(max(df[f"{impact_str}_ref"])))+2)+".2f}"
+            frmt_ref = "{:0"+str(int(np.log10(max(df[f"{impact_str}_ref"])) if max(df[f"{impact_str}_ref"])>0 else 0)+2)+".2f}"
             nval_ref = df[f'{impact_str}_ref'].apply(lambda x,frmt=frmt_ref: " ("+frmt.format(x)+")") #.round(2).astype(str)
             nspace_ref = nval_ref.apply(lambda x, n=nval_ref.apply(len).max(): " "*(n - len(x))) 
             nval = nval+nspace_ref+nval_ref 
@@ -256,23 +260,24 @@ def plotImpacts(df, impact_title="", pulls=False, normalize=False, oneSidedImpac
 
     return fig
 
-def readFitInfoFromFile(rf, filename, poi, group=False, stat=0.0, normalize=False, scale=1):    
-    impacts, labels, _ = combinetf_input.read_impacts_poi(rf, group, add_total=group, stat=stat, poi=poi, normalize=normalize)
+def readFitInfoFromFile(rf, filename, poi, group=False, grouping=None, filters=[], stat=0.0, normalize=False, scale=1):    
+    logger.debug("Read impacts for poi from file")
+    impacts, labels, norm = combinetf_input.read_impacts_poi(rf, group, add_total=group, stat=stat, poi=poi, normalize=normalize)
     
-    if (group and grouping) or args.filters:
+    if (group and grouping) or filters:
         filtimpacts = []
         filtlabels = []
         for impact,label in zip(impacts,labels):
             if group and grouping and label not in grouping:
                 continue
-            if args.filters and not any(re.match(f, label) for f in args.filters):
+            if filters and not any(re.match(f, label) for f in filters):
                 continue
             filtimpacts.append(impact)
             filtlabels.append(label)
         impacts = filtimpacts
         labels = filtlabels
 
-    df = pd.DataFrame(np.array(impacts, dtype=np.float64).T*scale, columns=["impact"])
+    df = pd.DataFrame(np.array(impacts, dtype=np.float64).T*scale, columns=["impact"])    
     df['label'] = [translate_label.get(l, l) for l in labels]
     df['absimpact'] = np.abs(df['impact'])
     if not group:
@@ -293,8 +298,9 @@ def readFitInfoFromFile(rf, filename, poi, group=False, stat=0.0, normalize=Fals
 def parseArgs():
     sort_choices = ["label", "abspull", "constraint", "absimpact"]
     sort_choices += [
-        *[f"{c}_diff" for c in sort_choices],  # possibility to sort based on largest difference between inputfile and referencefile
-        *[f"{c}_ref" for c in sort_choices] ]  # possibility to sort based on referencefile
+        *[f"{c}_diff" for c in sort_choices],  # possibility to sort based on largest difference between input and referencefile
+        *[f"{c}_ref" for c in sort_choices],   # possibility to sort based on reference file
+        *[f"{c}_both" for c in sort_choices] ] # possibility to sort based on the largest/smallest of both input and reference file
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", "--inputFile", type=str, required=True, help="fitresults output ROOT/hdf5 file from combinetf")
@@ -311,6 +317,8 @@ def parseArgs():
     parser.add_argument("--grouping", type=str, default=None, help="Select nuisances by a predefined grouping", choices=groupings.keys())
     parser.add_argument("-t","--translate", type=str, default=None, help="Specify .json file to translate labels")
     parser.add_argument("--noImpacts", action='store_true', help="Don't show impacts")
+    parser.add_argument("--poi", type=str, default=None, help="Specify POI to make impacts for, otherwise use all")
+    parser.add_argument("--poiType", type=str, default=None, help="POI type to make impacts for")
     parsers = parser.add_subparsers(dest='output_mode')
     interactive = parsers.add_parser("interactive", help="Launch and interactive dash session")
     interactive.add_argument("-i", "--interface", default="localhost", help="The network interface to bind to.")
@@ -354,8 +362,25 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
             impact_title = "$\\mathrm{Impact\\ on\\ mass\\ diff. }(\\eta)\\ (\\mathrm{MeV})$"
         else:
             impact_title = "Impact on mass diff. (MeV)"
-    elif poi and poi.startswith("Width"):
+    elif poi and poi.startswith("width"):
         impact_title = "Impact on width (MeV)"
+    elif poi_type in ["pmaskedexp", "pmaskedexpnorm", "sumxsec", "sumxsecnorm"]:
+        if poi_type in ["pmaskedexp", "sumxsec"]:
+            meta = ioutils.pickle_load_h5py(fitresult["meta"])
+            channel_info = conversion_tools.combine_channels(meta, True)
+            if len(channel_info.keys()) == 1:
+                lumi = channel_info["chan_13TeV"]["lumi"]
+            else:
+                raise NotImplementedError(f"Found channels {[k for k in channel_info.keys()]} but only one channel is supported.")
+            scale = 1./(lumi*1000)
+            poi_name = "_".join(poi.split("_")[:-1])
+            impact_title = "$\\sigma_\\mathrm{fid}("+poi_name+") [\\mathrm{pb}]$" 
+        else:
+            impact_title = "$1/\\sigma_\\mathrm{fid} \\mathrm{d}\\sigma$"
+    elif poi_type in ["ratiometaratio"]:
+        poi_name = "_".join(poi.split("_")[:-1]).replace("r_","")
+        impact_title = f"Impact on ratio {poi_name} *1000"
+        scale=1000
     else:
         impact_title=poi
 
@@ -366,41 +391,29 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
 
     if fitresult_ref:
         df_ref = readFitInfoFromFile(fitresult_ref, args.referenceFile, poi, group, stat=args.stat/100., normalize=normalize, scale=scale)
-        df = df.merge(df_ref, how="left", on="label", suffixes=("","_ref"))
-    
-    if group and fitresult_ref and set(fitresult_ref["hsysts"]) != set(fitresult["hsysts"]):
-        # add another group for the uncertainty from all systematics that are not common among the two groups; 
-        # defined as err = sqrt( variance(total) - variance(common nuisances) )
-        np_common = [s in fitresult_ref["hsysts"][...] for s in fitresult["hsysts"][...]]
-        np_common_ref = [s in fitresult["hsysts"][...] for s in fitresult_ref["hsysts"][...]]
-        cov = fitresult["cov"][np_common, :][:, np_common]
-        cov_ref = fitresult_ref["cov"][np_common_ref, :][:, np_common_ref]
+        df = df.merge(df_ref, how="outer", on="label", suffixes=("","_ref"))
 
-        jac = fitresult["nuisance_impact_nois"][:,np_common]
-        jac_ref = fitresult_ref["nuisance_impact_nois"][:,np_common_ref]
-
-        df_total = df.loc[df["label"] == "Total"]
-        impact_others = np.sqrt(df_total["impact"].values[0]**2 - scale**2 * (jac @ (cov @ jac.T))[0][0])
-        impact_others_ref = np.sqrt(df_total["impact_ref"].values[0]**2 - scale**2 * (jac_ref @ (cov_ref @ jac_ref.T))[0][0])
-
-        new_row = {"label": "Others",
-            "impact": impact_others, "absimpact": abs(impact_others), "impact_color": df_total["impact_color"].values[0],
-            "impact_ref": impact_others_ref, "absimpact_ref": abs(impact_others_ref), "impact_color_ref": df_total["impact_color"].values[0],
-        }
-
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        # remove rows with nuisance groups that are only included in one group but not in the other, since those are included in "Others" already
-        df = df.dropna()
+        # Set default values for missing entries in respective columns
+        default_values = {'impact_color': "#377eb8",  'impact_color_ref': "#377eb8"}  
+        for col in df.columns:
+            df[col].fillna(default_values.get(col, 0), inplace=True)
 
     if args.sort:
+        logger.debug("Sort impacts")
         if args.sort.endswith("diff"):
             key = args.sort.replace("_diff","")
             df[f"{key}_diff"] = df[key] - df[f"{key}_ref"]
+        elif args.sort.endswith("both"):
+            key = args.sort.replace("_both","")
+            if args.ascending:
+                df[f"{key}_both"] = df[[key, f"{key}_ref"]].max(axis=1)
+            else:
+                df[f"{key}_both"] = df[[key, f"{key}_ref"]].min(axis=1)
 
         df = df.sort_values(by=args.sort, ascending=args.ascending)
 
     df = df.fillna(0)
-
+    logger.debug("Make plots")
     if args.output_mode == "interactive":
         app.layout = html.Div([
                 dcc.Input(
@@ -452,8 +465,6 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
             outfile = args.outputFile
         outfile = os.path.join(outdir, outfile)
         extensions = [outfile.split(".")[-1], *args.otherExtensions]
-
-        df = df.sort_values(by=args.sort, ascending=args.ascending)
         if args.num and args.num < df.size:
             # in case multiple extensions are given including html, don't do the skimming on html but all other formats
             if "html" in extensions and len(extensions)>1:
@@ -467,7 +478,7 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
         fig = plotImpacts(df, pulls=not args.noPulls and not group, impact_title=impact_title, normalize=not args.absolute, oneSidedImpacts=args.oneSidedImpacts)
         writeOutput(fig, outfile, extensions[0:], postfix=postfix, args=args, meta_info=meta)      
         if args.eoscp and output_tools.is_eosuser_path(args.outFolder):
-            output_tools.copy_to_eos(args.outFolder, "")
+            output_tools.copy_to_eos(outdir, args.outFolder, "")
     else:
         raise ValueError("Must select mode 'interactive' or 'output'")
 
@@ -492,9 +503,16 @@ if __name__ == '__main__':
         producePlots(fitresult, args, None, fitresult_ref=fitresult_ref)
         exit()
 
-    pois = combinetf_input.get_poi_names(fitresult, poi_type=None)
+    if args.poi:
+        pois = [args.poi]
+    else:
+        pois = combinetf_input.get_poi_names(fitresult, poi_type=args.poiType)
+
     for poi in pois:
+        logger.debug(f"Now at {poi}")
         if args.mode in ["both", "ungrouped"]:
+            logger.debug(f"Make impact per nuisance")
             producePlots(fitresult, args, poi, fitresult_ref=fitresult_ref)
         if args.mode in ["both", "group"]:
+            logger.debug(f"Make impact my group")
             producePlots(fitresult, args, poi, group=True, fitresult_ref=fitresult_ref)

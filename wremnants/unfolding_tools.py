@@ -1,5 +1,5 @@
-from utilities import differential,common
-from wremnants import syst_tools, theory_tools, logging
+from utilities import differential, common, logging
+from wremnants import syst_tools, theory_tools, theory_corrections, theoryAgnostic_tools
 from copy import deepcopy
 import hist
 import numpy as np
@@ -75,6 +75,8 @@ def define_gen_level(df, gen_level, dataset_name, mode="w_mass"):
 
     if "wlike" in mode:
         df = df.Define("qGen", "event % 2 == 0 ? -1 : 1")
+    
+    df = df.Alias("chargeVGen", "postfsrChargeV")
 
     return df
 
@@ -136,13 +138,15 @@ def select_fiducial_space(df, select=True, accept=True, mode="w_mass", **kwargs)
         df = df.DefinePerSample("acceptance", "true")
 
     if select and accept:
+        logger.debug("Select events in fiducial phase space")        
         df = df.Filter("acceptance")
-    elif select :
+    elif select:
+        logger.debug("Reject events in fiducial phase space")
         df = df.Filter("acceptance == 0")
 
     return df
 
-def add_xnorm_histograms(results, df, args, dataset_name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols):
+def add_xnorm_histograms(results, df, args, dataset_name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols, add_helicity_axis=False):
     # add histograms before any selection
     df_xnorm = df
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
@@ -155,8 +159,64 @@ def add_xnorm_histograms(results, df, args, dataset_name, corr_helpers, qcdScale
 
     xnorm_axes = [axis_xnorm, *unfolding_axes]
     xnorm_cols = ["xnorm", *unfolding_cols]
-    
-    results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight"]))
 
-    syst_tools.add_theory_hists(results, df_xnorm, args, dataset_name, corr_helpers, qcdScaleByHelicity_helper, xnorm_axes, xnorm_cols, base_name="xnorm")
+    if add_helicity_axis:
+        df_xnorm = theoryAgnostic_tools.define_helicity_weights(df_xnorm)
 
+        from wremnants.helicity_utils import axis_helicity_multidim
+        results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight_helicity"], tensor_axes=[axis_helicity_multidim]))  
+    else:
+        results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight"]))
+
+    syst_tools.add_theory_hists(
+        results, 
+        df_xnorm, 
+        args, 
+        dataset_name, 
+        corr_helpers, 
+        qcdScaleByHelicity_helper, 
+        xnorm_axes, 
+        xnorm_cols, 
+        base_name="xnorm", 
+        addhelicity=add_helicity_axis,
+        nhelicity=9,
+    )
+
+def reweight_to_fitresult(fitresult, axes, poi_type = "nois", cme = 13, process = "Z", expected = False, flow=True):
+    # requires fitresult generated from 'fitresult_pois_to_hist.py'
+    histname = "hist_" + "_".join([a.name for a in axes])
+    if expected:
+        histname += "_expected"
+
+    import pickle
+    with open(fitresult, "rb") as f:
+        r = pickle.load(f)
+        if process == "W":
+            corrh_0 = r["results"][poi_type][f"chan_{str(cme).replace('.','p')}TeV"]["W_qGen0"][histname]
+            corrh_1 = r["results"][poi_type][f"chan_{str(cme).replace('.','p')}TeV"]["W_qGen1"][histname]
+        else:
+            corrh = r["results"][poi_type][f"chan_{str(cme).replace('.','p')}TeV"][process][histname]
+
+    slices = [slice(None) for i in range(len(axes))]
+
+    if "qGen" not in [a.name for a in axes]:
+        # CorrectionsTensor needs charge axis
+        if process == "Z":
+            axes.append(hist.axis.Regular(1, -1, 1, name="chargeVGen", flow=False)) 
+            slices.append(np.newaxis)
+            values = corrh.values(flow=flow)
+        elif process == "W":
+            axes.append(hist.axis.Regular(2, -2, 2, name="chargeVGen", flow=False))
+            slices.append(slice(None))    
+            values = np.stack([corrh_0.values(flow=flow), corrh_1.values(flow=flow)], axis=-1)
+
+    ch = hist.Hist(*axes, hist.axis.Regular(1, 0, 1, name="vars", flow=False))
+    slices.append(np.newaxis)
+
+    ch = theory_corrections.set_corr_ratio_flow(ch)
+    ch.values(flow=flow)[...] = values[*slices]
+
+    logger.debug(f"corrections from fitresult: {values}")
+
+    from wremnants.correctionsTensor_helper import makeCorrectionsTensor
+    return makeCorrectionsTensor(ch)

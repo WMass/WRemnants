@@ -568,13 +568,12 @@ def save_pdf_and_png(outdir, basename, fig=None):
 
 def write_index_and_log(outpath, logname, template_dir=f"{pathlib.Path(__file__).parent}/Templates", 
         yield_tables=None, analysis_meta_info=None, args={}, nround=2):
+    indexnamesave = "index.php"
     if "mit.edu" in socket.gethostname():
         indexname = "index_mit.php"
-        indexnamesave = "index.php"
-        shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexnamesave}")
     else:
         indexname = "index.php"
-        shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexname}")
+    shutil.copyfile(f"{template_dir}/{indexname}", f"{outpath}/{indexnamesave}")
     logname = f"{outpath}/{logname}.log"
 
     with open(logname, "w") as logf:
