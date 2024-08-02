@@ -361,6 +361,24 @@ def hist_to_variations(hist_in, gen_axes = [], sum_axes = [], rebin_axes=[], reb
 
     return variation_hist
 
+def muRmuFFullyCorrelatedVariations(hist_in):
+
+    if hist_in.name is None:
+        out_name = "hist_variations"
+    else:
+        out_name = hist_in.name + "_variations"
+
+    variation_hist = hist.Hist(*hist_in.axes, name = out_name, storage = hist.storage.Double())
+    variation_hist = variation_hist[...,0:1,:]
+
+    for i in range(len(hist_in.axes[len(hist_in.axes)-2])):
+        variation_hist.values(flow=True)[...,0,0] = variation_hist.values(flow=True)[...,0,0] + hist_in.values(flow=True)[...,i,0] - (hist_in.values(flow=True)[...,0,0]+hist_in.values(flow=True)[...,0,1])/2 #this average which is subtracted is the nominal histogram (by construction, it's directly related to how the weights are defined)
+        variation_hist.values(flow=True)[...,0,1] = variation_hist.values(flow=True)[...,0,1] + hist_in.values(flow=True)[...,i,1] - (hist_in.values(flow=True)[...,0,0]+hist_in.values(flow=True)[...,0,1])/2
+    variation_hist.values(flow=True)[...,0,0] = variation_hist.values(flow=True)[...,0,0] + (hist_in.values(flow=True)[...,0,0]+hist_in.values(flow=True)[...,0,1])/2
+    variation_hist.values(flow=True)[...,0,1] = variation_hist.values(flow=True)[...,0,1] + (hist_in.values(flow=True)[...,0,0]+hist_in.values(flow=True)[...,0,1])/2
+
+    return variation_hist
+
 
 def uncertainty_hist_from_envelope(h, proj_ax, entries):
     hdown = hh.syst_min_or_max_env_hist(h, proj_ax, "vars", entries, no_flow=["ptVgen"], do_min=True)

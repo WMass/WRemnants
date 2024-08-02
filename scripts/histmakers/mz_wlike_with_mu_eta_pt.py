@@ -393,17 +393,16 @@ def build_graph(df, dataset):
     nominal = df.HistoBoost("nominal", axes, [*cols, "nominal_weight"])
     results.append(nominal)
 
-    if isZ and not hasattr(dataset, "out_of_acceptance"):
+    if isZ: #this needs to be created also for out-of-acceptance, when present (e.g. unfolding, theory-agnostic, etc.)
         theoryAgnostic_helpers_cols = ["qtOverQ", "absYVgen", "chargeVgen", "csSineCosThetaPhigen", "nominal_weight"]
         # assume to have same coeffs for plus and minus (no reason for it not to be the case)
         if dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
             helpers_class = muRmuFPolVar_helpers_Z
-            process_name = "Z"
         for coeffKey in helpers_class.keys():
             logger.debug(f"Creating muR/muF histograms with polynomial variations for {coeffKey}")
             helperQ = helpers_class[coeffKey]
             df = df.Define(f"muRmuFPolVar_{coeffKey}_tensor", helperQ, theoryAgnostic_helpers_cols)
-            noiAsPoiWithPolHistName = Datagroups.histName("nominal", syst=f"muRmuFPolVar{process_name}_{coeffKey}")
+            noiAsPoiWithPolHistName = Datagroups.histName("nominal", syst=f"muRmuFPolVar_{coeffKey}")
             results.append(df.HistoBoost(noiAsPoiWithPolHistName, nominal_axes, [*nominal_cols, f"muRmuFPolVar_{coeffKey}_tensor"], tensor_axes=helperQ.tensor_axes, storage=hist.storage.Double()))
 
     if not args.noRecoil and args.recoilUnc:

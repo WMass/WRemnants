@@ -137,6 +137,7 @@ def make_parser(parser=None):
     parser.add_argument("--forceConstrainMass", action='store_true', help="force mass to be constrained in fit")
     parser.add_argument("--decorMassWidth", action='store_true', help="remove width variations from mass variations")
     parser.add_argument("--muRmuFPolVar", action="store_true", help="Use polynomial variations (like in theoryAgnosticPolVar) instead of binned variations for muR and muF (of course in setupCombine these are still constrained nuisances)")
+    parser.add_argument("--muRmuFFullyCorr", action="store_true", help="Use the fully correlated muR/muF variations derived from theoryAgnosticPolVar polynomial variations instead of the binned ones (by default you take the binned fully correlated variations even if you are using the polynomial variations for muR/muF, they just take care of the \"uncorrelated\" part) (this option only works with --muRmuFPolVar, it doesn't work on its own)")
     parser = make_subparsers(parser)
 
     return parser
@@ -405,6 +406,9 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, genvar=None, x
     def assertSample(name, startsWith=["W", "Z"], excludeMatch=[]):
         return any(name.startswith(init) for init in startsWith) and all(excl not in name for excl in excludeMatch)
 
+    def assertSampleWithOOA(name, startsWith=["W", "Z"], excludeMatch=[]):
+        return any(name.startswith(init) for init in startsWith) and name.endswith("OOA") and all(excl not in name for excl in excludeMatch)
+
     dibosonMatch = ["WW", "WZ", "ZZ"]
     WMatch = ["W"] # TODO: the name of out-of-acceptance might be changed at some point, maybe to WmunuOutAcc, so W will match it as well (and can exclude it using "OutAcc" if needed)
     ZMatch = ["Z"]
@@ -432,6 +436,11 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, genvar=None, x
     cardTool.addProcessGroup("nonsignal_samples_noOutAcc",     lambda x: assertSample(x, startsWith=nonSignalMatch, excludeMatch=[*dibosonMatch, "tau", "OOA"]))
     cardTool.addProcessGroup("signal_samples_inctau_noOutAcc", lambda x: assertSample(x, startsWith=signalMatch, excludeMatch=[*dibosonMatch, "OOA"]))
     cardTool.addProcessGroup("nonsignal_samples_inctau_noOutAcc", lambda x: assertSample(x, startsWith=nonSignalMatch, excludeMatch=[*dibosonMatch, "OOA"]))
+    # FIX for theoryAgnosticPolVar when using MiNNLO polynomial variations (we would still need these for the OOA)
+    cardTool.addProcessGroup("signal_samples_OOA",        lambda x: assertSampleWithOOA(x, startsWith=signalMatch, excludeMatch=[*dibosonMatch, "tau"]))
+    cardTool.addProcessGroup("nonsignal_samples_OOA",     lambda x: assertSampleWithOOA(x, startsWith=nonSignalMatch, excludeMatch=[*dibosonMatch, "tau"]))
+    cardTool.addProcessGroup("signal_samples_inctau_OOA", lambda x: assertSampleWithOOA(x, startsWith=signalMatch, excludeMatch=[*dibosonMatch]))
+    cardTool.addProcessGroup("nonsignal_samples_inctau_OOA", lambda x: assertSampleWithOOA(x, startsWith=nonSignalMatch, excludeMatch=[*dibosonMatch]))
 
     if not (isTheoryAgnostic or isUnfolding) :
         logger.info(f"All MC processes {cardTool.procGroups['MCnoQCD']}")
@@ -588,7 +597,7 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, genvar=None, x
                         for g in cardTool.procGroups["signal_samples"] for m in cardTool.datagroups.groups[g].members},
                 )
 
-    if args.muRmuFPolVar and not isTheoryAgnosticPolVar:
+    if args.muRmuFPolVar and not isPoiAsNoi:
         muRmuFPolVar_helper = combine_theoryAgnostic_helper.TheoryAgnosticHelper(cardTool, externalArgs=args)
         muRmuFPolVar_helper.configure_polVar(label,
                                              passSystToFakes,

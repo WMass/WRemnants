@@ -56,35 +56,51 @@ class TheoryAgnosticHelper(object):
                                        #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
                                        )
 
-    def add_muRmuF_polVar_uncertainty(self):
+    def add_muRmuF_polVar_uncertainty(self, isTheoryAgnostic):
         coeffs = [f"A{i}" for i in range(8)]
         signalGroupName = "muRmuFPolVarW" if self.label == "W" else "muRmuFPolVarZ"
         nonSignalGroupName = "muRmuFPolVarZ" if self.label == "W" else "muRmuFPolVarW"
-        for coeffKey in coeffs:
-            self.card_tool.addSystematic(f"{signalGroupName}_{coeffKey}",
-                                   group=signalGroupName,
-                                   mirror=False,
-                                   passToFakes=self.passSystToFakes,
-                                   processes=["signal_samples_inctau_noOutAcc" if self.separateOutOfAccSignal else "signal_samples_inctau"],
-                                   baseName=f"{signalGroupName}_{coeffKey}_",
-                                   noConstraint=False,
-                                   systAxes=["nPolVarSyst", "downUpVar"], 
-                                   labelsByAxis=["v", "downUpVar"],
-                                   #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
-                                   )
-        
-        for coeffKey in coeffs:
-            self.card_tool.addSystematic(f"{nonSignalGroupName}_{coeffKey}",
-                                   group=nonSignalGroupName,
-                                   mirror=False,
-                                   passToFakes=self.passSystToFakes,
-                                   processes=["nonsignal_samples_inctau_noOutAcc" if self.separateOutOfAccSignal else "nonsignal_samples_inctau"],
-                                   baseName=f"{nonSignalGroupName}_{coeffKey}_",
-                                   noConstraint=False,
-                                   systAxes=["nPolVarSyst", "downUpVar"], 
-                                   labelsByAxis=["v", "downUpVar"],
-                                   #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
-                                   )
+        signalProcesses = "signal_samples_inctau_OOA" if isTheoryAgnostic else "signal_samples_inctau"
+        nonsignalProcesses = "nonsignal_samples_inctau_OOA" if isTheoryAgnostic else "nonsignal_samples_inctau"
+        ProcessNames = [signalGroupName,nonSignalGroupName]
+        Processes = [signalProcesses,nonsignalProcesses]
+        if self.args.muRmuFFullyCorr:
+            signal_expanded_samples = self.card_tool.getProcNames([signalProcesses])
+            nonsignal_expanded_samples = self.card_tool.getProcNames([nonsignalProcesses])
+            func = syst_tools.muRmuFFullyCorrelatedVariations
+            signal_preop_map = {proc : func for proc in signal_expanded_samples}
+            nonsignal_preop_map = {proc : func for proc in nonsignal_expanded_samples}
+            preop_args = {}
+            PreOpMaps = [signal_preop_map,nonsignal_preop_map]
+        for Index in range(0,len(ProcessNames)):
+            for coeffKey in coeffs:
+                self.card_tool.addSystematic(f"muRmuFPolVar_{coeffKey}",
+                                       group=ProcessNames[Index],
+                                       mirror=False,
+                                       passToFakes=self.passSystToFakes,
+                                       processes=[Processes[Index]],
+                                       baseName=f"{ProcessNames[Index]}_{coeffKey}_",
+                                       noConstraint=False,
+                                       systAxes=["nPolVarSyst", "downUpVar"], 
+                                       labelsByAxis=["v", "downUpVar"],
+                                       rename=f"{ProcessNames[Index]}_{coeffKey}",
+                                       #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
+                                       )
+                if self.args.muRmuFFullyCorr:
+                    self.card_tool.addSystematic(f"muRmuFPolVar_{coeffKey}",
+                                           preOpMap=PreOpMaps[Index],
+                                           preOpArgs=preop_args,
+                                           group=ProcessNames[Index],
+                                           mirror=False,
+                                           passToFakes=self.passSystToFakes,
+                                           processes=[Processes[Index]],
+                                           baseName=f"{ProcessNames[Index]}_{coeffKey}_FullyCorr_",
+                                           noConstraint=False,
+                                           systAxes=["nPolVarSyst", "downUpVar"], 
+                                           labelsByAxis=["v", "downUpVar"],
+                                           rename=f"{ProcessNames[Index]}_{coeffKey}_FullyCorr",
+                                           #splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
+                                           )
         
 
     def add_theoryAgnostic_normVar_uncertainty(self, flow=True):
@@ -195,9 +211,11 @@ class TheoryAgnosticHelper(object):
                                 )
 
     def add_theoryAgnostic_uncertainty(self):
-        if self.args.analysisMode == "theoryAgnosticPolVar":
-            self.add_theoryAgnostic_polVar_uncertainty()
-        elif self.args.muRmuFPolVar == True:
-            self.add_muRmuF_polVar_uncertainty()
-        else:
-            self.add_theoryAgnostic_normVar_uncertainty()
+        isTheoryAgnostic = self.args.analysisMode in ["theoryAgnosticNormVar", "theoryAgnosticPolVar"]
+        if isTheoryAgnostic:
+            if self.args.analysisMode == "theoryAgnosticPolVar":
+                self.add_theoryAgnostic_polVar_uncertainty()
+            else:
+                self.add_theoryAgnostic_normVar_uncertainty()
+        if self.args.muRmuFPolVar == True:
+            self.add_muRmuF_polVar_uncertainty(isTheoryAgnostic)

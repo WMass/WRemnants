@@ -155,7 +155,8 @@ class TheoryHelper(object):
 
                         self.add_minnlo_scale_uncertainty(sample_group, extra_name = "fine", rebin_pt=fine_pt_binning, helicities_to_exclude=helicities_to_exclude)
 
-                    self.add_minnlo_scale_uncertainty(sample_group, extra_name = "inclusive", rebin_pt=[common.ptV_binning[0], common.ptV_binning[-1]], helicities_to_exclude=helicities_to_exclude, scale = scale_inclusive)
+                    if not (self.args.muRmuFPolVar and self.args.muRmuFFullyCorr):
+                        self.add_minnlo_scale_uncertainty(sample_group, extra_name = "inclusive", rebin_pt=[common.ptV_binning[0], common.ptV_binning[-1]], helicities_to_exclude=helicities_to_exclude, scale = scale_inclusive)
 
             # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
             self.add_helicity_shower_kt_uncertainty()

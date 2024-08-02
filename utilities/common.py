@@ -360,7 +360,7 @@ def common_parser(analysis_label=""):
     parser.add_argument("--noScaleToData", action="store_true", help="Do not scale the MC histograms with xsec*lumi/sum(gen weights) in the postprocessing step")
     parser.add_argument("--aggregateGroups", type=str, nargs="*", default=["Diboson", "Top"], help="Sum up histograms from members of given groups in the postprocessing step")
     parser.add_argument("--muRmuFPolVarFilePath", type=str, default=f"{data_dir}/MiNNLOmuRmuFPolVar/", help="Path where input files are stored")
-    parser.add_argument("--muRmuFPolVarFileTag", type=str, default="x0p50_y4p00_ConstrPol5ExtYdep_Trad", choices=["x0p50_y4p00_ConstrPol5ExtYdep_Trad","x0p50_y4p00_ConstrPol5Ext_Trad"],help="Tag for input files")
+    parser.add_argument("--muRmuFPolVarFileTag", type=str, default="x0p50_y4p00_Fix_Trad", choices=["x0p50_y4p00_Fix_Trad","x0p50_y4p00_FixYdep_Trad"],help="Tag for input files")
     parser.add_argument("--nToysMC", type=int, help="random toys for data and MC", default=-1)
     parser.add_argument("--varianceScalingForToys", type=int, default=1, help="Scaling of variance for toys (effective mc statistics corresponds to 1./scaling)")
     parser.add_argument("--randomSeedForToys", type=int, default=0, help="random seed for toys")
