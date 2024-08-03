@@ -117,15 +117,21 @@ axis_relIsoCat = hist.axis.Variable([0,0.15,0.3], name = "relIso",underflow=Fals
 
 def get_binning_fakes_pt(min_pt, max_pt):
     edges = np.arange(min_pt,32,1)
-    edges = np.append(edges, [e for e in [33,36,40,46,56] if e<max_pt][:-1])
+    edges = np.append(edges, [e for e in [35,38,41,44,47,50,53,56] if e<max_pt][:-1])
     edges = np.append(edges, [max_pt])
     ## the following lines are used to replace the previous ones when studying different pT binning and the MC stat
+    # edges = np.arange(min_pt,32,1)
+    # edges = np.append(edges, [e for e in [33,36,40,46,56] if e<max_pt][:-1])
+    # edges = np.append(edges, [max_pt])
     #edges = np.arange(min_pt,32.1,1.2)  
     #edges = np.append(edges, [e for e in [34.4, 38, 44, 56] if e<max_pt][:-1])
     #edges = np.append(edges, [max_pt])
     #edges = np.arange(min_pt,32,2)
     #edges = np.append(edges, [e for e in [32, 36, 40, 46, 56] if e<max_pt][:-1])
     #edges = np.append(edges, [max_pt])
+    #edges = np.arange(min_pt, max_pt, 3)
+    #edges = np.append(edges, [max_pt])
+
     return edges
 
 

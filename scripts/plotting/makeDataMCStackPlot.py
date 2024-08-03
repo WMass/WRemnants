@@ -39,14 +39,14 @@ parser.add_argument("--flow", type=str, choices=["show", "sum", "hint", "none"],
 parser.add_argument("--fitresult", type=str, help="Specify a fitresult root file to draw the postfit distributions with uncertainty bands")
 parser.add_argument("--prefit", action='store_true', help="Use the prefit uncertainty from the fitresult root file, instead of the postfit. (--fitresult has to be given)")
 parser.add_argument("--noRatioErr", action='store_false', dest="ratioError", help="Don't show stat unc in ratio")
-parser.add_argument("--selection", type=str, help="Specify custom selections as comma seperated list (e.g. '--selection passIso=0,passMT=1' )")
+parser.add_argument("--selection", type=str, help="Specify custom selections as comma seperated list (e.g. '--selection passIso=0,passMT=[2::hist.sum]' )")
 parser.add_argument("--presel", type=str, nargs="*", default=[], help="Specify custom selections on input histograms to integrate some axes, giving axis name and min,max (e.g. '--presel pt=ptmin,ptmax' ) or just axis name for bool axes")
 parser.add_argument("--normToData", action='store_true', help="Normalize MC to data")
 parser.add_argument("--fakeEstimation", type=str, help="Set the mode for the fake estimation", default="extended1D", choices=["simple", "extrapolate", "extended1D", "extended2D"])
 parser.add_argument("--fakeSmoothingMode", type=str, default="full", choices=["binned", "fakerate", "full"], help="Smoothing mode for fake estimate.")
 parser.add_argument("--fakeMCCorr", type=str, default=[None], nargs="*", choices=["none", "pt", "eta", "mt"], help="axes to apply nonclosure correction from QCD MC. Leave empty for inclusive correction, use'none' for no correction")
 parser.add_argument("--forceGlobalScaleFakes", default=None, type=float, help="Scale the fakes  by this factor (overriding any custom one implemented in datagroups.py in the fakeSelector).")
-parser.add_argument("--fakeSmoothingOrder", type=int, default=2, help="Order of the polynomial for the smoothing of the fake rate or full prediction, depending on the smoothing mode")
+parser.add_argument("--fakeSmoothingOrder", type=int, default=3, help="Order of the polynomial for the smoothing of the fake rate or full prediction, depending on the smoothing mode")
 parser.add_argument("--fakerateAxes", nargs="+", help="Axes for the fakerate binning", default=["eta","pt","charge"])
 parser.add_argument("--fineGroups", action='store_true', help="Plot each group as a separate process, otherwise combine groups based on predefined dictionary")
 
@@ -125,9 +125,18 @@ if args.axlim or args.rebin or args.absval:
 if args.selection:
     applySelection=False
     if args.selection != "none":
+        translate = {"hist.overflow": hist.overflow, "hist.underflow":hist.underflow, "hist.sum":hist.sum}
         for selection in args.selection.split(","):
             axis, value = selection.split("=")
-            select[axis] = int(value)
+            if value.startswith("["):
+                parts = [translate[p] if p in translate else int(p) if p!=str() else None for p in value[1:-1].split(":")]
+                select[axis] = hist.tag.Slicer()[parts[0]:parts[1]:parts[2]]
+            elif value=="hist.overflow":
+                select[axis] = hist.overflow
+            elif value=="hist.underflow":
+                select[axis] = hist.overflow
+            else:
+                select[axis] = int(value)
 else:
     applySelection=True
 

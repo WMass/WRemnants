@@ -18,8 +18,8 @@ meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
 nbins = sum([np.product([len(a) for a in info["axes"]]) for info in meta["channel_info"].values()])
 ndf = nbins - tree.ndofpartial
 
+print(f"nbins = {nbins}")
 print(f"-loglikelihood_{{full}} = {tree.nllvalfull}")
 print(f"-loglikelihood_{{saturated}} = {tree.satnllvalfull}")
-print(f"2*(nllfull-nllsat) = {2*(tree.nllvalfull-tree.satnllvalfull)}")
-print(f"nbins = {nbins}")
-print("chi2 probability =", scipy.stats.chi2.sf(2*(tree.nllvalfull-tree.satnllvalfull), ndf))
+print(f"2*(nllfull-nllsat)/ndf = {2*(tree.nllvalfull-tree.satnllvalfull)}/{ndf}")
+print("chi2 probability =", scipy.stats.chi2.sf(2*(tree.nllvalfull-tree.satnllvalfull), ndf)*100, "%")
