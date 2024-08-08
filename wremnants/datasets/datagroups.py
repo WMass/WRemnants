@@ -577,7 +577,7 @@ class Datagroups(object):
                 raise ValueError(f"In setSelectOp(): process {proc} not found")
             self.groups[proc].selectOp = op
 
-    def setGenAxes(self, gen_axes_names=None, sum_gen_axes=None):
+    def setGenAxes(self, gen_axes_names=None, sum_gen_axes=None, base_group=None, histToReadAxes="xnorm"):
         # gen_axes_names are the axes names to be recognized as gen axes, e.g. for the unfolding
         # sum_gen_axes are all gen axes names that are potentially in the produced histogram and integrated over if not used
         if isinstance(gen_axes_names, str):
@@ -593,6 +593,7 @@ class Datagroups(object):
             return
 
         self.all_gen_axes = args.get("genAxes", [])
+        self.all_gen_axes = [n for n in self.all_gen_axes]
 
         if self.mode[0] == "w":
             self.all_gen_axes = ["qGen", *self.all_gen_axes]
@@ -602,55 +603,93 @@ class Datagroups(object):
 
         logger.debug(f"Gen axes names are now {self.gen_axes_names}")
 
-    def getGenBinIndices(self, h, axesToRead=None):
-        gen_bins = []
-        for gen_axis in (self.gen_axes_names if axesToRead is None else axesToRead):
-            if gen_axis not in h.axes.name:
-                raise RuntimeError(f"Gen axis '{gen_axis}' not found in histogram axes '{h.axes.name}'!")
+        # set actual hist axes objects to be stored in metadata for post processing/plots/...
+        for group_name, group in self.groups.items():
+            if group_name != base_group:
+                continue
+            if group_name[0]=="W" and "qGen" in self.gen_axes_names:
+                for idx, sign in enumerate(["minus", "plus"]):
+                    # gen level bins, split by charge
+                    unfolding_hist = self.getHistForUnfolding(
+                        group_name, 
+                        member_filter=lambda x: x.name.startswith(f"W{sign}") and not x.name.endswith("OOA"), 
+                        histToReadAxes=histToReadAxes,
+                    )
+                    if unfolding_hist is None:
+                        continue
+                    gen_axes_to_read = [ax for ax in unfolding_hist.axes if ax.name != "qGen" and ax.name in self.gen_axes_names]
+                    self.gen_axes[f"W_qGen{idx}"] = gen_axes_to_read
+            else:
+                unfolding_hist = self.getHistForUnfolding(group_name, member_filter=lambda x: not x.name.endswith("OOA"), histToReadAxes=histToReadAxes)
+                if unfolding_hist is None:
+                    continue
+                self.gen_axes[group_name[0]] = [ax for ax in unfolding_hist.axes if ax.name in self.gen_axes_names]
 
-            gen_bin_list = [i for i in range(h.axes[gen_axis].size)]
-            if h.axes[gen_axis].traits.underflow:
+        logger.debug(f"New gen axes are: {self.gen_axes}")
+
+    def getGenBinIndices(self, axes=None):
+        gen_bins = []
+        for axis in axes:
+            gen_bin_list = [i for i in range(axis.size)]
+            if axis.traits.underflow:
                 gen_bin_list.append(hist.underflow)
-            if h.axes[gen_axis].traits.overflow:
+            if axis.traits.overflow:
                 gen_bin_list.append(hist.overflow)
             gen_bins.append(gen_bin_list)
         return gen_bins
 
-    def defineSignalBinsUnfolding(self, group_name, new_name=None, member_filter=None, histToReadAxes="xnorm", axesToRead=None):
+    def getHistForUnfolding(self, group_name, member_filter=None, histToReadAxes="xnorm"):
         if group_name not in self.groups.keys():
             raise RuntimeError(f"Base group {group_name} not found in groups {self.groups.keys()}!")
-        if axesToRead is None:
-            axesToRead = self.gen_axes_names
         base_members = self.groups[group_name].members[:]
         if member_filter is not None:
             base_members = [m for m in filter(lambda x, f=member_filter: f(x), base_members)]            
 
         if histToReadAxes not in self.results[base_members[0].name]["output"]:
-            raise ValueError(f"Results for member {base_members[0].name} does not include xnorm. Found {self.results[base_members[0].name]['output'].keys()}")
+            logger.warning(f"Results for member {base_members[0].name} does not include histogram {histToReadAxes}. Found {self.results[base_members[0].name]['output'].keys()}")
+            return None
         nominal_hist = self.results[base_members[0].name]["output"][histToReadAxes].get()
+        return nominal_hist
 
-        self.gen_axes[new_name] = [ax for ax in nominal_hist.axes if ax.name in axesToRead]
-        logger.debug(f"New gen axes are: {self.gen_axes}")
-
-        gen_bin_indices = self.getGenBinIndices(nominal_hist, axesToRead=axesToRead)
-
+    def getPOINames(self, gen_bin_indices, axes_names, base_name, flow=True):
+        poi_names = []
         for indices in itertools.product(*gen_bin_indices):
-
-            proc_name = group_name if new_name is None else new_name
-            for idx, var in zip(indices, axesToRead):
-                if idx == hist.underflow:
+            poi_name = base_name
+            for idx, var in zip(indices, axes_names):
+                if idx in [hist.overflow, hist.underflow] and not flow:
+                    break
+                elif idx == hist.underflow:
                     idx_str = "U"
                 elif idx == hist.overflow:
                     idx_str = "O"
                 else:
                     idx_str = str(idx)
-                proc_name += f"_{var}{idx_str}"
+                poi_name += f"_{var}{idx_str}"
+            else:
+                poi_names.append(poi_name)
+        
+        return poi_names
 
+    def defineSignalBinsUnfolding(self, group_name, new_name=None, member_filter=None, histToReadAxes="xnorm", axesNamesToRead=None):
+        nominal_hist = self.getHistForUnfolding(group_name, member_filter, histToReadAxes)
+        if axesNamesToRead is None:
+            axesNamesToRead = self.gen_axes_names
 
+        axesToRead = [nominal_hist.axes[n] for n in axesNamesToRead]
+
+        self.gen_axes[new_name] = axesToRead
+        logger.debug(f"New gen axes are: {self.gen_axes}")
+
+        gen_bin_indices = self.getGenBinIndices(axesToRead)
+
+        for indices, proc_name in zip(
+            itertools.product(*gen_bin_indices), 
+            self.getPOINames(gen_bin_indices, axesNamesToRead, base_name=group_name if new_name is None else new_name)
+        ):
+            logger.debug(f"Now at {proc_name} with indices {indices}")
             self.copyGroup(group_name, proc_name, member_filter=member_filter)
-
-            memberOp = lambda x, indices=indices, genvars=axesToRead: x[{var : i for var, i in zip(genvars, indices)}]
-            self.groups[proc_name].memberOp = [memberOp for m in base_members]
+            memberOp = lambda x, indices=indices, genvars=axesNamesToRead: x[{var : i for var, i in zip(genvars, indices)}]
+            self.groups[proc_name].memberOp = [memberOp for m in self.groups[group_name].members[:]]
 
             self.unconstrainedProcesses.append(proc_name)
 

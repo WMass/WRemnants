@@ -132,19 +132,9 @@ jobs:
           echo "NTRHEADS=${NTHREADS}*2" >> $GITHUB_ENV
 
       - name: wmass analysis
-        # run with a reduced binning
-        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding 
-          --pt 8 26 58 --eta 6 -2.4 2.4 --genBins 4 3
-
-      - name: wmass analysis
-        # run with full binning
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
-        run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding
+          --analysisMode unfolding --poiAsNoi -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding 
 
   w-unfolding:
     # The type of runner that the job will run on
@@ -172,17 +162,18 @@ jobs:
       - name: wmass plot response matrix
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
-          --axes "pt-ptGen" "abs(eta)-absEtaGen" --procFilters Wmunu -p mw -o $WEB_DIR -f $PLOT_DIR $HIST_FILE
+          --axes "pt-ptGen" "abs(eta)-absEtaGen" --procFilters Wmunu -p mw -o $WEB_DIR -f $PLOT_DIR $HIST_FILE --histName yieldsUnfolding
 
       - name: wmass combine setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py
-          --analysisMode unfolding -i $HIST_FILE --lumiScale $LUMI_SCALE --sparse -o $WREMNANTS_OUTDIR --postfix unfolding
+          --analysisMode unfolding --poiAsNoi -i $HIST_FILE --lumiScale $LUMI_SCALE --sparse -o $WREMNANTS_OUTDIR --postfix unfolding
+          --scaleNormXsecHistYields '0.01' --genAxes qGen-ptGen-absEtaGen
 
       - name: wmass combine fit 
         run: >-
-          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
-          unfolding ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_unfolding/ WMass.hdf5
+          cmssw-cc7 --command-to-run scripts/ci/setup_and_run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
+          $WREMNANTS_OUTDIR/WMass_eta_pt_charge_unfolding WMass.hdf5 -t -1 --binByBinStat --doImpacts
 
       - name: wmass combine unfolding result to hist
         run: >-
@@ -192,8 +183,7 @@ jobs:
       - name: wmass combine unfolding plot pulls 
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/pullsAndImpacts.py 
-          -f ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint 
-          --debug --grouping max -t utilities/styles/nuisance_translate.json 
+          -f ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint --debug --noImpacts
           output --outFolder $WEB_DIR/$PLOT_DIR -o pulls_unfolding_mw.html -n 50 --otherExtensions png pdf
           
       - name: wmass combine unfolding plot xsec 
@@ -493,7 +483,7 @@ jobs:
       - name: dilepton combine unfolding plot pulls 
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/pullsAndImpacts.py 
-          -f $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint --debug 
+          -f $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults_123456789.hdf5 -m ungrouped --sortDescending -s constraint --debug --noImpacts
           output --outFolder $WEB_DIR/$PLOT_DIR -o pulls_unfolding_ptll.html -n 50 --otherExtensions png pdf
 
       - name: dilepton combine unfolding plot xsec 

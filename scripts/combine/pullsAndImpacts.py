@@ -398,6 +398,7 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
             df[col].fillna(default_values.get(col, 0), inplace=True)
 
     if args.sort:
+        logger.debug("Sort impacts")
         if args.sort.endswith("diff"):
             logger.debug("Sort impacts")
             key = args.sort.replace("_diff","")
@@ -464,8 +465,6 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
             outfile = args.outputFile
         outfile = os.path.join(outdir, outfile)
         extensions = [outfile.split(".")[-1], *args.otherExtensions]
-
-        df = df.sort_values(by=args.sort, ascending=args.ascending)
         if args.num and args.num < df.size:
             # in case multiple extensions are given including html, don't do the skimming on html but all other formats
             if "html" in extensions and len(extensions)>1:

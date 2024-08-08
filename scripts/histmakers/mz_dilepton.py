@@ -10,7 +10,7 @@ import ROOT
 import narf
 import wremnants
 from wremnants import (theory_tools,syst_tools,theory_corrections, muon_validation, muon_calibration, muon_prefiring, muon_selections, unfolding_tools, 
-    muon_efficiencies_binned, muon_efficiencies_smooth, pileup, vertex)
+    muon_efficiencies_binned, muon_efficiencies_smooth, pileup, theoryAgnostic_tools, vertex)
 from wremnants.histmaker_tools import scale_to_data, aggregate_groups
 from wremnants.datasets.dataset_tools import getDatasets
 import hist
@@ -27,7 +27,6 @@ parser.add_argument("--noAuxiliaryHistograms", action="store_true", help="Remove
 parser.add_argument("--muonIsolation", type=int, nargs=2, default=[1,1], choices=[-1, 0, 1], help="Apply isolation cut to triggering and not-triggering muon (in this order): -1/1 for failing/passing isolation, 0 for skipping it. If using --useDileptonTriggerSelection, then the sorting is based on the muon charge as -/+")
 parser.add_argument("--addRunAxis", action="store_true", help="Add axis with slices of luminosity based on run numbers (for data only)")
 
-
 parser = common.set_parser_default(parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"])
 parser = common.set_parser_default(parser, "excludeProcs", ["QCD"])
 parser = common.set_parser_default(parser, "pt", common.get_default_ptbins(analysis_label))
@@ -35,11 +34,9 @@ parser = common.set_parser_default(parser, "pt", common.get_default_ptbins(analy
 args = parser.parse_args()
 isUnfolding = args.analysisMode == "unfolding"
 isPoiAsNoi = isUnfolding and args.poiAsNoi
-
-args = parser.parse_args()
+inclusive = hasattr(args, "inclusive") and args.inclusive
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
-
 
 thisAnalysis = ROOT.wrem.AnalysisType.Dilepton if args.useDileptonTriggerSelection else ROOT.wrem.AnalysisType.Wlike
 isoBranch = muon_selections.getIsoBranch(args.isolationDefinition)
@@ -93,6 +90,25 @@ auxiliary_gen_axes = ["massVgen", # preFSR variables
     "ewMll", "ewMlly", "ewLogDeltaM" # ew variables
     ]
 
+if isUnfolding:
+    # 8 quantiles
+    all_axes["cosThetaStarll"] = hist.axis.Variable([-1, -0.56, -0.375, -0.19, 0., 0.19, 0.375, 0.56, 1.], name = "cosThetaStarll", underflow=False, overflow=False)
+    all_axes["phiStarll"] = hist.axis.Variable([-math.pi, -2.27, -1.57, -0.87, 0, 0.87, 1.57, 2.27, math.pi], name = "phiStarll", underflow=False, overflow=False) 
+    # 10 quantiles
+    all_axes["yll"] = hist.axis.Variable([-2.5, -1.5, -1.1, -0.7, -0.35, 0, 0.35, 0.7, 1.1, 1.5, 2.5], name = "yll", underflow=not args.excludeFlow, overflow=not args.excludeFlow)
+
+    unfolding_axes, unfolding_cols, unfolding_selections = differential.get_dilepton_axes(
+        args.genAxes, 
+        common.get_gen_axes(dilepton_ptV_binning, inclusive, flow=True), 
+        add_out_of_acceptance_axis=isPoiAsNoi,
+    )
+    if not isPoiAsNoi:
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Zmumu")
+        
+    if args.fitresult:
+        noi_axes = [a for a in unfolding_axes if a.name != "acceptance"]
+        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult, noi_axes, process = "Z", poi_type = "nois")
+
 for a in args.axes:
     if a not in all_axes.keys():
         logger.error(f" {a} is not a known axes! Supported axes choices are {list(all_axes.keys())}")
@@ -103,13 +119,6 @@ if args.csVarsHist:
     nominal_cols += ["cosThetaStarll", "phiStarll"]
 
 nominal_axes = [all_axes[a] for a in nominal_cols] 
-
-inclusive = hasattr(args, "inclusive") and args.inclusive
-
-if isUnfolding:
-    unfolding_axes, unfolding_cols, unfolding_selections = differential.get_dilepton_axes(args.genAxes, common.get_gen_axes(isPoiAsNoi, dilepton_ptV_binning, inclusive), add_out_of_acceptance_axis=isPoiAsNoi)
-    if not isPoiAsNoi:
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group = "Zmumu")
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = muon_prefiring.make_muon_prefiring_helpers(era = era)
@@ -183,6 +192,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
+    df = df.DefinePerSample("unity", "1.0")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     weightsum = df.SumAndCount("weight")
@@ -204,12 +214,31 @@ def build_graph(df, dataset):
             cutsmap = {"fiducial" : "masswindow"}
 
         if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=[], accept=False, **cutsmap)
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=unfolding_selections, accept=False, **cutsmap)
         else:
-            logger.debug("Select events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=[], select=not isPoiAsNoi, accept=True, **cutsmap)
-            unfolding_tools.add_xnorm_histograms(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, unfolding_axes, unfolding_cols)
+            df = unfolding_tools.select_fiducial_space(df, mode=analysis_label, selections=unfolding_selections, select=not isPoiAsNoi, accept=True, **cutsmap)
+
+            if args.fitresult:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define("unfoldingWeight_tensor", unfolding_corr_helper, [*unfolding_corr_helper.hist.axes.name[:-1], "unity"])
+                df = df.Define("central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity")
+
+            if isPoiAsNoi:
+                df_xnorm = df.Filter("acceptance")
+            else:
+                df_xnorm = df
+
+            unfolding_tools.add_xnorm_histograms(
+                results, 
+                df_xnorm, 
+                args, 
+                dataset.name, 
+                corr_helpers, 
+                qcdScaleByHelicity_helper, 
+                [a for a in unfolding_axes if a.name != "acceptance"], 
+                [c for c in unfolding_cols if c !="acceptance"], 
+                add_helicity_axis="helicitySig" in args.genAxes,
+            )
             if not isPoiAsNoi:
                 axes = [*nominal_axes, *unfolding_axes] 
                 cols = [*nominal_cols, *unfolding_cols]
@@ -362,6 +391,9 @@ def build_graph(df, dataset):
         results.append(df.HistoBoost("weight", [hist.axis.Regular(100, -2, 2)], ["nominal_weight"], storage=hist.storage.Double()))
         results.append(df.HistoBoost("nominal", axes, [*cols, "nominal_weight"]))
 
+        if "helicitySig" in getattr(args, "genAxes",[]):
+            df = theoryAgnostic_tools.define_helicity_weights(df, filename=f"{common.data_dir}/angularCoefficients/w_z_moments_unfoldingBinning.hdf5")
+
     # histograms for corrections/uncertainties for pixel hit multiplicity
 
     # hNValidPixelHitsTrig = df.HistoBoost("hNValidPixelHitsTrig", [axis_eta, axis_nvalidpixel], ["trigMuons_eta0", f"trigMuons_{cvhName}NValidPixelHits0", "nominal_weight"])
@@ -379,7 +411,11 @@ def build_graph(df, dataset):
     if isUnfolding and isPoiAsNoi and dataset.name == "ZmumuPostVFP":
         noiAsPoiHistName = Datagroups.histName("nominal", syst="yieldsUnfolding")
         logger.debug(f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs")
-        results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))       
+        if "helicitySig" in getattr(args, "genAxes",[]):
+            from wremnants.helicity_utils import axis_helicity_multidim
+            results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight_helicity"], tensor_axes=[axis_helicity_multidim]))  
+        else:
+            results.append(df.HistoBoost(noiAsPoiHistName, [*nominal_axes, *unfolding_axes], [*nominal_cols, *unfolding_cols, "nominal_weight"]))  
 
     for obs in ["ptll", "mll", "yll", "cosThetaStarll", "phiStarll", "etaPlus", "etaMinus", "ptPlus", "ptMinus"]:
         if dataset.is_data:

@@ -5,7 +5,7 @@ logger = logging.child_logger(__name__)
 
 eta_binning = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.7, 1.9, 2.1, 2.4] # 18 eta bins
 
-def get_pt_eta_axes(n_bins_pt, min_pt, max_pt, n_bins_eta=0, flow_pt=True, flow_eta=False):
+def get_pt_eta_axes(n_bins_pt, min_pt, max_pt, n_bins_eta=0, flow_pt=True, flow_eta=False, add_out_of_acceptance_axis=False):
 
     # gen axes for differential measurement
     axis_ptGen = hist.axis.Regular(n_bins_pt, min_pt, max_pt, underflow=flow_pt, overflow=flow_pt, name = "ptGen")    
@@ -23,11 +23,15 @@ def get_pt_eta_axes(n_bins_pt, min_pt, max_pt, n_bins_eta=0, flow_pt=True, flow_
         cols.append("absEtaGen")
         logger.debug(f"Gen bins |eta|: {axis_absEtaGen.edges}")
 
+    if add_out_of_acceptance_axis:
+        axes.append(hist.axis.Boolean(name = "acceptance"))
+        cols.append("acceptance")
+
     return axes, cols
 
-def get_pt_eta_charge_axes(n_bins_pt, min_pt, max_pt, n_bins_eta=0, flow_pt=True, flow_eta=False):
+def get_pt_eta_charge_axes(n_bins_pt, min_pt, max_pt, n_bins_eta=0, flow_pt=True, flow_eta=False, add_out_of_acceptance_axis=False):
 
-    axes, cols = get_pt_eta_axes(n_bins_pt, min_pt, max_pt, n_bins_eta, flow_pt, flow_eta)
+    axes, cols = get_pt_eta_axes(n_bins_pt, min_pt, max_pt, n_bins_eta, flow_pt, flow_eta, add_out_of_acceptance_axis=add_out_of_acceptance_axis)
 
     axis_qGen = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "qGen")
     axes.append(axis_qGen)
@@ -43,11 +47,13 @@ def get_dilepton_axes(gen_vars, gen_axes, add_out_of_acceptance_axis=False):
     selections = []
 
     for var in gen_vars:
+        if var == "helicitySig": 
+            continue
         axes.append(gen_axes[var])
         cols.append(var)
 
-    # selections for out of fiducial region
-    if "ptVGen" in gen_vars:
+    # selections for out of fiducial region, use overflow bin in ptVGen (i.e. not treated as out of acceptance)
+    if "ptVGen" in gen_vars and not gen_axes["ptVGen"].traits.overflow:
         selections.append("ptVGen < {0}".format(gen_axes["ptVGen"].edges[-1]))
 
     if "absYVGen" in gen_vars:

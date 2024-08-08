@@ -113,12 +113,23 @@ def read_impacts_poi_h5(h5file, group, poi, skip_systNoConstraint=False):
     if poi is None:
         poi_type=None
     else:
-        poi_type = poi.split("_")[-1]
+        poi_type_original = poi.split("_")[-1]
+        poi_type = poi_type_original.replace("sumxsec", "sumpois")
+        poi_type = poi_type.replace("ratiometaratio", "ratiometapois")
+
         poi_names = get_poi_names(h5file, poi_type)
         if poi in poi_names:      
             if poi_type == "noi":
                 poi_type = 'nois'
-            impact_hist_total = f"nuisance_impact_{poi_type}"
+            
+            if poi_type in ["sumpois", "sumpoisnorm", "ratiometapois"]:
+                all_labels_hist = f"{poi_type}_names"
+                impact_hist_total = f"{poi_type}_outcov"
+                norm_hist = f"{poi_type}_outvals"
+            else:
+                all_labels_hist = "hsysts"
+                impact_hist_total = f"nuisance_impact_{poi_type}"
+                norm_hist = "x"
             impact_hist = f"nuisance_group_impact_{poi_type}" if group else f"nuisance_impact_{poi_type}"
         else:
             raise ValueError(f"Invalid POI: {poi}")
@@ -135,11 +146,13 @@ def read_impacts_poi_h5(h5file, group, poi, skip_systNoConstraint=False):
         norm = 0.
     else:
         ipoi = np.where(poi_names == poi)[0][0]
-        all_labels = h5file["hsysts"][...].astype(str)
-        isys = np.where(all_labels == poi.replace('_noi',''))[0][0]
         impacts = h5file[impact_hist][...][ipoi]
+        norm = h5file[norm_hist][...][ipoi]
+        all_labels = h5file[all_labels_hist][...].astype(str)
+        isys = np.where(all_labels == poi.replace(f'_{poi_type_original}',''))[0][0]
         total = h5file[impact_hist_total][...][ipoi,isys]
-        norm = h5file["x"][...][ipoi]
+        if impact_hist_total.endswith("cov"):
+            total = total**0.5
 
     if len(labels)+1 == len(impacts): 
         labels = np.append(labels, "binByBinStat")
@@ -211,7 +224,8 @@ def filter_poi_bins(names, gen_axes, selections={}, base_processes=[], flow=Fals
     mask = ~df.isna().any(axis=1)
     # select rows from base process
     if len(base_processes):
-        mask = mask & df["Name"].apply(lambda x, p=base_processes: any([x.startswith(p) for p in base_processes]))
+        mask = mask & df["Name"].apply(lambda x, b=base_processes: any([x.startswith(p) for p in b]))
+
     # remove rows that have additional axes that are not required (strip off process prefix and poi type postfix and compare length of gen axes assuming they are separated by '_')
     mask = mask & df["Name"].apply(lambda x, a=gen_axes, b=base_processes: any(len(x.replace(p,"").split("_")[1:-1])==len(a) if x.startswith(p) else False for p in b))    
     # gen bin selections

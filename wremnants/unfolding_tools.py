@@ -75,6 +75,8 @@ def define_gen_level(df, gen_level, dataset_name, mode="w_mass"):
 
     if "wlike" in mode:
         df = df.Define("qGen", "event % 2 == 0 ? -1 : 1")
+    
+    df = df.Alias("chargeVGen", "postfsrChargeV")
 
     return df
 
@@ -136,8 +138,10 @@ def select_fiducial_space(df, select=True, accept=True, mode="w_mass", **kwargs)
         df = df.DefinePerSample("acceptance", "true")
 
     if select and accept:
+        logger.debug("Select events in fiducial phase space")        
         df = df.Filter("acceptance")
     elif select:
+        logger.debug("Reject events in fiducial phase space")
         df = df.Filter("acceptance == 0")
 
     return df
@@ -155,12 +159,12 @@ def add_xnorm_histograms(results, df, args, dataset_name, corr_helpers, qcdScale
 
     xnorm_axes = [axis_xnorm, *unfolding_axes]
     xnorm_cols = ["xnorm", *unfolding_cols]
-    
+
     if add_helicity_axis:
         df_xnorm = theoryAgnostic_tools.define_helicity_weights(df_xnorm, filename=f"{common.data_dir}/angularCoefficients/w_z_moments_unfoldingBinning.hdf5")
 
         from wremnants.helicity_utils import axis_helicity_multidim
-        results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight_helicity"], tensor_axes=[axis_helicity_multidim]))  
+        results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight_helicity"], tensor_axes=[axis_helicity_multidim]))
     else:
         results.append(df_xnorm.HistoBoost("xnorm", xnorm_axes, [*xnorm_cols, "nominal_weight"]))
 

@@ -383,7 +383,7 @@ class HDF5Writer(object):
                 forceToNominal=[x for x in dg.getProcNames() if x not in 
                     dg.getProcNames([p for g in procs_syst for p in chanInfo.expandProcesses(g) if p != dg.fakeName])]
                 dg.loadHistsForDatagroups(
-                    chanInfo.nominalName, systName, label="syst",
+                    syst["nominalName"], systName, label="syst",
                     procsToRead=procs_syst, 
                     forceNonzero=forceNonzero and systName != "qcdScaleByHelicity",
                     preOpMap=syst["preOpMap"], preOpArgs=syst["preOpArgs"], applySelection=syst["applySelection"],
@@ -736,13 +736,13 @@ class HDF5Writer(object):
         maskednoigroups, maskednoigroupidxs = self.get_noigroups(masked=True)
         systgroups, systgroupidxs = self.get_systgroups()
         poigroups = self.get_systsnoimasked() if hasattr(args, "poiAsNoi") and args.poiAsNoi else procs
-        sumgroups, sumgroupsegmentids, sumgroupidxs = self.get_sumgroups(procs)
-        chargegroups, chargegroupidxs = self.get_chargegroups()
+        sumgroups, sumgroupsegmentids, sumgroupidxs = self.get_sumgroups(poigroups)
+        chargegroups, chargegroupidxs = self.get_ntuple_groups(poigroups, "cardAsymXsecGroups")
         polgroups, polgroupidxs = self.get_polgroups()
-        helgroups, helgroupidxs = self.get_helgroups()
-        chargemetagroups, chargemetagroupidxs = self.get_chargemetagroups()
-        ratiometagroups, ratiometagroupidxs = self.get_ratiometagroups()
-        helmetagroups, helmetagroupidxs = self.get_helmetagroups()
+        helgroups, helgroupidxs = self.get_ntuple_groups(poigroups, "cardHelXsecGroups")
+        chargemetagroups, chargemetagroupidxs = self.get_ntuple_groups(sumgroups, "cardAsymSumXsecGroups")
+        ratiometagroups, ratiometagroupidxs = self.get_ntuple_groups(sumgroups, "cardRatioSumXsecGroups")
+        helmetagroups, helmetagroupidxs = self.get_ntuple_groups(sumgroups, "cardHelSumXsecGroups")
         reggroups, reggroupidxs = self.get_reggroups()
         poly1dreggroups, poly1dreggroupfirstorder, poly1dreggrouplastorder, poly1dreggroupnames, poly1dreggroupbincenters = self.get_poly1dreggroups()
         poly2dreggroups, poly2dreggroupfirstorder, poly2dreggrouplastorder, poly2dreggroupfullorder, poly2dreggroupnames, poly2dreggroupbincenters0, poly2dreggroupbincenters1 = self.get_poly2dreggroups()
@@ -765,7 +765,7 @@ class HDF5Writer(object):
         create_dataset("polgroups", polgroups)
         create_dataset("polgroupidxs", polgroupidxs, 3, dtype='int32')
         create_dataset("helgroups", helgroups)
-        create_dataset("helgroupidxs", helgroupidxs, 6, dtype='int32')
+        create_dataset("helgroupidxs", helgroupidxs, 9, dtype='int32')
         create_dataset("sumgroups", sumgroups)
         create_dataset("sumgroupsegmentids", sumgroupsegmentids, dtype='int32')
         create_dataset("sumgroupidxs", sumgroupidxs, dtype='int32')
@@ -774,7 +774,7 @@ class HDF5Writer(object):
         create_dataset("ratiometagroups", ratiometagroups)
         create_dataset("ratiometagroupidxs", ratiometagroupidxs, 2, dtype='int32')
         create_dataset("helmetagroups", helmetagroups)
-        create_dataset("helmetagroupidxs", helmetagroupidxs, 6, dtype='int32')
+        create_dataset("helmetagroupidxs", helmetagroupidxs, 9, dtype='int32')
         create_dataset("reggroups", reggroups)
         create_dataset("reggroupidxs", reggroupidxs, dtype=h5py.special_dtype(vlen=np.dtype('int32')))
         create_dataset("poly1dreggroups", poly1dreggroups)
@@ -882,8 +882,6 @@ class HDF5Writer(object):
         else:
             target_dict = self.dict_systgroups
 
-        target_dict = self.dict_noigroups if syst.get("noi", False) else self.dict_systgroups
-
         for matched_group in matched_groups:
             target_dict[matched_group].add(name)
 
@@ -947,7 +945,7 @@ class HDF5Writer(object):
         sumgroupidxs = []
         dict_sumgroups = {}
         for chanInfo in self.get_channels().values():
-            dict_sumgroups.update(chanInfo.cardSumGroups)
+            dict_sumgroups.update(chanInfo.cardSumXsecGroups)
         for igroup, (group, members) in enumerate(common.natural_sort_dict(dict_sumgroups).items()):
             sumgroups.append(group)
             for proc in members:
@@ -955,29 +953,24 @@ class HDF5Writer(object):
                 sumgroupidxs.append(procs.index(proc))
         return sumgroups, sumgroupsegmentids, sumgroupidxs
 
-    def get_chargegroups(self):
-        #list of groups of signal processes by charge
-        return [], []
-
     def get_polgroups(self):
         #list of groups of signal processes by polarization
         return [], []
 
-    def get_helgroups(self):
-        #list of groups of signal processes by helicity xsec
-        return [], []
+    def get_ntuple_groups(self, groups, pairgroups):
+        pairmetagroups = []
+        pairmetagroupidxs = []
+        dict_pairroups = {}
+        for chanInfo in self.get_channels().values():
+            dict_pairroups.update(getattr(chanInfo, pairgroups))
+        for group, members in dict_pairroups.items():
+            pairmetagroups.append(group)
+            pairmetagroupidx = []
+            for proc in members:
+                pairmetagroupidx.append(groups.index(proc))
+            pairmetagroupidxs.append(pairmetagroupidx)
 
-    def get_chargemetagroups(self):
-        #list of groups of signal processes by chargemeta
-        return [], []
-
-    def get_ratiometagroups(self):
-        #list of groups of signal processes by ratiometa
-        return [], []
-
-    def get_helmetagroups(self):
-        #list of groups of signal processes by helmeta
-        return [], []
+        return pairmetagroups, pairmetagroupidxs
 
     def get_reggroups(self):
         #list of groups of signal processes for regularization

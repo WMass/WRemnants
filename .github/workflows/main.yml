@@ -199,7 +199,9 @@ jobs:
 
       # theory agnostic with POI as NOI
       - name: wmass theory agnostic combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/ --analysisMode theoryAgnosticNormVar --poiAsNoi
+        run:  >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE 
+          --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/ --analysisMode theoryAgnosticNormVar --poiAsNoi --scaleNormXsecHistYields 0.01
 
       - name: wmass theory agnostic combine fit
         run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge WMass.hdf5
