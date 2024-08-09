@@ -23,6 +23,7 @@ import numpy as np
 
 parser.add_argument("--mtCut", type=int, default=common.get_default_mtcut(analysis_label), help="Value for the transverse mass cut in the event selection") # 40 for Wmass, thus be 45 here (roughly half the boson mass)
 parser.add_argument("--muonIsolation", type=int, nargs=2, default=[1,1], choices=[-1, 0, 1], help="Apply isolation cut to triggering and not-triggering muon (in this order): -1/1 for failing/passing isolation, 0 for skipping it")
+parser.add_argument("--addIsoMtAxes", action="store_true", help="Add iso/mT axes to the nominal ones. It is for tests to get uncertainties (mainly from SF) versus iso-mT to validate the goodness of muon SF in the fake regions. Isolation (on triggering muon) and mT cut are automatically overridden.")
 parser.add_argument("--validateVetoSF", action="store_true", help="Add histogram for validation of veto SF, loading all necessary helpers. This requires using the veto selection on the non-triggering muon, with reduced pt cut")
 parser.add_argument("--useGlobalOrTrackerVeto", action="store_true", help="Use global-or-tracker veto definition and scale factors instead of global only")
 parser.add_argument("--useRefinedVeto", action="store_true", help="Temporary option, it uses a different computation of the veto SF (only implemented for global muons)")
@@ -43,12 +44,16 @@ if isFloatingPOIsTheoryAgnostic:
 
 parser = common.set_parser_default(parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"])
 parser = common.set_parser_default(parser, "excludeProcs", ["QCD"])
+if args.addIsoMtAxes:
+    parser = common.set_parser_default(parser, "muonIsolation", [0, 1])
 
 if isTheoryAgnostic:
     parser = common.set_parser_default(parser, "excludeFlow", True)
     if args.genAbsYVbinEdges and any(x < 0.0 for x in args.genAbsYVbinEdges):
         raise ValueError("Option --genAbsYVbinEdges requires all positive values. Please check")
 
+args = parser.parse_args() # parse again or new defaults won't be propagated
+    
 if args.useRefinedVeto and args.useGlobalOrTrackerVeto:
     raise NotImplementedError("Options --useGlobalOrTrackerVeto and --useRefinedVeto cannot be used together at the moment.")
 if args.validateVetoSF:
@@ -98,6 +103,17 @@ else:
     nominal_axes = [axis_eta, axis_pt, common.axis_charge]
     nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
 
+# for isoMt region validation and related tests
+# use very high upper edge as a proxy for infinity (cannot exploit overflow bins in the fit)
+# can probably use numpy infinity, but this is compatible with the root conversion
+axis_mtCat = hist.axis.Variable([0, int(args.mtCut/2.), args.mtCut, 1000], name = "mt", underflow=False, overflow=False)
+axis_isoCat = hist.axis.Variable([0, 0.15, 0.3, 100], name = "relIso",underflow=False, overflow=False)
+
+nominal_axes = [axis_eta, axis_pt, common.axis_charge]
+nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
+if args.addIsoMtAxes:
+    nominal_axes.extend([axis_mtCat, axis_isoCat])
+    nominal_cols.extend(["transverseMass", "trigMuons_relIso0"])
 
 if isUnfolding:
     template_wpt = (template_maxpt-template_minpt)/args.genBins[0]
@@ -265,8 +281,10 @@ def build_graph(df, dataset):
         if not passIsoBoth:
             df = muon_selections.apply_iso_muons(df, args.muonIsolation[0], args.muonIsolation[1], isoBranch, isoThreshold)
 
-    df = df.Define("trigMuons_passIso0", f"{isoBranch}[trigMuons][0] < {isoThreshold}")
-    df = df.Define("nonTrigMuons_passIso0", f"{isoBranch}[nonTrigMuons][0] < {isoThreshold}")
+    df = df.Define("trigMuons_relIso0", f"{isoBranch}[trigMuons][0]")
+    df = df.Define("nonTrigMuons_relIso0", f"{isoBranch}[nonTrigMuons][0]")
+    df = df.Define("trigMuons_passIso0", f"trigMuons_relIso0 < {isoThreshold}")
+    df = df.Define("nonTrigMuons_passIso0", f"nonTrigMuons_relIso0 < {isoThreshold}")
 
     df = muon_selections.select_z_candidate(df, mass_min, mass_max)
 
@@ -364,13 +382,16 @@ def build_graph(df, dataset):
 
     df = df.Define("passWlikeMT", f"transverseMass >= {mtw_min}")
 
-    if not args.onlyMainHistograms:
+    if not args.onlyMainHistograms and not isUnfolding and not args.addIsoMtAxes:
         axis_mt_coarse = hist.axis.Variable([0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 120.0], name = "mt", underflow=False, overflow=True)
         axis_trigPassIso = hist.axis.Boolean(name = f"trig_passIso")
         axis_nonTrigPassIso = hist.axis.Boolean(name = f"nonTrig_passIso")
 
         nominal_bin = df.HistoBoost("nominal_isoMtBins", [*axes, axis_trigPassIso, axis_nonTrigPassIso, axis_mt_coarse], [*cols, "trigMuons_passIso0", "nonTrigMuons_passIso0", "transverseMass", "nominal_weight"])
         results.append(nominal_bin)
+
+        nominal_testIsoMtFakeRegions = df.HistoBoost("nominal_testIsoMtFakeRegions", [*axes, axis_isoCat, axis_mtCat], [*cols, "trigMuons_relIso0", "transverseMass", "nominal_weight"])
+        results.append(nominal_testIsoMtFakeRegions)
 
         axis_eta_nonTrig = hist.axis.Regular(template_neta, template_mineta, template_maxeta, name = "etaNonTrig", overflow=False, underflow=False)
         ptMin_nonTrig = args.vetoRecoPt if args.validateVetoSF else template_minpt
@@ -393,7 +414,8 @@ def build_graph(df, dataset):
         df = df.Define("deltaPhiMuonMet", "std::abs(wrem::deltaPhi(trigMuons_phi0,met_wlike_TV2.Phi()))")
         df = df.Filter(f"deltaPhiMuonMet > {args.dphiMuonMetCut*np.pi}")
 
-    df = df.Filter("passWlikeMT")
+    if not args.addIsoMtAxes:
+        df = df.Filter("passWlikeMT")
 
     if not args.onlyMainHistograms:
         # plot reco vertex distribution before and after PU reweigthing
