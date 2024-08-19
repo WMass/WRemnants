@@ -68,6 +68,7 @@ jobs:
       NTHREADS: ${{steps.export.outputs.NTHREADS}}
       MAX_FILES: ${{steps.export.outputs.MAX_FILES}}
       LUMI_SCALE: ${{steps.export.outputs.LUMI_SCALE}}
+      NOMINAL_FAKE_SMOOTHING: ${{steps.export.outputs.NOMINAL_FAKE_SMOOTHING}}
 
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +132,7 @@ jobs:
           echo "NTHREADS=$NTHREADS" >> $GITHUB_OUTPUT
           echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
           echo "WEB_DIR=$WEB_DIR" >> $GITHUB_OUTPUT
+          echo "NOMINAL_FAKE_SMOOTHING=NOMINAL_FAKE_SMOOTHING" >> $GITHUB_OUTPUT
 
   w-analysis:
     # The type of runner that the job will run on
@@ -220,10 +222,12 @@ jobs:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
           WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
           PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          NOMINAL_FAKE_SMOOTHING: ${{ needs.setenv.outputs.NOMINAL_FAKE_SMOOTHING }}
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "NOMINAL_FAKE_SMOOTHING=${NOMINAL_FAKE_SMOOTHING}" >> $GITHUB_ENV
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
       - uses: actions/checkout@v4
         with:
