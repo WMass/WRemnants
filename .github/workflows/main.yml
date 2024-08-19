@@ -132,7 +132,7 @@ jobs:
           echo "NTHREADS=$NTHREADS" >> $GITHUB_OUTPUT
           echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
           echo "WEB_DIR=$WEB_DIR" >> $GITHUB_OUTPUT
-          echo "NOMINAL_FAKE_SMOOTHING=NOMINAL_FAKE_SMOOTHING" >> $GITHUB_OUTPUT
+          echo "NOMINAL_FAKE_SMOOTHING=$NOMINAL_FAKE_SMOOTHING" >> $GITHUB_OUTPUT
 
   w-analysis:
     # The type of runner that the job will run on
