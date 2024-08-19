@@ -82,7 +82,7 @@ def make_parser(parser=None):
     parser.add_argument("--noMCStat", action='store_true', help="Do not include MC stat uncertainty in covariance for theory fit (only when using --fitresult)")
     parser.add_argument("--fakerateAxes", nargs="+", help="Axes for the fakerate binning", default=["eta","pt","charge"])
     parser.add_argument("--fakeEstimation", type=str, help="Set the mode for the fake estimation", default="extended1D", choices=["closure", "simple", "extrapolate", "extended1D", "extended2D"])
-    parser.add_argument("--fakeSmoothingMode", type=str, default="hybrid", choices=["binned", "fakerate", "hybrid", "full"], help="Smoothing mode for fake estimate.")
+    parser.add_argument("--fakeSmoothingMode", type=str, default="full", choices=["binned", "fakerate", "hybrid", "full"], help="Smoothing mode for fake estimate.")
     parser.add_argument("--forceGlobalScaleFakes", default=None, type=float, help="Scale the fakes  by this factor (overriding any custom one implemented in datagroups.py in the fakeSelector).")
     parser.add_argument("--fakeMCCorr", type=str, default=[None], nargs="*", choices=["none", "pt", "eta", "mt"], help="axes to apply nonclosure correction from QCD MC. Leave empty for inclusive correction, use'none' for no correction")
     parser.add_argument("--fakeSmoothingOrder", type=int, default=3, help="Order of the polynomial for the smoothing of the application region or full prediction, depending on the smoothing mode")
@@ -138,7 +138,7 @@ def make_parser(parser=None):
     parser.add_argument("--massConstraintMode", choices=["automatic", "constrained", "unconstrained"], default="automatic", help="Whether mass is constrained within PDG value and uncertainty or unconstrained in the fit")
     parser.add_argument("--decorMassWidth", action='store_true', help="remove width variations from mass variations")
     parser.add_argument("--muRmuFPolVar", action="store_true", help="Use polynomial variations (like in theoryAgnosticPolVar) instead of binned variations for muR and muF (of course in setupCombine these are still constrained nuisances)")
-    parser.add_argument("--binByBinStatScaleForMW", type=float, default=1.10, help="scaling of bin by bin statistical uncertainty for W mass analysis")
+    parser.add_argument("--binByBinStatScaleForMW", type=float, default=1.26, help="scaling of bin by bin statistical uncertainty for W mass analysis")
     parser.add_argument("--exponentialTransform", action='store_true', help="apply exponential transformation to yields (useful for gen-level fits to helicity cross sections for example)")
     parser = make_subparsers(parser)
 
@@ -396,6 +396,7 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, genvar=None, x
                 pseudodataGroups.getNames(), inputBaseName, mode=args.fakeEstimation, fake_processes=["QCD",],
                 smoothing_mode=args.fakeSmoothingMode, smoothingOrderSpectrum=args.fakeSmoothingOrder,
                 mcCorr=args.fakeMCCorr,
+                integrate_x="mt" not in fitvar,
                 simultaneousABCD=simultaneousABCD, forceGlobalScaleFakes=args.forceGlobalScaleFakes,
                 )
         else:
@@ -820,7 +821,7 @@ def setup(args, inputFile, inputBaseName, inputLumiScale, fitvar, genvar=None, x
                 return hvar
 
             for axesToDecorrNames in [[], ]:
-                for idx, mag in [(1,0.2),(2,0.2),(3,0.2)]:
+                for idx, mag in [(1,0.2),(2,0.2),]:
                     subgroup = f"{cardTool.getFakeName()}Param{idx}"
                     cardTool.addSystematic(
                         name=inputBaseName, 

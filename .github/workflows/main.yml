@@ -29,6 +29,7 @@ env:
   OUTFILE_LOWPU_MUMU: "mz_lowPU_mumu.hdf5"
   DATAPATH: "/scratch/shared/NanoAOD/"
   DATAPATH_LOWPU: "/scratch/shared/NanoAOD/LowPU/"
+  NOMINAL_FAKE_SMOOTHING: "hybrid"
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -110,6 +111,7 @@ jobs:
           echo "NTHREADS=64" >> $GITHUB_ENV
           echo "MAX_FILES=-2" >> $GITHUB_ENV
           echo "LUMI_SCALE=1" >> $GITHUB_ENV
+          echo "NOMINAL_FAKE_SMOOTHING=full" >> $GITHUB_ENV
 
       - name: setup outdir
         run: echo "WREMNANTS_OUTDIR=/tmp/${USER}/$(uuidgen)" >> $GITHUB_ENV
@@ -232,7 +234,7 @@ jobs:
         run: echo "The web dir is $WEB_DIR plot dir is ${PLOT_DIR}"
 
       - name: wmass plotting
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --hists pt eta pt-eta -o $WEB_DIR -f $PLOT_DIR -p W $HIST_FILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 1.3 --fakeSmoothingMode $NOMINAL_FAKE_SMOOTHING --hists pt eta pt-eta -o $WEB_DIR -f $PLOT_DIR -p W $HIST_FILE variation --varName nominal_uncorr --varLabel MiNNLO --colors red
 
       - name: wmass plot lepton phi
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --yscale 10 --logy --baseName leptonPhi --fakeSmoothingMode fakerate --hists phi --fineGroups -o $WEB_DIR -f $PLOT_DIR -p W $HIST_FILE
