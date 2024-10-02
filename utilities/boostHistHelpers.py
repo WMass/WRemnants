@@ -583,7 +583,7 @@ def unrolledHist(h, obs=None, binwnorm=None, add_flow_bins=False):
     else:
         scale = 1
 
-    bins = np.product(hproj.axes.extent) if add_flow_bins else np.product(hproj.axes.size)
+    bins = np.prod(hproj.axes.extent) if add_flow_bins else np.prod(hproj.axes.size)
     newh = hist.Hist(hist.axis.Integer(0, bins, underflow=False, overflow=False), storage=hproj._storage_type())
     if hproj._storage_type() == hist.storage.Double():
         newh.view(flow=False)[...] = np.ravel(hproj.values(flow=add_flow_bins))*scale

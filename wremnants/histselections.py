@@ -870,7 +870,7 @@ class FakeSelector1DExtendedABCD(FakeSelectorSimpleABCD):
             if self.throw_toys == "normal":
                 # throw gaussian toys
                 toy_shape = [*values.shape, nsamples]
-                toy_size=np.product(toy_shape)
+                toy_size=np.prod(toy_shape)
                 np.random.seed(seed)  # For reproducibility
                 toys = np.random.normal(0, 1, size=toy_size)
                 toys = np.reshape(toys, toy_shape)
@@ -1096,7 +1096,7 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
             if self.throw_toys == "normal":
                 # throw gaussian toys
                 toy_shape = [*values.shape, nsamples]
-                toy_size=np.product(toy_shape)
+                toy_size=np.prod(toy_shape)
                 np.random.seed(seed)  # For reproducibility
                 toys = np.random.normal(0, 1, size=toy_size)
                 toys = np.reshape(toys, toy_shape)
@@ -1311,7 +1311,7 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
             if self.throw_toys == "normal":
                 # throw gaussian toys
                 toy_shape = [*values.shape, nsamples]
-                toy_size=np.product(toy_shape)
+                toy_size=np.prod(toy_shape)
                 np.random.seed(seed)
                 toys = np.random.normal(0, 1, size=toy_size)
                 toys = np.reshape(toys, toy_shape)

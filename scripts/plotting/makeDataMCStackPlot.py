@@ -247,18 +247,18 @@ for h in args.hists:
     if any(x in h.split("-") for x in ["pt", "ptll", "mll", "ptVgen", "ptVGen", "ptWgen", "ptZgen"]):
         # in case of variable bin width normalize to unit (which is GeV for all of these...)
         binwnorm = 1.0
-        ylabel="$Events\,/\,GeV$"
+        ylabel=r"$Events\,/\,GeV$"
     else:
         binwnorm = None
-        ylabel="$Events\,/\,bin$"
+        ylabel=r"$Events\,/\,bin$"
 
     if args.rlabel is None:
         if args.noData:
             rlabel = "Ratio to nominal"
         elif args.ratioToData:
-            rlabel = "$Pred.\,/\,Data$"
+            rlabel = r"$Pred.\,/\,Data$"
         else:
-            rlabel = "$Data\,/\,Pred.$"
+            rlabel = r"$Data\,/\,Pred.$"
     else:
         rlabel = args.rlabel
 

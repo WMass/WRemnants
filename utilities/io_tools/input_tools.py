@@ -14,7 +14,7 @@ import re
 
 logger = logging.child_logger(__name__)
 
-scetlib_tnp_match_expr = ["^gamma_.*[+|-]\d+", "^b_.*[+|-]\d+", "^s[+|-]\d+", "^h_.*\d+"]
+scetlib_tnp_match_expr = [r"^gamma_.*[+|-]\d+", r"^b_.*[+|-]\d+", r"^s[+|-]\d+", r"^h_.*\d+"]
 
 def load_results_h5py(h5file):
     if "results" in h5file.keys():

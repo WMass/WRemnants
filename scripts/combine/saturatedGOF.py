@@ -15,7 +15,7 @@ tree.GetEntry(0)
 
 fitresult_h5py = combinetf_input.get_fitresult(args.infile.replace(".root",".hdf5"))
 meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
-nbins = sum([np.product([len(a) for a in info["axes"]]) for info in meta["channel_info"].values()])
+nbins = sum([np.prod([len(a) for a in info["axes"]]) for info in meta["channel_info"].values()])
 ndf = nbins - tree.ndofpartial
 
 print(f"nbins = {nbins}")

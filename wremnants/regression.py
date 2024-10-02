@@ -134,7 +134,7 @@ def get_parameter_matrices_from2D(x, x2, y, w, order, order2=None, pol="power", 
     XTY = np.stack(stackXTY, axis=-1)
     if flatten:
         # flatten the 2D array into 1D
-        newshape = (*y.shape[:-2],np.product(y.shape[-2:]))
+        newshape = (*y.shape[:-2],np.prod(y.shape[-2:]))
         y = y.reshape(newshape)
         X = X.reshape(*newshape, X.shape[-1])
 

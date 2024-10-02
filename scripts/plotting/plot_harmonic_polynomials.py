@@ -84,7 +84,7 @@ def plot_harmonic_polynomials(outdir, args):
 
     # 1D plots
     for axis_name, ais in [("cosTheta", [0,1,5]), ("phi", [3,4,6,8])]:
-        h1ds = [histo.project(axis_name)/np.product([histo.axes[n].size for n in histo.axes.name if n != axis_name]) for histo in histos]
+        h1ds = [histo.project(axis_name)/np.prod([histo.axes[n].size for n in histo.axes.name if n != axis_name]) for histo in histos]
 
         fig, ax1 = plot_tools.figure(h1ds[0], xlabel=styles.xlabels.get(f"{axis_name.lower()}starll", axis_name), ylabel="Frequency",
             grid=True, automatic_scale=False, width_scale=1.2, logy=False)    

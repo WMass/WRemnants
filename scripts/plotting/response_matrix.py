@@ -48,20 +48,20 @@ groups.loadHistsForDatagroups(args.baseName, syst=args.histName, procsToRead=dat
 datagroups = groups.getDatagroups()
 
 translate_label = {
-    "pt" : "$\mathrm{Reco}\ p_\mathrm{T}\ [\mathrm{GeV}]$",
-    "ptGen" : "$\mathrm{Gen}\ p_\mathrm{T}\ [\mathrm{GeV}]$",
-    "eta" : "$\mathrm{Reco}\ \eta$",
-    "abs(eta)" : "$\mathrm{Reco}\ |\eta|$",
-    "absEtaGen" : "$\mathrm{Gen}\ |\eta|$",
+    "pt" : r"$\mathrm{Reco}\ p_\mathrm{T}\ [\mathrm{GeV}]$",
+    "ptGen" : r"$\mathrm{Gen}\ p_\mathrm{T}\ [\mathrm{GeV}]$",
+    "eta" : r"$\mathrm{Reco}\ \eta$",
+    "abs(eta)" : r"$\mathrm{Reco}\ |\eta|$",
+    "absEtaGen" : r"$\mathrm{Gen}\ |\eta|$",
     "ptll" : r"$\mathrm{Reco}\ p_\mathrm{T}(\ell\ell)\ [\mathrm{GeV}]$",
     "ptW" : r"$\mathrm{Reco}\ p_\mathrm{T}(\ell\nu)\ [\mathrm{GeV}]$",
-    "ptVGen" : "$\mathrm{Gen}\ p_\mathrm{T}(V)\ [\mathrm{GeV}]$",
-    "yll" : "$\mathrm{Reco}\ Y(\mathrm{V})$",
-    "abs(yll)" : "$\mathrm{Reco}\ |Y(\mathrm{V})|$",
-    "absYVGen" : "$\mathrm{Gen}\ |Y(\mathrm{V})|$",
+    "ptVGen" : r"$\mathrm{Gen}\ p_\mathrm{T}(V)\ [\mathrm{GeV}]$",
+    "yll" : r"$\mathrm{Reco}\ Y(\mathrm{V})$",
+    "abs(yll)" : r"$\mathrm{Reco}\ |Y(\mathrm{V})|$",
+    "absYVGen" : r"$\mathrm{Gen}\ |Y(\mathrm{V})|$",
     "cosThetaStarll" : r"$\mathrm{Reco}\ \cos{\theta^{\star}_{\ell\ell}}$",
     "phiStarll" : r"$\mathrm{Reco}\ \phi^{\star}_{\ell\ell}$",
-    "helicitySig" : "Helicity",
+    "helicitySig" : r"Helicity",
 }
 
 
@@ -103,7 +103,7 @@ def plot_resolution(histo, axes_reco, axis_gen, selections_global, selections_sl
     if len(axes_reco) == 1:
         xlabel = translate_label[axes_reco[0]]
     else:
-        xlabel = '-'.join([translate_label[a].replace('[\mathrm{GeV}]', '') for a in axes_reco])
+        xlabel = '-'.join([translate_label[a].replace(r'[\mathrm{GeV}]', '') for a in axes_reco])
         xlabel = xlabel.replace(r"-$\mathrm{Reco}", "-$") + ' bin'
 
     for sel, idx in selections_global:
@@ -137,12 +137,12 @@ def plot_resolution(histo, axes_reco, axis_gen, selections_global, selections_sl
                 label = int(h2d.axes[sel2].edges[idx2])
                 if sel2 == "helicitySig":
                     if idx2 == 0:
-                        label = "$\sigma_{\mathrm{UL}}$"
+                        label = r"$\sigma_{\mathrm{UL}}$"
                     else:
-                        label = f"$\sigma_{label}$"                    
+                        label = fr"$\sigma_{label}$"                    
             else:
                 edges = h2d.axes[sel2].edges
-                var2 = translate_label[sel2].replace('[\mathrm{GeV}]', '')
+                var2 = translate_label[sel2].replace(r'[\mathrm{GeV}]', '')
                 if idx2 == hist.overflow:
                     label = f"{var2} > {edges[-1]}"
                 elif idx2+1 < len(edges):
@@ -178,7 +178,7 @@ def plot_resolution(histo, axes_reco, axis_gen, selections_global, selections_sl
 
         if sel is not None:
             lo, hi = histo.axes[sel].edges[idx], histo.axes[sel].edges[idx+1]
-            var = translate_label[sel].replace('[\mathrm{GeV}]', '')
+            var = translate_label[sel].replace(r'[\mathrm{GeV}]', '')
             if sel.startswith("abs") and lo==0:
                 title = f"{var} < {hi}"
             else:

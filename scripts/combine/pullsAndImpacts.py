@@ -286,9 +286,9 @@ def readFitInfoFromFile(rf, filename, poi, group=False, grouping=None, filters=[
         df["pull"] = df['pull'] - df["pull_prefit"]
         df['abspull'] = np.abs(df['pull'])
         df['newpull'] = df['pull'] / (1-df["constraint"]**2)**0.5
-        df['newpull'].replace([np.inf, -np.inf, np.nan], 999, inplace=True)
+        df['newpull'] = df['newpull'].replace([np.inf, -np.inf, np.nan], 999)
         if poi:
-            df.drop(df.loc[df['label'].str.contains(poi.replace("_noi",""), regex=True)].index, inplace=True)
+            df = df.drop(df.loc[df['label'].str.contains(poi.replace("_noi",""), regex=True)].index)
     colors = np.full(len(df), '#377eb8')
     if not group:
         colors[df['impact'] > 0.] = '#e41a1c'
@@ -397,7 +397,7 @@ def producePlots(fitresult, args, poi, group=False, normalize=False, fitresult_r
         # Set default values for missing entries in respective columns
         default_values = {'impact_color': "#377eb8",  'impact_color_ref': "#377eb8"}  
         for col in df.columns:
-            df[col].fillna(default_values.get(col, 0), inplace=True)
+            df[col] = df[col].fillna(default_values.get(col, 0))
 
     if args.sort:
         logger.debug("Sort impacts")

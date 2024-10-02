@@ -99,7 +99,7 @@ def get_xlabel(names, proc=""):
     else:
         label = styles.xlabels.get(names[0], names[0])
     if proc:
-        label = label.replace("\mathrm{V}", "\mathrm{"+proc_dict.get(proc, proc[0])+"}")
+        label = label.replace(r"\mathrm{V}", r"\mathrm{"+proc_dict.get(proc, proc[0])+"}")
     return label
 
 def make_yields_df(hists, procs, signal=None, per_bin=False, yield_only=False, percentage=True):
@@ -161,10 +161,10 @@ def plot_xsec_unfolded(hist_xsec, hist_xsec_stat=None, hist_ref=None, poi_type="
         rlabel=f"Pulls"
     elif ratioToData:
         # rlabel=f"{args.refName}/{args.name}"
-        name = args.name.replace(' ','\ ')
-        rlabel=f"$1\,/\,{name}$"
+        name = args.name.replace(' ',r'\ ')
+        rlabel=fr"$1\,/\,{name}$"
     else:
-        rlabel=f"$Data\,/\,{label_others[0]}$"
+        rlabel=fr"$Data\,/\,{label_others[0]}$"
 
     rrange = args.rrange
 
@@ -292,12 +292,12 @@ def plot_uncertainties_unfolded(hist_xsec, hist_stat, hist_syst, poi_type, chann
 
     yLabel = styles.poi_types.get(poi_type, poi_type)
     if relative_uncertainty:
-        yLabel = "$\delta$ "+ yLabel
+        yLabel = r"$\delta$ "+ yLabel
         yLabel = yLabel.replace(" [pb]","")
         if percentage:
             yLabel += " [%]"
     else:
-        yLabel = "$\Delta$ "+ yLabel
+        yLabel = r"$\Delta$ "+ yLabel
 
     axes_names = hist_xsec.axes.name
     xlabel=get_xlabel(axes_names, proc)
@@ -452,12 +452,12 @@ def plot_uncertainties_with_ratio(
 
     yLabel = styles.poi_types.get(poi_type, poi_type)
     if relative_uncertainty:
-        yLabel = "$\delta$ "+ yLabel
+        yLabel = r"$\delta$ "+ yLabel
         yLabel = yLabel.replace(" [pb]","")
         if percentage:
             yLabel += " [%]"
     else:
-        yLabel = "$\Delta$ "+ yLabel
+        yLabel = r"$\Delta$ "+ yLabel
 
     axes_names = hist_xsec.axes.name
     xlabel=get_xlabel(axes_names, proc)
@@ -509,7 +509,7 @@ def plot_uncertainties_with_ratio(
     else:
         ylim = args.ylim
 
-    name = args.name.replace('' ,'\ ')
+    name = args.name.replace('' ,r'\ ')
     rlabel=f"{args.refName}/{name}"
     rrange = args.rrange
 

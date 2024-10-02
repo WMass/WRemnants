@@ -100,7 +100,7 @@ meta = input_tools.get_metadata(args.infile)
 is_normalized = meta["args"].get("normalize", False) if meta is not None else False
 
 translate_selection = {
-    "charge": "$\mathit{q}^\mu$ = ",
+    "charge": r"$\mathit{q}^\mu$ = ",
 }
 translate_selection_value = {
     "charge": {
@@ -116,10 +116,10 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, hup=
     if any(x in axes_names for x in ["ptll", "mll", "ptVgen", "ptVGen", "pt"]):
         # in case of variable bin width normalize to unit
         binwnorm = 1.0
-        ylabel="$Events\,/\,GeV$"
+        ylabel=r"$Events\,/\,GeV$"
     else:
         binwnorm = None
-        ylabel="$Events\,/\,bin$"
+        ylabel=r"$Events\,/\,bin$"
 
     if args.logTransform:
         ylabel = ylabel.replace("Events", "log(Events)")
@@ -160,7 +160,7 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, hup=
         if args.noData:
             rlabel = ('Diff.' if diff else 'Ratio') + " to pred."
         else:
-            rlabel = f"${args.dataName}"+('-' if diff else '\,/\,')+"Pred.$"
+            rlabel = f"${args.dataName}"+('-' if diff else r'\,/\,')+"Pred.$"
 
         fig, ax1, ax2 = plot_tools.figureWithRatio(h_data, xlabel, ylabel, args.ylim, 
             rlabel, args.rrange, width_scale=1.25 if len(axes_names) == 1 else 1, 
@@ -340,15 +340,15 @@ def make_plot(h_data, h_inclusive, h_stack, axes, colors=None, labels=None, hup=
     if chi2 is not None:
         p_val = int(round(scipy.stats.chi2.sf(chi2[0], chi2[1])*100))
         if saturated_chi2:
-            chi2_name = "\mathit{\chi}_{\mathrm{sat.}}^2/\mathit{ndf}"
+            chi2_name = r"$\mathit{\chi}_{\mathrm{sat.}}^2/\mathit{ndf}$"
         else:
-            chi2_name = "\mathit{\chi}^2/\mathit{ndf}"
+            chi2_name = r"$\mathit{\chi}^2/\mathit{ndf}$"
 
         if len(h_data.values())<100:
-            text_pieces.append(f"${chi2_name}$")
-            text_pieces.append(f"$= {round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$")
+            text_pieces.append(chi2_name)
+            text_pieces.append("$= {round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$")
         else:
-            text_pieces.append(f"${chi2_name} = {round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$")
+            text_pieces.append(chi2_name + fr" = ${round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$")
     
     plot_tools.add_cms_decor(ax1, args.cmsDecor, data=data or "Nonprompt" in labels, lumi=lumi if args.dataName=="Data" and not args.noData else None, loc=args.logoPos)
 
@@ -525,7 +525,7 @@ else:
                 continue
             shape = [len(a) for a in info["axes"]]
 
-            ch_end = ch_start+np.product(shape) # in combinetf1 the channels are concatenated and we need to index one after the other
+            ch_end = ch_start+np.prod(shape) # in combinetf1 the channels are concatenated and we need to index one after the other
 
             hist_data = fitresult["obs;1"].to_hist()
             values = np.reshape(hist_data.values()[ch_start:ch_end], shape)
@@ -543,7 +543,7 @@ else:
                 rfile = ROOT.TFile.Open(args.infile.replace(".hdf5",".root"))
                 ttree = rfile.Get("fitresults")
                 ttree.GetEntry(0)
-                chi2 = [2*(ttree.nllvalfull - ttree.satnllvalfull), np.product([len(a) for a in info["axes"]]) - ttree.ndofpartial]
+                chi2 = [2*(ttree.nllvalfull - ttree.satnllvalfull), np.prod([len(a) for a in info["axes"]]) - ttree.ndofpartial]
             else:
                 chi2 = None
 
@@ -616,7 +616,7 @@ else:
             rfile = ROOT.TFile.Open(args.infile.replace(".hdf5",".root"))
             ttree = rfile.Get("fitresults")
             ttree.GetEntry(0)
-            chi2 = [2*(ttree.nllvalfull - ttree.satnllvalfull), np.product([len(a) for a in axes]) - ttree.ndofpartial]
+            chi2 = [2*(ttree.nllvalfull - ttree.satnllvalfull), np.prod([len(a) for a in axes]) - ttree.ndofpartial]
         else:
             chi2 = None
 

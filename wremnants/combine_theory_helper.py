@@ -546,7 +546,7 @@ class TheoryHelper(object):
 
         for label,vals in np_map.items():
             if not all(label+v in self.np_hist.axes[self.syst_ax] for v in vals):
-                tmpvals = [x.replace(label, "") for x in self.np_hist.axes[self.syst_ax] if re.match(f"^{label}\d+", x)]
+                tmpvals = [x.replace(label, "") for x in self.np_hist.axes[self.syst_ax] if re.match(fr"^{label}\d+", x)]
                 if tmpvals:
                     logger.warning(f"Using variations {tmpvals} rather than default values {vals}!")
                     np_map[label] = tmpvals

@@ -706,7 +706,7 @@ class CardTool(object):
             hnom = self.datagroups.groups[proc].hists[self.nominalName]
             up = var_map[name+"Up"]
             down = var_map[name+"Down"]
-            nCellsWithoutOverflows = np.product(hnom.shape)
+            nCellsWithoutOverflows = np.prod(hnom.shape)
 
             checkFiniteBinValues(up, name+"Up")
             checkFiniteBinValues(down, name+"Down")

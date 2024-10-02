@@ -104,7 +104,7 @@ def plot(fittype, channel=None, data=True, stack=True, density=False, ratio=True
         binwidths = np.outer(xbinwidths, ybinwidths).flatten()
         edges = np.arange(0.5, len(binwidths)+1.5, 1.0)
     else:
-        bins = np.product([len(e.flatten())-1 for e in edges])
+        bins = np.prod([len(e.flatten())-1 for e in edges])
         edges = np.arange(0.5, bins+1.5, 1.0)
         binwidths = edges[1:] - edges[:-1]
 

@@ -130,7 +130,7 @@ if __name__ == '__main__':
             p1 = np.array([0,0])
             p2 = np.array([1,1])
 
-            pts = np.reshape(pts, (np.product(size),2))
+            pts = np.reshape(pts, (np.prod(size),2))
 
             # as a cross check- plot all tpr,fpr points
             # ax1.plot(pts[:,0], pts[:,1], linestyle="none", marker=".", color=colors(i))

@@ -18,12 +18,12 @@ logger = logging.child_logger(__name__)
 
 def valid_theory_corrections():
     corr_files = glob.glob(common.data_dir+"TheoryCorrections/*Corr*.pkl.lz4")
-    matches = [re.match("(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files]
+    matches = [re.match(r"(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files]
     return [m[1] for m in matches if m]+["none"]
 
 def valid_ew_theory_corrections():
     corr_files = glob.glob(common.data_dir+"TheoryCorrections/*[eE][wW]*Corr*.pkl.lz4")
-    matches = [re.match("(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files]
+    matches = [re.match(r"(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files]
     return [m[1] for m in matches if m]+["none"]
 
 def load_corr_helpers(procs, generators, make_tensor=True, base_dir=f"{common.data_dir}/TheoryCorrections/"):
