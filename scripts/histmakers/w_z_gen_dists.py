@@ -1,33 +1,76 @@
-from utilities import boostHistHelpers as hh, common, logging, differential
-from utilities.io_tools import output_tools
-
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants import theory_tools, syst_tools, theory_corrections, unfolding_tools, helicity_utils
-
-import narf
-
 import os
+
 import hist
-import math
 import numpy as np
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
-parser,initargs = common.common_parser(analysis_label)
+import narf
+from utilities import boostHistHelpers as hh
+from utilities import common, differential, logging
+from utilities.io_tools import output_tools
+from wremnants import (helicity_utils, syst_tools, theory_corrections,
+                       theory_tools, unfolding_tools)
+from wremnants.datasets.datagroups import Datagroups
+from wremnants.datasets.dataset_tools import getDatasets
 
-parser.add_argument("--skipHelicityXsecs", action='store_true', help="Skip the conversion of helicity helicity_xsecs to angular coeff fractions")
-parser.add_argument("--propagatePDFstoHelicity", action='store_true', help="Propagate PDF uncertainties to helicity xsecs")
-parser.add_argument("--useTheoryAgnosticBinning", action='store_true', help="Use theory agnostic binning (coarser) to produce the gen results")
-parser.add_argument("--useUnfoldingBinning", action='store_true', help="Use unfolding binning to produce the gen results")
-parser.add_argument("--singleLeptonHists", action='store_true', help="Also store single lepton kinematics")
-parser.add_argument("--photonHists", action='store_true', help="Also store photon kinematics")
-parser.add_argument("--skipEWHists", action='store_true', help="Also store histograms for EW reweighting. Use with --filter horace")
-parser.add_argument("--signedY", action='store_true', help="use signed Y")
-parser.add_argument("--fiducial", choices=["masswindow", "dilepton", "singlelep"], help="Apply selection on leptons (No argument for inclusive)")
-parser.add_argument("--auxiliaryHistograms", action="store_true", help="Safe auxiliary histograms (mainly for ew analysis)")
-parser.add_argument("--ptqVgen", action='store_true', help="To store qt by Q variable instead of ptVgen, GEN only ", default=None)
-parser.add_argument("--helicity", action='store_true', help="Make qcdScaleByHelicity hist")
-parser.add_argument("--theoryCorrections", action='store_true', help="Apply default theory corrections")
+analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+parser, initargs = common.common_parser(analysis_label)
+
+parser.add_argument(
+    "--skipHelicityXsecs",
+    action="store_true",
+    help="Skip the conversion of helicity helicity_xsecs to angular coeff fractions",
+)
+parser.add_argument(
+    "--propagatePDFstoHelicity",
+    action="store_true",
+    help="Propagate PDF uncertainties to helicity xsecs",
+)
+parser.add_argument(
+    "--useTheoryAgnosticBinning",
+    action="store_true",
+    help="Use theory agnostic binning (coarser) to produce the gen results",
+)
+parser.add_argument(
+    "--useUnfoldingBinning",
+    action="store_true",
+    help="Use unfolding binning to produce the gen results",
+)
+parser.add_argument(
+    "--singleLeptonHists",
+    action="store_true",
+    help="Also store single lepton kinematics",
+)
+parser.add_argument(
+    "--photonHists", action="store_true", help="Also store photon kinematics"
+)
+parser.add_argument(
+    "--skipEWHists",
+    action="store_true",
+    help="Also store histograms for EW reweighting. Use with --filter horace",
+)
+parser.add_argument("--signedY", action="store_true", help="use signed Y")
+parser.add_argument(
+    "--fiducial",
+    choices=["masswindow", "dilepton", "singlelep"],
+    help="Apply selection on leptons (No argument for inclusive)",
+)
+parser.add_argument(
+    "--auxiliaryHistograms",
+    action="store_true",
+    help="Safe auxiliary histograms (mainly for ew analysis)",
+)
+parser.add_argument(
+    "--ptqVgen",
+    action="store_true",
+    help="To store qt by Q variable instead of ptVgen, GEN only ",
+    default=None,
+)
+parser.add_argument(
+    "--helicity", action="store_true", help="Make qcdScaleByHelicity hist"
+)
+parser.add_argument(
+    "--theoryCorrections", action="store_true", help="Apply default theory corrections"
+)
 
 parser = common.set_parser_default(parser, "filterProcs", common.vprocs)
 args = parser.parse_args()
@@ -39,20 +82,26 @@ args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-datasets = getDatasets(maxFiles=args.maxFiles,
-                        filt=args.filterProcs,
-                        excl=args.excludeProcs,
-                        extended = "msht20an3lo" not in args.pdfs,
-                        nanoVersion="v9", base_path=args.dataPath, mode=analysis_label)
+datasets = getDatasets(
+    maxFiles=args.maxFiles,
+    filt=args.filterProcs,
+    excl=args.excludeProcs,
+    extended="msht20an3lo" not in args.pdfs,
+    nanoVersion="v9",
+    base_path=args.dataPath,
+    mode=analysis_label,
+)
 
 logger.debug(f"Will process samples {[d.name for d in datasets]}")
 
-axis_ygen = hist.axis.Regular(10, -5., 5., name="y")
-col_rapidity =  "yVgen" if args.signedY else "absYVgen"
+axis_ygen = hist.axis.Regular(10, -5.0, 5.0, name="y")
+col_rapidity = "yVgen" if args.signedY else "absYVgen"
 
 axis_ptqVgen = hist.axis.Variable(
-    [round(x, 4) for x in list(np.arange(0, 0.1 + 0.0125, 0.0125))]+[round(x, 4) for x in list(np.arange(0.1+0.025, 0.5 + 0.025, 0.025))], 
-    name = "ptqVgen", underflow=False
+    [round(x, 4) for x in list(np.arange(0, 0.1 + 0.0125, 0.0125))]
+    + [round(x, 4) for x in list(np.arange(0.1 + 0.025, 0.5 + 0.025, 0.025))],
+    name="ptqVgen",
+    underflow=False,
 )
 
 axis_chargeWgen = hist.axis.Regular(
@@ -63,67 +112,104 @@ axis_chargeZgen = hist.axis.Integer(
     0, 1, name="chargeVgen", underflow=False, overflow=False
 )
 
-axis_absetal_gen = hist.axis.Regular(24, 0, 2.4, name = "abseta")
-axis_ptl_gen = hist.axis.Regular(34, 26., 60., name = "pt")
+axis_absetal_gen = hist.axis.Regular(24, 0, 2.4, name="abseta")
+axis_ptl_gen = hist.axis.Regular(34, 26.0, 60.0, name="pt")
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, theory_corrs)
+
 
 def build_graph(df, dataset):
     logger.info("build graph")
     logger.info(dataset.name)
     results = []
-    
+
     if dataset.is_data:
         raise RuntimeError("Running GEN analysis over data is not supported")
 
-    isW = dataset.name.startswith("W") and dataset.name[1] not in ["W", "Z"] #in common.wprocs
-    isZ = dataset.name.startswith("Z") and dataset.name[1] not in ["W", "Z"] #in common.zprocs
+    isW = dataset.name.startswith("W") and dataset.name[1] not in [
+        "W",
+        "Z",
+    ]  # in common.wprocs
+    isZ = dataset.name.startswith("Z") and dataset.name[1] not in [
+        "W",
+        "Z",
+    ]  # in common.zprocs
 
-    axis_massWgen = hist.axis.Variable([4., 13000.], name="massVgen", underflow=True, overflow=False)
-    axis_massZgen = hist.axis.Regular(12, 60., 120., name="massVgen")
+    axis_massWgen = hist.axis.Variable(
+        [4.0, 13000.0], name="massVgen", underflow=True, overflow=False
+    )
+    axis_massZgen = hist.axis.Regular(12, 60.0, 120.0, name="massVgen")
 
-    theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(ptV_flow=True, absYV_flow=True,wlike="Z" in dataset.name)
+    theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
+        ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
+    )
     axis_ptV_thag = theoryAgnostic_axes[0]
     axis_yV_thag = theoryAgnostic_axes[1]
 
     if args.useUnfoldingBinning:
-        unfolding_axes, unfolding_cols, unfolding_selections = differential.get_dilepton_axes(
-            ["ptVGen", "absYVGen"], 
-            common.get_gen_axes(common.get_dilepton_ptV_binning(), True, flow=True), 
-            add_out_of_acceptance_axis=False,
+        unfolding_axes, unfolding_cols, unfolding_selections = (
+            differential.get_dilepton_axes(
+                ["ptVGen", "absYVGen"],
+                common.get_gen_axes(common.get_dilepton_ptV_binning(), True, flow=True),
+                add_out_of_acceptance_axis=False,
+            )
         )
         axis_absYVgen = hist.axis.Variable(
             unfolding_axes[1].edges,
-            name = "absYVgen", underflow=False,
+            name="absYVgen",
+            underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
             unfolding_axes[0].edges,
-            name = "ptVgen", underflow=False,
+            name="ptVgen",
+            underflow=False,
         )
 
-        axis_massZgen = hist.axis.Regular(1, 60., 120., name="massVgen")
-    
+        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
+
     elif args.useTheoryAgnosticBinning:
         axis_absYVgen = hist.axis.Variable(
-            axis_yV_thag.edges, #same axis as theory agnostic norms
-            name = "absYVgen", underflow=False
+            axis_yV_thag.edges,  # same axis as theory agnostic norms
+            name="absYVgen",
+            underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            axis_ptV_thag.edges, #same axis as theory agnostic norms, 
-            #common.ptV_binning,
-            name = "ptVgen", underflow=False,
+            axis_ptV_thag.edges,  # same axis as theory agnostic norms,
+            # common.ptV_binning,
+            name="ptVgen",
+            underflow=False,
         )
     else:
         axis_absYVgen = hist.axis.Variable(
-            [0., 0.25, 0.5, 0.75, 1., 1.25, 1.5, 1.75, 2., 2.25, 2.5, 2.75, 3., 3.25, 3.5, 4., 5.], # this is the same binning as hists from theory corrections
-            name = "absYVgen", underflow=False
+            [
+                0.0,
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                1.25,
+                1.5,
+                1.75,
+                2.0,
+                2.25,
+                2.5,
+                2.75,
+                3.0,
+                3.25,
+                3.5,
+                4.0,
+                5.0,
+            ],  # this is the same binning as hists from theory corrections
+            name="absYVgen",
+            underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            (*common.get_dilepton_ptV_binning(fine=False), 13000.),
-            name = "ptVgen", underflow=False,
+            (*common.get_dilepton_ptV_binning(fine=False), 13000.0),
+            name="ptVgen",
+            underflow=False,
         )
-        
+
     axis_rapidity = axis_ygen if args.signedY else axis_absYVgen
 
     weight_expr = "std::copysign(1.0, genWeight)"
@@ -134,21 +220,38 @@ def build_graph(df, dataset):
         weight_expr = f"{weight_expr}*LHEScaleWeightAltSet1[4]"
 
     df = df.Define("weight", weight_expr)
-    df = df.DefinePerSample("unity","1.")
+    df = df.DefinePerSample("unity", "1.")
     # This sum should happen before any change of the weight
     weightsum = df.SumAndCount("weight")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
-    df = theory_tools.define_theory_weights_and_corrs(df, dataset.name, corr_helpers, args)
+    df = theory_tools.define_theory_weights_and_corrs(
+        df, dataset.name, corr_helpers, args
+    )
 
     if isZ:
-        nominal_axes = [axis_massZgen, axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen, axis_chargeZgen]
+        nominal_axes = [
+            axis_massZgen,
+            axis_rapidity,
+            axis_ptqVgen if args.ptqVgen else axis_ptVgen,
+            axis_chargeZgen,
+        ]
         lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_chargeZgen]
     else:
-        nominal_axes = [axis_massWgen, axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen, axis_chargeWgen]
+        nominal_axes = [
+            axis_massWgen,
+            axis_rapidity,
+            axis_ptqVgen if args.ptqVgen else axis_ptVgen,
+            axis_chargeWgen,
+        ]
         lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_chargeWgen]
-    
-    nominal_cols = ["massVgen", col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen", "chargeVgen"]
+
+    nominal_cols = [
+        "massVgen",
+        col_rapidity,
+        "ptqVgen" if args.ptqVgen else "ptVgen",
+        "chargeVgen",
+    ]
     lep_cols = ["absEtaGen", "ptGen", "chargeVgen"]
 
     mode = f'{"z" if isZ else "w"}_{analysis_label}'
@@ -157,165 +260,565 @@ def build_graph(df, dataset):
             mode += "_wlike"
 
         df = unfolding_tools.define_gen_level(df, "preFSR", dataset.name, mode=mode)
-        df = unfolding_tools.select_fiducial_space(df, mode=mode, fiducial=args.fiducial, unfolding=True, selections=unfolding_selections)
+        df = unfolding_tools.select_fiducial_space(
+            df,
+            mode=mode,
+            fiducial=args.fiducial,
+            unfolding=True,
+            selections=unfolding_selections,
+        )
 
     if args.singleLeptonHists and (isW or isZ):
-        results.append(df.HistoBoost("nominal_genlep", lep_axes, [*lep_cols, "nominal_weight"], storage=hist.storage.Weight()))
+        results.append(
+            df.HistoBoost(
+                "nominal_genlep",
+                lep_axes,
+                [*lep_cols, "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
-    if not args.skipEWHists and (isW or isZ) and 'Zmumu_powheg-weak' in dataset.name:
+    if not args.skipEWHists and (isW or isZ) and "Zmumu_powheg-weak" in dataset.name:
         if isZ:
-            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.10, bin_edges_low=[0,46,50,60,70,80], bin_edges_high=[100,110,120,140,160,200])
+            massBins = theory_tools.make_ew_binning(
+                mass=91.1535,
+                width=2.4932,
+                initialStep=0.10,
+                bin_edges_low=[0, 46, 50, 60, 70, 80],
+                bin_edges_high=[100, 110, 120, 140, 160, 200],
+            )
         else:
-            massBins = theory_tools.make_ew_binning(mass = 80.3815, width = 2.0904, initialStep=0.010)
-        
+            massBins = theory_tools.make_ew_binning(
+                mass=80.3815, width=2.0904, initialStep=0.010
+            )
+
         # LHE level
         df = syst_tools.define_weak_weights(df, dataset.name)
-        axis_lheMV = hist.axis.Variable(massBins, name = "massVlhe", underflow=False)
-        axis_lhePtV = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ptVlhe") 
-        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, underflow=False, name = "absYVlhe")
-        axis_lheYV = hist.axis.Regular(100, -5., 5., name = "YVlhe")
-        axis_lhechargeZ = hist.axis.Integer(0, 1, underflow=False, overflow=False, name = "chargeVlhe")
-        axis_lhechargeW = hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "chargeVlhe")
+        axis_lheMV = hist.axis.Variable(massBins, name="massVlhe", underflow=False)
+        axis_lhePtV = hist.axis.Variable(
+            common.ptV_binning, underflow=False, name="ptVlhe"
+        )
+        axis_lheAbsYV = hist.axis.Regular(50, 0, 5, underflow=False, name="absYVlhe")
+        axis_lheYV = hist.axis.Regular(100, -5.0, 5.0, name="YVlhe")
+        axis_lhechargeZ = hist.axis.Integer(
+            0, 1, underflow=False, overflow=False, name="chargeVlhe"
+        )
+        axis_lhechargeW = hist.axis.Regular(
+            2, -2.0, 2.0, underflow=False, overflow=False, name="chargeVlhe"
+        )
         axis_lhechargeV = axis_lhechargeZ if isZ else axis_lhechargeW
-        axis_lheCosThetaStar = hist.axis.Regular(50, -1, 1, name = "cosThetaStarlhe")
-        axis_lhePhiStar = hist.axis.Regular(8, -np.pi, np.pi, circular=True, name="phiStarlhe")
+        axis_lheCosThetaStar = hist.axis.Regular(50, -1, 1, name="cosThetaStarlhe")
+        axis_lhePhiStar = hist.axis.Regular(
+            8, -np.pi, np.pi, circular=True, name="phiStarlhe"
+        )
         axis_weak = hist.axis.StrCategory(syst_tools.weakWeightNames(), name="weak")
         axis_helicity = helicity_utils.axis_helicity
 
-        results.append(df.HistoBoost("lhe_massVptV", [axis_lheMV, axis_lhePtV], ["massVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("lhe_absYVptV", [axis_lheAbsYV, axis_lhePtV], ["absYVlhe", "ptVlhe", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("lhe_absYVmassV", [axis_lheAbsYV, axis_lheMV], ["absYVlhe", "massVlhe", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("lhe_massVcosTheta", [axis_lheMV, axis_lheCosThetaStar], ["massVlhe", "csCosThetalhe", "nominal_weight"], storage=hist.storage.Weight()))
-        syst_tools.add_weakweights_hist(results, df, [axis_lheMV, axis_lheCosThetaStar], ["massVlhe", "csCosThetalhe"], proc=dataset.name, base_name='lhe_massVcosTheta')
+        results.append(
+            df.HistoBoost(
+                "lhe_massVptV",
+                [axis_lheMV, axis_lhePtV],
+                ["massVlhe", "ptVlhe", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "lhe_absYVptV",
+                [axis_lheAbsYV, axis_lhePtV],
+                ["absYVlhe", "ptVlhe", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "lhe_absYVmassV",
+                [axis_lheAbsYV, axis_lheMV],
+                ["absYVlhe", "massVlhe", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "lhe_massVcosTheta",
+                [axis_lheMV, axis_lheCosThetaStar],
+                ["massVlhe", "csCosThetalhe", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        syst_tools.add_weakweights_hist(
+            results,
+            df,
+            [axis_lheMV, axis_lheCosThetaStar],
+            ["massVlhe", "csCosThetalhe"],
+            proc=dataset.name,
+            base_name="lhe_massVcosTheta",
+        )
 
-        results.append(df.HistoBoost("lhe",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "nominal_weight"], storage=hist.storage.Weight()))
+        results.append(
+            df.HistoBoost(
+                "lhe",
+                [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV],
+                ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
-        results.append(df.HistoBoost("lhe_angular",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV, axis_lheCosThetaStar, axis_lhePhiStar], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csCosThetalhe", "csPhilhe", "nominal_weight"], storage=hist.storage.Weight()))
+        results.append(
+            df.HistoBoost(
+                "lhe_angular",
+                [
+                    axis_lheMV,
+                    axis_lheAbsYV,
+                    axis_lhePtV,
+                    axis_lhechargeV,
+                    axis_lheCosThetaStar,
+                    axis_lhePhiStar,
+                ],
+                [
+                    "massVlhe",
+                    "absYVlhe",
+                    "ptVlhe",
+                    "chargeVlhe",
+                    "csCosThetalhe",
+                    "csPhilhe",
+                    "nominal_weight",
+                ],
+                storage=hist.storage.Weight(),
+            )
+        )
 
-        hist_lhe_helicity = df.HistoBoost("lhe_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csAngularMomentslhe_wnom"], tensor_axes = [axis_helicity])
+        hist_lhe_helicity = df.HistoBoost(
+            "lhe_helicity",
+            [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV],
+            [
+                "massVlhe",
+                "absYVlhe",
+                "ptVlhe",
+                "chargeVlhe",
+                "csAngularMomentslhe_wnom",
+            ],
+            tensor_axes=[axis_helicity],
+        )
         results.append(hist_lhe_helicity)
 
-        hist_lhe_weak_helicity = df.HistoBoost("lhe_weak_helicity", [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "weakWeight_tensor_helicity"], tensor_axes = [axis_helicity, axis_weak])
+        hist_lhe_weak_helicity = df.HistoBoost(
+            "lhe_weak_helicity",
+            [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV],
+            [
+                "massVlhe",
+                "absYVlhe",
+                "ptVlhe",
+                "chargeVlhe",
+                "weakWeight_tensor_helicity",
+            ],
+            tensor_axes=[axis_helicity, axis_weak],
+        )
         results.append(hist_lhe_weak_helicity)
 
-        results.append(df.HistoBoost("lhe_weak_angular",  [axis_lheMV, axis_lheAbsYV, axis_lhePtV, axis_lhechargeV, axis_lheCosThetaStar, axis_lhePhiStar], ["massVlhe", "absYVlhe", "ptVlhe", "chargeVlhe", "csCosThetalhe", "csPhilhe", "weakWeight_tensor_wnom"], storage=hist.storage.Weight(), tensor_axes=[axis_weak]))
+        results.append(
+            df.HistoBoost(
+                "lhe_weak_angular",
+                [
+                    axis_lheMV,
+                    axis_lheAbsYV,
+                    axis_lhePtV,
+                    axis_lhechargeV,
+                    axis_lheCosThetaStar,
+                    axis_lhePhiStar,
+                ],
+                [
+                    "massVlhe",
+                    "absYVlhe",
+                    "ptVlhe",
+                    "chargeVlhe",
+                    "csCosThetalhe",
+                    "csPhilhe",
+                    "weakWeight_tensor_wnom",
+                ],
+                storage=hist.storage.Weight(),
+                tensor_axes=[axis_weak],
+            )
+        )
 
-    if not args.skipEWHists and (isW or isZ) and "GenPart_status" in df.GetColumnNames():
+    if (
+        not args.skipEWHists
+        and (isW or isZ)
+        and "GenPart_status" in df.GetColumnNames()
+    ):
         if isZ:
-            massBins = theory_tools.make_ew_binning(mass = 91.1535, width = 2.4932, initialStep=0.010, bin_edges_low=[0,50,60], bin_edges_high=[120])
+            massBins = theory_tools.make_ew_binning(
+                mass=91.1535,
+                width=2.4932,
+                initialStep=0.010,
+                bin_edges_low=[0, 50, 60],
+                bin_edges_high=[120],
+            )
         else:
-            massBins = theory_tools.make_ew_binning(mass = 80.3815, width = 2.0904, initialStep=0.010)
-        
+            massBins = theory_tools.make_ew_binning(
+                mass=80.3815, width=2.0904, initialStep=0.010
+            )
+
         # pre FSR
-        axis_genMV = hist.axis.Variable(massBins, name = "massVgen", underflow=False)
-        axis_genPtV = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ptVgen") 
-        axis_genAbsYV = hist.axis.Regular(50, 0, 5, name = "absYVgen")
-        results.append(df.HistoBoost("preFSR_massVptV", [axis_genMV, axis_genPtV], ["massVgen", "ptVgen", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("preFSR_absYVptV", [axis_genAbsYV, axis_genPtV], ["absYVgen", "ptVgen", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("preFSR_absYVmassV", [axis_genAbsYV, axis_genMV], ["absYVgen", "massVgen", "nominal_weight"], storage=hist.storage.Weight()))
+        axis_genMV = hist.axis.Variable(massBins, name="massVgen", underflow=False)
+        axis_genPtV = hist.axis.Variable(
+            common.ptV_binning, underflow=False, name="ptVgen"
+        )
+        axis_genAbsYV = hist.axis.Regular(50, 0, 5, name="absYVgen")
+        results.append(
+            df.HistoBoost(
+                "preFSR_massVptV",
+                [axis_genMV, axis_genPtV],
+                ["massVgen", "ptVgen", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "preFSR_absYVptV",
+                [axis_genAbsYV, axis_genPtV],
+                ["absYVgen", "ptVgen", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "preFSR_absYVmassV",
+                [axis_genAbsYV, axis_genMV],
+                ["absYVgen", "massVgen", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
         # post FSR, pre tau decay
-        axis_ewMll = hist.axis.Variable(massBins, name = "ewMll", underflow=False)
-        axis_ewPtll = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ewPTll") 
-        axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name = "ewAbsYll")
-        results.append(df.HistoBoost("ew_MllPTll", [axis_ewMll, axis_ewPtll], ["ewMll", "ewPTll", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("ew_YllPTll", [axis_ewAbsYll, axis_ewPtll], ["ewAbsYll", "ewPTll", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("ew_YllMll", [axis_ewAbsYll, axis_ewMll], ["ewAbsYll", "ewMll", "nominal_weight"], storage=hist.storage.Weight()))
+        axis_ewMll = hist.axis.Variable(massBins, name="ewMll", underflow=False)
+        axis_ewPtll = hist.axis.Variable(
+            common.ptV_binning, underflow=False, name="ewPTll"
+        )
+        axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name="ewAbsYll")
+        results.append(
+            df.HistoBoost(
+                "ew_MllPTll",
+                [axis_ewMll, axis_ewPtll],
+                ["ewMll", "ewPTll", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "ew_YllPTll",
+                [axis_ewAbsYll, axis_ewPtll],
+                ["ewAbsYll", "ewPTll", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "ew_YllMll",
+                [axis_ewAbsYll, axis_ewMll],
+                ["ewAbsYll", "ewMll", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
         # dressed
-        axis_ewMll = hist.axis.Variable(massBins, name = "ewMll", underflow=False)
-        axis_ewPtll = hist.axis.Variable(common.ptV_binning, underflow=False, name = "ewPTll") 
-        axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name = "ewAbsYll")
+        axis_ewMll = hist.axis.Variable(massBins, name="ewMll", underflow=False)
+        axis_ewPtll = hist.axis.Variable(
+            common.ptV_binning, underflow=False, name="ewPTll"
+        )
+        axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name="ewAbsYll")
         df = theory_tools.define_dressed_vars(df, mode=mode)
-        results.append(df.HistoBoost("dressed_MllPTll", [axis_ewMll, axis_ewPtll], ["dressed_MV", "dressed_PTV", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("dressed_YllPTll", [axis_ewAbsYll, axis_ewPtll], ["dressed_absYV", "dressed_PTV", "nominal_weight"], storage=hist.storage.Weight()))
-        results.append(df.HistoBoost("dressed_YllMll", [axis_ewAbsYll, axis_ewMll], ["dressed_absYV", "dressed_MV", "nominal_weight"], storage=hist.storage.Weight()))
+        results.append(
+            df.HistoBoost(
+                "dressed_MllPTll",
+                [axis_ewMll, axis_ewPtll],
+                ["dressed_MV", "dressed_PTV", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "dressed_YllPTll",
+                [axis_ewAbsYll, axis_ewPtll],
+                ["dressed_absYV", "dressed_PTV", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "dressed_YllMll",
+                [axis_ewAbsYll, axis_ewMll],
+                ["dressed_absYV", "dressed_MV", "nominal_weight"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
         if args.auxiliaryHistograms:
-            axis_ewMlly = hist.axis.Variable(massBins, name = "ewMlly")
-            results.append(df.HistoBoost("nominal_ewMlly", [axis_ewMlly], ["ewMlly", "nominal_weight"], storage=hist.storage.Weight()))
+            axis_ewMlly = hist.axis.Variable(massBins, name="ewMlly")
+            results.append(
+                df.HistoBoost(
+                    "nominal_ewMlly",
+                    [axis_ewMlly],
+                    ["ewMlly", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
             # coarse binning
-            axis_Mll = hist.axis.Regular(100, 50, 150, name = "Mll")
-            results.append(df.HistoBoost("nominal_Mll", [axis_Mll], ["ewMll", "nominal_weight"], storage=hist.storage.Weight()))
-            axis_Mlly = hist.axis.Regular(100, 50, 150, name = "Mlly")
-            results.append(df.HistoBoost("nominal_Mlly", [axis_Mlly], ["ewMlly", "nominal_weight"], storage=hist.storage.Weight()))
+            axis_Mll = hist.axis.Regular(100, 50, 150, name="Mll")
+            results.append(
+                df.HistoBoost(
+                    "nominal_Mll",
+                    [axis_Mll],
+                    ["ewMll", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
+            axis_Mlly = hist.axis.Regular(100, 50, 150, name="Mlly")
+            results.append(
+                df.HistoBoost(
+                    "nominal_Mlly",
+                    [axis_Mlly],
+                    ["ewMlly", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
 
-            axis_PTll =  hist.axis.Regular(100, 0, 100, name = "PTll")
-            axis_PTlly = hist.axis.Regular(100, 0, 100, name = "PTlly")
-            axis_Yll =  hist.axis.Regular(100, -5, 5, name = "Yll")
-            axis_Ylly = hist.axis.Regular(100, -5, 5, name = "Ylly")
-            results.append(df.HistoBoost("nominal_PTll",  [axis_PTll],  ["ewPTll", "nominal_weight"], storage=hist.storage.Weight()))
-            results.append(df.HistoBoost("nominal_PTlly", [axis_PTlly], ["ewPTlly", "nominal_weight"], storage=hist.storage.Weight()))
-            results.append(df.HistoBoost("nominal_Yll",  [axis_Yll],  ["ewYll", "nominal_weight"], storage=hist.storage.Weight()))
-            results.append(df.HistoBoost("nominal_Ylly", [axis_Ylly], ["ewYlly", "nominal_weight"], storage=hist.storage.Weight()))
+            axis_PTll = hist.axis.Regular(100, 0, 100, name="PTll")
+            axis_PTlly = hist.axis.Regular(100, 0, 100, name="PTlly")
+            axis_Yll = hist.axis.Regular(100, -5, 5, name="Yll")
+            axis_Ylly = hist.axis.Regular(100, -5, 5, name="Ylly")
+            results.append(
+                df.HistoBoost(
+                    "nominal_PTll",
+                    [axis_PTll],
+                    ["ewPTll", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
+            results.append(
+                df.HistoBoost(
+                    "nominal_PTlly",
+                    [axis_PTlly],
+                    ["ewPTlly", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
+            results.append(
+                df.HistoBoost(
+                    "nominal_Yll",
+                    [axis_Yll],
+                    ["ewYll", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
+            results.append(
+                df.HistoBoost(
+                    "nominal_Ylly",
+                    [axis_Ylly],
+                    ["ewYlly", "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
+            )
 
             # single lepton hists
             if args.singleLeptonHists:
                 if isZ:
                     # first lepton is leading in pT
-                    df = df.Define('ewLepPt1', 'ewLeptons[0].pt()')
-                    df = df.Define('ewLepPt2', 'ewLeptons[1].pt()')
-                    df = df.Define('ewLepEta1', 'ewLeptons[0].eta()')
-                    df = df.Define('ewLepEta2', 'ewLeptons[1].eta()')
+                    df = df.Define("ewLepPt1", "ewLeptons[0].pt()")
+                    df = df.Define("ewLepPt2", "ewLeptons[1].pt()")
+                    df = df.Define("ewLepEta1", "ewLeptons[0].eta()")
+                    df = df.Define("ewLepEta2", "ewLeptons[1].eta()")
                 if isW:
                     # first lepton is charged
-                    df = df.Define('ewLepPt1', 'ewLeptons[0].mass() == 0 ? ewLeptons[1].pt() : ewLeptons[0].pt()')
-                    df = df.Define('ewLepPt2', 'ewLeptons[0].mass() == 0 ? ewLeptons[0].pt() : ewLeptons[1].pt()')
-                    df = df.Define('ewLepEta1', 'ewLeptons[0].mass() == 0 ? ewLeptons[1].eta() : ewLeptons[0].eta()')
-                    df = df.Define('ewLepEta2', 'ewLeptons[0].mass() == 0 ? ewLeptons[0].eta() : ewLeptons[1].eta()')
-                
-                axis_ewLepPt = hist.axis.Regular(100, 0, 100, name = "pt")
-                results.append(df.HistoBoost("nominal_ewLepPt1", [axis_ewLepPt], ["ewLepPt1", "nominal_weight"], storage=hist.storage.Weight()))
-                results.append(df.HistoBoost("nominal_ewLepPt2", [axis_ewLepPt], ["ewLepPt2", "nominal_weight"], storage=hist.storage.Weight()))
-                axis_ewLepEta = hist.axis.Regular(100, -5, 5, name = "eta")
-                results.append(df.HistoBoost("nominal_ewLepEta1", [axis_ewLepEta], ["ewLepEta1", "nominal_weight"], storage=hist.storage.Weight()))
-                results.append(df.HistoBoost("nominal_ewLepEta2", [axis_ewLepEta], ["ewLepEta2", "nominal_weight"], storage=hist.storage.Weight()))
+                    df = df.Define(
+                        "ewLepPt1",
+                        "ewLeptons[0].mass() == 0 ? ewLeptons[1].pt() : ewLeptons[0].pt()",
+                    )
+                    df = df.Define(
+                        "ewLepPt2",
+                        "ewLeptons[0].mass() == 0 ? ewLeptons[0].pt() : ewLeptons[1].pt()",
+                    )
+                    df = df.Define(
+                        "ewLepEta1",
+                        "ewLeptons[0].mass() == 0 ? ewLeptons[1].eta() : ewLeptons[0].eta()",
+                    )
+                    df = df.Define(
+                        "ewLepEta2",
+                        "ewLeptons[0].mass() == 0 ? ewLeptons[0].eta() : ewLeptons[1].eta()",
+                    )
+
+                axis_ewLepPt = hist.axis.Regular(100, 0, 100, name="pt")
+                results.append(
+                    df.HistoBoost(
+                        "nominal_ewLepPt1",
+                        [axis_ewLepPt],
+                        ["ewLepPt1", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
+                results.append(
+                    df.HistoBoost(
+                        "nominal_ewLepPt2",
+                        [axis_ewLepPt],
+                        ["ewLepPt2", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
+                axis_ewLepEta = hist.axis.Regular(100, -5, 5, name="eta")
+                results.append(
+                    df.HistoBoost(
+                        "nominal_ewLepEta1",
+                        [axis_ewLepEta],
+                        ["ewLepEta1", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
+                results.append(
+                    df.HistoBoost(
+                        "nominal_ewLepEta2",
+                        [axis_ewLepEta],
+                        ["ewLepEta2", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
 
             if args.photonHists:
                 # photon distributions
-                df = df.Define('nPhotons', 'ewPhotons.size()')
-                df = df.Define('leadPhotonPt', 'ewPhotons.size() > 0 ? log10(ewPhotons[0].pt()) : -99')
-                df = df.Define('leadPhotonEta', 'ewPhotons.size() > 0 ? ewPhotons[0].eta() : -99')
-                df = df.Define('sublPhotonPt', 'ewPhotons.size() > 1 ? log10(ewPhotons[1].pt()) : -99')
-                df = df.Define('sublPhotonEta', 'ewPhotons.size() > 1 ? ewPhotons[1].eta() : -99')
-                df = df.Define('trailPhotonPt', 'ewPhotons.size() > 2 ? log10(ewPhotons[2].pt()) : -99')
-                df = df.Define('trailPhotonEta', 'ewPhotons.size() > 2 ? ewPhotons[2].eta() : -99')
+                df = df.Define("nPhotons", "ewPhotons.size()")
+                df = df.Define(
+                    "leadPhotonPt",
+                    "ewPhotons.size() > 0 ? log10(ewPhotons[0].pt()) : -99",
+                )
+                df = df.Define(
+                    "leadPhotonEta", "ewPhotons.size() > 0 ? ewPhotons[0].eta() : -99"
+                )
+                df = df.Define(
+                    "sublPhotonPt",
+                    "ewPhotons.size() > 1 ? log10(ewPhotons[1].pt()) : -99",
+                )
+                df = df.Define(
+                    "sublPhotonEta", "ewPhotons.size() > 1 ? ewPhotons[1].eta() : -99"
+                )
+                df = df.Define(
+                    "trailPhotonPt",
+                    "ewPhotons.size() > 2 ? log10(ewPhotons[2].pt()) : -99",
+                )
+                df = df.Define(
+                    "trailPhotonEta", "ewPhotons.size() > 2 ? ewPhotons[2].eta() : -99"
+                )
 
-                axis_ewNPhotons = hist.axis.Regular(5, 0, 5, name = "n")
-                results.append(df.HistoBoost("nominal_ewPhotons", [axis_ewNPhotons], ["nPhotons", "nominal_weight"], storage=hist.storage.Weight()))
+                axis_ewNPhotons = hist.axis.Regular(5, 0, 5, name="n")
+                results.append(
+                    df.HistoBoost(
+                        "nominal_ewPhotons",
+                        [axis_ewNPhotons],
+                        ["nPhotons", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
 
-                axis_photonPt = hist.axis.Regular(100, -5, 5, name = "pt")
-                axis_photonEta = hist.axis.Regular(100, -5, 5, name = "eta")
-                results.append(df.HistoBoost("nominal_leadPhoton", [axis_photonPt, axis_photonEta], ["leadPhotonPt", "leadPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
-                results.append(df.HistoBoost("nominal_sublPhoton", [axis_photonPt, axis_photonEta], ["sublPhotonPt", "sublPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
-                results.append(df.HistoBoost("nominal_trailPhoton", [axis_photonPt, axis_photonEta], ["trailPhotonPt", "trailPhotonEta", "nominal_weight"], storage=hist.storage.Weight()))
+                axis_photonPt = hist.axis.Regular(100, -5, 5, name="pt")
+                axis_photonEta = hist.axis.Regular(100, -5, 5, name="eta")
+                results.append(
+                    df.HistoBoost(
+                        "nominal_leadPhoton",
+                        [axis_photonPt, axis_photonEta],
+                        ["leadPhotonPt", "leadPhotonEta", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
+                results.append(
+                    df.HistoBoost(
+                        "nominal_sublPhoton",
+                        [axis_photonPt, axis_photonEta],
+                        ["sublPhotonPt", "sublPhotonEta", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
+                results.append(
+                    df.HistoBoost(
+                        "nominal_trailPhoton",
+                        [axis_photonPt, axis_photonEta],
+                        ["trailPhotonPt", "trailPhotonEta", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
 
                 # postfsr definition
-                axis_eta = hist.axis.Regular(25, 0, 2.5, name = "postfsrLep_absEta", overflow=True, underflow=False)
-                axis_pt = hist.axis.Regular(50, 20, 70, name = "postfsrLep_pt", overflow=True, underflow=True)
-                results.append(df_fiducial.HistoBoost("nominal_postfsr", [axis_eta, axis_pt], ["postfsrLep_absEta", "postfsrLep_pt", "nominal_weight"], storage=hist.storage.Weight()))
+                axis_eta = hist.axis.Regular(
+                    25, 0, 2.5, name="postfsrLep_absEta", overflow=True, underflow=False
+                )
+                axis_pt = hist.axis.Regular(
+                    50, 20, 70, name="postfsrLep_pt", overflow=True, underflow=True
+                )
+                results.append(
+                    df_fiducial.HistoBoost(
+                        "nominal_postfsr",
+                        [axis_eta, axis_pt],
+                        ["postfsrLep_absEta", "postfsrLep_pt", "nominal_weight"],
+                        storage=hist.storage.Weight(),
+                    )
+                )
 
-    if 'powheg' in dataset.name:
+    if "powheg" in dataset.name:
         return results, weightsum
 
-    if 'horace' not in dataset.name and 'winhac' not in dataset.name and \
-            "LHEScaleWeight" in df.GetColumnNames() and "LHEPdfWeight" in df.GetColumnNames() and "MEParamWeight" in df.GetColumnNames():
+    if (
+        "horace" not in dataset.name
+        and "winhac" not in dataset.name
+        and "LHEScaleWeight" in df.GetColumnNames()
+        and "LHEPdfWeight" in df.GetColumnNames()
+        and "MEParamWeight" in df.GetColumnNames()
+    ):
 
-        qcdScaleByHelicity_helper = theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like = dataset.name[0] != "W") if args.helicity else None
+        qcdScaleByHelicity_helper = (
+            theory_corrections.make_qcd_uncertainty_helper_by_helicity(
+                is_w_like=dataset.name[0] != "W"
+            )
+            if args.helicity
+            else None
+        )
 
-        df = syst_tools.add_theory_hists(results, df, args, dataset.name, corr_helpers, qcdScaleByHelicity_helper, nominal_axes, nominal_cols, base_name="nominal_gen",propagateToHelicity= args.propagatePDFstoHelicity)
-        df = syst_tools.add_helicity_hists(results, df, dataset.name, nominal_axes, nominal_cols, base_name="nominal_gen", storage=hist.storage.Weight())
-    
+        df = syst_tools.add_theory_hists(
+            results,
+            df,
+            args,
+            dataset.name,
+            corr_helpers,
+            qcdScaleByHelicity_helper,
+            nominal_axes,
+            nominal_cols,
+            base_name="nominal_gen",
+            propagateToHelicity=args.propagatePDFstoHelicity,
+        )
+        df = syst_tools.add_helicity_hists(
+            results,
+            df,
+            dataset.name,
+            nominal_axes,
+            nominal_cols,
+            base_name="nominal_gen",
+            storage=hist.storage.Weight(),
+        )
+
     nominal_cols = [col_rapidity, "ptqVgen" if args.ptqVgen else "ptVgen"]
     nominal_axes = [axis_rapidity, axis_ptqVgen if args.ptqVgen else axis_ptVgen]
-    nominal_gen = df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols, "nominal_weight"], storage=hist.storage.Weight())
-    
+    nominal_gen = df.HistoBoost(
+        "nominal_gen",
+        nominal_axes,
+        [*nominal_cols, "nominal_weight"],
+        storage=hist.storage.Weight(),
+    )
+
     results.append(nominal_gen)
 
     return results, weightsum
 
+
 resultdict = narf.build_and_run(datasets, build_graph)
-output_tools.write_analysis_output(resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args)
+output_tools.write_analysis_output(
+    resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
+)
 
 if not args.skipHelicityXsecs:
     logger.info("Writing out helicity cross sections")
@@ -328,26 +831,40 @@ if not args.skipHelicityXsecs:
     for dataset in datasets:
         name = dataset.name
         if "nominal_gen_helicity_xsecs_scale" not in resultdict[name]["output"]:
-            logger.warning(f"Failed to find nominal_gen_helicity_xsecs_scale hist for proc {name}. Skipping!")
+            logger.warning(
+                f"Failed to find nominal_gen_helicity_xsecs_scale hist for proc {name}. Skipping!"
+            )
             continue
-        helicity_xsecs = resultdict[name]["output"]["nominal_gen_helicity_xsecs_scale"].get()
-        helicity_xsecs_lhe = resultdict[name]["output"]["nominal_gen_helicity_xsecs_scale_lhe"].get()
+        helicity_xsecs = resultdict[name]["output"][
+            "nominal_gen_helicity_xsecs_scale"
+        ].get()
+        helicity_xsecs_lhe = resultdict[name]["output"][
+            "nominal_gen_helicity_xsecs_scale_lhe"
+        ].get()
         if name in ["ZmumuPostVFP", "Zee_MiNNLO", "Zmumu_MiNNLO"]:
             if z_helicity_xsecs is None:
                 z_helicity_xsecs = helicity_xsecs
                 z_helicity_xsecs_lhe = helicity_xsecs_lhe
             else:
-                z_helicity_xsecs = hh.addHists(z_helicity_xsecs, helicity_xsecs, createNew=False)
-                z_helicity_xsecs_lhe = hh.addHists(z_helicity_xsecs_lhe, helicity_xsecs_lhe, createNew=False)
+                z_helicity_xsecs = hh.addHists(
+                    z_helicity_xsecs, helicity_xsecs, createNew=False
+                )
+                z_helicity_xsecs_lhe = hh.addHists(
+                    z_helicity_xsecs_lhe, helicity_xsecs_lhe, createNew=False
+                )
         elif name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]:
             if w_helicity_xsecs is None:
                 w_helicity_xsecs = helicity_xsecs
                 w_helicity_xsecs_lhe = helicity_xsecs_lhe
             else:
-                w_helicity_xsecs = hh.addHists(w_helicity_xsecs, helicity_xsecs, createNew=False)
-                w_helicity_xsecs_lhe = hh.addHists(w_helicity_xsecs_lhe, helicity_xsecs_lhe, createNew=False)
+                w_helicity_xsecs = hh.addHists(
+                    w_helicity_xsecs, helicity_xsecs, createNew=False
+                )
+                w_helicity_xsecs_lhe = hh.addHists(
+                    w_helicity_xsecs_lhe, helicity_xsecs_lhe, createNew=False
+                )
 
-    helicity_xsecs_out={}
+    helicity_xsecs_out = {}
     if z_helicity_xsecs:
         helicity_xsecs_out["Z"] = z_helicity_xsecs
         helicity_xsecs_out["Z_lhe"] = z_helicity_xsecs_lhe

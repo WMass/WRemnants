@@ -1,0 +1,112 @@
+#!/bin/bash
+# This pre-commit hook fixes whitespace issues and formats Python files
+
+# Exit if any command fails
+set -e
+
+# Trap the EXIT signal to print the last executed command when the script exits
+trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
+
+
+# Find all staged c++ files
+STAGED_FILES_CPP=$(git diff --cached --name-only --diff-filter=d | grep -E '\.(c|cpp|h|hpp)$' || true)
+
+for FILE in $STAGED_FILES_CPP; do
+  clang++ -I./narf/narf/include/ -I./wremnants/include/ -std=c++20 -fsyntax-only $FILE 
+  if [ $? -ne 0 ]; then
+    echo "Syntax error in $FILE. Commit aborted."
+    exit 1
+  fi
+done
+
+
+# Find all staged YAML files
+STAGED_FILES_YAML=$(git diff --cached --name-only --diff-filter=d | grep -E '\.ya?ml$' || true)
+
+# Check syntax of each YAML file
+for FILE in $STAGED_FILES_YAML; do
+  python -c "import yaml, sys; yaml.safe_load(open('$FILE'))"
+  if [ $? -ne 0 ]; then
+    echo "Syntax error in $FILE. Commit aborted."
+    exit 1
+  fi
+done
+
+
+# Find all staged json files
+STAGED_FILES_JSON=$(git diff --cached --name-only --diff-filter=d | grep -E '\.json$' || true)
+
+# Check syntax of each json file
+for FILE in $STAGED_FILES_JSON; do
+  python -m json.tool $FILE > /dev/null
+  if [ $? -ne 0 ]; then
+    echo "Syntax error in $FILE. Commit aborted."
+    exit 1
+  fi
+done
+
+
+# Find all staged Python files
+STAGED_FILES_PY=$(git diff --cached --name-only --diff-filter=d | grep -E '\.py$' || true)
+
+# Check for syntax errors in each staged Python file
+for FILE in $STAGED_FILES_PY; do
+  # Use python's compile command to check for syntax errors
+  python -m py_compile "$FILE"
+
+  # Check the exit status of the previous command
+  if [ $? -ne 0 ]; then
+    echo "Syntax error in $FILE. Commit aborted."
+    exit 1
+  fi
+done
+
+
+# apply style modifications on staged files
+unset MODIFIED_FILES
+
+# Loop through each staged c/c++ files and fix style issues
+for FILE in $STAGED_FILES_CPP; do
+  # apply LLVM style
+  clang-format -i "$FILE"
+
+  # Check if the file was modified compared to the staged version
+  if ! git diff --quiet "$FILE"; then
+    # Track the modified files
+    MODIFIED_FILES+=("$FILE")
+  fi
+
+done
+
+
+# Loop through each staged Python file and fix style issues
+for FILE in $STAGED_FILES_PY; do
+  # Remove trailing whitespace
+  black "$FILE"
+
+  # Remove unused imports
+  autoflake --in-place --expand-star-imports --remove-all-unused-imports "$FILE"
+
+  # Run isort to organize imports
+  isort "$FILE"
+
+  # Check if the file was modified compared to the staged version
+  if ! git diff --quiet "$FILE"; then
+    # Track the modified files
+    MODIFIED_FILES+=("$FILE")
+  fi
+
+done
+
+
+# Notify the user if any files were modified
+if [ ${#MODIFIED_FILES[@]} -gt 0 ]; then
+  echo "The following files were modified and need to be re-staged:"
+  for FILE in "${MODIFIED_FILES[@]}"; do
+    echo "  $FILE"
+  done
+  echo "Please review the changes and manually add the modified files to the staging area."
+  exit 1
+fi
+
+exit 0

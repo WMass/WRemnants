@@ -1,0 +1,146 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Base
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 1 * * 2,4,6' # Run on Tuesday, Thursday, and Saturday morning at 1h00 UTC
+    - cron: '30 5 * * 1-5' # Run on weekdays
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+
+  linting:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: run Black
+        run: |
+          black --check .
+
+      - name: run isort
+        run: |
+          isort . --check-only --diff
+
+      - name: run Flake8
+        run: |
+          flake8 . --select=F401,F403
+
+      - name: check python Files
+        run: |
+          # Find all python files and check their syntax
+          for FILE in $(find . -name '*.py' -not -path '*/narf/*' -not -path '*/wremnants-data/*'); do
+            echo "Checking python file: $FILE"
+            python -m py_compile "$FILE"
+            if [ $? -ne 0 ]; then
+              echo "Invalid python syntax in $FILE"
+              exit 1
+            fi
+          done
+
+      - name: check JSON Files
+        run: |
+          # Find all JSON files and check their syntax
+          for FILE in $(find . -name '*.json' -not -path '*/narf/*' -not -path '*/wremnants-data/*'); do
+            echo "Checking JSON file: $FILE"
+            python -m json.tool "$FILE" > /dev/null
+            if [ $? -ne 0 ]; then
+              echo "Invalid JSON syntax in $FILE"
+              exit 1
+            fi
+          done
+
+      - name: check YAML Files
+        run: |
+          # Find all YAML files and check their syntax
+          for FILE in $(find . -name '*.yaml' -not -path '*/narf/*' -not -path '*/wremnants-data/*'); do
+            echo "Checking YAML file: $FILE"
+            python -c "import yaml, sys; yaml.safe_load(open('$FILE'))" > /dev/null
+            if [ $? -ne 0 ]; then
+              echo "Invalid YAML syntax in $FILE"
+              exit 1
+            fi
+          done
+
+      - name: check C++ Files
+        run: |
+          # Find all C++ files and check their syntax
+          for FILE in $(find . -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -not -path '*/narf/*' -not -path '*/wremnants-data/*'); do
+            echo "Checking $FILE"
+            clang++ -I./narf/narf/include/ -I./wremnants/include/ -std=c++20 -fsyntax-only "$FILE"
+            if [ $? -ne 0 ]; then
+              echo "Syntax error in $FILE"
+              exit 1
+            fi
+          done
+
+  setup:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: linting
+    outputs:
+      RUN_ON: ${{ steps.set_output.outputs.run_on }}
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: setup kerberos
+        run: |
+          kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
+          klist -k -t -e ~/private/.keytab
+          klist
+          echo "xrdfs root://eosuser.cern.ch// ls $EOS_DIR"
+          xrdfs root://eosuser.cern.ch// ls $EOS_DIR
+
+      - name: setup kerberos within singularity image
+        run: |
+          scripts/ci/run_with_singularity.sh kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
+          scripts/ci/run_with_singularity.sh klist -k -t -e ~/private/.keytab
+          scripts/ci/run_with_singularity.sh klist
+          echo "xrdfs root://eoscms.cern.ch// ls $EOS_DATA_DIR"
+          scripts/ci/run_with_singularity.sh xrdfs root://eoscms.cern.ch// ls $EOS_DATA_DIR
+
+      - name: Set mode for scheduled build
+        if: github.event.schedule == '0 1 * * 2,4,6'
+        id: set_output
+        run: |
+          echo "run_on=scheduled" >> $GITHUB_ENV
+
+      - name: Set mode for reference run
+        if: github.event.schedule == '30 5 * * 1-5'
+        id: set_output
+        run: |
+          echo "run_on=reference" >> $GITHUB_ENV
+
+      - name: Set mode for pull request
+        if: github.event_name == 'pull_request'
+        id: set_output
+        run: |
+          echo "run_on=pull" >> $GITHUB_ENV
+
+      - name: Set mode for dispatch
+        if: github.event_name == 'repository_dispatch'
+        id: set_output
+        run: |
+          echo "run_on=dispatch" >> $GITHUB_ENV
+
+

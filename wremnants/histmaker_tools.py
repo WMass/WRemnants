@@ -1,14 +1,20 @@
-from narf.ioutils import H5PickleProxy
 import time
+
+from narf.ioutils import H5PickleProxy
 from utilities import logging
 
 logger = logging.child_logger(__name__)
+
 
 def scale_to_data(result_dict):
     # scale histograms by lumi*xsec/sum(gen weights)
     time0 = time.time()
 
-    lumi = [result["lumi"] for result in result_dict.values() if result["dataset"]["is_data"]]
+    lumi = [
+        result["lumi"]
+        for result in result_dict.values()
+        if result["dataset"]["is_data"]
+    ]
     if len(lumi) == 0:
         lumi = 1
     else:
@@ -25,7 +31,7 @@ def scale_to_data(result_dict):
 
         scale = lumi * 1000 * xsec / result["weight_sum"]
 
-        result["weight_sum"] = result["weight_sum"]*scale
+        result["weight_sum"] = result["weight_sum"] * scale
 
         for h_name, histogram in result["output"].items():
 
@@ -72,7 +78,7 @@ def aggregate_groups(datasets, result_dict, groups_to_aggregate):
                         "filepaths": result["dataset"]["filepaths"],
                     },
                     "weight_sum": float(result["weight_sum"]),
-                    "event_count": float(result["event_count"])
+                    "event_count": float(result["event_count"]),
                 }
             else:
                 resdict["dataset"]["xsec"] += result["dataset"]["xsec"]
@@ -87,7 +93,9 @@ def aggregate_groups(datasets, result_dict, groups_to_aggregate):
         for h_name, histograms in members.items():
 
             if len(histograms) != resdict["n_members"]:
-                logger.warning(f"There is a different number of histograms ({len(histograms)}) than original members {resdict['n_members']} for {h_name} from group {group}")
+                logger.warning(
+                    f"There is a different number of histograms ({len(histograms)}) than original members {resdict['n_members']} for {h_name} from group {group}"
+                )
                 logger.warning("Summing them up probably leads to wrong behaviour")
 
             output[h_name] = H5PickleProxy(sum(histograms))

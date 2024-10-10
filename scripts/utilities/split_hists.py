@@ -1,25 +1,34 @@
 import argparse
-import h5py
+import concurrent.futures
 import copy
 
-from utilities import logging
-from utilities.io_tools import input_tools
+import boost_histogram as bh
+import h5py
+
 import narf
 import narf.ioutils
-import boost_histogram as bh
-
-import concurrent.futures
-
+from utilities import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", type=str, help="Input hdf5 file")
-parser.add_argument("-a", "--axis", required=True, type=str, help="axis name to split on")
-parser.add_argument("-s", "--start", type=int, default=0, help="start index for splitting")
-parser.add_argument("-e", "--end", required=True, type=int, help="end index for splitting")
-parser.add_argument("-p", "--postfix", type=str, help="Postfix for output file name", default="")
-parser.add_argument("--nominalData", action="store_true", help="use nominal data for all outputs")
+parser.add_argument(
+    "-a", "--axis", required=True, type=str, help="axis name to split on"
+)
+parser.add_argument(
+    "-s", "--start", type=int, default=0, help="start index for splitting"
+)
+parser.add_argument(
+    "-e", "--end", required=True, type=int, help="end index for splitting"
+)
+parser.add_argument(
+    "-p", "--postfix", type=str, help="Postfix for output file name", default=""
+)
+parser.add_argument(
+    "--nominalData", action="store_true", help="use nominal data for all outputs"
+)
 args = parser.parse_args()
 logger = logging.setup_logger(__file__)
+
 
 def copy_and_slice(h5proxy, axis, idx):
     print("copy_and_slice")
@@ -30,9 +39,10 @@ def copy_and_slice(h5proxy, axis, idx):
         print(obj.axes.name)
         if axis in obj.axes.name:
             print("slicing")
-            obj = obj[{axis : idx}]
+            obj = obj[{axis: idx}]
 
     return narf.ioutils.H5PickleProxy(obj)
+
 
 class DeepCopyOverride:
     def __init__(self, target_class, targetfn):
@@ -50,6 +60,7 @@ class DeepCopyOverride:
             self.target_class.__deepcopy__ = oldfn
         else:
             del self.target_class.__deepcopy__
+
 
 newfiles = True
 
@@ -71,13 +82,15 @@ for key in keys:
 
         # preload all the proxied objects so we can close the file
         # TODO should this be an option in pickle_load_h5py directly?
-        with DeepCopyOverride(narf.ioutils.H5PickleProxy, lambda h5proxy, memo : narf.ioutils.H5PickleProxy(h5proxy.get())):
+        with DeepCopyOverride(
+            narf.ioutils.H5PickleProxy,
+            lambda h5proxy, memo: narf.ioutils.H5PickleProxy(h5proxy.get()),
+        ):
             copy.deepcopy(res)
-
 
     def copy_and_write(isplit):
 
-    # for isplit in range(args.start, args.end):
+        # for isplit in range(args.start, args.end):
         print("isplit", isplit)
         # narf.ioutils.H5PickleProxy.__deepcopy__ = lambda h5proxy, memo : copy_and_slice(h5proxy, args.axis, isplit)
         # outres = copy.deepcopy(res)
@@ -88,10 +101,15 @@ for key in keys:
         else:
             isplitsource = isplit
 
-        with DeepCopyOverride(narf.ioutils.H5PickleProxy, lambda h5proxy, memo : copy_and_slice(h5proxy, args.axis, isplitsource)):
+        with DeepCopyOverride(
+            narf.ioutils.H5PickleProxy,
+            lambda h5proxy, memo: copy_and_slice(h5proxy, args.axis, isplitsource),
+        ):
             outres = copy.deepcopy(res)
 
-        outfile = args.input.replace(".hdf5", f"{args.postfix}_{args.axis}_{isplit}.hdf5")
+        outfile = args.input.replace(
+            ".hdf5", f"{args.postfix}_{args.axis}_{isplit}.hdf5"
+        )
         mode = "w" if newfiles else "r+"
 
         print("outfile", outfile, mode)
@@ -103,17 +121,9 @@ for key in keys:
 
         return True
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers = 64) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=64) as executor:
         for res in executor.map(copy_and_write, range(args.start, args.end)):
             pass
 
     res = None
     newfiles = False
-
-
-
-
-
-
-
-

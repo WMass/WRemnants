@@ -1,42 +1,73 @@
 #!/usr/bin/env python3
 
-import os, re, array, math
-import time
-import argparse
+import os
+## safe batch mode
+import sys
+
 from utilities import logging
 
-## safe batch mode                                 
-import sys
 args = sys.argv[:]
-sys.argv = ['-b']
+sys.argv = ["-b"]
 import ROOT
+
 sys.argv = args
 ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
 from copy import *
 
-#sys.path.append(os.getcwd() + "/plotUtils/")
-#from utility import *
+# sys.path.append(os.getcwd() + "/plotUtils/")
+# from utility import *
 from scripts.analysisTools.plotUtils.utility import *
+
 sys.path.append(os.getcwd())
 
 if __name__ == "__main__":
 
     parser = common_plot_parser()
     parser.add_argument("outputfolder", type=str, nargs=1)
-    parser.add_argument("--file", dest="inputfile",   type=str, nargs="+", help="Input files")
-    parser.add_argument("--hname",       type=str, nargs="+", help="Histogram name to pick from each file")
+    parser.add_argument(
+        "--file", dest="inputfile", type=str, nargs="+", help="Input files"
+    )
+    parser.add_argument(
+        "--hname", type=str, nargs="+", help="Histogram name to pick from each file"
+    )
     parser.add_argument("--legendEntry", type=str, nargs="+", help="Legend entry")
-    parser.add_argument("-x", "--xAxisName", default="Invariant mass (GeV) ", help="x axis name")
-    parser.add_argument(     "--rebinx", dest="rebinX", default=1, type=int, help="To rebin x axis (mass)")
-    parser.add_argument(     "--rebiny", dest="rebinY", default=1, type=int, help="To rebin y axis (pt)")
-    parser.add_argument(     "--rebinz", dest="rebinZ", default=1, type=int, help="To rebin z axis (eta)")
-    parser.add_argument(     "--ybin", type=int, nargs=2, default=[0, 0], help="Bins for y axis to plot, default is to do all")
-    parser.add_argument(     "--zbin", type=int, nargs=2, default=[0, 0], help="Bins for z axis to plot, default is to do all")
-    parser.add_argument(     '--norm', dest='normalize', action='store_true',
-                             help='Normalize to area of first histogram')
-    parser.add_argument("-p", "--postfix", type=str, default="", help="Postfix for output plots")
+    parser.add_argument(
+        "-x", "--xAxisName", default="Invariant mass (GeV) ", help="x axis name"
+    )
+    parser.add_argument(
+        "--rebinx", dest="rebinX", default=1, type=int, help="To rebin x axis (mass)"
+    )
+    parser.add_argument(
+        "--rebiny", dest="rebinY", default=1, type=int, help="To rebin y axis (pt)"
+    )
+    parser.add_argument(
+        "--rebinz", dest="rebinZ", default=1, type=int, help="To rebin z axis (eta)"
+    )
+    parser.add_argument(
+        "--ybin",
+        type=int,
+        nargs=2,
+        default=[0, 0],
+        help="Bins for y axis to plot, default is to do all",
+    )
+    parser.add_argument(
+        "--zbin",
+        type=int,
+        nargs=2,
+        default=[0, 0],
+        help="Bins for z axis to plot, default is to do all",
+    )
+    parser.add_argument(
+        "--norm",
+        dest="normalize",
+        action="store_true",
+        help="Normalize to area of first histogram",
+    )
+    parser.add_argument(
+        "-p", "--postfix", type=str, default="", help="Postfix for output plots"
+    )
     args = parser.parse_args()
 
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -46,21 +77,26 @@ if __name__ == "__main__":
     outdir_original = args.outputfolder[0]
     outdir = createPlotDirAndCopyPhp(outdir_original, eoscp=args.eoscp)
 
-    if len(args.inputfile) != len(args.hname) or len(args.inputfile) != len(args.legendEntry):
+    if len(args.inputfile) != len(args.hname) or len(args.inputfile) != len(
+        args.legendEntry
+    ):
         logger.error("Different number of input options for histograms")
         quit()
-        
+
     hists3D = []
     for i in range(len(args.inputfile)):
         f = safeOpenFile(args.inputfile[i])
-        hists3D.append( safeGetObject(f, args.hname[i]) )
+        hists3D.append(safeGetObject(f, args.hname[i]))
         f.Close()
 
     for h in hists3D:
-        if args.rebinX > 1: h.RebinX(args.rebinX)
-        if args.rebinY > 1: h.RebinY(args.rebinY)
-        if args.rebinZ > 1: h.RebinZ(args.rebinZ)
-    
+        if args.rebinX > 1:
+            h.RebinX(args.rebinX)
+        if args.rebinY > 1:
+            h.RebinY(args.rebinY)
+        if args.rebinZ > 1:
+            h.RebinZ(args.rebinZ)
+
     adjustSettings_CMS_lumi()
     canvas = ROOT.TCanvas("canvas", "", 900, 800)
     canvas.SetTickx(1)
@@ -76,15 +112,15 @@ if __name__ == "__main__":
     iymin = 1
     iymax = hists3D[0].GetNbinsY()
     if args.ybin[0] > 0 and args.ybin[1] > 0:
-        iymin,iymax = args.ybin
+        iymin, iymax = args.ybin
 
     izmin = 1
     izmax = hists3D[0].GetNbinsZ()
     if args.zbin[0] > 0 and args.zbin[1] > 0:
-        izmin,izmax = args.zbin
+        izmin, izmax = args.zbin
 
-    colors = [ROOT.kBlack, ROOT.kBlue, ROOT.kRed+2, ROOT.kGreen+2, ROOT.kOrange+2]
-        
+    colors = [ROOT.kBlack, ROOT.kBlue, ROOT.kRed + 2, ROOT.kGreen + 2, ROOT.kOrange + 2]
+
     for ieta in range(1, 1 + hists3D[0].GetNbinsZ()):
         if not (izmin <= ieta <= izmax):
             continue
@@ -94,13 +130,13 @@ if __name__ == "__main__":
 
             hists = []
             for ih, h in enumerate(hists3D):
-                hists.append( h.ProjectionX(f"hmass_{ih}", ipt, ipt, ieta, ieta, "e") )
+                hists.append(h.ProjectionX(f"hmass_{ih}", ipt, ipt, ieta, ieta, "e"))
                 hists[-1].SetLineColor(colors[ih])
                 hists[-1].SetLineWidth(2)
                 if ih and args.normalize:
-                    hists[-1].Scale(hists[0].Integral()/hists[-1].Integral())
-                    
-            miny, maxy =  getMinMaxMultiHisto(hists, excludeEmpty=False, sumError=False)
+                    hists[-1].Scale(hists[0].Integral() / hists[-1].Integral())
+
+            miny, maxy = getMinMaxMultiHisto(hists, excludeEmpty=False, sumError=False)
 
             hfirst = hists[0]
             hfirst.SetStats(0)
@@ -120,18 +156,24 @@ if __name__ == "__main__":
             for i in range(1, len(hists)):
                 hists[i].Draw("HIST SAME")
 
-            header = "{} < #eta < {}".format(round(hists3D[0].GetZaxis().GetBinLowEdge(ieta),1), round(hists3D[0].GetZaxis().GetBinUpEdge(ieta),1))
+            header = "{} < #eta < {}".format(
+                round(hists3D[0].GetZaxis().GetBinLowEdge(ieta), 1),
+                round(hists3D[0].GetZaxis().GetBinUpEdge(ieta), 1),
+            )
             header += "   ---   "
-            header += "{} < p_{{T}} < {} GeV".format(round(hists3D[0].GetYaxis().GetBinLowEdge(ipt),0), round(hists3D[0].GetYaxis().GetBinUpEdge(ipt),0))
-            
+            header += "{} < p_{{T}} < {} GeV".format(
+                round(hists3D[0].GetYaxis().GetBinLowEdge(ipt), 0),
+                round(hists3D[0].GetYaxis().GetBinUpEdge(ipt), 0),
+            )
+
             leg = ROOT.TLegend(0.2, 0.6, 0.9, 0.9)
             leg.SetNColumns(1)
             leg.SetFillColor(0)
             leg.SetFillStyle(0)
-            leg.SetFillColorAlpha(0,0.6)
+            leg.SetFillColorAlpha(0, 0.6)
             leg.SetBorderSize(0)
             leg.SetHeader(header)
-            for il, l in enumerate(args.legendEntry):            
+            for il, l in enumerate(args.legendEntry):
                 legEntry = l
                 if il and args.normalize:
                     legEntry += " (norm)"
@@ -144,7 +186,7 @@ if __name__ == "__main__":
             canvasName = f"compareMass_ieta_{ieta}_ipt_{ipt}{postfix}"
 
             canvas.RedrawAxis("sameaxis")
-            for ext in ["png","pdf"]:
+            for ext in ["png", "pdf"]:
                 canvas.SaveAs(f"{outdir}/{canvasName}.{ext}")
 
     copyOutputToEos(outdir, outdir_original, eoscp=args.eoscp)

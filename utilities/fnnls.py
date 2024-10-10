@@ -1,5 +1,6 @@
 import numpy as np
 
+
 # from https://github.com/lostsea/fast-nnls/tree/master
 def fnnls(AtA, Aty, epsilon=None, iter_max=None):
     """
@@ -41,8 +42,10 @@ def fnnls(AtA, Aty, epsilon=None, iter_max=None):
         iter_max = 30 * n
 
     if Aty.ndim != 1 or Aty.shape[0] != n:
-        raise ValueError('Invalid dimension; got Aty vector of size {}, ' \
-                         'expected {}'.format(Aty.shape, n))
+        raise ValueError(
+            "Invalid dimension; got Aty vector of size {}, "
+            "expected {}".format(Aty.shape, n)
+        )
 
     # Represents passive and active sets.
     # If sets[j] is 0, then index j is in the active set (R in literature).
@@ -78,18 +81,18 @@ def fnnls(AtA, Aty, epsilon=None, iter_max=None):
 
         # Update s. Solve (AtA)^p * s^p = (Aty)^p
         s[P] = np.linalg.lstsq(AtA_in_p, Aty_in_p, rcond=None)[0]
-        s[R] = 0.
+        s[R] = 0.0
 
         while np.any(s[P] <= epsilon):
             i += 1
 
-            mask = (s[P] <= epsilon)
+            mask = s[P] <= epsilon
             alpha = np.min(x[P][mask] / (x[P][mask] - s[P][mask]))
             x += alpha * (s - x)
 
             # Move all indices j in P such that x[j] = 0 to R
             # First get all indices where x == 0 in the MASKED x
-            zero_mask = (x[P] < epsilon)
+            zero_mask = x[P] < epsilon
             # These correspond to indices in P
             zeros = P[zero_mask]
             # Finally, update the passive/active sets.
@@ -104,7 +107,7 @@ def fnnls(AtA, Aty, epsilon=None, iter_max=None):
 
             # Update s. Solve (AtA)^p * s^p = (Aty)^p
             s[P] = np.linalg.lstsq(AtA_in_p, Aty_in_p, rcond=None)[0]
-            s[R] = 0.
+            s[R] = 0.0
 
         x = s.copy()
         w = Aty - AtA.dot(x)

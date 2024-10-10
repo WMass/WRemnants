@@ -8,10 +8,16 @@ singularity run /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmas
 ```
 
 Activate git Large File Storage (only need to do this once for a given user/home directory)
-```
+``` bash
 git lfs install
 ```
-    
+
+Activate git pre-commit hooks (only need to do this once for a given repository)
+``` bash
+git config core.hooksPath .githooks
+```
+If the pre-commit hook is doing something undesired, it can be by passed by adding “--no-verify” when doing “git commit”
+
 Get the code (after forking from the central WMass repository)
 ```bash
 MY_GIT_USER=$(git config user.github)
@@ -27,7 +33,7 @@ git push origin main
 ```
 
 Get combinetf. Need to run cmssw-cc7 (outside of the other singularity image) to work in a special centos7 environment, which allows you to work with CMSSW. If you plan to contribute to the combinetf code, you may first fork from: https://github.com/bendavid/HiggsAnalysis-CombinedLimit
-```
+``` bash
     cmssw-cc7
     cd /some/path/to/download/code/
     export SCRAM_ARCH="slc7_amd64_gcc700"
@@ -49,7 +55,7 @@ Get combinetf. Need to run cmssw-cc7 (outside of the other singularity image) to
 ```
 
 To run the fit with combinetf
-```
+``` bash
     cmssw-cc7
     cd /path/to/CMSSW_10_6_19_patch2/src/HiggsAnalysis/CombinedLimit/
     cmsenv

@@ -1,25 +1,30 @@
-import ROOT
-import pathlib
 import hist
+import ROOT
+
 import narf.clingutils
 from utilities import common
 
-narf.clingutils.Declare('#include "muon_prefiring.h"')
+narf.clingutils.Declare('#include "muon_prefiring.hpp"')
 
 data_dir = common.data_dir
 
-def make_muon_prefiring_helpers(filename = data_dir + "/muonSF/L1MuonPrefiringParametriations_histograms.root", era = None):
 
-    fin = ROOT.TFile.Open(filename);
+def make_muon_prefiring_helpers(
+    filename=data_dir + "/muonSF/L1MuonPrefiringParametriations_histograms.root",
+    era=None,
+):
 
-    eradict = { "2016H" : "2016H",
-               #"2016PreVFP", "2016preVFP",
-               # BG should be like preVFP, but more data was used to derive corrections
-               "2016PreVFP" : "2016BG"  ,
-               "2016PostVFP" : "2016postVFP",
-               "2017" : "2016postVFP", #this is just for creating the helper for 17/18. Need a better solution later.
-               "2018" : "2016postVFP",
-               }
+    fin = ROOT.TFile.Open(filename)
+
+    eradict = {
+        "2016H": "2016H",
+        # "2016PreVFP", "2016preVFP",
+        # BG should be like preVFP, but more data was used to derive corrections
+        "2016PreVFP": "2016BG",
+        "2016PostVFP": "2016postVFP",
+        "2017": "2016postVFP",  # this is just for creating the helper for 17/18. Need a better solution later.
+        "2018": "2016postVFP",
+    }
 
     eratag = eradict[era]
 
@@ -39,8 +44,18 @@ def make_muon_prefiring_helpers(filename = data_dir + "/muonSF/L1MuonPrefiringPa
 
     return helper, helper_stat, helper_syst
 
+
 @ROOT.pythonization("muon_prefiring_helper_stat<", ns="wrem", is_prefix=True)
 def pythonize_rdataframe(klass):
     # add axes corresponding to the tensor dimensions
-    klass.tensor_axes = (hist.axis.Integer(0, klass.NVar, underflow=False, overflow=False, name="etaPhiRegion", label = "muon prefiring eta-phi regions"),
-                        common.down_up_axis)
+    klass.tensor_axes = (
+        hist.axis.Integer(
+            0,
+            klass.NVar,
+            underflow=False,
+            overflow=False,
+            name="etaPhiRegion",
+            label="muon prefiring eta-phi regions",
+        ),
+        common.down_up_axis,
+    )

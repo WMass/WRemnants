@@ -4,14 +4,10 @@ name: Unfolding
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
-  pull_request:
-    branches: [ main ]
-  schedule:
-    - cron: '0 1 * * 5' # Run on Friday morning at 1h00 UTC
-    - cron: '30 5 * * 1-5' # Run on weekdays
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Base"]
+    types:
+      - completed
 
 env: 
   MAX_FILES: 10
@@ -28,6 +24,7 @@ env:
 jobs:
 
   setenv:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}  # Only run if linting succeeded
     runs-on: [self-hosted, linux, x64]
 
     outputs:
@@ -44,38 +41,22 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: setup kerberos
-        run: |
-          kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
-          klist -k -t -e ~/private/.keytab
-          klist
-          echo "xrdfs root://eosuser.cern.ch// ls $EOS_DIR"
-          xrdfs root://eosuser.cern.ch// ls $EOS_DIR
-
-      - name: setup kerberos within singularity image
-        run: |
-          scripts/ci/run_with_singularity.sh kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
-          scripts/ci/run_with_singularity.sh klist -k -t -e ~/private/.keytab
-          scripts/ci/run_with_singularity.sh klist
-          echo "xrdfs root://eoscms.cern.ch// ls $EOS_DATA_DIR"
-          scripts/ci/run_with_singularity.sh xrdfs root://eoscms.cern.ch// ls $EOS_DATA_DIR
-
       - name: setup unscheduled
         if: github.event_name != 'schedule'
         run: echo PLOT_DIR=PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')/$(date +%Y_%m_%d)/unfolding >> $GITHUB_ENV
 
       - name: setup scheduled build
-        if: github.event.schedule == '0 1 * * 5'
+        if: github.event.workflow_run.outputs.run_on == 'scheduled'
         run: |
           echo PLOT_DIR=ScheduledBuilds_unfolding/$(date +%Y_%m_%d)_$(git rev-parse --short "$GITHUB_SHA") >> $GITHUB_ENV
 
       - name: setup reference run
-        if: github.event.schedule == '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'reference'
         run: |
           echo PLOT_DIR=ReferenceRuns/$(date +%Y_%m_%d)_$(git rev-parse --short "$GITHUB_SHA")/unfolding >> $GITHUB_ENV
 
-      - name: setup full events
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+      - name: setup 1:1 data:mc events
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: |
           echo "NTHREADS=256" >> $GITHUB_ENV
           echo "MAX_FILES=-2" >> $GITHUB_ENV
@@ -126,7 +107,7 @@ jobs:
           lfs: 'true'
 
       - name: wmass setup lumi scale
-        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        if: github.event_name == 'pull_request' || github.event.workflow_run.outputs.run_on == 'reference'
         run: | 
           echo "LUMI_SCALE=120" >> $GITHUB_ENV
           echo "NTRHEADS=${NTHREADS}*2" >> $GITHUB_ENV
@@ -261,14 +242,15 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: setup full events
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+      - name: setup 1:1 data:mc events
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: |
           echo "NTHREADS=128" >> $GITHUB_ENV
 
       - name: wlike analysis
         # run with a reduced binning
-        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'pull' || github.event.workflow_run.outputs.run_on == 'reference'
+
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py --dataPath $DATAPATH 
           --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding 
@@ -276,7 +258,7 @@ jobs:
 
       - name: wlike analysis
         # run with full binning
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py --dataPath $DATAPATH 
           --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --postfix unfolding
@@ -403,21 +385,21 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: setup full events
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+      - name: setup 1:1 data:mc events
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: |
           echo "NTHREADS=128" >> $GITHUB_ENV
 
       - name: dilepton analysis
         # run with a reduced binning
-        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'pull' || github.event.workflow_run.outputs.run_on == 'reference'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py --dataPath $DATAPATH
           --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --axes ptll yll --postfix unfolding --genAxes ptVGen
 
       - name: dilepton analysis
         # run with full binning
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py --dataPath $DATAPATH
           --analysisMode unfolding -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --axes ptll yll --postfix unfolding
@@ -458,14 +440,14 @@ jobs:
 
       - name: dilepton combine ptll unfolding setup
         # run with a reduced binning
-        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'pull' || github.event.workflow_run.outputs.run_on == 'reference'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
           --analysisMode unfolding -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE --sparse -o $WREMNANTS_OUTDIR --postfix unfolding
 
       - name: dilepton combine ptll unfolding setup
         # run with full binning
-        if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
+        if: github.event.workflow_run.outputs.run_on == 'dispatch' || github.event.workflow_run.outputs.run_on == 'scheduled'
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
           --analysisMode unfolding -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE --sparse -o $WREMNANTS_OUTDIR --postfix unfolding
@@ -512,7 +494,7 @@ jobs:
           rm -r $WREMNANTS_OUTDIR/$LOCAL_WEB_DIR
           
       - name: save analysis files
-        if: github.event_name != 'pull_request' && github.event.schedule == '0 1 * * 5'
+        if: github.event.workflow_run.outputs.run_on == 'scheduled'
         run: |
           echo "xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR root://eosuser.cern.ch//$EOS_DIR/ScheduledBuilds_unfolding/"
           xrdcp --parallel 4 -R -f $WREMNANTS_OUTDIR root://eosuser.cern.ch//$EOS_DIR/ScheduledBuilds_unfolding/

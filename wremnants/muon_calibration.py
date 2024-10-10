@@ -1,111 +1,161 @@
-import ROOT
-import pathlib
-import hist
-import narf
-from utilities import rdf_tools
-from utilities import common, logging
-from utilities import boostHistHelpers as hh
-import uproot
-import numpy as np
-import scipy
-import warnings
-from functools import reduce
-import narf.tfliteutils
-import time
-import lz4.frame
 import pickle
+import time
+from functools import reduce
+
+import hist
+import lz4.frame
+import numpy as np
+import ROOT
+import uproot
+
+import narf
+import narf.tfliteutils
+from utilities import boostHistHelpers as hh
+from utilities import common, logging
 
 logger = logging.child_logger(__name__)
 
-narf.clingutils.Declare('#include "muon_calibration.h"')
-narf.clingutils.Declare('#include "lowpu_utils.h"')
+narf.clingutils.Declare('#include "muon_calibration.hpp"')
+narf.clingutils.Declare('#include "lowpu_utils.hpp"')
 
 data_dir = common.data_dir
 
-def make_muon_calibration_helpers(args,
-        mc_filename=data_dir+"/calibration/correctionResults_v718_idealgeom_gensim.root", 
-        data_filename=data_dir+"/calibration/correctionResults_v721_recjpsidata.root", 
-        era = None):
+
+def make_muon_calibration_helpers(
+    args,
+    mc_filename=data_dir + "/calibration/correctionResults_v718_idealgeom_gensim.root",
+    data_filename=data_dir + "/calibration/correctionResults_v721_recjpsidata.root",
+    era=None,
+):
 
     if era == "2018":
-        data_filename=data_dir+"/calibration/correctionResults_lbl2018_recjpsidata.root"
+        data_filename = (
+            data_dir + "/calibration/correctionResults_lbl2018_recjpsidata.root"
+        )
     elif era == "2017":
-        data_filename=data_dir+"/calibration/correctionResults_lbl2017_recjpsidata.root"
+        data_filename = (
+            data_dir + "/calibration/correctionResults_lbl2017_recjpsidata.root"
+        )
 
     if args.muonCorrMC in ["trackfit_only", "lbl", "lbl_massfit"]:
-        raise NotImplementedError(f"Muon calibrations for non-ideal geometry are currently not available! (needed for --muonCorrMC {args.muonCorrMC})")
+        raise NotImplementedError(
+            f"Muon calibrations for non-ideal geometry are currently not available! (needed for --muonCorrMC {args.muonCorrMC})"
+        )
 
     mc_helper = ROOT.wrem.CVHCorrector(mc_filename)
     data_helper = ROOT.wrem.CVHCorrector(data_filename)
 
     uncertainty_hist = get_dummy_uncertainties()
-    uncertainty_hist_cpp = narf.hist_to_pyroot_boost(uncertainty_hist, tensor_rank = 2)
+    uncertainty_hist_cpp = narf.hist_to_pyroot_boost(uncertainty_hist, tensor_rank=2)
     # min gen pt = 9 GeV to avoid threshold effects
     # max weight = 10 to protect against outliers
-    uncertainty_helper = ROOT.wrem.calibration_uncertainty_helper[type(uncertainty_hist_cpp)](ROOT.std.move(uncertainty_hist_cpp), 9., 10.)
+    uncertainty_helper = ROOT.wrem.calibration_uncertainty_helper[
+        type(uncertainty_hist_cpp)
+    ](ROOT.std.move(uncertainty_hist_cpp), 9.0, 10.0)
 
-    uncertainty_helper.tensor_axes = (uncertainty_hist.axes["calvar"], common.down_up_axis)
+    uncertainty_helper.tensor_axes = (
+        uncertainty_hist.axes["calvar"],
+        common.down_up_axis,
+    )
 
     return mc_helper, data_helper, uncertainty_helper
 
+
 def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False):
     if args.muonCorrMC in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
-        mc_corrfile = calib_filepaths['mc_corrfile'][args.muonCorrMC]
-        logger.warning("You apply J/Psi massfit corrections on MC, this is currenlty not recommended!")
+        mc_corrfile = calib_filepaths["mc_corrfile"][args.muonCorrMC]
+        logger.warning(
+            "You apply J/Psi massfit corrections on MC, this is currenlty not recommended!"
+        )
     else:
         mc_corrfile = None
     if args.muonCorrData in ["massfit", "lbl_massfit"]:
-        data_corrfile = calib_filepaths['data_corrfile'][args.muonCorrData] 
+        data_corrfile = calib_filepaths["data_corrfile"][args.muonCorrData]
     else:
         data_corrfile = None
-    tflite_file = calib_filepaths['tflite_file']
-    mc_helper = make_jpsi_crctn_helper(filepath = mc_corrfile) if mc_corrfile else None
-    data_helper = make_jpsi_crctn_helper(filepath = data_corrfile) if data_corrfile else None
+    tflite_file = calib_filepaths["tflite_file"]
+    mc_helper = make_jpsi_crctn_helper(filepath=mc_corrfile) if mc_corrfile else None
+    data_helper = (
+        make_jpsi_crctn_helper(filepath=data_corrfile) if data_corrfile else None
+    )
 
     if make_uncertainty_helper:
-        mc_unc_helper = make_jpsi_crctn_unc_helper(
-            filepath_correction = mc_corrfile,
-            filepath_tflite = tflite_file,
-            n_eta_bins = 24, scale_var_method = args.muonScaleVariation,
-            dummy_mu_scale_var = args.dummyMuScaleVar, dummy_var_mag = args.muonCorrMag
-        ) if mc_corrfile else None
-        data_unc_helper = make_jpsi_crctn_unc_helper(
-            filepath_correction = data_corrfile,
-            scale_var_method = args.muonScaleVariation,
-            scale_A = args.scale_A, scale_e = args.scale_e, scale_M = args.scale_M,
-        ) if data_corrfile else None
+        mc_unc_helper = (
+            make_jpsi_crctn_unc_helper(
+                filepath_correction=mc_corrfile,
+                filepath_tflite=tflite_file,
+                n_eta_bins=24,
+                scale_var_method=args.muonScaleVariation,
+                dummy_mu_scale_var=args.dummyMuScaleVar,
+                dummy_var_mag=args.muonCorrMag,
+            )
+            if mc_corrfile
+            else None
+        )
+        data_unc_helper = (
+            make_jpsi_crctn_unc_helper(
+                filepath_correction=data_corrfile,
+                scale_var_method=args.muonScaleVariation,
+                scale_A=args.scale_A,
+                scale_e=args.scale_e,
+                scale_M=args.scale_M,
+            )
+            if data_corrfile
+            else None
+        )
 
         return mc_helper, data_helper, mc_unc_helper, data_unc_helper
     else:
         return mc_helper, data_helper
 
+
 def make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths):
-    parametrized_helper = make_Z_non_closure_parametrized_helper(
-        closure_filepaths['parametrized'], calib_filepaths['tflite_file'],
-        correlated = args.correlatedNonClosureNP, scale_var_method = args.muonScaleVariation,
-        dummy_A = args.dummyNonClosureA, dummy_M = args.dummyNonClosureM,
-        dummy_A_mag = args.dummyNonClosureAMag, dummy_M_mag = args.dummyNonClosureMMag
-    ) if (args.nonClosureScheme in ["A-M-separated", "A-M-combined", "A-only", "M-only", "binned-plus-M"]) else None
-    binned_helper = make_Z_non_closure_binned_helper(
-        closure_filepaths['binned'], calib_filepaths['tflite_file'],
-        correlated = args.correlatedNonClosureNP, scale_var_method = args.muonScaleVariation
-    ) if (args.nonClosureScheme in ["binned", "binned-plus-M"]) else None
+    parametrized_helper = (
+        make_Z_non_closure_parametrized_helper(
+            closure_filepaths["parametrized"],
+            calib_filepaths["tflite_file"],
+            correlated=args.correlatedNonClosureNP,
+            scale_var_method=args.muonScaleVariation,
+            dummy_A=args.dummyNonClosureA,
+            dummy_M=args.dummyNonClosureM,
+            dummy_A_mag=args.dummyNonClosureAMag,
+            dummy_M_mag=args.dummyNonClosureMMag,
+        )
+        if (
+            args.nonClosureScheme
+            in ["A-M-separated", "A-M-combined", "A-only", "M-only", "binned-plus-M"]
+        )
+        else None
+    )
+    binned_helper = (
+        make_Z_non_closure_binned_helper(
+            closure_filepaths["binned"],
+            calib_filepaths["tflite_file"],
+            correlated=args.correlatedNonClosureNP,
+            scale_var_method=args.muonScaleVariation,
+        )
+        if (args.nonClosureScheme in ["binned", "binned-plus-M"])
+        else None
+    )
     return parametrized_helper, binned_helper
+
 
 def make_muon_bias_helpers(args):
     # apply a bias to MC to correct for the nonclosure with data in the muon momentum scale calibration
-    if args.biasCalibration is None: 
+    if args.biasCalibration is None:
         return None
 
     if args.biasCalibration in ["parameterized", "A", "M"]:
         if args.muonCorrMC == "idealMC_lbltruth":
             filename = "calibrationAlignmentZ_after_LBL_v721"
         else:
-            raise NotImplementedError(f"Did not find any parameterized closure file for --muonCorrMC {args.muonCorrMC}!")
+            raise NotImplementedError(
+                f"Did not find any parameterized closure file for --muonCorrMC {args.muonCorrMC}!"
+            )
 
         f = uproot.open(f"{data_dir}/closure/{filename}.root")
 
-        A, M = [x.to_hist() for x in [f['AZ'], f['MZ']]]
+        A, M = [x.to_hist() for x in [f["AZ"], f["MZ"]]]
 
         factor_A = 1
         factor_M = 1
@@ -116,15 +166,22 @@ def make_muon_bias_helpers(args):
 
         # The bias correction follows the same parameterization as the J/Psi correction, but with e=0
         # We use the J/Psi correction helper and set e=0
-        if (A.axes != M.axes):
+        if A.axes != M.axes:
             raise RuntimeError("A, M histograms have different axes!")
         else:
-            axis_param = hist.axis.Regular(3, 0, 3, underflow = False, overflow = False, name = 'param')
-            axis_cenval = hist.axis.Regular(1, 0, 1, name = 'cenval')
-            hist_comb = hist.Hist(*A.axes, axis_param, axis_cenval, storage = hist.storage.Double())
-            hist_comb.view()[...,0] = np.stack([x.values() for x in [A*factor_A, A*0, M/45.*factor_M]], axis = -1)
+            axis_param = hist.axis.Regular(
+                3, 0, 3, underflow=False, overflow=False, name="param"
+            )
+            axis_cenval = hist.axis.Regular(1, 0, 1, name="cenval")
+            hist_comb = hist.Hist(
+                *A.axes, axis_param, axis_cenval, storage=hist.storage.Double()
+            )
+            hist_comb.view()[..., 0] = np.stack(
+                [x.values() for x in [A * factor_A, A * 0, M / 45.0 * factor_M]],
+                axis=-1,
+            )
 
-        hist_comb_cpp = narf.hist_to_pyroot_boost(hist_comb, tensor_rank = 2)
+        hist_comb_cpp = narf.hist_to_pyroot_boost(hist_comb, tensor_rank=2)
         helper = ROOT.wrem.JpsiCorrectionsRVecHelper[type(hist_comb_cpp).__cpp_name__](
             ROOT.std.move(hist_comb_cpp)
         )
@@ -147,35 +204,45 @@ def make_muon_bias_helpers(args):
             offset = 0
             logger.warning("You are using an outdated closure file!")
         else:
-            raise NotImplementedError(f"Did not find any closure file for muon momentum scale correction {args.muonCorrMC}"+str(" smeared!" if args.smearing else "!"))
+            raise NotImplementedError(
+                f"Did not find any closure file for muon momentum scale correction {args.muonCorrMC}"
+                + str(" smeared!" if args.smearing else "!")
+            )
 
         h2d = uproot.open(f"{data_dir}/closure/{filename}.root:closure").to_hist()
         # Drop the uncertainty because the Weight storage type doesn't play nice with ROOT
 
-        h2d_nounc = hist.Hist(*h2d.axes, data=h2d.values(flow=True)+offset)
-        h2d_std = hist.Hist(*h2d.axes, data=h2d.variances(flow=True)**0.5)
+        h2d_nounc = hist.Hist(*h2d.axes, data=h2d.values(flow=True) + offset)
+        h2d_std = hist.Hist(*h2d.axes, data=h2d.variances(flow=True) ** 0.5)
         # Set overflow to closest values
-        h2d_nounc[hist.underflow,:][...] = h2d_nounc[0,:].view(flow=True)
-        h2d_nounc[:,hist.underflow][...] = h2d_nounc[:,0].view(flow=True)
-        h2d_nounc[hist.overflow,:][...] = h2d_nounc[-1,:].view(flow=True)
-        h2d_nounc[:,hist.overflow][...] = h2d_nounc[:,-1].view(flow=True)
+        h2d_nounc[hist.underflow, :][...] = h2d_nounc[0, :].view(flow=True)
+        h2d_nounc[:, hist.underflow][...] = h2d_nounc[:, 0].view(flow=True)
+        h2d_nounc[hist.overflow, :][...] = h2d_nounc[-1, :].view(flow=True)
+        h2d_nounc[:, hist.overflow][...] = h2d_nounc[:, -1].view(flow=True)
 
-        h2d_std[hist.underflow,:][...] = h2d_std[0,:].view(flow=True)
-        h2d_std[:,hist.underflow][...] = h2d_std[:,0].view(flow=True)
-        h2d_std[hist.overflow,:][...] = h2d_std[-1,:].view(flow=True)
-        h2d_std[:,hist.overflow][...] = h2d_std[:,-1].view(flow=True)
+        h2d_std[hist.underflow, :][...] = h2d_std[0, :].view(flow=True)
+        h2d_std[:, hist.underflow][...] = h2d_std[:, 0].view(flow=True)
+        h2d_std[hist.overflow, :][...] = h2d_std[-1, :].view(flow=True)
+        h2d_std[:, hist.overflow][...] = h2d_std[:, -1].view(flow=True)
 
         h2d_cpp = narf.hist_to_pyroot_boost(h2d_nounc, tensor_rank=0)
         h2d_std_cpp = narf.hist_to_pyroot_boost(h2d_std, tensor_rank=0)
 
-        helper = ROOT.wrem.BiasCalibrationHelper[type(h2d_cpp).__cpp_name__](ROOT.GetThreadPoolSize(), ROOT.std.move(h2d_cpp), ROOT.std.move(h2d_std_cpp))
+        helper = ROOT.wrem.BiasCalibrationHelper[type(h2d_cpp).__cpp_name__](
+            ROOT.GetThreadPoolSize(), ROOT.std.move(h2d_cpp), ROOT.std.move(h2d_std_cpp)
+        )
     else:
-        raise NotImplementedError(f"Correction for --bias-calibration {args.biasCalibration} not available")
+        raise NotImplementedError(
+            f"Correction for --bias-calibration {args.biasCalibration} not available"
+        )
 
     return helper
 
-def make_muon_smearing_helpers_binned(filename = f"{data_dir}/calibration/smearingrel_smooth.pkl.lz4",
-                               filenamevar = f"{data_dir}/calibration/smearing_variations_smooth.pkl.lz4"):
+
+def make_muon_smearing_helpers_binned(
+    filename=f"{data_dir}/calibration/smearingrel_smooth.pkl.lz4",
+    filenamevar=f"{data_dir}/calibration/smearing_variations_smooth.pkl.lz4",
+):
     # this helper smears muon pT to match the resolution in data
 
     with lz4.frame.open(filename, "rb") as fin:
@@ -183,7 +250,9 @@ def make_muon_smearing_helpers_binned(filename = f"{data_dir}/calibration/smeari
 
     smearingrel_smooth_boost = narf.hist_to_pyroot_boost(smearingrel_smooth)
 
-    helper = ROOT.wrem.SmearingHelper[type(smearingrel_smooth_boost)](ROOT.std.move(smearingrel_smooth_boost))
+    helper = ROOT.wrem.SmearingHelper[type(smearingrel_smooth_boost)](
+        ROOT.std.move(smearingrel_smooth_boost)
+    )
 
     with lz4.frame.open(filenamevar, "rb") as fin:
         smearing_variations = pickle.load(fin)
@@ -191,18 +260,25 @@ def make_muon_smearing_helpers_binned(filename = f"{data_dir}/calibration/smeari
     var_axis = smearing_variations.axes[-1]
 
     neig = var_axis.size
-    smearing_variations_boost = narf.hist_to_pyroot_boost(smearing_variations, tensor_rank = 1)
+    smearing_variations_boost = narf.hist_to_pyroot_boost(
+        smearing_variations, tensor_rank=1
+    )
 
-    helper_var = ROOT.wrem.SmearingUncertaintyHelper[type(smearing_variations_boost), neig](ROOT.std.move(smearing_variations_boost))
+    helper_var = ROOT.wrem.SmearingUncertaintyHelper[
+        type(smearing_variations_boost), neig
+    ](ROOT.std.move(smearing_variations_boost))
 
     helper_var.tensor_axes = [var_axis]
 
     return helper, helper_var
 
-def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutionDATA_LBL_JZ_deltaphim_Apr3.root",
-                               filenamemc = f"{data_dir}/calibration/resolutionMC_LBL_JZ_deltaphim_Apr3.root",
-                               override_d = None,
-                               dummy_vars = False):
+
+def make_muon_smearing_helpers(
+    filenamedata=f"{data_dir}/calibration/resolutionDATA_LBL_JZ_deltaphim_Apr3.root",
+    filenamemc=f"{data_dir}/calibration/resolutionMC_LBL_JZ_deltaphim_Apr3.root",
+    override_d=None,
+    dummy_vars=False,
+):
     # this helper smears muon pT to match the resolution in data
 
     def load_res(filename):
@@ -213,50 +289,56 @@ def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutio
         d = f.Get("d")
         cov = f.Get("covariance_matrix")
 
-        a = narf.root_to_hist(a, axis_names = ["res_eta"])
-        c = narf.root_to_hist(c, axis_names = ["res_eta"])
-        b = narf.root_to_hist(b, axis_names = ["res_eta"])
-        d = narf.root_to_hist(d, axis_names = ["res_eta"])
+        a = narf.root_to_hist(a, axis_names=["res_eta"])
+        c = narf.root_to_hist(c, axis_names=["res_eta"])
+        b = narf.root_to_hist(b, axis_names=["res_eta"])
+        d = narf.root_to_hist(d, axis_names=["res_eta"])
         cov = narf.root_to_hist(cov)
 
         f.Close()
 
-        return a,c,b,d,cov
+        return a, c, b, d, cov
 
     adata, cdata, bdata, ddata, covdata = load_res(filenamedata)
     amc, cmc, bmc, dmc, covmc = load_res(filenamemc)
 
     if override_d is not None:
         ddata.values()[...] = override_d
-        ddata.variances()[...] = 0.
+        ddata.variances()[...] = 0.0
 
         dmc.values()[...] = override_d
-        dmc.variances()[...] = 0.
+        dmc.variances()[...] = 0.0
 
-    if np.any(np.isclose(ddata.values(), 0.)) or np.any(np.isclose(dmc.values(), 0.)):
-        raise ValueError("d^2 values of 0 are invalid for the resolution parameterization")
+    if np.any(np.isclose(ddata.values(), 0.0)) or np.any(np.isclose(dmc.values(), 0.0)):
+        raise ValueError(
+            "d^2 values of 0 are invalid for the resolution parameterization"
+        )
 
     axis_res_eta = adata.axes["res_eta"]
-    axis_res_parm = hist.axis.StrCategory(["a", "c", "b", "d"], name = "res_parm")
+    axis_res_parm = hist.axis.StrCategory(["a", "c", "b", "d"], name="res_parm")
     # ordering is different here because the covariance matrix is ordered a, b, c
-    axis_res_parm_reduced = hist.axis.StrCategory(["a", "b", "c"], name = "res_parm_reduced")
-    axis_data_mc = hist.axis.StrCategory(["data", "mc"], name = "data_mc")
+    axis_res_parm_reduced = hist.axis.StrCategory(
+        ["a", "b", "c"], name="res_parm_reduced"
+    )
+    axis_data_mc = hist.axis.StrCategory(["data", "mc"], name="data_mc")
 
     neta = axis_res_eta.size
     nparms = axis_res_parm.size
     nparmsreduced = axis_res_parm_reduced.size
 
-    hnomw = hist.Hist(axis_res_eta, axis_res_parm, axis_data_mc, storage = hist.storage.Weight())
+    hnomw = hist.Hist(
+        axis_res_eta, axis_res_parm, axis_data_mc, storage=hist.storage.Weight()
+    )
 
-    hnomw[{"data_mc" : "data", "res_parm" : "a"}] = adata.view()
-    hnomw[{"data_mc" : "data", "res_parm" : "c"}] = cdata.view()
-    hnomw[{"data_mc" : "data", "res_parm" : "b"}] = bdata.view()
-    hnomw[{"data_mc" : "data", "res_parm" : "d"}] = ddata.view()
+    hnomw[{"data_mc": "data", "res_parm": "a"}] = adata.view()
+    hnomw[{"data_mc": "data", "res_parm": "c"}] = cdata.view()
+    hnomw[{"data_mc": "data", "res_parm": "b"}] = bdata.view()
+    hnomw[{"data_mc": "data", "res_parm": "d"}] = ddata.view()
 
-    hnomw[{"data_mc" : "mc", "res_parm" : "a"}] = amc.view()
-    hnomw[{"data_mc" : "mc", "res_parm" : "c"}] = cmc.view()
-    hnomw[{"data_mc" : "mc", "res_parm" : "b"}] = bmc.view()
-    hnomw[{"data_mc" : "mc", "res_parm" : "d"}] = dmc.view()
+    hnomw[{"data_mc": "mc", "res_parm": "a"}] = amc.view()
+    hnomw[{"data_mc": "mc", "res_parm": "c"}] = cmc.view()
+    hnomw[{"data_mc": "mc", "res_parm": "b"}] = bmc.view()
+    hnomw[{"data_mc": "mc", "res_parm": "d"}] = dmc.view()
 
     hnom = hist.Hist(*hnomw.axes)
     hnom[...] = hnomw.values()
@@ -266,11 +348,17 @@ def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutio
         variances = np.reshape(variances, (neta, -1))
         nparmcov = variances.shape[-1]
         for iparm, parm in enumerate(axis_res_parm_reduced):
-            if not np.all(np.isclose(variances[..., iparm], h[{"res_parm" : parm}].variances(), atol=0.)):
-                raise ValueError("Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order.")
+            if not np.all(
+                np.isclose(
+                    variances[..., iparm], h[{"res_parm": parm}].variances(), atol=0.0
+                )
+            ):
+                raise ValueError(
+                    "Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order."
+                )
 
-    hnomwdata = hnomw[{"data_mc" : "data"}]
-    hnomwmc = hnomw[{"data_mc" : "mc"}]
+    hnomwdata = hnomw[{"data_mc": "data"}]
+    hnomwmc = hnomw[{"data_mc": "mc"}]
 
     check_variances(hnomwdata, covdata)
     check_variances(hnomwmc, covmc)
@@ -280,7 +368,7 @@ def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutio
 
     e, v = np.linalg.eigh(dcov)
 
-    dparms = np.sqrt(e[None, :])*v
+    dparms = np.sqrt(e[None, :]) * v
     dparms = np.reshape(dparms, (neta, -1, nvar))
 
     if dummy_vars:
@@ -295,59 +383,83 @@ def make_muon_smearing_helpers(filenamedata = f"{data_dir}/calibration/resolutio
                 dparms[ieta, iparm, ivar] = varsize
                 ivar += 1
 
-    axis_res_var = hist.axis.Integer(0, nvar, name = "smearing_variation")
+    axis_res_var = hist.axis.Integer(0, nvar, name="smearing_variation")
 
     hvar = hist.Hist(axis_res_eta, axis_res_parm, axis_res_var)
     hvar[...] = hnomwdata.values()[..., None]
 
     for iparm, parm in enumerate(axis_res_parm_reduced):
-        hvar[{"res_parm" : parm}] = hvar[{"res_parm" : parm}].values() + dparms[:, iparm, :]
+        hvar[{"res_parm": parm}] = (
+            hvar[{"res_parm": parm}].values() + dparms[:, iparm, :]
+        )
 
     hnom = narf.hist_to_pyroot_boost(hnom, tensor_rank=2)
     hvar = narf.hist_to_pyroot_boost(hvar, tensor_rank=2)
 
     helper = ROOT.wrem.SmearingHelperParametrized[type(hnom)](ROOT.std.move(hnom))
-    helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[type(hnom), type(hvar), nvar](helper, ROOT.std.move(hvar))
+    helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[
+        type(hnom), type(hvar), nvar
+    ](helper, ROOT.std.move(hvar))
 
     helper_var.tensor_axes = [axis_res_var]
 
     return helper, helper_var
 
-def add_resolution_uncertainty(df, axes, results, nominal_cols, smearing_uncertainty_helper, reco_sel_GF, storage_type=hist.storage.Double()):
+
+def add_resolution_uncertainty(
+    df,
+    axes,
+    results,
+    nominal_cols,
+    smearing_uncertainty_helper,
+    reco_sel_GF,
+    storage_type=hist.storage.Double(),
+):
 
     if smearing_uncertainty_helper is None:
         return df
 
-    df = df.Define("muonResolutionSyst_weights", smearing_uncertainty_helper,
+    df = df.Define(
+        "muonResolutionSyst_weights",
+        smearing_uncertainty_helper,
         [
             f"{reco_sel_GF}_recoPt",
             f"{reco_sel_GF}_recoEta",
             f"{reco_sel_GF}_response_weight",
-            "nominal_weight"
-        ]
+            "nominal_weight",
+        ],
     )
 
     var_axes = smearing_uncertainty_helper.tensor_axes
 
     muonResolutionSyst_responseWeights = df.HistoBoost(
-            "nominal_muonResolutionSyst_responseWeights", axes,
-            [*nominal_cols, "muonResolutionSyst_weights"],
-            tensor_axes = var_axes, storage=storage_type
-        )
+        "nominal_muonResolutionSyst_responseWeights",
+        axes,
+        [*nominal_cols, "muonResolutionSyst_weights"],
+        tensor_axes=var_axes,
+        storage=storage_type,
+    )
     results.append(muonResolutionSyst_responseWeights)
 
     return df
 
 
-def make_muon_calibration_helper_single(filename=data_dir+"/calibration/correctionResults_v718_idealgeom_gensim.root"):
+def make_muon_calibration_helper_single(
+    filename=data_dir + "/calibration/correctionResults_v718_idealgeom_gensim.root",
+):
 
     helper = ROOT.wrem.CVHCorrectorSingle[""](filename)
     return helper
 
+
 def get_dummy_uncertainties():
-    axis_eta = hist.axis.Regular(48, -2.4, 2.4, name = "eta")
-    axis_calvar = hist.axis.Integer(0, 1, underflow=False, overflow=False, name = "calvar")
-    axis_calparm = hist.axis.Integer(0, 4, underflow=False, overflow=False, name = "calparm")
+    axis_eta = hist.axis.Regular(48, -2.4, 2.4, name="eta")
+    axis_calvar = hist.axis.Integer(
+        0, 1, underflow=False, overflow=False, name="calvar"
+    )
+    axis_calparm = hist.axis.Integer(
+        0, 4, underflow=False, overflow=False, name="calparm"
+    )
 
     h = hist.Hist(axis_eta, axis_calvar, axis_calparm)
 
@@ -360,7 +472,10 @@ def get_dummy_uncertainties():
 
     return h
 
-def make_smearing_grad_helper(filename = f"{data_dir}/calibration/resparms_dummy_eta48.root"):
+
+def make_smearing_grad_helper(
+    filename=f"{data_dir}/calibration/resparms_dummy_eta48.root",
+):
 
     f = ROOT.TFile.Open(filename)
 
@@ -375,29 +490,38 @@ def make_smearing_grad_helper(filename = f"{data_dir}/calibration/resparms_dummy
 
     return smearinggradhelper
 
+
 def make_jpsi_crctn_helper(filepath):
     f = uproot.open(filepath)
 
     # TODO: convert variable axis to regular if the bin width is uniform
-    A, e, M = [x.to_hist() for x in [f['A'], f['e'], f['M']]]
+    A, e, M = [x.to_hist() for x in [f["A"], f["e"], f["M"]]]
 
     # TODO: make this into a function in utilities/boostHistHelpers
     if (A.axes != e.axes) or (e.axes != M.axes):
         raise RuntimeError("A, e, M histograms have different axes!")
     else:
-        axis_param = hist.axis.Regular(3, 0, 3, underflow = False, overflow = False, name = 'param')
-        hist_comb = hist.Hist(*A.axes, axis_param, storage = hist.storage.Double())
-        hist_comb.view()[...] = np.stack([x.values() for x in [A, e, M]], axis = -1)
+        axis_param = hist.axis.Regular(
+            3, 0, 3, underflow=False, overflow=False, name="param"
+        )
+        hist_comb = hist.Hist(*A.axes, axis_param, storage=hist.storage.Double())
+        hist_comb.view()[...] = np.stack([x.values() for x in [A, e, M]], axis=-1)
 
-    hist_comb_cpp = narf.hist_to_pyroot_boost(hist_comb, tensor_rank = 1)
-    jpsi_crctn_helper = ROOT.wrem.JpsiCorrectionsRVecHelper[type(hist_comb_cpp).__cpp_name__](
-        ROOT.std.move(hist_comb_cpp)
-    )
+    hist_comb_cpp = narf.hist_to_pyroot_boost(hist_comb, tensor_rank=1)
+    jpsi_crctn_helper = ROOT.wrem.JpsiCorrectionsRVecHelper[
+        type(hist_comb_cpp).__cpp_name__
+    ](ROOT.std.move(hist_comb_cpp))
     return jpsi_crctn_helper
 
+
 def make_jpsi_crctn_unc_helper(
-    filepath_correction, scale_A = 1.0, scale_e = 1.0, scale_M = 1.0, isW = True,
-    scale_var_method = 'smearingWeightsSplines'):
+    filepath_correction,
+    scale_A=1.0,
+    scale_e=1.0,
+    scale_M=1.0,
+    isW=True,
+    scale_var_method="smearingWeightsSplines",
+):
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("A")
@@ -405,9 +529,9 @@ def make_jpsi_crctn_unc_helper(
     M = f.Get("M")
     cov = f.Get("covariance_matrix")
 
-    A = narf.root_to_hist(A, axis_names = ["scale_eta"])
-    e = narf.root_to_hist(e, axis_names = ["scale_eta"])
-    M = narf.root_to_hist(M, axis_names = ["scale_eta"])
+    A = narf.root_to_hist(A, axis_names=["scale_eta"])
+    e = narf.root_to_hist(e, axis_names=["scale_eta"])
+    M = narf.root_to_hist(M, axis_names=["scale_eta"])
     cov = narf.root_to_hist(cov)
 
     f.Close()
@@ -416,15 +540,17 @@ def make_jpsi_crctn_unc_helper(
     neta = axis_eta.size
 
     cov = cov.values()
-    nparmscov = cov.shape[0]//neta
+    nparmscov = cov.shape[0] // neta
     n_scale_params = 3
-    nvars = neta*n_scale_params
+    nvars = neta * n_scale_params
 
     variances_ref = np.stack([A.variances(), e.variances(), M.variances()], axis=-1)
     variances = np.reshape(np.diag(cov), (neta, nparmscov))[:, :n_scale_params]
 
-    if not np.all(np.isclose(variances, variances_ref, atol=0.)):
-        raise ValueError("Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order.")
+    if not np.all(np.isclose(variances, variances_ref, atol=0.0)):
+        raise ValueError(
+            "Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order."
+        )
 
     cov = np.reshape(cov, (neta, nparmscov, neta, nparmscov))
     cov = cov[:, :n_scale_params, :, :n_scale_params]
@@ -440,42 +566,57 @@ def make_jpsi_crctn_unc_helper(
     var_mat = np.sqrt(e[None, :]) * v
     var_mat = np.reshape(var_mat, (neta, n_scale_params, nvars))
 
-    axis_scale_params = hist.axis.Integer(0, n_scale_params, underflow=False, overflow = False, name = 'scale_params')
-    axis_scale_params_unc = hist.axis.Integer(0, nvars, underflow=False, overflow = False, name = 'unc')
+    axis_scale_params = hist.axis.Integer(
+        0, n_scale_params, underflow=False, overflow=False, name="scale_params"
+    )
+    axis_scale_params_unc = hist.axis.Integer(
+        0, nvars, underflow=False, overflow=False, name="unc"
+    )
 
-    hist_scale_params_unc = hist.Hist(axis_eta, axis_scale_params, axis_scale_params_unc)
+    hist_scale_params_unc = hist.Hist(
+        axis_eta, axis_scale_params, axis_scale_params_unc
+    )
     hist_scale_params_unc[...] = var_mat
 
-    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(hist_scale_params_unc, tensor_rank = 2)
-
-    if scale_var_method == 'smearingWeightsGaus':
-        helper = ROOT.wrem.JpsiCorrectionsUncHelper[type(hist_scale_params_unc_cpp).__cpp_name__](
-            ROOT.std.move(hist_scale_params_unc_cpp)
-        )
-    elif scale_var_method == 'smearingWeightsSplines':
-        helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[type(hist_scale_params_unc_cpp).__cpp_name__](
-            ROOT.std.move(hist_scale_params_unc_cpp)
-        )
-    elif scale_var_method == 'massWeights':
-        nweights = 21 if isW else 23
-        helper = ROOT.wrem.JpsiCorrectionsUncHelper_massWeights[type(hist_scale_params_unc_cpp).__cpp_name__, nweights](
-        ROOT.std.move(hist_scale_params_unc_cpp)
+    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(
+        hist_scale_params_unc, tensor_rank=2
     )
-    helper.tensor_axes = (hist_scale_params_unc.axes['unc'], common.down_up_axis)
+
+    if scale_var_method == "smearingWeightsGaus":
+        helper = ROOT.wrem.JpsiCorrectionsUncHelper[
+            type(hist_scale_params_unc_cpp).__cpp_name__
+        ](ROOT.std.move(hist_scale_params_unc_cpp))
+    elif scale_var_method == "smearingWeightsSplines":
+        helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
+            type(hist_scale_params_unc_cpp).__cpp_name__
+        ](ROOT.std.move(hist_scale_params_unc_cpp))
+    elif scale_var_method == "massWeights":
+        nweights = 21 if isW else 23
+        helper = ROOT.wrem.JpsiCorrectionsUncHelper_massWeights[
+            type(hist_scale_params_unc_cpp).__cpp_name__, nweights
+        ](ROOT.std.move(hist_scale_params_unc_cpp))
+    helper.tensor_axes = (hist_scale_params_unc.axes["unc"], common.down_up_axis)
     return helper
+
 
 def make_dummy_closure_uncertainty_helper(neta=24, etalow=-2.4, etahigh=2.4):
 
     n_scale_params = 3
     n_var_params = 2
 
-    nvars = n_var_params*neta
+    nvars = n_var_params * neta
 
     axis_eta = hist.axis.Regular(neta, etalow, etahigh, name="scale_eta")
-    axis_scale_params = hist.axis.Integer(0, n_scale_params, underflow=False, overflow = False, name = 'scale_params')
-    axis_scale_params_unc = hist.axis.Integer(0, nvars, underflow=False, overflow = False, name = 'unc')
+    axis_scale_params = hist.axis.Integer(
+        0, n_scale_params, underflow=False, overflow=False, name="scale_params"
+    )
+    axis_scale_params_unc = hist.axis.Integer(
+        0, nvars, underflow=False, overflow=False, name="unc"
+    )
 
-    hist_scale_params_unc = hist.Hist(axis_eta, axis_scale_params, axis_scale_params_unc)
+    hist_scale_params_unc = hist.Hist(
+        axis_eta, axis_scale_params, axis_scale_params_unc
+    )
 
     ivar = 0
     for ieta in range(neta):
@@ -483,7 +624,7 @@ def make_dummy_closure_uncertainty_helper(neta=24, etalow=-2.4, etahigh=2.4):
             if iparm == 0:
                 var_size = 1e-4
             elif iparm == 2:
-                var_size = 1e-4/50.
+                var_size = 1e-4 / 50.0
 
             hist_scale_params_unc.values()[ieta, iparm, ivar] = var_size
 
@@ -491,14 +632,17 @@ def make_dummy_closure_uncertainty_helper(neta=24, etalow=-2.4, etahigh=2.4):
 
     print(hist_scale_params_unc.values())
 
-    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(hist_scale_params_unc, tensor_rank = 2)
-
-    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[type(hist_scale_params_unc_cpp).__cpp_name__](
-        ROOT.std.move(hist_scale_params_unc_cpp)
+    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(
+        hist_scale_params_unc, tensor_rank=2
     )
 
-    helper.tensor_axes = (hist_scale_params_unc.axes['unc'], common.down_up_axis)
+    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
+        type(hist_scale_params_unc_cpp).__cpp_name__
+    ](ROOT.std.move(hist_scale_params_unc_cpp))
+
+    helper.tensor_axes = (hist_scale_params_unc.axes["unc"], common.down_up_axis)
     return helper
+
 
 def make_closure_uncertainty_helper(filepath_correction):
 
@@ -507,8 +651,8 @@ def make_closure_uncertainty_helper(filepath_correction):
     M = f.Get("MZ")
     cov = f.Get("covariance_matrix")
 
-    A = narf.root_to_hist(A, axis_names = ["scale_eta"])
-    M = narf.root_to_hist(M, axis_names = ["scale_eta"])
+    A = narf.root_to_hist(A, axis_names=["scale_eta"])
+    M = narf.root_to_hist(M, axis_names=["scale_eta"])
     cov = narf.root_to_hist(cov)
 
     f.Close()
@@ -517,15 +661,17 @@ def make_closure_uncertainty_helper(filepath_correction):
     neta = axis_eta.size
 
     cov = cov.values()
-    nparmscov = cov.shape[0]//neta
+    nparmscov = cov.shape[0] // neta
     n_scale_params = 3
-    nvars = neta*n_scale_params
+    nvars = neta * n_scale_params
 
     variances_ref = np.stack([A.variances(), M.variances()], axis=-1)
     variances = np.reshape(np.diag(cov), (neta, nparmscov))[:, :n_scale_params]
 
-    if not np.all(np.isclose(variances, variances_ref, atol=0.)):
-        raise ValueError("Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order.")
+    if not np.all(np.isclose(variances, variances_ref, atol=0.0)):
+        raise ValueError(
+            "Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order."
+        )
 
     cov = np.reshape(cov, (neta, nparmscov, neta, nparmscov))
     covin = cov
@@ -552,158 +698,164 @@ def make_closure_uncertainty_helper(filepath_correction):
     # cov += alignment_var @ alignment_var.T
 
     e, v = np.linalg.eigh(cov)
-    e = np.maximum(e, 0.)
+    e = np.maximum(e, 0.0)
     var_mat = np.sqrt(e[None, :]) * v
     var_mat = np.reshape(var_mat, (neta, n_scale_params, nvars))
 
     if not np.all(np.isfinite(var_mat)):
         raise ValueError("Variations not finite")
 
-    axis_scale_params = hist.axis.Integer(0, n_scale_params, underflow=False, overflow = False, name = 'scale_params')
-    axis_scale_params_unc = hist.axis.Integer(0, nvars, underflow=False, overflow = False, name = 'unc')
-
-    hist_scale_params_unc = hist.Hist(axis_eta, axis_scale_params, axis_scale_params_unc)
-    hist_scale_params_unc[...] = var_mat
-
-    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(hist_scale_params_unc, tensor_rank = 2)
-
-    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[type(hist_scale_params_unc_cpp).__cpp_name__](
-        ROOT.std.move(hist_scale_params_unc_cpp)
+    axis_scale_params = hist.axis.Integer(
+        0, n_scale_params, underflow=False, overflow=False, name="scale_params"
+    )
+    axis_scale_params_unc = hist.axis.Integer(
+        0, nvars, underflow=False, overflow=False, name="unc"
     )
 
-    helper.tensor_axes = (hist_scale_params_unc.axes['unc'], common.down_up_axis)
+    hist_scale_params_unc = hist.Hist(
+        axis_eta, axis_scale_params, axis_scale_params_unc
+    )
+    hist_scale_params_unc[...] = var_mat
+
+    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(
+        hist_scale_params_unc, tensor_rank=2
+    )
+
+    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
+        type(hist_scale_params_unc_cpp).__cpp_name__
+    ](ROOT.std.move(hist_scale_params_unc_cpp))
+
+    helper.tensor_axes = (hist_scale_params_unc.axes["unc"], common.down_up_axis)
     return helper
 
-def make_uniform_closure_uncertainty_helper(iparm = 0, val = 1e-5):
+
+def make_uniform_closure_uncertainty_helper(iparm=0, val=1e-5):
     nvars = 1
     n_scale_params = 3
 
-    axis_eta = hist.axis.Regular(1, -2.4, 2.4, name = "scale_eta")
-    axis_scale_params = hist.axis.Integer(0, n_scale_params, underflow=False, overflow = False, name = 'scale_params')
-    axis_scale_params_unc = hist.axis.Integer(0, nvars, underflow=False, overflow = False, name = 'unc')
-
-    hist_scale_params_unc = hist.Hist(axis_eta, axis_scale_params, axis_scale_params_unc)
-    hist_scale_params_unc.values()[:, iparm, 0] = val
-
-    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(hist_scale_params_unc, tensor_rank = 2)
-
-    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[type(hist_scale_params_unc_cpp).__cpp_name__](
-        ROOT.std.move(hist_scale_params_unc_cpp)
+    axis_eta = hist.axis.Regular(1, -2.4, 2.4, name="scale_eta")
+    axis_scale_params = hist.axis.Integer(
+        0, n_scale_params, underflow=False, overflow=False, name="scale_params"
+    )
+    axis_scale_params_unc = hist.axis.Integer(
+        0, nvars, underflow=False, overflow=False, name="unc"
     )
 
-    helper.tensor_axes = (hist_scale_params_unc.axes['unc'], common.down_up_axis)
+    hist_scale_params_unc = hist.Hist(
+        axis_eta, axis_scale_params, axis_scale_params_unc
+    )
+    hist_scale_params_unc.values()[:, iparm, 0] = val
+
+    hist_scale_params_unc_cpp = narf.hist_to_pyroot_boost(
+        hist_scale_params_unc, tensor_rank=2
+    )
+
+    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
+        type(hist_scale_params_unc_cpp).__cpp_name__
+    ](ROOT.std.move(hist_scale_params_unc_cpp))
+
+    helper.tensor_axes = (hist_scale_params_unc.axes["unc"], common.down_up_axis)
     return helper
 
 
 def make_Z_non_closure_parametrized_helper(
-    filepath_correction, filepath_tflite,
-    n_eta_bins = 24, n_scale_params = 3, correlated = False, scale_var_method = 'smearingWeightsSplines',
-    dummy_A = True, dummy_M = False, dummy_A_mag = 7.5e-5, dummy_M_mag = 0
+    filepath_correction,
+    filepath_tflite,
+    n_eta_bins=24,
+    n_scale_params=3,
+    correlated=False,
+    scale_var_method="smearingWeightsSplines",
+    dummy_A=True,
+    dummy_M=False,
+    dummy_A_mag=7.5e-5,
+    dummy_M_mag=0,
 ):
     f = uproot.open(filepath_correction)
-    M = f['MZ'].to_hist()
-    A = f['AZ'].to_hist()
+    M = f["MZ"].to_hist()
+    A = f["AZ"].to_hist()
 
-    axis_eta = hist.axis.Regular(n_eta_bins, -2.4, 2.4, name = 'eta')
-    axis_scale_params = hist.axis.Regular(n_scale_params, 0, 1, name = 'scale_params')
+    axis_eta = hist.axis.Regular(n_eta_bins, -2.4, 2.4, name="eta")
+    axis_scale_params = hist.axis.Regular(n_scale_params, 0, 1, name="scale_params")
     hist_non_closure = hist.Hist(axis_eta, axis_scale_params)
     if dummy_A:
-        hist_non_closure.view()[...,0] = np.full(n_eta_bins, dummy_A_mag)
+        hist_non_closure.view()[..., 0] = np.full(n_eta_bins, dummy_A_mag)
     else:
-        hist_non_closure.view()[...,0] = A.values()
-    hist_non_closure.view()[...,1] = np.zeros(n_eta_bins)
+        hist_non_closure.view()[..., 0] = A.values()
+    hist_non_closure.view()[..., 1] = np.zeros(n_eta_bins)
     if dummy_M:
-        hist_non_closure.view()[...,2] = np.full(n_eta_bins, dummy_M_mag)
+        hist_non_closure.view()[..., 2] = np.full(n_eta_bins, dummy_M_mag)
     else:
-        hist_non_closure.view()[...,2] = M.values()
+        hist_non_closure.view()[..., 2] = M.values()
 
-    hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure, tensor_rank = 1)
+    hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure, tensor_rank=1)
     if correlated:
-        if scale_var_method == 'smearingWeightsSplines':
+        if scale_var_method == "smearingWeightsSplines":
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplinesCorl[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins
-            ] (
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+            ](ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperCorl[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins
-            ] (
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+            ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = tuple([common.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == 'smearingWeightsSplines':
+        if scale_var_method == "smearingWeightsSplines":
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplines[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins
-            ] (
-                filepath_tflite,
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+            ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelper[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins
-            ] (
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+            ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = (
-            hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name = 'unc'),
-            common.down_up_axis
+            hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name="unc"),
+            common.down_up_axis,
         )
         return z_non_closure_helper
 
+
 def make_Z_non_closure_binned_helper(
-    filepath_correction, filepath_tflite,
-    n_eta_bins = 24, n_pt_bins = 5, correlated = False, scale_var_method = 'smearingWeightsSplines'
+    filepath_correction,
+    filepath_tflite,
+    n_eta_bins=24,
+    n_pt_bins=5,
+    correlated=False,
+    scale_var_method="smearingWeightsSplines",
 ):
     f = uproot.open(filepath)
 
     # TODO: convert variable axis to regular if the bin width is uniform
-    hist_non_closure = f['closure'].to_hist()
+    hist_non_closure = f["closure"].to_hist()
     hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure)
     if correlated:
         z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperCorl[
-            type(hist_non_closure_cpp).__cpp_name__,
-            n_eta_bins,
-            n_pt_bins
-        ](
-            ROOT.std.move(hist_non_closure_cpp)
-        )
+            type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
+        ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = tuple([common.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == 'smearingWeightsSplines':
+        if scale_var_method == "smearingWeightsSplines":
             z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperSplines[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins,
-                n_pt_bins
-            ](
-                filepath_tflite,
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
+            ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelper[
-                type(hist_non_closure_cpp).__cpp_name__,
-                n_eta_bins,
-                n_pt_bins
-            ](
-                ROOT.std.move(hist_non_closure_cpp)
-            )
+                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
+            ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = (
-            hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name = 'unc_ieta'),
-            hist.axis.Regular(n_pt_bins, 0, n_pt_bins, name = 'unc_ipt'),
-            common.down_up_axis
+            hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name="unc_ieta"),
+            hist.axis.Regular(n_pt_bins, 0, n_pt_bins, name="unc_ipt"),
+            common.down_up_axis,
         )
         return z_non_closure_helper
 
+
 # returns the cov mat of only scale parameters in eta bins, in the form of a 2D numpy array
 # there are 3 scale params (A, e, M) + 3 resolution params for each eta bin in the jpsi calib file
-def get_jpsi_scale_param_cov_mat(cov, n_scale_params = 3, n_tot_params = 4, n_eta_bins = 24, scale = 1.0):
+def get_jpsi_scale_param_cov_mat(
+    cov, n_scale_params=3, n_tot_params=4, n_eta_bins=24, scale=1.0
+):
     cov_dim = len(cov.axes[0].edges) - 1
     if cov_dim != n_tot_params * n_eta_bins:
         raise ValueError(
@@ -711,47 +863,83 @@ def get_jpsi_scale_param_cov_mat(cov, n_scale_params = 3, n_tot_params = 4, n_et
             f"total parameters {n_tot_params} times the number of eta bins {n_eta_bins}"
         )
     idx_first_param = np.arange(0, cov_dim, n_tot_params)
-    idx_scale_params = np.sort(reduce(
-        np.append, [(idx_first_param + i) for i in range(n_scale_params)]
-    ))
-    cov_scale_params = np.empty([n_scale_params * n_eta_bins, n_scale_params * n_eta_bins])
+    idx_scale_params = np.sort(
+        reduce(np.append, [(idx_first_param + i) for i in range(n_scale_params)])
+    )
+    cov_scale_params = np.empty(
+        [n_scale_params * n_eta_bins, n_scale_params * n_eta_bins]
+    )
     for irow_scale_params, irow_all_params in enumerate(idx_scale_params):
         cov_scale_params[irow_scale_params, :] = scale * np.take(
             cov.values()[irow_all_params], idx_scale_params
         )
     return cov_scale_params
 
-def crop_cov_mat(filepath, n_tot_params = 4, n_cropped_eta_bins = 2):
+
+def crop_cov_mat(filepath, n_tot_params=4, n_cropped_eta_bins=2):
     f = uproot.open(filepath)
     filename = filepath.split("/")[-1]
-    cov_mat = np.array(f['covariance_matrix'].to_hist().values())
+    cov_mat = np.array(f["covariance_matrix"].to_hist().values())
     start_idx = n_tot_params * n_cropped_eta_bins
     cov_mat_cropped = cov_mat[start_idx:-start_idx, start_idx:-start_idx]
     fout = uproot.recreate(filename.split(".")[0] + "_cropped_eta" + ".root")
-    fout['covariance_matrix'] = cov_mat_cropped 
+    fout["covariance_matrix"] = cov_mat_cropped
+
 
 def define_lblcorr_muons(df, cvh_helper, corr_branch="cvh"):
 
     # split the nested vectors
-    df = df.Define("Muon_cvhmergedGlobalIdxs", "wrem::splitNestedRVec(Muon_cvhmergedGlobalIdxs_Vals, Muon_cvhmergedGlobalIdxs_Counts)")
-    df = df.Define(f"Muon_{corr_branch}JacRef", f"wrem::splitNestedRVec(Muon_{corr_branch}JacRef_Vals, Muon_{corr_branch}JacRef_Counts)")
+    df = df.Define(
+        "Muon_cvhmergedGlobalIdxs",
+        "wrem::splitNestedRVec(Muon_cvhmergedGlobalIdxs_Vals, Muon_cvhmergedGlobalIdxs_Counts)",
+    )
+    df = df.Define(
+        f"Muon_{corr_branch}JacRef",
+        f"wrem::splitNestedRVec(Muon_{corr_branch}JacRef_Vals, Muon_{corr_branch}JacRef_Counts)",
+    )
 
-    df = df.Define("Muon_lblMom4Charge", cvh_helper, [f"Muon_{corr_branch}Pt", f"Muon_{corr_branch}Eta", f"Muon_{corr_branch}Phi", f"Muon_{corr_branch}Charge", "Muon_cvhmergedGlobalIdxs", f"Muon_{corr_branch}JacRef"])
+    df = df.Define(
+        "Muon_lblMom4Charge",
+        cvh_helper,
+        [
+            f"Muon_{corr_branch}Pt",
+            f"Muon_{corr_branch}Eta",
+            f"Muon_{corr_branch}Phi",
+            f"Muon_{corr_branch}Charge",
+            "Muon_cvhmergedGlobalIdxs",
+            f"Muon_{corr_branch}JacRef",
+        ],
+    )
 
     # split into individual vectors
-    df = df.Define("Muon_lblPt", "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Pt(); } ); return res;")
-    df = df.Define("Muon_lblEta", "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Eta(); } ); return res;")
-    df = df.Define("Muon_lblPhi", "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Phi(); } ); return res;")
-    df = df.Define("Muon_lblCharge", "ROOT::VecOps::RVec<int> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.second; }); return res;")
+    df = df.Define(
+        "Muon_lblPt",
+        "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Pt(); } ); return res;",
+    )
+    df = df.Define(
+        "Muon_lblEta",
+        "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Eta(); } ); return res;",
+    )
+    df = df.Define(
+        "Muon_lblPhi",
+        "ROOT::VecOps::RVec<float> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.first.Phi(); } ); return res;",
+    )
+    df = df.Define(
+        "Muon_lblCharge",
+        "ROOT::VecOps::RVec<int> res(Muon_lblMom4Charge.size()); std::transform(Muon_lblMom4Charge.begin(), Muon_lblMom4Charge.end(), res.begin(), [](const auto &x) { return x.second; }); return res;",
+    )
     return df
 
-def define_corrected_muons(df, cvh_helper, jpsi_helper, args, dataset, smearing_helper=None, bias_helper=None):
+
+def define_corrected_muons(
+    df, cvh_helper, jpsi_helper, args, dataset, smearing_helper=None, bias_helper=None
+):
     if not (dataset.is_data or dataset.name in common.vprocs):
-        corr_type = "none" 
+        corr_type = "none"
     else:
         corr_type = args.muonCorrData if dataset.is_data else args.muonCorrMC
 
-    # use continuous variable helix fits (cvh) with ideal or non ideal geometry 
+    # use continuous variable helix fits (cvh) with ideal or non ideal geometry
     corr_branch = "cvhideal" if "idealMC" in corr_type else "cvh"
 
     # layer-by-layer corrections (lbl)
@@ -765,25 +953,54 @@ def define_corrected_muons(df, cvh_helper, jpsi_helper, args, dataset, smearing_
 
     # calibrations from J/Psi massfits
     if "massfit" in corr_type:
-        df = df.Define("Muon_jpsiCorrectedPt", jpsi_helper, [muon_var_name(muon, var) for var in ["pt", "eta", "charge"]])
+        df = df.Define(
+            "Muon_jpsiCorrectedPt",
+            jpsi_helper,
+            [muon_var_name(muon, var) for var in ["pt", "eta", "charge"]],
+        )
         muon_pt = "Muon_jpsiCorrected"
     else:
         muon_pt = muon
 
     # Muon momentum scale resolution
     if not dataset.is_data and smearing_helper:
-        df = df.Define("Muon_smearedPt", smearing_helper, ["run", "luminosityBlock", "event", muon_var_name(muon_pt, "pt"), muon_var_name(muon, "eta")])
+        df = df.Define(
+            "Muon_smearedPt",
+            smearing_helper,
+            [
+                "run",
+                "luminosityBlock",
+                "event",
+                muon_var_name(muon_pt, "pt"),
+                muon_var_name(muon, "eta"),
+            ],
+        )
         muon_pt = "Muon_smeared"
 
     # Bias corrections from nonclosure
     if not dataset.is_data and bias_helper:
         if args.biasCalibration in ["parameterized", "A", "M"]:
-            df = df.Define("Muon_biasedPtData", bias_helper, [muon_var_name(muon_pt, "pt"), muon_var_name(muon, "eta"), muon_var_name(muon, "charge")])
+            df = df.Define(
+                "Muon_biasedPtData",
+                bias_helper,
+                [
+                    muon_var_name(muon_pt, "pt"),
+                    muon_var_name(muon, "eta"),
+                    muon_var_name(muon, "charge"),
+                ],
+            )
         else:
-            df = df.Define("Muon_biasedPtData", bias_helper, ["rdfslot_", muon_var_name(muon_pt, "pt"), muon_var_name(muon, "eta")])
+            df = df.Define(
+                "Muon_biasedPtData",
+                bias_helper,
+                ["rdfslot_", muon_var_name(muon_pt, "pt"), muon_var_name(muon, "eta")],
+            )
 
         # bias derived from data -> invert to apply on MC
-        df = df.Define("Muon_biasedPt", "{0}/Muon_biasedPtData * {0}".format(muon_var_name(muon_pt, "pt")))
+        df = df.Define(
+            "Muon_biasedPt",
+            "{0}/Muon_biasedPtData * {0}".format(muon_var_name(muon_pt, "pt")),
+        )
 
         muon_pt = "Muon_biased"
 
@@ -793,11 +1010,13 @@ def define_corrected_muons(df, cvh_helper, jpsi_helper, args, dataset, smearing_
 
     return df
 
-def getColName_genFiltered_recoMuonSel(reco_sel = "goodMuons", require_prompt = True):
+
+def getColName_genFiltered_recoMuonSel(reco_sel="goodMuons", require_prompt=True):
     genMatch_condition = "Prompt" if require_prompt else "FSonly"
     return f"{reco_sel}_genTruth_{genMatch_condition}"
 
-def define_genFiltered_recoMuonSel(df, reco_sel = "goodMuons", require_prompt = True):
+
+def define_genFiltered_recoMuonSel(df, reco_sel="goodMuons", require_prompt=True):
     col_name = getColName_genFiltered_recoMuonSel(reco_sel, require_prompt)
     require_prompt = "true" if require_prompt else "false"
     df = df.Define(
@@ -805,160 +1024,191 @@ def define_genFiltered_recoMuonSel(df, reco_sel = "goodMuons", require_prompt = 
         (
             f"wrem::filterRecoMuonsByGenTruth("
             f"    {reco_sel},"
-             "    Muon_genPartIdx," 
-             "    GenPart_pdgId,"
-             "    GenPart_statusFlags,"
-             "    GenPart_status,"
+            "    Muon_genPartIdx,"
+            "    GenPart_pdgId,"
+            "    GenPart_statusFlags,"
+            "    GenPart_status,"
             f"    {require_prompt}"
-             ")"
-        )
+            ")"
+        ),
     )
     return df
 
-def define_covMatFiltered_recoMuonSel(df, reco_sel = "goodMuons"):
+
+def define_covMatFiltered_recoMuonSel(df, reco_sel="goodMuons"):
     df = df.Redefine(
         f"{reco_sel}",
         (
             f"wrem::filterRecoMuonsByCovMat("
             f"    {reco_sel},"
-             "    Muon_cvhMomCov_Vals,"
-             "    Muon_cvhMomCov_Counts"
-             ")"
-        )
+            "    Muon_cvhMomCov_Vals,"
+            "    Muon_cvhMomCov_Counts"
+            ")"
+        ),
     )
     return df
 
-def muon_var_name(mu_type, var):
-        return mu_type+(f"_{var}" if mu_type == "Muon" else var.capitalize())
 
-def define_matched_gen_muons_covMat(df, reco_sel = "goodMuons"):
+def muon_var_name(mu_type, var):
+    return mu_type + (f"_{var}" if mu_type == "Muon" else var.capitalize())
+
+
+def define_matched_gen_muons_covMat(df, reco_sel="goodMuons"):
     df = df.Define(
         f"{reco_sel}_covMat",
         (
             "wrem::getCovMatForSelectedRecoMuons<float>("
             f"    Muon_cvhMomCov_Vals, Muon_cvhMomCov_Counts, {reco_sel}"
             ");"
-        )
+        ),
     )
     return df
 
+
 # this returns the kinematic variables of a collection of GEN muons matching a subset of RECO muons
 def define_matched_gen_muons_kinematics(
-    df,
-    reco_sel = "goodMuons",
-    kinematic_vars = ["pt", "eta", "phi", "charge"]
+    df, reco_sel="goodMuons", kinematic_vars=["pt", "eta", "phi", "charge"]
 ):
     for var in kinematic_vars:
-        if var == "charge": var = "pdgId"
+        if var == "charge":
+            var = "pdgId"
         df = df.Define(
             f"{reco_sel}_gen{var.capitalize()}",
-            f"ROOT::VecOps::Take(GenPart_{var}, Muon_genPartIdx[{reco_sel}]);"
+            f"ROOT::VecOps::Take(GenPart_{var}, Muon_genPartIdx[{reco_sel}]);",
         )
         if var == "pdgId":
             df = df.Define(
                 f"{reco_sel}_genCharge",
-                (f"ROOT::VecOps::RVec<int> res({reco_sel}_gen{var.capitalize()}.size());"
-                 "for (int i = 0; i < res.size(); i++) {"
-                 f"    res[i] = ({reco_sel}_gen{var.capitalize()}[i] > 0 ? -1 : 1);"
-                 "}"
-                 "return res;"
-                )
+                (
+                    f"ROOT::VecOps::RVec<int> res({reco_sel}_gen{var.capitalize()}.size());"
+                    "for (int i = 0; i < res.size(); i++) {"
+                    f"    res[i] = ({reco_sel}_gen{var.capitalize()}[i] > 0 ? -1 : 1);"
+                    "}"
+                    "return res;"
+                ),
             )
     return df
 
-def calculate_matched_gen_muon_kinematics(df, reco_sel = "goodMuons"):
+
+def calculate_matched_gen_muon_kinematics(df, reco_sel="goodMuons"):
     df = df.Define(
         f"{reco_sel}_genTheta",
-        (f"ROOT::VecOps::RVec<double> res({reco_sel}_genEta.size());"
-         "for (int i = 0; i < res.size(); i++) {"
-         f"    res[i] = wrem::calculateTheta({reco_sel}_genEta[i]);"
-         "}"
-         "return res;"
-        )
+        (
+            f"ROOT::VecOps::RVec<double> res({reco_sel}_genEta.size());"
+            "for (int i = 0; i < res.size(); i++) {"
+            f"    res[i] = wrem::calculateTheta({reco_sel}_genEta[i]);"
+            "}"
+            "return res;"
+        ),
     )
     df = df.Define(
         f"{reco_sel}_genP",
-        (f"ROOT::VecOps::RVec<double> res({reco_sel}_genPt.size());"
-         "for (int i = 0; i < res.size(); i++) {"
-         f"    res[i] = {reco_sel}_genPt[i] / std::sin({reco_sel}_genTheta[i]);"
-         "}"
-         "return res;"
-        )
+        (
+            f"ROOT::VecOps::RVec<double> res({reco_sel}_genPt.size());"
+            "for (int i = 0; i < res.size(); i++) {"
+            f"    res[i] = {reco_sel}_genPt[i] / std::sin({reco_sel}_genTheta[i]);"
+            "}"
+            "return res;"
+        ),
     )
     df = df.Define(
         f"{reco_sel}_genQop",
-        (f"ROOT::VecOps::RVec<double> res({reco_sel}_genCharge.size());"
-         "for (int i = 0; i < res.size(); i++) {"
-         f"    res[i] = {reco_sel}_genCharge[i] / {reco_sel}_genP[i];"
-         "}"
-         "return res;"
-        )
+        (
+            f"ROOT::VecOps::RVec<double> res({reco_sel}_genCharge.size());"
+            "for (int i = 0; i < res.size(); i++) {"
+            f"    res[i] = {reco_sel}_genCharge[i] / {reco_sel}_genP[i];"
+            "}"
+            "return res;"
+        ),
     )
     return df
 
-def define_matched_genSmeared_muon_kinematics(df, reco_sel = "goodMuons"):
-    df = df.Define(f"{reco_sel}_genSmearedQop", 
-        (f"ROOT::VecOps::RVec<double> res({reco_sel}_genQop.size());"
-         "for (int i = 0; i < res.size(); i++) {"
-         "    res[i] = wrem::smearGenQop("
-         f"        {reco_sel}_covMat[i],"
-         f"        {reco_sel}_genQop[i]"
-         "    );"
-         "}"
-         "return res;"
-        )
+
+def define_matched_genSmeared_muon_kinematics(df, reco_sel="goodMuons"):
+    df = df.Define(
+        f"{reco_sel}_genSmearedQop",
+        (
+            f"ROOT::VecOps::RVec<double> res({reco_sel}_genQop.size());"
+            "for (int i = 0; i < res.size(); i++) {"
+            "    res[i] = wrem::smearGenQop("
+            f"        {reco_sel}_covMat[i],"
+            f"        {reco_sel}_genQop[i]"
+            "    );"
+            "}"
+            "return res;"
+        ),
     )
-    df = df.Define(f"{reco_sel}_genSmearedPt", 
-        (f"ROOT::VecOps::RVec<double> res({reco_sel}_genPt.size());"
-         "for (int i = 0; i < res.size(); i++) {"
-         f"    res[i] = {reco_sel}_genCharge[i] * std::sin({reco_sel}_genTheta[i]) / {reco_sel}_genSmearedQop[i];"
-         "}"
-         "return res;"
-        )
+    df = df.Define(
+        f"{reco_sel}_genSmearedPt",
+        (
+            f"ROOT::VecOps::RVec<double> res({reco_sel}_genPt.size());"
+            "for (int i = 0; i < res.size(); i++) {"
+            f"    res[i] = {reco_sel}_genCharge[i] * std::sin({reco_sel}_genTheta[i]) / {reco_sel}_genSmearedQop[i];"
+            "}"
+            "return res;"
+        ),
     )
     df = df.Define(f"{reco_sel}_genSmearedEta", f"{reco_sel}_genEta")
     df = df.Define(f"{reco_sel}_genSmearedPhi", f"{reco_sel}_genPhi")
     df = df.Define(f"{reco_sel}_genSmearedCharge", f"{reco_sel}_genCharge")
     return df
 
+
 def define_matched_reco_muon_kinematics(
-    df, reco_sel = "goodMuons", kinematic_vars = ["pt", "eta", "phi", "charge"]
+    df, reco_sel="goodMuons", kinematic_vars=["pt", "eta", "phi", "charge"]
 ):
     for var in kinematic_vars:
         reco_muon_col = muon_var_name("Muon_corrected", var)
         df = df.Define(
-            f"{reco_sel}_reco{var.capitalize()}",
-            f"{reco_muon_col}[{reco_sel}];"
+            f"{reco_sel}_reco{var.capitalize()}", f"{reco_muon_col}[{reco_sel}];"
         )
     return df
 
-def define_corrected_reco_muon_kinematics(df, muons="goodMuons", kinematic_vars = ["pt", "eta", "phi", "charge"], index=0):
+
+def define_corrected_reco_muon_kinematics(
+    df, muons="goodMuons", kinematic_vars=["pt", "eta", "phi", "charge"], index=0
+):
     for var in kinematic_vars:
         df = df.Define(
             f"{muons}_{var.lower()}{index}",
-            f"Muon_corrected{var.capitalize()}[{muons}][{index}]"
+            f"Muon_corrected{var.capitalize()}[{muons}][{index}]",
         )
     return df
 
+
 def add_jpsi_crctn_stats_unc_hists(
-    args, df, axes, results, nominal_cols, nominal_cols_gen_smeared,
-    calib_filepaths, jpsi_crctn_data_unc_helper, smearing_weights_procs, reco_sel_GF, dataset_name, isW, storage_type=hist.storage.Double()
+    args,
+    df,
+    axes,
+    results,
+    nominal_cols,
+    nominal_cols_gen_smeared,
+    calib_filepaths,
+    jpsi_crctn_data_unc_helper,
+    smearing_weights_procs,
+    reco_sel_GF,
+    dataset_name,
+    isW,
+    storage_type=hist.storage.Double(),
 ):
     df = df.DefinePerSample("bool_true", "true")
     df = df.DefinePerSample("bool_false", "false")
 
-    if args.muonScaleVariation == 'smearingWeightsGaus' or args.validationHists:
+    if args.muonScaleVariation == "smearingWeightsGaus" or args.validationHists:
         smearing_weights_procs.append(dataset_name)
-        if args.muonScaleVariation == 'smearingWeightsGaus':
+        if args.muonScaleVariation == "smearingWeightsGaus":
             jpsi_unc_helper = jpsi_crctn_data_unc_helper
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
-                calib_filepaths['data_corrfile'][args.muonCorrData],
-                calib_filepaths['tflite_file'],
-                scale_var_method = 'smearingWeightsGaus',
-                dummy_mu_scale_var = args.dummyMuScaleVar, dummy_var_mag = args.muonCorrMag
+                calib_filepaths["data_corrfile"][args.muonCorrData],
+                calib_filepaths["tflite_file"],
+                scale_var_method="smearingWeightsGaus",
+                dummy_mu_scale_var=args.dummyMuScaleVar,
+                dummy_var_mag=args.muonCorrMag,
             )
-        df = df.Define("muonScaleSyst_responseWeights_tensor_gaus", jpsi_unc_helper,
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_gaus",
+            jpsi_unc_helper,
             [
                 f"{reco_sel_GF}_genQop",
                 f"{reco_sel_GF}_genPhi",
@@ -970,28 +1220,36 @@ def add_jpsi_crctn_stats_unc_hists(
                 f"{reco_sel_GF}_genSmearedPt",
                 f"{reco_sel_GF}_covMat",
                 "nominal_weight",
-                "bool_false"
-            ]
+                "bool_false",
+            ],
         )
         if args.validationHists:
             muonScaleSyst_responseWeights_gaus = df.HistoBoost(
-                "muonScaleSyst_responseWeights_gaus", axes,
-                [*nominal_cols_gen_smeared, "muonScaleSyst_responseWeights_tensor_gaus"],
-                tensor_axes = jpsi_unc_helper.tensor_axes, storage=hist.storage.Double()
+                "muonScaleSyst_responseWeights_gaus",
+                axes,
+                [
+                    *nominal_cols_gen_smeared,
+                    "muonScaleSyst_responseWeights_tensor_gaus",
+                ],
+                tensor_axes=jpsi_unc_helper.tensor_axes,
+                storage=hist.storage.Double(),
             )
             results.append(muonScaleSyst_responseWeights_gaus)
 
-    if args.muonScaleVariation == 'smearingWeightsSplines' or args.validationHists:
-        if args.muonScaleVariation == 'smearingWeightsSplines':
+    if args.muonScaleVariation == "smearingWeightsSplines" or args.validationHists:
+        if args.muonScaleVariation == "smearingWeightsSplines":
             jpsi_unc_helper = jpsi_crctn_data_unc_helper
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
-                calib_filepaths['data_corrfile'][args.muonCorrData],
-                calib_filepaths['tflite_file'],
-                scale_var_method = 'smearingWeightsSplines',
-                dummy_mu_scale_var = args.dummyMuScaleVar, dummy_var_mag = args.muonCorrMag
+                calib_filepaths["data_corrfile"][args.muonCorrData],
+                calib_filepaths["tflite_file"],
+                scale_var_method="smearingWeightsSplines",
+                dummy_mu_scale_var=args.dummyMuScaleVar,
+                dummy_var_mag=args.muonCorrMag,
             )
-        df = df.Define("muonScaleSyst_responseWeights_tensor_splines", jpsi_unc_helper,
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_splines",
+            jpsi_unc_helper,
             [
                 f"{reco_sel_GF}_recoPt",
                 f"{reco_sel_GF}_recoEta",
@@ -1000,73 +1258,91 @@ def add_jpsi_crctn_stats_unc_hists(
                 f"{reco_sel_GF}_genEta",
                 f"{reco_sel_GF}_genCharge",
                 f"{reco_sel_GF}_response_weight",
-                "nominal_weight"
-            ]
+                "nominal_weight",
+            ],
         )
         if args.validationHists:
             muonScaleSyst_responseWeights_splines = df.HistoBoost(
-                "muonScaleSyst_responseWeights_splines", axes,
+                "muonScaleSyst_responseWeights_splines",
+                axes,
                 [*nominal_cols, "muonScaleSyst_responseWeights_tensor_splines"],
-                tensor_axes = jpsi_unc_helper.tensor_axes, storage=hist.storage.Double()
+                tensor_axes=jpsi_unc_helper.tensor_axes,
+                storage=hist.storage.Double(),
             )
             results.append(muonScaleSyst_responseWeights_splines)
 
-    if args.muonScaleVariation == 'massWeights' or args.validationHists:
-        if args.muonScaleVariation == 'massWeights' and isW: 
+    if args.muonScaleVariation == "massWeights" or args.validationHists:
+        if args.muonScaleVariation == "massWeights" and isW:
             jpsi_unc_helper = jpsi_crctn_data_unc_helper
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
-                calib_filepaths['data_corrfile'][args.muonCorrData],
-                calib_filepaths['tflite_file'], isW = isW,
-                scale_var_method = 'massWeights',
-                dummy_mu_scale_var = args.dummyMuScaleVar, dummy_var_mag = args.muonCorrMag
-            ) # need to make a new massweights helper due to different nweights for Z and W
-        df = df.Define("muonScaleSyst_responseWeights_tensor_massWeights", jpsi_unc_helper,
+                calib_filepaths["data_corrfile"][args.muonCorrData],
+                calib_filepaths["tflite_file"],
+                isW=isW,
+                scale_var_method="massWeights",
+                dummy_mu_scale_var=args.dummyMuScaleVar,
+                dummy_var_mag=args.muonCorrMag,
+            )  # need to make a new massweights helper due to different nweights for Z and W
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_massWeights",
+            jpsi_unc_helper,
             [
                 f"{reco_sel_GF}_eta0_reco",
                 f"{reco_sel_GF}_charge0_reco",
                 f"{reco_sel_GF}_pt0_reco",
                 "massWeight_tensor",
                 "nominal_weight",
-                f"bool_{str(isW).lower()}"
-            ]
+                f"bool_{str(isW).lower()}",
+            ],
         )
         if args.validationHists:
             muonScaleSyst_responseWeights_massWeights = df.HistoBoost(
-                "muonScaleSyst_responseWeights_massWeights", axes,
+                "muonScaleSyst_responseWeights_massWeights",
+                axes,
                 [*nominal_cols, "muonScaleSyst_responseWeights_tensor_massWeights"],
-                tensor_axes = jpsi_unc_helper.tensor_axes, storage=hist.storage.Double()
+                tensor_axes=jpsi_unc_helper.tensor_axes,
+                storage=hist.storage.Double(),
             )
             results.append(muonScaleSyst_responseWeights_massWeights)
 
     # Set the nominal muon scale variation.
     # If the scale var is derived from smearingWeightsGaus on the smeared-GEN,
     # the nominal will be the transported variation on RECO
-    if not args.muonScaleVariation == 'smearingWeightsGaus':
-        if args.muonScaleVariation == 'smearingWeightsSplines':
-            df= df.Define(
+    if not args.muonScaleVariation == "smearingWeightsGaus":
+        if args.muonScaleVariation == "smearingWeightsSplines":
+            df = df.Define(
                 "nominal_muonScaleSyst_responseWeights_tensor",
-                "muonScaleSyst_responseWeights_tensor_splines"
+                "muonScaleSyst_responseWeights_tensor_splines",
             )
-        elif args.muonScaleVariation == 'massWeights':
-            df= df.Define(
+        elif args.muonScaleVariation == "massWeights":
+            df = df.Define(
                 "nominal_muonScaleSyst_responseWeights_tensor",
-                "muonScaleSyst_responseWeights_tensor_massWeights"
+                "muonScaleSyst_responseWeights_tensor_massWeights",
             )
         nominal_muonScaleSyst_responseWeights = df.HistoBoost(
-            "nominal_muonScaleSyst_responseWeights", axes,
+            "nominal_muonScaleSyst_responseWeights",
+            axes,
             [*nominal_cols, "nominal_muonScaleSyst_responseWeights_tensor"],
-            tensor_axes = jpsi_crctn_data_unc_helper.tensor_axes,
-            storage = storage_type
+            tensor_axes=jpsi_crctn_data_unc_helper.tensor_axes,
+            storage=storage_type,
         )
         results.append(nominal_muonScaleSyst_responseWeights)
     return df
 
+
 def add_jpsi_crctn_Z_non_closure_hists(
-    args, df, nominal_axes, results, nominal_cols, nominal_cols_gen_smeared,
-    z_non_closure_parametrized_helper, z_non_closure_binned_helper, reco_sel_GF, storage_type=hist.storage.Double()
+    args,
+    df,
+    nominal_axes,
+    results,
+    nominal_cols,
+    nominal_cols_gen_smeared,
+    z_non_closure_parametrized_helper,
+    z_non_closure_binned_helper,
+    reco_sel_GF,
+    storage_type=hist.storage.Double(),
 ):
-    if args.muonScaleVariation == 'smearingWeightsSplines':
+    if args.muonScaleVariation == "smearingWeightsSplines":
         input_kinematics = [
             f"{reco_sel_GF}_recoPt",
             f"{reco_sel_GF}_recoEta",
@@ -1074,7 +1350,7 @@ def add_jpsi_crctn_Z_non_closure_hists(
             f"{reco_sel_GF}_genPt",
             f"{reco_sel_GF}_genEta",
             f"{reco_sel_GF}_genCharge",
-            f"{reco_sel_GF}_response_weight"
+            f"{reco_sel_GF}_response_weight",
         ]
         nominal_cols_non_closure = nominal_cols
     else:
@@ -1084,105 +1360,121 @@ def add_jpsi_crctn_Z_non_closure_hists(
             f"{reco_sel_GF}_genSmearedEta",
             f"{reco_sel_GF}_genSmearedPt",
             f"{reco_sel_GF}_genSmearedCharge",
-            f"{reco_sel_GF}_covMat"
+            f"{reco_sel_GF}_covMat",
         ]
         nominal_cols_non_closure = nominal_cols_gen_smeared
     if args.nonClosureScheme in ["A-M-separated", "A-only"]:
         df = df.DefinePerSample("AFlag", "0x01")
-        df = df.Define("Z_non_closure_parametrized_A", z_non_closure_parametrized_helper,
-            [
-                *input_kinematics,
-                "nominal_weight",
-                "AFlag"
-            ]
+        df = df.Define(
+            "Z_non_closure_parametrized_A",
+            z_non_closure_parametrized_helper,
+            [*input_kinematics, "nominal_weight", "AFlag"],
         )
         hist_Z_non_closure_parametrized_A = df.HistoBoost(
-            "Z_non_closure_parametrized_A_gaus" if args.muonScaleVariation == 'smearingWeightsGaus' else "nominal_Z_non_closure_parametrized_A",
+            (
+                "Z_non_closure_parametrized_A_gaus"
+                if args.muonScaleVariation == "smearingWeightsGaus"
+                else "nominal_Z_non_closure_parametrized_A"
+            ),
             nominal_axes,
             [*nominal_cols_non_closure, "Z_non_closure_parametrized_A"],
-            tensor_axes = z_non_closure_parametrized_helper.tensor_axes,
-            storage=storage_type
+            tensor_axes=z_non_closure_parametrized_helper.tensor_axes,
+            storage=storage_type,
         )
         results.append(hist_Z_non_closure_parametrized_A)
     if args.nonClosureScheme in ["A-M-separated", "binned-plus-M", "M-only"]:
         df = df.DefinePerSample("MFlag", "0x04")
-        df = df.Define("Z_non_closure_parametrized_M", z_non_closure_parametrized_helper,
-            [
-                *input_kinematics,
-                "nominal_weight",
-                "MFlag"
-            ]
+        df = df.Define(
+            "Z_non_closure_parametrized_M",
+            z_non_closure_parametrized_helper,
+            [*input_kinematics, "nominal_weight", "MFlag"],
         )
         hist_Z_non_closure_parametrized_M = df.HistoBoost(
-            "Z_non_closure_parametrized_M_gaus" if args.muonScaleVariation == 'smearingWeightsGaus' else "nominal_Z_non_closure_parametrized_M",
+            (
+                "Z_non_closure_parametrized_M_gaus"
+                if args.muonScaleVariation == "smearingWeightsGaus"
+                else "nominal_Z_non_closure_parametrized_M"
+            ),
             nominal_axes,
             [*nominal_cols_non_closure, "Z_non_closure_parametrized_M"],
-            tensor_axes = z_non_closure_parametrized_helper.tensor_axes,
-            storage=storage_type
+            tensor_axes=z_non_closure_parametrized_helper.tensor_axes,
+            storage=storage_type,
         )
         results.append(hist_Z_non_closure_parametrized_M)
     if args.nonClosureScheme == "A-M-combined":
         df = df.DefinePerSample("AMFlag", "0x01 | 0x04")
-        df = df.Define("Z_non_closure_parametrized", z_non_closure_parametrized_helper,
-            [
-                *input_kinematics,
-                "nominal_weight",
-                "AMFlag"
-            ]
+        df = df.Define(
+            "Z_non_closure_parametrized",
+            z_non_closure_parametrized_helper,
+            [*input_kinematics, "nominal_weight", "AMFlag"],
         )
         hist_Z_non_closure_parametrized = df.HistoBoost(
-            "Z_non_closure_parametrized_gaus" if args.muonScaleVariation == 'smearingWeightsGaus' else "nominal_Z_non_closure_parametrized",
+            (
+                "Z_non_closure_parametrized_gaus"
+                if args.muonScaleVariation == "smearingWeightsGaus"
+                else "nominal_Z_non_closure_parametrized"
+            ),
             nominal_axes,
             [*nominal_cols_non_closure, "Z_non_closure_parametrized"],
-            tensor_axes = z_non_closure_parametrized_helper.tensor_axes,
-            storage=storage_type
+            tensor_axes=z_non_closure_parametrized_helper.tensor_axes,
+            storage=storage_type,
         )
         results.append(hist_Z_non_closure_parametrized)
     if args.nonClosureScheme in ["binned", "binned-plus-M"]:
-        df = df.Define("Z_non_closure_binned", z_non_closure_binned_helper,
-            [
-                *input_kinematics,
-                "nominal_weight"
-            ]
+        df = df.Define(
+            "Z_non_closure_binned",
+            z_non_closure_binned_helper,
+            [*input_kinematics, "nominal_weight"],
         )
         hist_Z_non_closure_binned = df.HistoBoost(
-            "Z_non_closure_binned_gaus" if args.muonScaleVariation == 'smearingWeightsGaus' else "nominal_Z_non_closure_binned",
+            (
+                "Z_non_closure_binned_gaus"
+                if args.muonScaleVariation == "smearingWeightsGaus"
+                else "nominal_Z_non_closure_binned"
+            ),
             nominal_axes,
             [*nominal_cols_non_closure, "Z_non_closure_binned"],
-            tensor_axes = z_non_closure_binned_helper.tensor_axes,
-            storage=storage_type
+            tensor_axes=z_non_closure_binned_helper.tensor_axes,
+            storage=storage_type,
         )
         results.append(hist_Z_non_closure_binned)
     return df
 
-def transport_smearing_weights_to_reco(resultdict, procs, nonClosureScheme = "A-M-separated"):
+
+def transport_smearing_weights_to_reco(
+    resultdict, procs, nonClosureScheme="A-M-separated"
+):
     time0 = time.time()
-    
-    hists_to_transport = ['muonScaleSyst_responseWeights_gaus']
+
+    hists_to_transport = ["muonScaleSyst_responseWeights_gaus"]
     if nonClosureScheme == "A-M-separated":
-        hists_to_transport.append('Z_non_closure_parametrized_A_gaus')
-        hists_to_transport.append('Z_non_closure_parametrized_M_gaus')
+        hists_to_transport.append("Z_non_closure_parametrized_A_gaus")
+        hists_to_transport.append("Z_non_closure_parametrized_M_gaus")
     if nonClosureScheme == "A-M-combined":
-        hists_to_transport.append('Z_non_closure_parametrized_gaus')
+        hists_to_transport.append("Z_non_closure_parametrized_gaus")
     if nonClosureScheme == "binned":
-        hists_to_transport.append('Z_non_closure_binned_gaus')
+        hists_to_transport.append("Z_non_closure_binned_gaus")
     if nonClosureScheme == "binned-plus-M":
-        hists_to_transport.append('Z_non_closure_parametrized_M_gaus')
-        hists_to_transport.append('Z_non_closure_binned_gaus')
+        hists_to_transport.append("Z_non_closure_parametrized_M_gaus")
+        hists_to_transport.append("Z_non_closure_binned_gaus")
 
     for proc in procs:
 
         if proc not in resultdict:
-            logger.warning(f"Proc {proc} not found in output. Skipping smearing weights transportation")
+            logger.warning(
+                f"Proc {proc} not found in output. Skipping smearing weights transportation"
+            )
             continue
-        proc_hists = resultdict[proc]['output']
+        proc_hists = resultdict[proc]["output"]
 
-        nominal_reco = proc_hists['nominal'].get()
-        if 'nominal_gen_smeared' in proc_hists.keys():
-            nominal_gensmear = proc_hists['nominal_gen_smeared'].get()
+        nominal_reco = proc_hists["nominal"].get()
+        if "nominal_gen_smeared" in proc_hists.keys():
+            nominal_gensmear = proc_hists["nominal_gen_smeared"].get()
         else:
             logger.warning(f"Histogram nominal_gen_smeared not found in {proc}")
-            logger.warning("nuisances generated by smearing weights not transported to RECO kinematics!")
+            logger.warning(
+                "nuisances generated by smearing weights not transported to RECO kinematics!"
+            )
             return
 
         logger.debug(f"Process {proc}")
@@ -1190,23 +1482,27 @@ def transport_smearing_weights_to_reco(resultdict, procs, nonClosureScheme = "A-
         for histname in hists_to_transport:
             if histname in proc_hists.keys():
                 hist_gensmear = proc_hists[histname].get()
-                reco_histname = 'nominal_' + histname[:-len('_gaus')]
+                reco_histname = "nominal_" + histname[: -len("_gaus")]
                 hist_reco = hist.Hist(
-                    *hist_gensmear.axes,
-                    storage = hist_gensmear._storage_type()
+                    *hist_gensmear.axes, storage=hist_gensmear._storage_type()
                 )
-                
+
                 bin_ratio = hh.divideHists(hist_gensmear, nominal_gensmear)
                 hist_reco = hh.multiplyHists(nominal_reco, bin_ratio)
                 proc_hists[reco_histname] = narf.ioutils.H5PickleProxy(hist_reco)
             else:
                 logger.warning(f"Histogram {histname} not found in {proc}")
-                logger.warning("nuisances generated by smearing weights not transported to RECO kinematics!")
+                logger.warning(
+                    "nuisances generated by smearing weights not transported to RECO kinematics!"
+                )
                 return
-                
+
     logger.info(f"Transport smearing weights: {time.time() - time0}")
 
-def make_alt_reco_and_gen_hists(df, results, nominal_axes, nominal_columns, matched_reco_sel = "goodMuons"):
+
+def make_alt_reco_and_gen_hists(
+    df, results, nominal_axes, nominal_columns, matched_reco_sel="goodMuons"
+):
 
     nominal_cols_gen = nominal_columns[:]
     nominal_cols_gen_smeared = nominal_columns[:]
@@ -1214,36 +1510,78 @@ def make_alt_reco_and_gen_hists(df, results, nominal_axes, nominal_columns, matc
     for col in ("pt", "eta", "charge"):
         idx = [i for i, x in enumerate(nominal_columns) if f"_{col}0" in x]
         if len(idx) != 1:
-            logger.warning(f"None or more than one columns to match '_{col}0'! Do nothing here!")
+            logger.warning(
+                f"None or more than one columns to match '_{col}0'! Do nothing here!"
+            )
             continue
         else:
             nominal_cols_gen[idx[0]] = f"{matched_reco_sel}_{col}0_gen"
-            nominal_cols_gen_smeared[idx[0]] = f"{matched_reco_sel}_{col}0_gen_smeared"  
+            nominal_cols_gen_smeared[idx[0]] = f"{matched_reco_sel}_{col}0_gen_smeared"
 
-    results.append(df.HistoBoost("nominal_gen", nominal_axes, [*nominal_cols_gen, "nominal_weight"], storage=hist.storage.Double()))
-    results.append(df.HistoBoost("nominal_gen_smeared", nominal_axes, [*nominal_cols_gen_smeared, "nominal_weight"], storage=hist.storage.Double()))
+    results.append(
+        df.HistoBoost(
+            "nominal_gen",
+            nominal_axes,
+            [*nominal_cols_gen, "nominal_weight"],
+            storage=hist.storage.Double(),
+        )
+    )
+    results.append(
+        df.HistoBoost(
+            "nominal_gen_smeared",
+            nominal_axes,
+            [*nominal_cols_gen_smeared, "nominal_weight"],
+            storage=hist.storage.Double(),
+        )
+    )
 
     return [nominal_cols_gen, nominal_cols_gen_smeared]
-    
+
+
 def define_lbl_corrections_jpsi_calibration_ntuples(df, helper):
     df = df.DefinePerSample("Muplus_charge", "1")
     df = df.DefinePerSample("Muminus_charge", "-1")
 
     df = df.Define("globalidxvint", "ROOT::VecOps::RVec<int>(globalidxv)")
 
-    df = df.Define("Mupluscor_Mom4Charge", helper, ["Muplus_pt", "Muplus_eta", "Muplus_phi", "Muplus_charge", "globalidxvint", "Muplus_jacRef"])
+    df = df.Define(
+        "Mupluscor_Mom4Charge",
+        helper,
+        [
+            "Muplus_pt",
+            "Muplus_eta",
+            "Muplus_phi",
+            "Muplus_charge",
+            "globalidxvint",
+            "Muplus_jacRef",
+        ],
+    )
     df = df.Define("Mupluscor_mom4", "Mupluscor_Mom4Charge.first")
     df = df.Define("Mupluscor_pt", "Mupluscor_Mom4Charge.first.Pt()")
     df = df.Define("Mupluscor_eta", "Mupluscor_Mom4Charge.first.Eta()")
     df = df.Define("Mupluscor_phi", "Mupluscor_Mom4Charge.first.Phi()")
 
-    df = df.Define("Muminuscor_Mom4Charge", helper, ["Muminus_pt", "Muminus_eta", "Muminus_phi", "Muminus_charge", "globalidxvint", "Muminus_jacRef"])
+    df = df.Define(
+        "Muminuscor_Mom4Charge",
+        helper,
+        [
+            "Muminus_pt",
+            "Muminus_eta",
+            "Muminus_phi",
+            "Muminus_charge",
+            "globalidxvint",
+            "Muminus_jacRef",
+        ],
+    )
     df = df.Define("Muminuscor_mom4", "Muminuscor_Mom4Charge.first")
     df = df.Define("Muminuscor_pt", "Muminuscor_Mom4Charge.first.Pt()")
     df = df.Define("Muminuscor_eta", "Muminuscor_Mom4Charge.first.Eta()")
     df = df.Define("Muminuscor_phi", "Muminuscor_Mom4Charge.first.Phi()")
 
-    df = df.Define("Jpsicor_mom4", "ROOT::Math::PxPyPzEVector(Mupluscor_Mom4Charge.first) + ROOT::Math::PxPyPzEVector(Muminuscor_Mom4Charge.first)")
+    df = df.Define(
+        "Jpsicor_mom4",
+        "ROOT::Math::PxPyPzEVector(Mupluscor_Mom4Charge.first) + ROOT::Math::PxPyPzEVector(Muminuscor_Mom4Charge.first)",
+    )
 
     df = df.Define("Jpsicor_pt", "Jpsicor_mom4.Pt()")
     df = df.Define("Jpsicor_eta", "Jpsicor_mom4.Eta()")
@@ -1251,6 +1589,7 @@ def define_lbl_corrections_jpsi_calibration_ntuples(df, helper):
     df = df.Define("Jpsicor_mass", "Jpsicor_mom4.M()")
 
     return df
+
 
 def define_passthrough_corrections_jpsi_calibration_ntuples(df):
     df = df.DefinePerSample("Muplus_charge", "1")
@@ -1269,13 +1608,26 @@ def define_passthrough_corrections_jpsi_calibration_ntuples(df):
     df = df.Alias("Jpsicor_phi", "Jpsi_phi")
     df = df.Alias("Jpsicor_mass", "Jpsi_mass")
 
-    df = df.Define("Mupluscor_mom4", "ROOT::Math::PtEtaPhiMVector(Mupluscor_pt, Mupluscor_eta, Mupluscor_phi, wrem::muon_mass)")
-    df = df.Define("Muminuscor_mom4", "ROOT::Math::PtEtaPhiMVector(Muminuscor_pt, Muminuscor_eta, Muminuscor_phi, wrem::muon_mass)")
-    df = df.Define("Jpsicor_mom4", "ROOT::Math::PtEtaPhiMVector(Jpsicor_pt, Jpsicor_eta, Jpsicor_phi, Jpsicor_mass)")
+    df = df.Define(
+        "Mupluscor_mom4",
+        "ROOT::Math::PtEtaPhiMVector(Mupluscor_pt, Mupluscor_eta, Mupluscor_phi, wrem::muon_mass)",
+    )
+    df = df.Define(
+        "Muminuscor_mom4",
+        "ROOT::Math::PtEtaPhiMVector(Muminuscor_pt, Muminuscor_eta, Muminuscor_phi, wrem::muon_mass)",
+    )
+    df = df.Define(
+        "Jpsicor_mom4",
+        "ROOT::Math::PtEtaPhiMVector(Jpsicor_pt, Jpsicor_eta, Jpsicor_phi, Jpsicor_mass)",
+    )
 
     return df
 
-def make_pixel_multiplicity_helpers(filename = f"{common.data_dir}/calibration/pixelcorr.pkl.lz4", reverse_variations = False):
+
+def make_pixel_multiplicity_helpers(
+    filename=f"{common.data_dir}/calibration/pixelcorr.pkl.lz4",
+    reverse_variations=False,
+):
     with lz4.frame.open(filename, "rb") as fin:
         res = pickle.load(fin)
 
@@ -1289,26 +1641,38 @@ def make_pixel_multiplicity_helpers(filename = f"{common.data_dir}/calibration/p
     # make this an integer axis for more performant lookup
     # the indexing must match the enum class TriggerCat defined in utils.h
     # axis_nontrig_trig = hist.axis.StrCategory(["nontrig", "nontrig"], name="nontrig_trig")
-    axis_nontrig_trig = hist.axis.Integer(0, 2, name="nontrig_trig", underflow=False, overflow=False)
+    axis_nontrig_trig = hist.axis.Integer(
+        0, 2, name="nontrig_trig", underflow=False, overflow=False
+    )
 
-    hdists = hist.Hist(axis_data_mc, axis_nontrig_trig,  *hNValidPixelHitsTrig_data.axes, storage = hNValidPixelHitsTrig_data._storage_type())
+    hdists = hist.Hist(
+        axis_data_mc,
+        axis_nontrig_trig,
+        *hNValidPixelHitsTrig_data.axes,
+        storage=hNValidPixelHitsTrig_data._storage_type(),
+    )
 
-
-    hdists[ {"data_mc" : "data", "nontrig_trig" : ROOT.wrem.TriggerCat.nonTriggering*1j}] = hNValidPixelHitsNonTrig_data.view(flow=True)
-    hdists[ {"data_mc" : "data", "nontrig_trig" : ROOT.wrem.TriggerCat.triggering*1j}] = hNValidPixelHitsTrig_data.view(flow=True)
-    hdists[ {"data_mc" : "mc", "nontrig_trig" : ROOT.wrem.TriggerCat.nonTriggering*1j}] = hNValidPixelHitsNonTrig_mc.view(flow=True)
-    hdists[ {"data_mc" : "mc", "nontrig_trig" : ROOT.wrem.TriggerCat.triggering*1j}] = hNValidPixelHitsTrig_mc.view(flow=True)
-
+    hdists[
+        {"data_mc": "data", "nontrig_trig": ROOT.wrem.TriggerCat.nonTriggering * 1j}
+    ] = hNValidPixelHitsNonTrig_data.view(flow=True)
+    hdists[
+        {"data_mc": "data", "nontrig_trig": ROOT.wrem.TriggerCat.triggering * 1j}
+    ] = hNValidPixelHitsTrig_data.view(flow=True)
+    hdists[
+        {"data_mc": "mc", "nontrig_trig": ROOT.wrem.TriggerCat.nonTriggering * 1j}
+    ] = hNValidPixelHitsNonTrig_mc.view(flow=True)
+    hdists[{"data_mc": "mc", "nontrig_trig": ROOT.wrem.TriggerCat.triggering * 1j}] = (
+        hNValidPixelHitsTrig_mc.view(flow=True)
+    )
 
     # integrate out pt since we can't reliably derive corrections differential in it
-    hdists = hdists[{"pt" : hist.sum}]
-
+    hdists = hdists[{"pt": hist.sum}]
 
     # compute reweighting in terms of nvalidpixel==0 or nvalidpixel>0 rather than full distribution
     s = hist.tag.Slicer()
 
-    h0 = hdists[{"nvalidpixel" : 0j}]
-    h1 = hdists[{"nvalidpixel" : s[1j::hist.sum]}]
+    h0 = hdists[{"nvalidpixel": 0j}]
+    h1 = hdists[{"nvalidpixel": s[1j :: hist.sum]}]
     h0val = h0.values(flow=True)
     h0var = h0.variances(flow=True)
     h1val = h1.values(flow=True)
@@ -1316,35 +1680,41 @@ def make_pixel_multiplicity_helpers(filename = f"{common.data_dir}/calibration/p
     num = h0val
     den = h0val + h1val
 
-    p0 = np.divide(num, den, out=np.zeros_like(num), where=den!=0)
-    p0var = np.divide(1., den**4, out=np.zeros_like(den), where=den!=0) * (h1val**2*h0var + h0val**2*h1var)
+    p0 = np.divide(num, den, out=np.zeros_like(num), where=den != 0)
+    p0var = np.divide(1.0, den**4, out=np.zeros_like(den), where=den != 0) * (
+        h1val**2 * h0var + h0val**2 * h1var
+    )
 
-    hp0 = hist.Hist(*h0.axes, storage = hist.storage.Weight())
+    hp0 = hist.Hist(*h0.axes, storage=hist.storage.Weight())
     hp0.values(flow=True)[...] = p0
     hp0.variances(flow=True)[...] = p0var
 
-    axis_nvalidpixel = hist.axis.Variable([-0.5, 0.5, np.inf], name = "nvalidpixel")
+    axis_nvalidpixel = hist.axis.Variable([-0.5, 0.5, np.inf], name="nvalidpixel")
 
-    hnom_axes = hp0[{"data_mc" : "data"}].axes
+    hnom_axes = hp0[{"data_mc": "data"}].axes
     hnom_axes = [*hnom_axes, axis_nvalidpixel]
 
     hnom = hist.Hist(*hnom_axes, name="hnom")
 
     # default weight is 1
-    hnom.values(flow=True)[...] = 1.
+    hnom.values(flow=True)[...] = 1.0
 
-    p0d = hp0[{"data_mc" : "data"}].values()
-    p0m = hp0[{"data_mc" : "mc"}].values()
+    p0d = hp0[{"data_mc": "data"}].values()
+    p0m = hp0[{"data_mc": "mc"}].values()
 
-    hnom[{"nvalidpixel" : 0j}] = np.where(p0m==0., 1., p0d/p0m)
-    hnom[{"nvalidpixel" : 1j}] = np.where((1.-p0m)==0., 1., (1. - p0d)/(1. - p0m))
+    hnom[{"nvalidpixel": 0j}] = np.where(p0m == 0.0, 1.0, p0d / p0m)
+    hnom[{"nvalidpixel": 1j}] = np.where(
+        (1.0 - p0m) == 0.0, 1.0, (1.0 - p0d) / (1.0 - p0m)
+    )
 
     # build variations for statistical uncertainties
     axis_eta = hnom.axes["eta"]
     axis_charge = hnom.axes["charge"]
 
     nvarstat = hp0.values().size
-    axis_varstat = hist.axis.Integer(0, nvarstat, name = "var", underflow=False, overflow=False)
+    axis_varstat = hist.axis.Integer(
+        0, nvarstat, name="var", underflow=False, overflow=False
+    )
 
     hp0var = hist.Hist(*hp0.axes, axis_varstat)
     hp0var.values(flow=True)[...] = hp0.values(flow=True)[..., None]
@@ -1354,61 +1724,87 @@ def make_pixel_multiplicity_helpers(filename = f"{common.data_dir}/calibration/p
         for itrig in range(axis_nontrig_trig.size):
             for ieta in range(axis_eta.size):
                 for icharge in range(axis_charge.size):
-                    val = hp0[{"data_mc" : idatamc, "nontrig_trig" : itrig, "eta" : ieta, "charge" : icharge}].value
-                    var = hp0[{"data_mc" : idatamc, "nontrig_trig" : itrig, "eta" : ieta, "charge" : icharge}].variance
+                    val = hp0[
+                        {
+                            "data_mc": idatamc,
+                            "nontrig_trig": itrig,
+                            "eta": ieta,
+                            "charge": icharge,
+                        }
+                    ].value
+                    var = hp0[
+                        {
+                            "data_mc": idatamc,
+                            "nontrig_trig": itrig,
+                            "eta": ieta,
+                            "charge": icharge,
+                        }
+                    ].variance
                     newval = val + np.sqrt(np.abs(var))
-                    hp0var[{"data_mc" : idatamc, "nontrig_trig" : itrig, "eta" : ieta, "charge" : icharge, "var" : ivar}] = np.clip(val + np.sqrt(np.abs(var)), 0., 1.)
+                    hp0var[
+                        {
+                            "data_mc": idatamc,
+                            "nontrig_trig": itrig,
+                            "eta": ieta,
+                            "charge": icharge,
+                            "var": ivar,
+                        }
+                    ] = np.clip(val + np.sqrt(np.abs(var)), 0.0, 1.0)
                     ivar += 1
 
     if ivar != nvarstat:
         raise ValueError("Incorrect number of variations")
 
-    hvarstat = hist.Hist(*hnom.axes, axis_varstat, name = "hvarstat")
-    hvarstat.values(flow=True)[...] = 1.
+    hvarstat = hist.Hist(*hnom.axes, axis_varstat, name="hvarstat")
+    hvarstat.values(flow=True)[...] = 1.0
 
+    p0dvar = hp0var[{"data_mc": "data"}].values()
+    p0mvar = hp0var[{"data_mc": "mc"}].values()
 
-    p0dvar = hp0var[{"data_mc" : "data"}].values()
-    p0mvar = hp0var[{"data_mc" : "mc"}].values()
+    hvarstat[{"nvalidpixel": 0j}] = np.where(p0mvar == 0.0, 1.0, p0dvar / p0mvar)
+    hvarstat[{"nvalidpixel": 1j}] = np.where(
+        (1 - p0mvar) == 0.0, 1.0, (1.0 - p0dvar) / (1.0 - p0mvar)
+    )
 
-    hvarstat[{"nvalidpixel" : 0j}] = np.where(p0mvar == 0., 1., p0dvar/p0mvar)
-    hvarstat[{"nvalidpixel" : 1j}] = np.where((1 - p0mvar)==0., 1., (1. - p0dvar)/(1. - p0mvar))
-
-    hvarstat.values(flow=True)[...] *= 1./hnom.values(flow=True)[..., None]
-
+    hvarstat.values(flow=True)[...] *= 1.0 / hnom.values(flow=True)[..., None]
 
     neta = axis_eta.size
 
     # one variation per eta bin plus one fully correlated variation
     nvar = neta + 1
 
-    axis_var = hist.axis.Integer(0, nvar, name = "var", underflow=False, overflow=False)
-    hvar = hist.Hist(*hnom.axes, axis_var, name = "hvar")
+    axis_var = hist.axis.Integer(0, nvar, name="var", underflow=False, overflow=False)
+    hvar = hist.Hist(*hnom.axes, axis_var, name="hvar")
 
     # default weight is 1
-    hvar.values(flow=True)[...] = 1.
+    hvar.values(flow=True)[...] = 1.0
 
     ivar = 0
     for ieta in range(neta):
-        hvar[{"eta" : ieta, "var" : ivar}] = hnom[{"eta" : ieta}].view(flow=True)
+        hvar[{"eta": ieta, "var": ivar}] = hnom[{"eta": ieta}].view(flow=True)
         ivar += 1
 
     # fully correlated variation
-    hvar[{"var" : ivar}] = hnom.view(flow=True)
+    hvar[{"var": ivar}] = hnom.view(flow=True)
     ivar += 1
 
     if ivar != nvar:
         raise ValueError("Incorrect number of variations")
 
     if reverse_variations:
-        hvar.values(flow=True)[...] = 1./hvar.values(flow=True)
+        hvar.values(flow=True)[...] = 1.0 / hvar.values(flow=True)
 
     hnom_cpp = narf.hist_to_pyroot_boost(hnom)
     hvar_cpp = narf.hist_to_pyroot_boost(hvar, tensor_rank=1)
     hvarstat_cpp = narf.hist_to_pyroot_boost(hvarstat, tensor_rank=1)
 
     helper = ROOT.wrem.PixelMultiplicityHelper[type(hnom_cpp)](ROOT.std.move(hnom_cpp))
-    helper_var = ROOT.wrem.PixelMultiplicityUncertaintyHelper[nvar, type(hvar_cpp)](ROOT.std.move(hvar_cpp))
-    helper_varstat = ROOT.wrem.PixelMultiplicityUncertaintyHelper[nvarstat, type(hvarstat_cpp)](ROOT.std.move(hvarstat_cpp))
+    helper_var = ROOT.wrem.PixelMultiplicityUncertaintyHelper[nvar, type(hvar_cpp)](
+        ROOT.std.move(hvar_cpp)
+    )
+    helper_varstat = ROOT.wrem.PixelMultiplicityUncertaintyHelper[
+        nvarstat, type(hvarstat_cpp)
+    ](ROOT.std.move(hvarstat_cpp))
 
     helper_var.tensor_axes = [axis_var]
     helper_varstat.tensor_axes = [axis_varstat]

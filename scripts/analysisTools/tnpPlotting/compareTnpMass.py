@@ -4,44 +4,85 @@
 # example:
 # python w-mass-13TeV/compareTnpMass.py /home/m/mciprian/tnp/Steve_Marc_Raj/outputs/test_trackerMuons/tnp_tracking_data_vertexWeights1_oscharge0.root /home/m/mciprian/tnp/Steve_Marc_Raj/outputs/test_trackerMuons/tnp_tracking_mc_vertexWeights1_oscharge0.root plots/TnP/Steve_Marc_Raj/testTrackerMuons/tracking/ --zbin 1 3
 
-import os, re, array, math
-import time
-import argparse
+import os
+## safe batch mode
+import sys
+
 from utilities import logging
 
-## safe batch mode                                 
-import sys
 args = sys.argv[:]
-sys.argv = ['-b']
+sys.argv = ["-b"]
 import ROOT
+
 sys.argv = args
 ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
 from copy import *
 
-#sys.path.append(os.getcwd() + "/plotUtils/")
-#from utility import *
+# sys.path.append(os.getcwd() + "/plotUtils/")
+# from utility import *
 from scripts.analysisTools.plotUtils.utility import *
+
 sys.path.append(os.getcwd())
 
 if __name__ == "__main__":
 
     parser = common_plot_parser()
     parser.add_argument("inputfileData", type=str, nargs=1, help="Input file for data")
-    parser.add_argument("inputfileMC",   type=str, nargs=1, help="Input file for MC")
+    parser.add_argument("inputfileMC", type=str, nargs=1, help="Input file for MC")
     parser.add_argument("outputfolder", type=str, nargs=1)
-    parser.add_argument("-x", "--xAxisName", dest="xAxisName", default="Invariant mass (GeV) ", help="x axis name")
-    parser.add_argument(     "--rebinx", dest="rebinX", default=1, type=int, help="To rebin x axis (mass)")
-    parser.add_argument(     "--rebiny", dest="rebinY", default=1, type=int, help="To rebin y axis (pt)")
-    parser.add_argument(     "--rebinz", dest="rebinZ", default=1, type=int, help="To rebin z axis (eta)")
-    parser.add_argument(     "--ybin", type=int, nargs=2, default=[0, 0], help="Bins for y axis to plot, default is to do all")
-    parser.add_argument(     "--zbin", type=int, nargs=2, default=[0, 0], help="Bins for z axis to plot, default is to do all")
-    parser.add_argument(     "--showAllProbesMC", action='store_true', help="Show sum of failing and passing probes for MC (when not using --plotPassProbes, and it only works for steps where standalone muons were used)")
-    parser.add_argument(     "--plotPassProbes", action='store_true', help="Plot passing probes instead of failing probes")
-    parser.add_argument(     "--plotPassAltProbes", action='store_true', help="Plot passing probes instead of failing probes")
-    parser.add_argument(     '--skipNorm', dest='normalize', action='store_false',
-                             help='Normalize to area of first histogram')
+    parser.add_argument(
+        "-x",
+        "--xAxisName",
+        dest="xAxisName",
+        default="Invariant mass (GeV) ",
+        help="x axis name",
+    )
+    parser.add_argument(
+        "--rebinx", dest="rebinX", default=1, type=int, help="To rebin x axis (mass)"
+    )
+    parser.add_argument(
+        "--rebiny", dest="rebinY", default=1, type=int, help="To rebin y axis (pt)"
+    )
+    parser.add_argument(
+        "--rebinz", dest="rebinZ", default=1, type=int, help="To rebin z axis (eta)"
+    )
+    parser.add_argument(
+        "--ybin",
+        type=int,
+        nargs=2,
+        default=[0, 0],
+        help="Bins for y axis to plot, default is to do all",
+    )
+    parser.add_argument(
+        "--zbin",
+        type=int,
+        nargs=2,
+        default=[0, 0],
+        help="Bins for z axis to plot, default is to do all",
+    )
+    parser.add_argument(
+        "--showAllProbesMC",
+        action="store_true",
+        help="Show sum of failing and passing probes for MC (when not using --plotPassProbes, and it only works for steps where standalone muons were used)",
+    )
+    parser.add_argument(
+        "--plotPassProbes",
+        action="store_true",
+        help="Plot passing probes instead of failing probes",
+    )
+    parser.add_argument(
+        "--plotPassAltProbes",
+        action="store_true",
+        help="Plot passing probes instead of failing probes",
+    )
+    parser.add_argument(
+        "--skipNorm",
+        dest="normalize",
+        action="store_false",
+        help="Normalize to area of first histogram",
+    )
     args = parser.parse_args()
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -49,14 +90,22 @@ if __name__ == "__main__":
 
     if args.showAllProbesMC:
         if args.plotPassAltProbes or args.plotPassProbes:
-            logger.error("Can't use --plotPassProbes or --plotPassAltProbes with --showAllProbesMC")
+            logger.error(
+                "Can't use --plotPassProbes or --plotPassAltProbes with --showAllProbesMC"
+            )
             quit()
 
     outdir_original = args.outputfolder[0]
     outdir = createPlotDirAndCopyPhp(outdir_original, eoscp=args.eoscp)
 
-    probeType = "passAlt" if args.plotPassAltProbes else "pass" if args.plotPassProbes else "fail"
-    probeTypeHist = "pass" if (args.plotPassAltProbes or args.plotPassProbes) else "fail"
+    probeType = (
+        "passAlt"
+        if args.plotPassAltProbes
+        else "pass" if args.plotPassProbes else "fail"
+    )
+    probeTypeHist = (
+        "pass" if (args.plotPassAltProbes or args.plotPassProbes) else "fail"
+    )
     passAltNamePostfix = "_alt" if probeType == "passAlt" else ""
 
     f = safeOpenFile(args.inputfileData[0])
@@ -78,9 +127,12 @@ if __name__ == "__main__":
 
     hists = [hmcTot3D, hmc3D, hdata3D]
     for h in hists:
-        if args.rebinX > 1: h.RebinX(args.rebinX)
-        if args.rebinY > 1: h.RebinY(args.rebinY)
-        if args.rebinZ > 1: h.RebinZ(args.rebinZ)
+        if args.rebinX > 1:
+            h.RebinX(args.rebinX)
+        if args.rebinY > 1:
+            h.RebinY(args.rebinY)
+        if args.rebinZ > 1:
+            h.RebinZ(args.rebinZ)
 
     adjustSettings_CMS_lumi()
     canvas = ROOT.TCanvas("canvas", "", 900, 800)
@@ -97,12 +149,12 @@ if __name__ == "__main__":
     iymin = 1
     iymax = hmcTot3D.GetNbinsY()
     if args.ybin[0] > 0 and args.ybin[1] > 0:
-        iymin,iymax = args.ybin
+        iymin, iymax = args.ybin
 
     izmin = 1
     izmax = hmcTot3D.GetNbinsZ()
     if args.zbin[0] > 0 and args.zbin[1] > 0:
-        izmin,izmax = args.zbin
+        izmin, izmax = args.zbin
 
     for ieta in range(1, 1 + hmcTot3D.GetNbinsZ()):
         if not (izmin <= ieta <= izmax):
@@ -115,8 +167,8 @@ if __name__ == "__main__":
             hdata = hdata3D.ProjectionX("hdata", ipt, ipt, ieta, ieta, "e")
 
             hmcTot.SetMarkerSize(0)
-            #hmcTot.SetFillColor(ROOT.kGreen+2)
-            hmcTot.SetFillColorAlpha(ROOT.kGreen+2, 0.5)
+            # hmcTot.SetFillColor(ROOT.kGreen+2)
+            hmcTot.SetFillColorAlpha(ROOT.kGreen + 2, 0.5)
             hmcTot.SetFillStyle(1001)
 
             hmc.SetLineColor(ROOT.kBlue)
@@ -126,12 +178,22 @@ if __name__ == "__main__":
             hdata.SetMarkerSize(1)
 
             if args.normalize:
-                hmcTotScale = hdata.Integral()/hmcTot.Integral() if hmcTot.Integral() > 0.0 else 1.0
+                hmcTotScale = (
+                    hdata.Integral() / hmcTot.Integral()
+                    if hmcTot.Integral() > 0.0
+                    else 1.0
+                )
                 hmcTot.Scale(hmcTotScale)
-                hmcScale = hdata.Integral()/hmc.Integral() if hmc.Integral() > 0.0 else 1.0
+                hmcScale = (
+                    hdata.Integral() / hmc.Integral() if hmc.Integral() > 0.0 else 1.0
+                )
                 hmc.Scale(hmcScale)
 
-            miny, maxy =  getMinMaxMultiHisto([hdata, hmc, hmcTot] if args.showAllProbesMC else [hdata, hmc], excludeEmpty=False, sumError=False)
+            miny, maxy = getMinMaxMultiHisto(
+                [hdata, hmc, hmcTot] if args.showAllProbesMC else [hdata, hmc],
+                excludeEmpty=False,
+                sumError=False,
+            )
 
             hframe = hmcTot if args.showAllProbesMC else hmc
             hframe.SetStats(0)
@@ -154,19 +216,25 @@ if __name__ == "__main__":
                 hmc.Draw("HIST")
             hdata.Draw("EP SAME")
 
-            header = "{} < #eta < {}".format(round(hmcTot3D.GetZaxis().GetBinLowEdge(ieta),1), round(hmcTot3D.GetZaxis().GetBinUpEdge(ieta),1))
+            header = "{} < #eta < {}".format(
+                round(hmcTot3D.GetZaxis().GetBinLowEdge(ieta), 1),
+                round(hmcTot3D.GetZaxis().GetBinUpEdge(ieta), 1),
+            )
             header += "   ---   "
-            header += "{} < p_{{T}} < {} GeV".format(round(hmcTot3D.GetYaxis().GetBinLowEdge(ipt),0), round(hmcTot3D.GetYaxis().GetBinUpEdge(ipt),0))
+            header += "{} < p_{{T}} < {} GeV".format(
+                round(hmcTot3D.GetYaxis().GetBinLowEdge(ipt), 0),
+                round(hmcTot3D.GetYaxis().GetBinUpEdge(ipt), 0),
+            )
 
             leg = ROOT.TLegend(0.2, 0.78 if args.showAllProbesMC else 0.82, 0.9, 0.9)
             leg.SetNColumns(3)
             leg.SetFillColor(0)
             leg.SetFillStyle(0)
-            leg.SetFillColorAlpha(0,0.6)
+            leg.SetFillColorAlpha(0, 0.6)
             leg.SetBorderSize(0)
             leg.SetHeader(header)
-            leg.AddEntry(hdata,  f"Data ({probeType} probes)", "EP")
-            leg.AddEntry(hmc,    f"MC ({probeType} probes)"  , "L")
+            leg.AddEntry(hdata, f"Data ({probeType} probes)", "EP")
+            leg.AddEntry(hmc, f"MC ({probeType} probes)", "L")
             if args.showAllProbesMC:
                 leg.AddEntry(hmcTot, "MC (all probes)", "LF")
             leg.Draw("same")
@@ -174,7 +242,7 @@ if __name__ == "__main__":
             canvasName = f"{probeType}ProbeMass_ieta_{ieta}_ipt_{ipt}"
 
             canvas.RedrawAxis("sameaxis")
-            for ext in ["png","pdf"]:
+            for ext in ["png", "pdf"]:
                 canvas.SaveAs(f"{outdir}/{canvasName}.{ext}")
 
     copyOutputToEos(outdir, outdir_original, eoscp=args.eoscp)

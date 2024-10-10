@@ -1,11 +1,10 @@
 from copy import deepcopy
-import hist
-from narf.ioutils import H5PickleProxy
-import numpy as np
+
 from utilities import logging
 from utilities.styles import styles
 
 logger = logging.child_logger(__name__)
+
 
 class Datagroup_member(object):
     def __init__(self, name, result):
@@ -15,9 +14,12 @@ class Datagroup_member(object):
         self.is_data = result["dataset"].get("is_data", False)
         self.lumi = result.get("lumi", 0)
 
+
 class Datagroup(object):
 
-    def __init__(self, name, members={}, scale=None, memberOp=None, label=None, color=None):
+    def __init__(
+        self, name, members={}, scale=None, memberOp=None, label=None, color=None
+    ):
         self.name = name
         self.scale = scale
         self.label = styles.process_labels.get(name, name) if label is None else label
@@ -27,10 +29,10 @@ class Datagroup(object):
         else:
             self.members = members
 
-        self.histselector = None        # selector object to perform selection operation
-        self.memberOp = memberOp        # list of operations that is applied on single members
+        self.histselector = None  # selector object to perform selection operation
+        self.memberOp = memberOp  # list of operations that is applied on single members
 
-        self.hists = {}                 # list of histograms processed from narf datasets
+        self.hists = {}  # list of histograms processed from narf datasets
 
     def copy(self, new_name, member_filter=None):
         x = deepcopy(self)
@@ -38,9 +40,13 @@ class Datagroup(object):
 
         if member_filter:
             # Invert the member filter and exclude those members
-            x.deleteMembers([m for m in filter(lambda x,f=member_filter: not f(x), x.members)])
+            x.deleteMembers(
+                [m for m in filter(lambda x, f=member_filter: not f(x), x.members)]
+            )
 
-        logger.debug(f"Make a copy of group {self.name}, named {new_name} with members {[m.name for m in x.members]}")
+        logger.debug(
+            f"Make a copy of group {self.name}, named {new_name} with members {[m.name for m in x.members]}"
+        )
         return x
 
     def addMembers(self, members, member_operations=None):
@@ -51,15 +57,17 @@ class Datagroup(object):
             for m, o in zip(members, member_operations):
                 self.addMember(m, o)
         else:
-            raise RuntimeError("'member_operations' has to be a string or a list with the same length as 'members'!")            
+            raise RuntimeError(
+                "'member_operations' has to be a string or a list with the same length as 'members'!"
+            )
 
     def addMember(self, member, member_operation=None):
         # adds a member to the existing members of a given group
-        
+
         # add member operation
         if self.memberOp is None:
-            self.memberOp = [None]*len(self.members)
-        
+            self.memberOp = [None] * len(self.members)
+
         self.memberOp.append(deepcopy(member_operation))
         self.members.append(member)
 
@@ -74,7 +82,9 @@ class Datagroup(object):
         # deletes a process from the list of members of a given group
 
         if member not in [m for m in self.members]:
-            logger.warning(f"The member {member.name} can not be found in the group {self.name}! Do nothing here.")
+            logger.warning(
+                f"The member {member.name} can not be found in the group {self.name}! Do nothing here."
+            )
             return
 
         logger.debug(f"Delete member {member.name}!")

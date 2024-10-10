@@ -1,20 +1,20 @@
-import string
-import os
-import sys 
-import subprocess
-import time
-import hdf5plugin
-import h5py
-import narf
-import numpy as np
-from utilities import common, logging
 import glob
-import shutil
-import lz4.frame
+import os
 import pickle
+import shutil
+import string
+import subprocess
 import tempfile
+import time
+
+import h5py
+import lz4.frame
+
+import narf
+from utilities import common, logging
 
 logger = logging.child_logger(__name__)
+
 
 def readTemplate(templateFile, templateDict, filt=None):
     if not os.path.isfile(templateFile):
@@ -25,40 +25,49 @@ def readTemplate(templateFile, templateDict, filt=None):
     filled = source.substitute(templateDict)
     return filled
 
+
 def fillTemplatedFile(templateFile, outFile, templateDict, append=False):
     filled = readFromTempate(templateFile, templateDict)
     with open(outFile, "w" if not append else "a") as outFile:
         outFile.write(result)
 
+
 def analysis_debug_output(results):
     logger.debug("")
     logger.debug("Unweighted (Weighted) events, before cut")
-    logger.debug("-"*30)
-    for key,val in results.items():
+    logger.debug("-" * 30)
+    for key, val in results.items():
         if "event_count" in val:
-            logger.debug(f"Dataset {key.ljust(30)}:  {str(val['event_count']).ljust(15)} ({round(val['weight_sum'],1)})")
-            logger.debug("-"*30)
+            logger.debug(
+                f"Dataset {key.ljust(30)}:  {str(val['event_count']).ljust(15)} ({round(val['weight_sum'],1)})"
+            )
+            logger.debug("-" * 30)
     logger.debug("")
 
-def writeMetaInfoToRootFile(rtfile, exclude_diff='notebooks', args=None):
+
+def writeMetaInfoToRootFile(rtfile, exclude_diff="notebooks", args=None):
     import ROOT
-    meta_dict = narf.ioutils.make_meta_info_dict(exclude_diff, args=args, wd=common.base_dir)
+
+    meta_dict = narf.ioutils.make_meta_info_dict(
+        exclude_diff, args=args, wd=common.base_dir
+    )
     d = rtfile.mkdir("meta_info")
     d.cd()
-    
+
     for key, value in meta_dict.items():
         out = ROOT.TNamed(str(key), str(value))
         out.Write()
+
 
 def write_analysis_output(results, outfile, args):
     analysis_debug_output(results)
 
     to_append = []
     if args.theoryCorr and not args.theoryCorrAltOnly:
-        to_append.append(args.theoryCorr[0]+"Corr")
+        to_append.append(args.theoryCorr[0] + "Corr")
     if args.maxFiles is not None:
-        to_append.append(f"maxFiles_{args.maxFiles}".replace("-","m"))
-    if len(args.pdfs)>=1 and args.pdfs[0] != "ct18z": 
+        to_append.append(f"maxFiles_{args.maxFiles}".replace("-", "m"))
+    if len(args.pdfs) >= 1 and args.pdfs[0] != "ct18z":
         to_append.append(args.pdfs[0])
     if hasattr(args, "ptqVgen") and args.ptqVgen:
         to_append.append("vars_qtbyQ")
@@ -79,14 +88,18 @@ def write_analysis_output(results, outfile, args):
         outfile = args.appendOutputFile
         if os.path.isfile(outfile):
             logger.info(f"Analysis output will be appended to file {outfile}")
-            open_as="a"
+            open_as = "a"
         else:
-            logger.warning(f"Analysis output requested to be appended to file {outfile}, but the file does not exist yet, it will be created instead")
-            open_as="w"
+            logger.warning(
+                f"Analysis output requested to be appended to file {outfile}, but the file does not exist yet, it will be created instead"
+            )
+            open_as = "w"
     else:
         if os.path.isfile(outfile):
-            logger.warning(f"Output file {outfile} exists already, it will be overwritten")
-        open_as="w"
+            logger.warning(
+                f"Output file {outfile} exists already, it will be overwritten"
+            )
+        open_as = "w"
 
     time0 = time.time()
     with h5py.File(outfile, open_as) as f:
@@ -95,18 +108,24 @@ def write_analysis_output(results, outfile, args):
             narf.ioutils.pickle_dump_h5py(k, v, f)
 
         if "meta_info" not in f.keys():
-            narf.ioutils.pickle_dump_h5py("meta_info", narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir), f)
+            narf.ioutils.pickle_dump_h5py(
+                "meta_info",
+                narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir),
+                f,
+            )
 
     logger.info(f"Writing output: {time.time()-time0}")
     logger.info(f"Output saved in {outfile}")
 
     return outfile
 
+
 def is_eosuser_path(path):
     if not path:
         return False
     path = os.path.realpath(path)
     return path.startswith("/eos/user") or path.startswith("/eos/home-")
+
 
 def make_plot_dir(outpath, outfolder=None, eoscp=False, allowCreateLocalFolder=True):
     if eoscp and is_eosuser_path(outpath):
@@ -129,7 +148,9 @@ def make_plot_dir(outpath, outfolder=None, eoscp=False, allowCreateLocalFolder=T
             logger.debug(f"Creating new directory {outpath}")
             os.makedirs(outpath)
         else:
-            raise IOError(f"The path {outpath} doesn't not exist. You should create it (and possibly link it to your web area)")
+            raise IOError(
+                f"The path {outpath} doesn't not exist. You should create it (and possibly link it to your web area)"
+            )
 
     if full_outpath and not os.path.isdir(full_outpath):
         try:
@@ -137,9 +158,9 @@ def make_plot_dir(outpath, outfolder=None, eoscp=False, allowCreateLocalFolder=T
             logger.info(f"Creating folder {full_outpath}")
         except FileExistsError as e:
             logger.warning(e)
-            pass
 
     return full_outpath
+
 
 def copy_to_eos(tmpFolder, outpath, outfolder=None, deleteFullTmp=False):
     eospath, outpath = split_eos_path(outpath)
@@ -148,10 +169,12 @@ def copy_to_eos(tmpFolder, outpath, outfolder=None, deleteFullTmp=False):
         fullpath = os.path.join(outpath, outfolder)
     logger.info(f"Copying {tmpFolder} to {eospath}")
 
-    for f in glob.glob(tmpFolder+"/*"):
+    for f in glob.glob(tmpFolder + "/*"):
         if not (os.path.isfile(f) or os.path.isdir(f)):
             continue
-        outPathForCopy = "/".join(["root://eosuser.cern.ch", eospath, f.replace(tmpFolder, f"{fullpath}/")])
+        outPathForCopy = "/".join(
+            ["root://eosuser.cern.ch", eospath, f.replace(tmpFolder, f"{fullpath}/")]
+        )
         if os.path.isdir(f):
             # remove last folder to do "xrdcp -fr /path/to/folder/ root://eosuser.cern.ch//eos/cms/path/to/"
             # in this way one can copy the whole subfolder through xrdcp without first creating the structure
@@ -160,27 +183,36 @@ def copy_to_eos(tmpFolder, outpath, outfolder=None, deleteFullTmp=False):
 
         logger.debug(f"Executing {' '.join(command)}")
         if subprocess.call(command):
-            raise IOError("Failed to copy the files to eos! Perhaps you are missing a kerberos ticket and need to run kinit <user>@CERN.CH?"
-                " from lxplus you can run without eoscp and take your luck with the mount.")
+            raise IOError(
+                "Failed to copy the files to eos! Perhaps you are missing a kerberos ticket and need to run kinit <user>@CERN.CH?"
+                " from lxplus you can run without eoscp and take your luck with the mount."
+            )
 
     shutil.rmtree(tmpFolder.replace(fullpath, ""))
 
-def write_theory_corr_hist(output_name, process, output_dict, args=None, file_meta_data=None): 
+
+def write_theory_corr_hist(
+    output_name, process, output_dict, args=None, file_meta_data=None
+):
     outname = output_name
     output_filename = f"{outname}Corr{process}.pkl.lz4"
     logger.info(f"Write correction file {output_filename}")
-    result_dict = {process : output_dict, "meta_data" : narf.ioutils.make_meta_info_dict(args, wd=common.base_dir)}
+    result_dict = {
+        process: output_dict,
+        "meta_data": narf.ioutils.make_meta_info_dict(args, wd=common.base_dir),
+    }
     if file_meta_data is not None:
         result_dict["file_meta_data"] = file_meta_data
     with lz4.frame.open(output_filename, "wb") as f:
-        pickle.dump(result_dict, f, protocol = pickle.HIGHEST_PROTOCOL)
+        pickle.dump(result_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 def split_eos_path(path):
 
     path = os.path.realpath(path)
     if not is_eosuser_path(path):
         raise ValueError(f"Expected a path on /eos/user, found {path}!")
-        
+
     splitpath = [x for x in path.split("/") if x]
     # Can be /eos/user/<letter>/<username> or <letter-username>
     if "home-" in splitpath[1]:
@@ -191,7 +223,6 @@ def split_eos_path(path):
         basepath = "/".join(splitpath[4:])
 
     if path[0] == "/":
-        eospath = "/"+eospath
+        eospath = "/" + eospath
 
     return eospath, basepath
-
