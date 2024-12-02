@@ -1,4 +1,5 @@
 import itertools
+import re
 
 import hist
 import numpy as np
@@ -8,6 +9,122 @@ from utilities import logging
 from utilities.io_tools import combinetf_input
 
 logger = logging.child_logger(__name__)
+
+
+def get_number_from_string(
+    s,
+    choose_index=-1,  # >= 0 to choose single index when more are found
+    return_list=False,
+    return_value_if_absent=0,
+):
+
+    los = [int(i) for i in re.findall(r"\d+", s)]
+    if return_list:
+        return los
+
+    if len(los) == 0:
+        # returning as integer to be used in sorting expressions
+        return return_value_if_absent
+    elif len(los) == 1:
+        return los[0]
+    else:
+        if choose_index < 0:
+            return tuple(los)
+        else:
+            return los[min(choose_index, len(los) - 1)]
+
+
+def get_hepdata_label(name, input_dict=None):
+
+    if input_dict is not None and name in input_dict.keys():
+        return input_dict[name]
+
+    postfix = " [avg.]" if "SymAvg" in name else " [diff.]" if "SymDiff" in name else ""
+    if "Scale_correction_unc" in name:
+        parID = get_number_from_string(name, choose_index=0)
+        newname = "$\\mathit{p}_{T}^{μ}$ calib. J/ψ stat. " + f"({parID})"
+    elif "ScaleClos_correction_unc" in name:
+        parID = get_number_from_string(name, choose_index=0)
+        newname = "$\\mathit{p}_{T}^{μ}$ calib. Z closure stat. " + f"({parID})"
+    elif "Resolution_correction_smearing_variation" in name:
+        parID = get_number_from_string(name, choose_index=0)
+        newname = "$\\mathit{p}_{T}^{μ}$ calib. resolution. " + f"({parID})"
+    elif re.match("QCDscale(W|Z)", name):
+        # QCDscaleZinclusive_PtV0_13000helicity_2_SymDiff
+        # QCDscaleZfine_PtV3_5helicity_1_SymAvg
+        tokens = re.findall(r"\d+", name)
+        pt_low, pt_high, ang_coeff = map(int, tokens)
+        boson = "W" if "QCDscaleW" in name else "Z"
+        if "inclusive_" in name:
+            newname = f"$A_{ang_coeff}$ angular coeff., {boson}, inclusive"
+        elif "fine_" in name:
+            boson_pt = (
+                "$\\mathit{p}_{T}^{" + boson + "}$ " + f"[{pt_low}, {pt_high}] GeV"
+            )
+            newname = f"$A_{ang_coeff}$ angular coeff., {boson}, {boson_pt}"
+    elif name.startswith("effS"):
+        ## TODO: this is a bit awkward ...
+        # effSyst_reco_altBkg_etaDecorr33
+        # effSyst_veto_reco_etaDecorr27
+        # effStat_trigger_eta9pt7q0
+        # effStat_iso_eta9pt7qall
+        step = ""
+        tokens = name.split("_")
+        if "veto" in name:
+            step = f"veto {tokens[2]}" if "effSyst" in name else "veto"
+        else:
+            step = tokens[1]
+        eta_text = "$\\eta^{\\mu}$"
+        pt_text = "$\\mathit{p}_{T}^{\\mu}$"
+        syst_stat = ""
+        eta_pt_charge_bin_ids = get_number_from_string(name, return_list=True)
+        if "effStat" in name:
+            syst_stat = "stat"
+            eta_bin = eta_pt_charge_bin_ids[0]
+            pt_bin = eta_pt_charge_bin_ids[1]
+            if name.endswith("qall"):
+                charge_text = ""
+            elif name.endswith("q0"):
+                charge_text = "$\\mathit{q}^{μ}$ +1"
+            else:
+                charge_text = "$\\mathit{q}^{μ}$ -1"
+            eta_pt_charge_bin = (
+                f"{eta_text} {eta_bin}, {pt_text} {pt_bin}, {charge_text}"
+            )
+        else:
+            syst_stat = "syst"
+            if "altBkg" in name:
+                step += " alt. bkg "
+            if "etaDecorr" in name:
+                eta_bin = (
+                    eta_pt_charge_bin_ids[0] - 1
+                )  # subtract 1 since otherwise this index starts from 1
+                eta_pt_charge_bin = f"{eta_text} {eta_bin}"
+            elif "fullyCorr" in name:
+                eta_pt_charge_bin = f"{eta_text} correlated"
+        newname = "$ε_{" + syst_stat + "}^{μ}$ " + f"{step} {eta_pt_charge_bin}"
+    elif "pdf" in name:
+        base = name.split("Sym")[0]
+        pdfEigen = get_number_from_string(base, choose_index=0)
+        pdfSet = base.split(str(pdfEigen), 1)[
+            1
+        ]  # split only on first occurrence to select the PDF set
+        newname = f"PDF {pdfSet} ({pdfEigen})"
+    elif name.startswith("FakeSmoothing"):
+        # FakeSmoothing_eta17_charge0_param3
+        tokens = re.findall(r"\d+", name)
+        pt_text = "$\\mathit{p}_{T}^{\\mu}$"
+        eta_text = "$\\eta^{\\mu}$"
+        if tokens[1] == 1:
+            charge_text = "$\\mathit{q}^{μ}$ +1"
+        else:
+            charge_text = "$\\mathit{q}^{μ}$ -1"
+        newname = f"Nonprompt {pt_text} smoothing, {eta_text} {tokens[0]}, {charge_text}, param. {tokens[2]}"
+    else:
+        newname = name
+
+    newname += postfix
+    return newname
 
 
 def transform_poi(poi_type, meta):
