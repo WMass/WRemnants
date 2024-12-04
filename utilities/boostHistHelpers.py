@@ -519,6 +519,13 @@ def rebinHistMultiAx(h, axes, edges=[], lows=[], highs=[]):
                 complex(0, low), upper, hist.rebin(rebin) if rebin else None
             )
         elif type(rebin) == int and rebin > 1:
+            axis_index = h.axes.name.index(ax)
+            axis = h.axes[axis_index]
+            if axis.size % rebin != 0:
+                raise ValueError(f"The axis '{ax}' with size {axis.size} is not compatible with the rebin factor of {rebin}!")
+            elif not isinstance(axis, hist.axis.Regular):
+                logger.warning(f"The hist axis '{ax}' to rebin is not of type 'Regular', but of type '{type(axis).__name__}'.")
+                
             logger.info(f"Rebinning the axis '{ax}' by [{rebin}]")
             sel[ax] = slice(None, None, hist.rebin(rebin))
     return h[sel] if len(sel) > 0 else h
