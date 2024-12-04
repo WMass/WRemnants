@@ -19,6 +19,8 @@ parser.add_argument("--etapt-fit", type=str, default=None)
 parser.add_argument("--ptll-fit", type=str, default=None)
 parser.add_argument("--ptll-yll-fit", type=str, default=None)
 parser.add_argument("--helicity-fit", type=str, default=None)
+parser.add_argument("--slice-helicity", type=int, default=None)
+parser.add_argument("--slice-charge", type=int, default=None)
 parser.add_argument("--obs", type=str, default="ptVgen")
 parser.add_argument("--prefit", action="store_true")
 parser.add_argument("--noPrefit", action="store_true")
@@ -65,7 +67,7 @@ def quadrature_sum_hist(hists, is_down):
 
 def load_hist(filename, fittype="postfit", helicity=False):
     fitresult = combinetf2_input.get_fitresult(filename)
-    obs = {args.obs, "helicity"} if helicity else {args.obs}
+    obs = {args.obs, "helicity", "chargeVgen"} if helicity else {args.obs}
     if "projections" in fitresult.keys() and len(fitresult["projections"]):
         fitresult = fitresult["projections"]
         idx = [i for (i, a) in enumerate(fitresult) if obs == set(a["axes"])][0]
@@ -149,25 +151,46 @@ if not args.prefit and not args.noPrefit:
         colors.append("gray")
 
     elif args.helicity_fit is not None:
-        gen = load_hist(args.helicity_fit, "prefit", helicity=True)[{"helicity": -1.0j}]
+        if args.slice_helicity is None:
+            gen = load_hist(args.helicity_fit, "prefit", helicity=False)
 
-        theory_up, theory_down = hist_to_up_down_unc(gen)
+            theory_up, theory_down = hist_to_up_down_unc(gen)
 
-        hists_nom.append(gen)
-        hists_err.extend([theory_up, theory_down])
-        labels.append("Helicity fit prefit")
-        names.append("Helicity fit prefit")
-        colors.append("gray")
+            hists_nom.append(gen)
+            hists_err.extend([theory_up, theory_down])
+            labels.append("Helicity fit prefit")
+            names.append("Helicity fit prefit")
+            colors.append("gray")
+        else:
+            gen = load_hist(args.helicity_fit, "prefit", helicity=True)[{"helicity": args.slice_helicity*1.0j, "chargeVgen":args.slice_charge*1.j}]
+
+            theory_up, theory_down = hist_to_up_down_unc(gen)
+
+            hists_nom.append(gen)
+            hists_err.extend([theory_up, theory_down])
+            labels.append("Helicity fit prefit")
+            names.append("Helicity fit prefit")
+            colors.append("gray")
 
 if args.helicity_fit:
-    helh = load_hist(args.helicity_fit, helicity=True)[{"helicity": -1.0j}]
+    if args.slice_helicity is None:
+        helh = load_hist(args.helicity_fit, helicity=False)
 
-    hists_nom.append(helh)
-    hists_err.extend(hist_to_up_down_unc(helh))
-    labels.append(f"Helicity fit {fittype}")
-    names.append(f"{fittype} helicity")
-    # colors.append("#5790FC")
-    colors.append("#E42536")
+        hists_nom.append(helh)
+        hists_err.extend(hist_to_up_down_unc(helh))
+        labels.append(f"Helicity fit {fittype}")
+        names.append(f"{fittype} helicity")
+        # colors.append("#5790FC")
+        colors.append("#E42536")
+    else:
+        helh = load_hist(args.helicity_fit, helicity=True)[{"helicity": args.slice_helicity*1.0j, "chargeVgen":args.slice_charge*1.j}]
+
+        hists_nom.append(helh)
+        hists_err.extend(hist_to_up_down_unc(helh))
+        labels.append(f"Helicity fit {fittype}")
+        names.append(f"{fittype} helicity")
+        # colors.append("#5790FC")
+        colors.append("#E42536")
 
 if not args.noetapt_postfit:
     etapth = load_hist(args.etapt_fit)
