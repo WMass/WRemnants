@@ -22,15 +22,16 @@ from matplotlib.ticker import StrMethodFormatter
 
 import narf
 from utilities import boostHistHelpers as hh
-from utilities import logging
+from utilities import common, logging
 
 hep.style.use(hep.style.ROOT)
 
 logger = logging.child_logger(__name__)
 
 
-def cfgFigure(href, xlim=None, bin_density=300, width_scale=1, automatic_scale=True):
-    base_size = 8
+def cfgFigure(
+    href, xlim=None, bin_density=300, width_scale=1, automatic_scale=True, base_size=8
+):
     hax = href.axes[0]
     if not xlim:
         xlim = [hax.edges[0], hax.edges[-1]]
@@ -114,10 +115,13 @@ def figureWithRatio(
     logx=False,
     width_scale=1,
     automatic_scale=True,
+    base_size=8,
     only_ratio=False,
     subplotsizes=[4, 2],
 ):
-    fig, xlim = cfgFigure(href, xlim, bin_density, width_scale, automatic_scale)
+    fig, xlim = cfgFigure(
+        href, xlim, bin_density, width_scale, automatic_scale, base_size
+    )
 
     ratio_axes = []
 
@@ -1079,6 +1083,8 @@ def makePlotWithRatioToRef(
     cutoff=1e-6,
     only_ratio=False,
     width_scale=1,
+    automatic_scale=True,
+    base_size=8,
     linewidth=2,
     leg_padding="auto",
     lower_leg_padding="auto",
@@ -1150,6 +1156,8 @@ def makePlotWithRatioToRef(
             only_ratio=only_ratio,
             width_scale=width_scale,
             subplotsizes=subplotsizes,
+            automatic_scale=automatic_scale,
+            base_size=base_size,
         )
         ax2 = ratio_axes[ratio_axes_idx]
     else:
@@ -1169,6 +1177,8 @@ def makePlotWithRatioToRef(
             logx=logx,
             only_ratio=only_ratio,
             width_scale=width_scale,
+            automatic_scale=automatic_scale,
+            base_size=base_size,
         )
 
     linestyles = linestyles + ["solid"] * (len(hists_ratio) - len(linestyles))
@@ -1601,6 +1611,11 @@ def write_index_and_log(
             + "\n"
         )
         logf.write(meta_info)
+        meta_info = narf.ioutils.make_meta_info_dict(
+            "notebooks", args=args, wd=common.base_dir
+        )
+        logf.write(f"git hash: {meta_info['git_hash']}\n")
+        logf.write(f"git diff: {meta_info['git_diff']}\n")
 
         if yield_tables:
             for k, v in yield_tables.items():

@@ -23,6 +23,12 @@ if __name__ == "__main__":
         help="Fitresult file from combinetf with inclusive fit",
     )
     parser.add_argument(
+        "--infileNominal",
+        type=str,
+        default=None,
+        help="Fitresult file from combinetf with nominal fit",
+    )
+    parser.add_argument(
         "--data",
         action="store_true",
         help="Specify if the fit is performed on data, needed for correct p-value calculation",
@@ -83,6 +89,15 @@ if __name__ == "__main__":
             f"{args.infileInclusive.replace('.hdf5','.root')}:fitresults"
         ) as utree:
             nll_inclusive = utree["nllvalfull"].array(library="np")
+
+    if args.infileNominal:
+        fNominal = combinetf_input.get_fitresult(args.infileNominal)
+        dfNominal = combinetf_input.read_impacts_pois(
+            fNominal,
+            poi_type=args.poiType,
+            group=True,
+            uncertainties=["stat", "muonCalibration"],
+        )
 
     df = combinetf_input.read_impacts_pois(
         fitresult,
@@ -256,6 +271,20 @@ if __name__ == "__main__":
         err_stat = df_p["err_stat"].values * scale
         err_cal = df_p["err_muonCalibration"].values * scale
 
+        if args.infileNominal:
+            if len(dfNominal) > 1:
+                logger.warning(
+                    f"Found {len(dfNominal)} values from the inclusive fit but was expecting 1, take first value"
+                )
+            elif len(dfNominal) == 0:
+                raise RuntimeError(
+                    f"Found 0 values from the inclusive fit but was expecting 1"
+                )
+
+            central = dfNominal["value"].values[0] * scale + offset
+        else:
+            central = 0
+
         if args.infileInclusive:
             if len(dfInclusive) > 1:
                 logger.warning(
@@ -266,17 +295,17 @@ if __name__ == "__main__":
                     f"Found 0 values from the inclusive fit but was expecting 1"
                 )
 
-            central = dfInclusive["value"].values[0] * scale + offset
             c_err_stat = dfInclusive["err_stat"].values[0] * scale
             c_err_cal = dfInclusive["err_muonCalibration"].values[0] * scale
             c_err = dfInclusive["err_total"].values[0] * scale
+            c = dfInclusive["value"].values[0] * scale + offset
 
-            if args.showMCInput:
-                c = central
+            if args.infileNominal:
+                c -= central
             else:
-                c = 0
-        else:
-            central = 0
+                if not args.showMCInput:
+                    central = c
+                    c = 0
 
         val -= central
 
@@ -436,7 +465,7 @@ if __name__ == "__main__":
             loc=args.legPos,
             text_size=args.legSize,
             extra_handles=extra_handles,
-            extra_labels=["Nominal"],
+            extra_labels=["Inclusive"],
             custom_handlers=["tripleband"],
         )
 

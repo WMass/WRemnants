@@ -794,5 +794,17 @@ def plot_parser():
         default=[0.9, 1.1],
         help="y range for ratio plot",
     )
+    parser.add_argument(
+        "--scaleTextSize",
+        type=float,
+        default=1.0,
+        help="Scale all text sizes by this number",
+    )
+    parser.add_argument(
+        "--customFigureWidth",
+        type=float,
+        default=None,
+        help="Use a custom figure width, otherwise chosen automatic",
+    )
 
     return parser

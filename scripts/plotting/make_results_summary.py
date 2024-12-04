@@ -54,14 +54,14 @@ cms_res = combinetf_input.read_groupunc_df(
     name="CMS",
 )
 cms_res["color"] = "#E42536"
-cms_res["Reference"] = "This Work"
+cms_res["Reference"] = "This work"
 dfw_cms = pd.concat((dfw, cms_res), ignore_index=True)
 
 eoscp = output_tools.is_eosuser_path(args.outpath)
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=eoscp)
 
 nentries = len(dfw_cms)
-xpos = 80145 + args.pdg * 10
+xpos = 80148 + args.pdg * 10
 top = nentries  # +0.5
 # step = (top+0.25)/nentries
 step = top / nentries
@@ -84,7 +84,6 @@ fig = plot_tools.make_summary_plot(
     capsize=6,
     width_scale=1.25,
     cms_label=args.cmsDecor,
-    cms_loc=0,
     padding=4,
     point_size=0.24,
     top_offset=0,
@@ -94,7 +93,7 @@ fig = plot_tools.make_summary_plot(
     bbox_to_anchor=(xpos + 105, legtop),
     legtext_size=text_size,
     logoPos=args.logoPos,
-    lumi=16.8,
+    lumi=None,
 )
 
 ax = plt.gca()
@@ -128,7 +127,7 @@ for i, row in dfw_cms.iterrows():
     if not isEW:
         ax.annotate(
             label,
-            (80265, pos),
+            (80260, pos),
             fontsize=text_size,
             ha="left",
             va="center",
@@ -140,7 +139,7 @@ for i, row in dfw_cms.iterrows():
         (xpos, pos - 0.42),
         fontsize=text_size,
         ha="left",
-        color="dimgrey",
+        color="#666666",
         annotation_clip=False,
         style="italic" if isCMS else None,
     )
@@ -154,6 +153,7 @@ ax.xaxis.set_major_locator(ticker.MultipleLocator(50))
 ax.xaxis.set_minor_locator(ticker.MultipleLocator(25))
 ax.xaxis.grid(False, which="both")
 ax.yaxis.grid(False, which="both")
+ax.set_yticks([])
 
 name = "resultsSummary"
 if args.postfix:

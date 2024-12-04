@@ -1,8 +1,8 @@
 import itertools
 import json
-import os
 
 import hist
+import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 import pandas as pd
@@ -12,7 +12,7 @@ from matplotlib.lines import Line2D
 
 from narf import ioutils
 from utilities import boostHistHelpers as hh
-from utilities import common, differential, logging, parsing
+from utilities import common, logging, parsing
 from utilities.io_tools import combinetf_input, input_tools, output_tools
 from utilities.styles import styles
 from wremnants import plot_tools
@@ -53,13 +53,24 @@ parser.add_argument(
     help="Only plot the filtered processes",
 )
 parser.add_argument(
+    "--suppressProcsLabel",
+    type=str,
+    nargs="*",
+    default=[],
+    help="Don't show given processes in the legends",
+)
+parser.add_argument(
     "--selectionAxes",
     type=str,
     default=["charge", "passIso", "passMT", "cosThetaStarll"],
     help="List of axes where for each bin a separate plot is created",
 )
 parser.add_argument(
-    "--axlim", type=float, nargs="*", help="min and max for axes (2 values per axis)"
+    "--axlim",
+    type=float,
+    default=None,
+    nargs="*",
+    help="min and max for axes (2 values per axis)",
 )
 parser.add_argument(
     "--invertAxes",
@@ -94,12 +105,6 @@ parser.add_argument(
     nargs="*",
     default=None,
     help="Location in (x,y) for additional text, aligned to upper left",
-)
-parser.add_argument(
-    "--customFigureWidth",
-    type=float,
-    default=None,
-    help="Use a custom figure width, otherwise chosen automatic",
 )
 parser.add_argument(
     "--varNames", type=str, nargs="*", default=None, help="Name of variation hist"
@@ -160,7 +165,9 @@ translate_label = {}
 if args.translate:
     with open(args.translate) as f:
         translate_label = json.load(f)
-    translate = lambda x: styles.translate_html_to_latex(translate_label.get(x, x))
+    translate = lambda x: styles.translate_html_to_latex(
+        translate_label.get(x, x).replace("resum. TNP ", "")
+    )
 else:
     translate = lambda x: x
 
@@ -170,7 +177,7 @@ if varNames is not None:
     varColors = args.varColors
     if varLabels is None:
         if args.translate:
-            varLabels = [translate(e).replace(r"resum.\ TNP\ ", "") for e in varNames]
+            varLabels = [translate(e) for e in varNames]
         else:
             # try to get labels from predefined styles
             varLabels = [styles.legend_labels_combine.get(e, e) for e in varNames]
@@ -200,18 +207,12 @@ diff = not args.noLowerPanel and args.logTransform
 data = not args.noData
 
 # load .hdf5 file first, must exist in combinetf and combinetf2
-fitresult_h5py = combinetf_input.get_fitresult(args.infile.replace(".root", ".hdf5"))
+fitresult_h5py = combinetf_input.get_fitresult(args.infile)
 
 if "results" in fitresult_h5py.keys():
     fitresult = ioutils.pickle_load_h5py(fitresult_h5py["results"])
-    combinetf2 = True
-elif os.path.isfile(args.infile.replace(".hdf5", ".root")):
-    fitresult = combinetf_input.get_fitresult(args.infile.replace(".hdf5", ".root"))
-    combinetf2 = False
 else:
-    raise IOError(
-        "Unknown source, input file must be either from combinetf2 or combinetf1 (in case of combinetf1 both .root and .hdf5 files must exist)"
-    )
+    raise IOError("Unknown source, input file must be from combinetf2")
 
 meta = input_tools.get_metadata(args.infile)
 is_normalized = meta["args"].get("normalize", False) if meta is not None else False
@@ -225,6 +226,8 @@ translate_selection_value = {
         1.0: "+1",
     },
 }
+
+plt.rcParams["font.size"] = plt.rcParams["font.size"] * args.scaleTextSize
 
 
 def make_plot(
@@ -289,9 +292,9 @@ def make_plot(
     histtype_data = "errorbar"
     histtype_mc = "fill"
 
-    if any(x in axes_names for x in ["ptVgen", "absYVgen", "helicity"]):
-        histtype_data = "step"
-        histtype_mc = "errorbar"
+    # if any(x in axes_names for x in ["ptVgen", "absYVgen", "helicity"]):
+    #     histtype_data = "step"
+    #     histtype_mc = "errorbar"
 
     if len(h_data.axes) > 1:
         if args.invertAxes:
@@ -325,7 +328,7 @@ def make_plot(
         xlabel = f"({', '.join([styles.xlabels.get(s,s).replace('(GeV)','') for s in axes_names])}) bin"
     if ratio or diff:
         if args.noData:
-            rlabel = ("Diff." if diff else "Ratio") + " to pred."
+            rlabel = ("Diff." if diff else "Ratio") + " to nominal"
         else:
             rlabel = f"${args.dataName}" + ("-" if diff else r"\,/\,") + "Pred.$"
 
@@ -336,6 +339,7 @@ def make_plot(
             args.ylim,
             rlabel,
             args.rrange,
+            xlim=args.axlim,
             width_scale=(
                 args.customFigureWidth
                 if args.customFigureWidth is not None
@@ -348,13 +352,32 @@ def make_plot(
     else:
         fig, ax1 = plot_tools.figure(h_data, xlabel, ylabel, args.ylim)
 
+    for (
+        h,
+        c,
+        l,
+    ) in zip(h_stack, colors, labels):
+        # only for labels
+        hep.histplot(
+            h,
+            xerr=False,
+            yerr=False,
+            histtype=histtype_mc,
+            color=c,
+            label=l,
+            density=False,
+            binwnorm=binwnorm,
+            ax=ax1,
+            zorder=1,
+            flow="none",
+        )
+
     hep.histplot(
         h_stack,
         xerr=False,
         yerr=False,
         histtype=histtype_mc,
         color=colors,
-        label=labels,
         stack=True,
         density=False,
         binwnorm=binwnorm,
@@ -482,7 +505,8 @@ def make_plot(
 
             hatchstyle = None
             facecolor = "silver"
-            label_unc = "Pred. unc."
+            # label_unc = "Pred. unc."
+            label_unc = "Model unc."
 
             if diff:
                 ax2.fill_between(
@@ -570,9 +594,13 @@ def make_plot(
         else:
             chi2_name = r"$\mathit{\chi}^2/\mathit{ndf}$"
 
+        # chi2_text = [
+        #     chi2_name,
+        #     rf"$= {round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$",
+        # ]
         chi2_text = [
-            chi2_name,
-            rf"$= {round(chi2[0],1)}/{chi2[1]}\ (\mathit{{p}}={p_val}\%)$",
+            rf"{chi2_name} = ${round(chi2[0],1)}/{chi2[1]}$",
+            rf"$(\mathit{{p}}={p_val}\%)$",
         ]
 
         if args.extraTextLoc is None or len(args.extraTextLoc) <= 2:
@@ -591,8 +619,9 @@ def make_plot(
         ax1,
         args.cmsDecor,
         data=data or "Nonprompt" in labels,
-        lumi=lumi if args.dataName == "Data" and not args.noData else None,
+        lumi=lumi,  # if args.dataName == "Data" and not args.noData else None,
         loc=args.logoPos,
+        text_size=args.legSize,
     )
 
     if len(h_stack) < 10:
@@ -668,6 +697,9 @@ def make_plots(
         hist_stack, labels, colors, procs = styles.process_grouping(
             args.processGrouping, hist_stack, procs
         )
+    labels = [
+        l if p not in args.suppressProcsLabel else None for l, p in zip(labels, procs)
+    ]
 
     if hist_var is not None:
         hists_down = [
@@ -765,455 +797,149 @@ def make_plots(
         )
 
 
-if combinetf2:
-    meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
-    command = meta["meta_info"]["command"]
-    asimov = False
-    if "-t-1" in command or "-t -1" in command or "-t" not in command:
-        asimov = True
-    meta_input = meta["meta_info_input"]
-    procs = meta["procs"].astype(str)
-    if args.filterProcs is not None:
-        procs = [p for p in procs if p in args.filterProcs]
-    labels, colors, procs = styles.get_labels_colors_procs_sorted(procs)
+meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
+command = meta["meta_info"]["command"]
+asimov = False
+if "-t-1" in command or "-t -1" in command or "-t" not in command:
+    asimov = True
+meta_input = meta["meta_info_input"]
+procs = meta["procs"].astype(str)
+if args.filterProcs is not None:
+    procs = [p for p in procs if p in args.filterProcs]
+labels, colors, procs = styles.get_labels_colors_procs_sorted(procs)
 
-    if args.correlatedVariations:
-        correlated = "_correlated"
-    else:
-        correlated = ""
-
-    if len(args.project) == 0:
-
-        chi2 = None
-        if fittype == "postfit" and fitresult["postfit_profile"] and not args.noChisq:
-            # use saturated likelihood test if relevant
-
-            nllvalfull = fitresult["nllvalfull"]
-            satnllvalfull = fitresult["satnllvalfull"]
-            satchi2 = 2.0 * (nllvalfull - satnllvalfull)
-            ndof = fitresult["ndfsat"]
-            chi2 = satchi2, ndof
-            saturated_chi2 = True
-        elif f"chi2_{fittype}" in fitresult and not args.noChisq:
-            chi2 = fitresult[f"chi2_{fittype}"], fitresult[f"ndf_{fittype}"]
-            saturated_chi2 = False
-
-        for channel, info in meta_input["channel_info"].items():
-            if channel.endswith("masked"):
-                continue
-
-            hist_data = fitresult["hist_data_obs"][channel].get()
-            hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
-            hist_stack = fitresult[f"hist_{fittype}"][channel].get()
-            hist_stack = [hist_stack[{"processes": p}] for p in procs]
-
-            # vary poi by postfit uncertainty
-            if varNames is not None:
-                hist_var = fitresult[f"hist_{fittype}_variations{correlated}"][
-                    channel
-                ].get()
-            else:
-                hist_var = None
-
-            if args.logTransform:
-                hist_data.variances(flow=True)[...] = (
-                    hist_data.variances(flow=True)[...]
-                    / hist_data.values(flow=True)[...] ** 2
-                )
-                for h in hist_stack:
-                    h.variances(flow=True)[...] = (
-                        h.variances(flow=True)[...] / h.values(flow=True)[...] ** 2
-                    )
-
-                hist_data.values(flow=True)[...] = np.log(
-                    hist_data.values(flow=True)[...]
-                )
-                for h in hist_stack:
-                    h.values(flow=True)[...] = np.log(h.values(flow=True)[...])
-
-            if any(x in hist_data.axes.name for x in ["helicity"]):
-                if asimov:
-                    hist_data.values()[...] = 1e5 * np.log(hist_data.values())
-                or_vals = np.copy(hist_inclusive.values())
-                hist_inclusive.values()[...] = 1e5 * np.log(hist_inclusive.values())
-                hist_inclusive.variances()[...] = (
-                    1e10 * (hist_inclusive.variances()) / np.square(or_vals)
-                )
-
-                if varNames is not None:
-                    hist_var.values()[...] = 1e5 * np.log(hist_var.values())
-                    hist_var.variances()[...] = (
-                        1e10 * (hist_var.variances()) / np.square(or_vals)
-                    )
-
-                for h in hist_stack:
-                    or_vals = np.copy(h.values())
-                    h.values()[...] = 1e5 * np.log(h.values())
-                    h.variances()[...] = 1e10 * (h.variances()) / np.square(or_vals)
-
-            make_plots(
-                hist_data,
-                hist_inclusive,
-                hist_stack,
-                info["axes"],
-                hist_var=hist_var,
-                channel=channel,
-                procs=procs,
-                labels=labels,
-                colors=colors,
-                chi2=chi2,
-                saturated_chi2=saturated_chi2,
-                meta=meta,
-                lumi=info["lumi"],
-            )
-    else:
-        for result in fitresult["projections"]:
-            channel = result["channel"]
-            axes = result["axes"]
-
-            for projection in args.project:
-                if channel == projection[0] and set(axes) == set(projection[1:]):
-                    break
-            else:
-                continue
-
-            axes = [
-                a for a in meta_input["channel_info"][channel]["axes"] if a.name in axes
-            ]
-
-            if f"chi2_{fittype}" in fitresult and not args.noChisq:
-                chi2 = result[f"chi2_{fittype}"], result[f"ndf_{fittype}"]
-            else:
-                chi2 = None
-
-            hist_data = result["hist_data_obs"].get()
-            hist_inclusive = result[f"hist_{fittype}_inclusive"].get()
-            hist_stack = result[f"hist_{fittype}"].get()
-            hist_stack = [hist_stack[{"processes": p}] for p in procs]
-
-            # vary poi by postfit uncertainty
-            if varNames is not None:
-                hist_var = result[f"hist_{fittype}_variations{correlated}"].get()
-            else:
-                hist_var = None
-
-            make_plots(
-                hist_data,
-                hist_inclusive,
-                hist_stack,
-                axes,
-                hist_var=hist_var,
-                channel=channel,
-                procs=procs,
-                labels=labels,
-                colors=colors,
-                chi2=chi2,
-                meta=meta,
-                lumi=meta_input["channel_info"][channel]["lumi"],
-            )
-
+if args.correlatedVariations:
+    correlated = "_correlated"
 else:
-    raise RuntimeError(
-        "prefit/postfit plotting from combinetf1 is deprecated because of several inconsistencies which are (only) fixed in combinetf2"
-    )
-    # combinetf1
-    import ROOT
+    correlated = ""
 
-    procs = [
-        k.replace("expproc_", "").replace(f"_{fittype};1", "")
-        for k in fitresult.keys()
-        if fittype in k
-        and k.startswith("expproc_")
-        and all(x not in k for x in ["hybrid", "masked"])
-    ]
-    if args.filterProcs is not None:
-        procs = [p for p in procs if p in args.filterProcs]
-    labels, colors, procs = styles.get_labels_colors_procs_sorted(procs)
+if len(args.project) == 0:
 
-    if "meta" in fitresult_h5py:
-        # the fit was probably done on a file generated via the hdf5 writer and we can use the axes information
-        meta = ioutils.pickle_load_h5py(fitresult_h5py["meta"])
-        ch_start = 0
-        for channel, info in meta["channel_info"].items():
-            if channel.endswith("masked"):
-                continue
-            shape = [len(a) for a in info["axes"]]
+    chi2 = None
+    saturated_chi2 = False
+    if fittype == "postfit" and fitresult["postfit_profile"] and not args.noChisq:
+        # use saturated likelihood test if relevant
 
-            ch_end = ch_start + np.prod(
-                shape
-            )  # in combinetf1 the channels are concatenated and we need to index one after the other
+        nllvalfull = fitresult["nllvalfull"]
+        satnllvalfull = fitresult["satnllvalfull"]
+        satchi2 = 2.0 * (nllvalfull - satnllvalfull)
+        ndof = fitresult["ndfsat"]
+        chi2 = satchi2, ndof
+        saturated_chi2 = True
+    elif f"chi2_{fittype}" in fitresult and not args.noChisq:
+        chi2 = fitresult[f"chi2_{fittype}"], fitresult[f"ndf_{fittype}"]
 
-            hist_data = fitresult["obs;1"].to_hist()
-            values = np.reshape(hist_data.values()[ch_start:ch_end], shape)
-            hist_data = hist.Hist(
-                *info["axes"],
-                storage=hist.storage.Weight(),
-                data=np.stack((values, values), axis=-1),
-            )
+    for channel, info in meta_input["channel_info"].items():
+        if channel.endswith("masked"):
+            logger.info(f"Skip masked channel {channel}")
+            continue
 
-            # last bin can be masked channel; slice with [:nBins]
-            hist_inclusive = fitresult[f"expfull_{fittype};1"].to_hist()
-            hist_inclusive = hist.Hist(
-                *info["axes"],
-                storage=hist.storage.Weight(),
-                data=np.stack(
-                    (
-                        np.reshape(hist_inclusive.values()[ch_start:ch_end], shape),
-                        np.reshape(hist_inclusive.variances()[ch_start:ch_end], shape),
-                    ),
-                    axis=-1,
-                ),
-            )
-            hist_stack = [
-                fitresult[f"expproc_{p}_{fittype};1"].to_hist() for p in procs
-            ]
-            hist_stack = [
-                hist.Hist(
-                    *info["axes"],
-                    storage=hist.storage.Weight(),
-                    data=np.stack(
-                        (
-                            np.reshape(h.values()[ch_start:ch_end], shape),
-                            np.reshape(h.variances()[ch_start:ch_end], shape),
-                        ),
-                        axis=-1,
-                    ),
-                )
-                for h in hist_stack
-            ]
+        hist_data = fitresult["hist_data_obs"][channel].get()
+        hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
+        hist_stack = fitresult[f"hist_{fittype}"][channel].get()
+        hist_stack = [hist_stack[{"processes": p}] for p in procs]
 
-            if not args.prefit and not args.noChisq:
-                rfile = ROOT.TFile.Open(args.infile.replace(".hdf5", ".root"))
-                ttree = rfile.Get("fitresults")
-                ttree.GetEntry(0)
-                chi2 = [
-                    2 * (ttree.nllvalfull - ttree.satnllvalfull),
-                    np.prod([len(a) for a in info["axes"]]) - ttree.ndofpartial,
-                ]
-            else:
-                chi2 = None
-
-            make_plots(
-                hist_data,
-                hist_inclusive,
-                hist_stack,
-                info["axes"],
-                channel=channel,
-                procs=procs,
-                labels=labels,
-                colors=colors,
-                chi2=chi2,
-                meta=meta,
-                saturated_chi2=True,
-                lumi=info["lumi"],
-            )
-            ch_start = ch_end
-    else:
-        # the fit was probably done on a file generated via the root writer and we can't use the axes information
-
-        # get axes from the directory name
-        filename_parts = [x for x in filter(lambda x: x, args.infile.split("/"))]
-        analysis = filename_parts[-2].split("_")[0]
-        if analysis == "ZMassDilepton":
-            all_axes = {
-                # "mll": hist.axis.Regular(60, 60., 120., name = "mll", overflow=False, underflow=False),
-                "mll": hist.axis.Variable(
-                    [
-                        60,
-                        70,
-                        75,
-                        78,
-                        80,
-                        82,
-                        84,
-                        85,
-                        86,
-                        87,
-                        88,
-                        89,
-                        90,
-                        91,
-                        92,
-                        93,
-                        94,
-                        95,
-                        96,
-                        97,
-                        98,
-                        100,
-                        102,
-                        105,
-                        110,
-                        120,
-                    ],
-                    name="mll",
-                    overflow=False,
-                    underflow=False,
-                ),
-                "etaAbsEta": hist.axis.Variable(
-                    [
-                        -2.4,
-                        -2.0,
-                        -1.6,
-                        -1.4,
-                        -1.2,
-                        -1.0,
-                        -0.6,
-                        0.0,
-                        0.6,
-                        1.0,
-                        1.2,
-                        1.4,
-                        1.6,
-                        2.0,
-                        2.4,
-                    ],
-                    name="etaAbsEta",
-                    overflow=False,
-                    underflow=False,
-                ),
-                "cosThetaStarll": hist.axis.Regular(
-                    2, -1.0, 1.0, name="cosThetaStarll", underflow=False, overflow=False
-                ),
-                "yll": hist.axis.Regular(
-                    20, -2.5, 2.5, name="yll", overflow=False, underflow=False
-                ),
-                "ptll": hist.axis.Variable(
-                    common.get_dilepton_ptV_binning(False),
-                    name="ptll",
-                    underflow=False,
-                    overflow=False,
-                ),
-            }
-        elif analysis == "ZMassWLike":
-            all_axes = {
-                "pt": hist.axis.Regular(
-                    34, 26, 60, name="pt", overflow=False, underflow=False
-                ),
-                "eta": hist.axis.Regular(
-                    48, -2.4, 2.4, name="eta", overflow=False, underflow=False
-                ),
-                "charge": common.axis_charge,
-                "ptGen": hist.axis.Regular(
-                    33, 27, 60, name="ptGen", overflow=False, underflow=False
-                ),
-                "absEtaGen": hist.axis.Variable(
-                    differential.eta_binning,
-                    name="absEtaGen",
-                    overflow=False,
-                    underflow=False,
-                ),
-                "qGen": common.axis_charge,
-            }
-        elif analysis == "WMass":
-            all_axes = {
-                "pt": hist.axis.Regular(
-                    30, 26, 56, name="pt", overflow=False, underflow=False
-                ),
-                # "pt": hist.axis.Regular(31, 26, 57, name = "pt", overflow=False, underflow=False),
-                # "pt": hist.axis.Regular(29, 27, 56, name = "ptGen", overflow=False, underflow=False),
-                "eta": hist.axis.Regular(
-                    48, -2.4, 2.4, name="eta", overflow=False, underflow=False
-                ),
-                "charge": common.axis_charge,
-                "passIso": common.axis_passIso,
-                "passMT": common.axis_passMT,
-                "ptGen": hist.axis.Regular(
-                    29, 27, 56, name="ptGen", overflow=False, underflow=False
-                ),
-                "absEtaGen": hist.axis.Variable(
-                    differential.eta_binning,
-                    name="absEtaGen",
-                    overflow=False,
-                    underflow=False,
-                ),
-                "qGen": common.axis_charge,
-            }
+        # vary poi by postfit uncertainty
+        if varNames is not None:
+            hist_var = fitresult[f"hist_{fittype}_variations{correlated}"][
+                channel
+            ].get()
         else:
-            raise ValueError(f"Unknown analysis {analysis}, can't set the axes")
+            hist_var = None
+
+        if args.logTransform:
+            hist_data.variances(flow=True)[...] = (
+                hist_data.variances(flow=True)[...]
+                / hist_data.values(flow=True)[...] ** 2
+            )
+            for h in hist_stack:
+                h.variances(flow=True)[...] = (
+                    h.variances(flow=True)[...] / h.values(flow=True)[...] ** 2
+                )
+
+            hist_data.values(flow=True)[...] = np.log(hist_data.values(flow=True)[...])
+            for h in hist_stack:
+                h.values(flow=True)[...] = np.log(h.values(flow=True)[...])
+
+        if any(x in hist_data.axes.name for x in ["helicity"]):
+            if asimov:
+                hist_data.values()[...] = 1e5 * np.log(hist_data.values())
+            or_vals = np.copy(hist_inclusive.values())
+            hist_inclusive.values()[...] = 1e5 * np.log(hist_inclusive.values())
+            hist_inclusive.variances()[...] = (
+                1e10 * (hist_inclusive.variances()) / np.square(or_vals)
+            )
+
+            if varNames is not None:
+                hist_var.values()[...] = 1e5 * np.log(hist_var.values())
+                hist_var.variances()[...] = (
+                    1e10 * (hist_var.variances()) / np.square(or_vals)
+                )
+
+            for h in hist_stack:
+                or_vals = np.copy(h.values())
+                h.values()[...] = 1e5 * np.log(h.values())
+                h.variances()[...] = 1e10 * (h.variances()) / np.square(or_vals)
+
+        make_plots(
+            hist_data,
+            hist_inclusive,
+            hist_stack,
+            info["axes"],
+            hist_var=hist_var,
+            channel=channel,
+            procs=procs,
+            labels=labels,
+            colors=colors,
+            chi2=chi2,
+            saturated_chi2=saturated_chi2,
+            meta=meta,
+            lumi=info["lumi"],
+        )
+else:
+    for result in fitresult["projections"]:
+        channel = result["channel"]
+        axes = result["axes"]
+
+        for projection in args.project:
+            if channel == projection[0] and set(axes) == set(projection[1:]):
+                break
+        else:
+            continue
 
         axes = [
-            all_axes[part]
-            for part in filename_parts[-2].split("_")
-            if part in all_axes.keys()
-        ]
-        if args.axlim:
-            nv = len(args.axlim)
-            if nv % 2:
-                raise ValueError(
-                    "if --axlim is specified it must have two values per axis!"
-                )
-            axlim = np.array(args.axlim).reshape((int(nv / 2), 2))
-            axes = [
-                (
-                    ax
-                    if lim is not None
-                    else hist.axis.Variable(
-                        ax.edges[(ax.edges >= lim[0]) & (ax.edges <= lim[1])]
-                    )
-                )
-                for ax, lim in itertools.zip_longest(axes, axlim)
-            ]
-        shape = [len(a) for a in axes]
-
-        hist_data = fitresult["obs;1"].to_hist()
-        nBins = hist_data.shape[0]
-        values = np.reshape(hist_data.values(), shape)
-        hist_data = hist.Hist(
-            *axes,
-            storage=hist.storage.Weight(),
-            data=np.stack((values, values), axis=-1),
-        )
-
-        # last bin can be masked channel; slice with [:nBins]
-        hist_inclusive = fitresult[f"expfull_{fittype};1"].to_hist()[:nBins]
-        hist_inclusive = hist.Hist(
-            *axes,
-            storage=hist.storage.Weight(),
-            data=np.stack(
-                (
-                    np.reshape(hist_inclusive.values(), shape),
-                    np.reshape(hist_inclusive.variances(), shape),
-                ),
-                axis=-1,
-            ),
-        )
-        hist_stack = [
-            fitresult[f"expproc_{p}_{fittype};1"].to_hist()[:nBins] for p in procs
-        ]
-        hist_stack = [
-            hist.Hist(
-                *axes,
-                storage=hist.storage.Weight(),
-                data=np.stack(
-                    (np.reshape(h.values(), shape), np.reshape(h.variances(), shape)),
-                    axis=-1,
-                ),
-            )
-            for h in hist_stack
+            a for a in meta_input["channel_info"][channel]["axes"] if a.name in axes
         ]
 
-        if not args.prefit:
-            rfile = ROOT.TFile.Open(args.infile.replace(".hdf5", ".root"))
-            ttree = rfile.Get("fitresults")
-            ttree.GetEntry(0)
-            chi2 = [
-                2 * (ttree.nllvalfull - ttree.satnllvalfull),
-                np.prod([len(a) for a in axes]) - ttree.ndofpartial,
-            ]
+        if f"chi2_{fittype}" in fitresult and not args.noChisq:
+            chi2 = result[f"chi2_{fittype}"], result[f"ndf_{fittype}"]
         else:
             chi2 = None
+
+        hist_data = result["hist_data_obs"].get()
+        hist_inclusive = result[f"hist_{fittype}_inclusive"].get()
+        hist_stack = result[f"hist_{fittype}"].get()
+        hist_stack = [hist_stack[{"processes": p}] for p in procs]
+
+        # vary poi by postfit uncertainty
+        if varNames is not None:
+            hist_var = result[f"hist_{fittype}_variations{correlated}"].get()
+        else:
+            hist_var = None
 
         make_plots(
             hist_data,
             hist_inclusive,
             hist_stack,
             axes,
+            hist_var=hist_var,
+            channel=channel,
             procs=procs,
             labels=labels,
             colors=colors,
             chi2=chi2,
-            saturated_chi2=True,
+            meta=meta,
+            lumi=meta_input["channel_info"][channel]["lumi"],
         )
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:

@@ -1,6 +1,7 @@
 import pickle
 
 import hist
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -28,6 +29,7 @@ parser.add_argument(
     "--ratioToData", action="store_true", help="Use data as denominator in ratio"
 )
 parser.add_argument("--twoRatios", action="store_true", help="Make two ratio panels")
+parser.add_argument("--baseSize", type=float, default=10, help="Figure size")
 parser.add_argument(
     "--saveForHepdata",
     action="store_true",
@@ -40,6 +42,8 @@ args = parser.parse_args()
 logger = logging.setup_logger("make_postfit_vgen", args.verbose)
 
 fittype = "prefit" if args.prefit else "postfit"
+
+plt.rcParams["font.size"] = plt.rcParams["font.size"] * args.scaleTextSize
 
 
 def hist_to_up_down_unc(h):
@@ -281,7 +285,7 @@ else:
 rlabel = "Ratio to " + (
     "data"
     if unfolded_data and args.ratioToData
-    else f"\n{labels[0]}" if args.noPrefit else "\nprefit"
+    else f"{labels[0]}" if args.noPrefit else "prefit"
 )
 
 if args.twoRatios:
@@ -289,7 +293,7 @@ if args.twoRatios:
     subplotsizes = [3, 2, 2]
     rlabel = [
         "Ratio to\n" + labels[3] + "fit",
-        rlabel,
+        rlabel.replace("Ratio to ", "Ratio to\n"),
     ]
     midratio_idxs = [
         3,
@@ -346,7 +350,9 @@ fig = plot_tools.makePlotWithRatioToRef(
     legtext_size=args.legSize,
     dataIdx=idx_unfolded,
     ratio_to_data=args.ratioToData,
-    width_scale=1.25,
+    width_scale=1.0 if args.customFigureWidth is None else args.customFigureWidth,
+    automatic_scale=True if args.customFigureWidth is None else False,
+    base_size=args.baseSize,
     subplotsizes=subplotsizes,
     no_sci=args.noSciy,
     lumi=16.8,
