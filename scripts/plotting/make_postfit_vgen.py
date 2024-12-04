@@ -383,9 +383,12 @@ if args.saveForHepdata:
     logger.warning(f"Saving histograms for HEPData in {outfile_root}")
     for ih, h in enumerate(hists_nom):
         hroot = narf.hist_to_root(h)
-        hname = names[ih]
+        htitle = labels[ih]
+        hname = names[ih].replace(" ", "_").replace("-", "_")
         hroot.SetName(hname)
-        hroot.SetTitle(hname)
+        hroot.SetTitle(htitle)
+        # divide by bin width
+        hroot.Scale(1.0, "width")
         hroot.GetXaxis().SetTitle(xlabel)
         hroot.GetYaxis().SetTitle(ylabel)
         hroot.Write()
