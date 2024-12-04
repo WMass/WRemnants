@@ -81,12 +81,14 @@ class Datagroups(object):
             )
 
             self.era = "2017H"
+            self.lumi_uncertainty = 1.017
         else:
             from wremnants.datasets.datagroups2016 import (
                 make_datagroups_2016 as make_datagroups,
             )
 
             self.era = "2016postVFP"
+            self.lumi_uncertainty = 1.012
 
         make_datagroups(self, **kwargs)
 

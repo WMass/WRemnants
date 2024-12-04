@@ -39,12 +39,6 @@ from wremnants.helicity_utils_polvar import makehelicityWeightHelper_polvar
 from wremnants.histmaker_tools import aggregate_groups, scale_to_data
 
 parser.add_argument(
-    "--lumiUncertainty",
-    type=float,
-    help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%)",
-    default=1.012,
-)
-parser.add_argument(
     "--noGenMatchMC",
     action="store_true",
     help="Don't use gen match filter for prompt muons with MC samples (note: QCD MC never has it anyway)",
@@ -1189,6 +1183,7 @@ def build_graph(df, dataset):
                 axis_leadjetPt_fakes,
                 axis_dphi_fakes,
             ]
+
             df = df.Define("goodMuons_hasJet0", "Muon_jetIdx[goodMuons][0] != -1 ")
             df = df.Define(
                 "goodMuons_jetpt0",
@@ -1782,10 +1777,6 @@ def build_graph(df, dataset):
                 axes,
                 cols,
                 storage_type=storage_type,
-            )
-            # luminosity, as shape variation despite being a flat scaling to facilitate propagation to fakes
-            df = syst_tools.add_luminosity_unc_hists(
-                results, df, args, axes, cols, storage_type=storage_type
             )
 
         # n.b. this is the W analysis so mass weights shouldn't be propagated

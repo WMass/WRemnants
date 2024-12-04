@@ -405,54 +405,6 @@ class HDF5Writer(object):
             # initialize dictionaties for systematics
             self.init_data_dicts_channel(chan, procs_chan)
 
-            # lnN systematics
-            for var_name, syst in chanInfo.lnNSystematics.items():
-                logger.info(f"Now in channel {chan} at lnN systematic {var_name}")
-
-                if chanInfo.isExcludedNuisance(var_name):
-                    continue
-                procs_syst = [p for p in syst["processes"] if p in procs_chan]
-                if len(procs_syst) == 0:
-                    continue
-
-                ksyst = syst["size"]
-                asymmetric = type(ksyst) is list
-                if asymmetric:
-                    ksystup = ksyst[1]
-                    ksystdown = ksyst[0]
-                    if ksystup == 0.0 and ksystdown == 0.0:
-                        continue
-                    if ksystup == 0.0:
-                        ksystup = 1.0
-                    if ksystdown == 0.0:
-                        ksystdown = 1.0
-                    logkup_proc = math.log(ksystup) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-                    logkdown_proc = -math.log(ksystdown) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-                    logkavg_proc = 0.5 * (logkup_proc + logkdown_proc)
-                    logkhalfdiff_proc = 0.5 * (logkup_proc - logkdown_proc)
-                    logkup_proc = None
-                    logkdown_proc = None
-                else:
-                    if ksyst == 0.0:
-                        continue
-                    logkavg_proc = math.log(ksyst) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-
-                for proc in procs_syst:
-                    logger.debug(f"Now at proc {proc}!")
-
-                    self.book_logk_avg(logkavg_proc, chan, proc, var_name)
-
-                    if asymmetric:
-                        self.book_logk_halfdiff(logkhalfdiff_proc, chan, proc, var_name)
-
-                self.book_systematic(syst, var_name, masked=masked)
-
             # shape systematics
             for systKey, syst in chanInfo.systematics.items():
                 logger.info(
