@@ -8,7 +8,7 @@
 
 // #include <boost/math/special_functions/erf.hpp>
 #include <TMath.h>
-#include <TRandom.h>
+#include <TRandom3.h>
 
 namespace wrem {
 
@@ -170,6 +170,8 @@ public: // was private?
   int etaBin(double eta) const;
   int phiBin(double phi) const;
   template <typename T> double error(T f) const;
+
+  TRandom3 *random = new TRandom3(42);
 
   // public:
   enum TYPE { MC, DT };
@@ -621,8 +623,8 @@ Vec_f applyRochesterMC(Vec_f pt, Vec_f eta, Vec_f phi, Vec_f ch, Vec_i gen_idx,
     else
       res[i] = 1.0000 * pt[i] *
                rochester->kSmearMC(ch[i], pt[i], eta[i], phi[i],
-                                   nTrackerLayers.at(i), gRandom->Rndm(),
-                                   fluctuation, 0);
+                                   nTrackerLayers.at(i),
+                                   rochester->random->Rndm(), fluctuation, 0);
   }
 
   return res;
