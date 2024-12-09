@@ -45,7 +45,7 @@ class TheoryHelper(object):
         self.scale_pdf_unc = -1.0
         self.mirror_tnp = True
         self.minnlo_unc = "byHelicityPt"
-        self.skipFromSignal = False
+        self.helicity_fit_unc = False
         self.args = args
         self.label = label
 
@@ -90,16 +90,19 @@ class TheoryHelper(object):
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
         self.samples = samples
-        self.skipFromSignal = False
+        self.helicity_fit_unc = False
         self.minnlo_scale = minnlo_scale
         self.minnlo_symmetrize = (
             None if minnlo_symmetrize.lower() == "none" else minnlo_symmetrize
         )
 
-    def add_all_theory_unc(self, skipFromSignal=False):
-        self.skipFromSignal = skipFromSignal
+    def add_all_theory_unc(self, helicity_fit_unc=False):
+        self.helicity_fit_unc = helicity_fit_unc
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
+        # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
+        self.add_helicity_shower_kt_uncertainty()
+
         self.add_pdf_uncertainty(operation=self.pdf_operation, scale=self.scale_pdf_unc)
         try:
             self.add_quark_mass_vars()
@@ -228,9 +231,6 @@ class TheoryHelper(object):
                         scale=scale_inclusive * self.minnlo_scale,
                         symmetrize=self.minnlo_symmetrize,
                     )
-
-            # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
-            self.add_helicity_shower_kt_uncertainty()
 
     def add_minnlo_scale_uncertainty(
         self,
@@ -490,10 +490,10 @@ class TheoryHelper(object):
         ]
 
         logger.debug(f"Selected TNP nuisances: {self.tnp_nuisance_names}")
-        processesZ = [] if self.skipFromSignal else ["single_v_samples"]
+        processesZ = [] if self.helicity_fit_unc else ["single_v_samples"]
         processesW = (
             ["wtau_samples", "single_v_nonsig_samples"]
-            if self.skipFromSignal
+            if self.helicity_fit_unc
             else ["single_v_samples"]
         )
         processes = processesW if self.label == "W" else processesZ
@@ -580,8 +580,6 @@ class TheoryHelper(object):
 
         logger.debug(f"Adding gamma uncertainties from syst entries {gamma_vals}")
 
-        # processesZ = [] if self.skipFromSignal else ['single_v_samples']
-        # processesW = ['wtau_samples', 'single_v_nonsig_samples'] if self.skipFromSignal else ['single_v_samples']
         processesZ = ["single_v_samples"]
         processesW = ["single_v_samples"]
         processes = processesW if self.label == "W" else processesZ

@@ -1093,9 +1093,15 @@ def makePlotWithRatioToRef(
     lumi=None,
     center_rlabels=False,
     swap_ratio_panels=False,
+    select={},
 ):
+    if select:
+        hists = [h[select] for h in hists]
+
     if hists_ratio is None:
         hists_ratio = hists
+    elif select is not None:
+        hists_ratio = [h[select] for h in hists_ratio]
 
     if len(hists_ratio) != len(labels) or len(hists_ratio) != len(colors):
         raise ValueError(
