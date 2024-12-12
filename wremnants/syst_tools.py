@@ -2543,7 +2543,7 @@ def add_helicity_hists(
         )
 
         gen_theoryAgnostic = df.HistoBoost(
-            "nominal_gen_helicity_yieldsTheoryAgnostic",
+            "nominal_gen_yieldsTheoryAgnostic",
             [*axes, axis_ptV_thag, axis_yV_thag],
             [*cols, "ptVgen", "absYVgen", "helicity_moments_helicity_tensor"],
             tensor_axes=[axis_helicity, helicity_utils.axis_helicity_multidim],

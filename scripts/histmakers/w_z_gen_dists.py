@@ -267,7 +267,7 @@ def build_graph(df, dataset):
         # make a new axis here to avoid name collision with histograms which otherwise already
         # have a helicity axis
         axis_helicitygen = hist.axis.Integer(
-            -1, 8, name="helicitygen", overflow=False, underflow=False
+            -1, 8, name="helicity", overflow=False, underflow=False
         )
 
         # since mutliple tensor weights are not currently supported, convert the helicity tensor to a std::array which
@@ -821,12 +821,15 @@ def build_graph(df, dataset):
             propagateToHelicity=args.propagatePDFstoHelicity,
         )
 
+        helicity_axes = nominal_axes[:-1] if args.addHelicityAxis else nominal_axes
+        helicity_cols = nominal_cols[:-2] if args.addHelicityAxis else nominal_cols
+
         df = syst_tools.add_helicity_hists(
             results,
             df,
             dataset.name,
-            nominal_axes,
-            nominal_cols,
+            helicity_axes,
+            helicity_cols,
             base_name="nominal_gen",
             storage=hist.storage.Weight(),
         )

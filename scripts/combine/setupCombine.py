@@ -671,7 +671,7 @@ def make_parser(parser=None):
         help="Events from the same process but from tau final states are added to the signal",
     )
     parser.add_argument(
-        "--noPDFandQCDtheorySystOnSignal",
+        "--helicityFitTheoryUnc",
         action="store_true",
         help="Removes PDF and theory uncertainties on signal processes",
     )
@@ -1500,11 +1500,11 @@ def setup(
     if args.fitAlphaS or (not args.doStatOnly and not args.noTheoryUnc):
         theorySystSamples = ["signal_samples_inctau"]
         if wmass:
-            if args.noPDFandQCDtheorySystOnSignal:
+            if args.helicityFitTheoryUnc:
                 theorySystSamples = ["wtau_samples"]
             theorySystSamples.append("single_v_nonsig_samples")
         elif wlike:
-            if args.noPDFandQCDtheorySystOnSignal:
+            if args.helicityFitTheoryUnc:
                 theorySystSamples = []
             theorySystSamples.append("single_v_nonsig_samples")
         if xnorm:
@@ -1537,7 +1537,7 @@ def setup(
 
         if not args.doStatOnly and not args.noTheoryUnc:
             theory_helper.add_all_theory_unc(
-                skipFromSignal=args.noPDFandQCDtheorySystOnSignal,
+                helicity_fit_unc=args.helicityFitTheoryUnc,
             )
 
     if args.doStatOnly:
