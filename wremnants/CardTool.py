@@ -42,7 +42,6 @@ class CardTool(object):
         )
         self.outfile = None
         self.systematics = {}
-        self.lnNSystematics = {}
         self.fakeEstimate = None
         self.channels = ["inclusive"]
         self.cardContent = {}
@@ -327,22 +326,6 @@ class CardTool(object):
         if group not in splitGroupDict:
             splitGroupDict[group] = re.compile(".*")
         return splitGroupDict
-
-    def addLnNSystematic(
-        self, name, size, processes, group=None, groupFilter=None, splitGroup={}
-    ):
-        if not self.isExcludedNuisance(name):
-            self.lnNSystematics.update(
-                {
-                    name: {
-                        "size": size,
-                        "processes": self.expandProcesses(processes),
-                        "group": group,
-                        "groupFilter": groupFilter,
-                        "splitGroup": self.precompile_splitGroupDict(group, splitGroup),
-                    }
-                }
-            )
 
     # preOp is a function to apply per process, preOpMap can be used with a dict for a speratate function for each process,
     #   it is executed before summing the processes. Arguments can be specified with preOpArgs
@@ -1422,7 +1405,6 @@ class CardTool(object):
         if self.pseudoData and not self.xnorm:
             self.addPseudodata()
 
-        self.writeLnNSystematics()
         for syst in self.systematics.keys():
             if self.isExcludedNuisance(syst):
                 continue
@@ -1591,41 +1573,6 @@ class CardTool(object):
             logger.debug(f"Write X sec sum group {groupName} with members {members}")
             text += f"\n{groupName} {groupLabel} = {members}"
         return text
-
-    def writeLnNSystematics(self):
-        nondata = self.predictedProcesses()
-        nondata_chan = {chan: nondata.copy() for chan in self.channels}
-        for chan in self.excludeProcessForChannel.keys():
-            nondata_chan[chan] = list(
-                filter(
-                    lambda x: not self.excludeProcessForChannel[chan].match(x), nondata
-                )
-            )
-        # skip any syst that would be applied to no process (can happen when some are excluded)
-        for name, info in self.lnNSystematics.items():
-            if self.isExcludedNuisance(name):
-                continue
-            if all(x not in info["processes"] for x in nondata):
-                logger.warning(
-                    f"Trying to add lnN uncertainty {name} for {info['processes']}, which are not valid processes; see predicted processes: {nondata}.. It will be skipped"
-                )
-                continue
-
-            group = info["group"]
-            groupFilter = info["groupFilter"]
-            for chan in self.channels:
-                nameChan = name.replace("CHANNEL", chan)
-                include = [
-                    (str(info["size"]) if x in info["processes"] else "-").ljust(
-                        self.procColumnsSpacing
-                    )
-                    for x in nondata_chan[chan]
-                ]
-                self.cardContent[
-                    chan
-                ] += f'{nameChan.ljust(self.spacing)} lnN{" "*(self.systTypeSpacing-2)} {"".join(include)}\n'
-                if group and len(list(filter(groupFilter, [nameChan]))):
-                    self.addSystToGroup(group, chan, nameChan)
 
     def fillCardWithSyst(self, syst):
         # note: this function doesn't act on all systematics all at once
