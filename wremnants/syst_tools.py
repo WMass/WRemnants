@@ -1704,28 +1704,6 @@ def add_QCDbkg_jetPt_hist(
     add_syst_hist(results, dQCDbkGVar, name, axes, cols, "nominal_weight", **kwargs)
 
 
-def add_luminosity_unc_hists(
-    results, df, args, axes, cols, base_name="nominal", **kwargs
-):
-    name = Datagroups.histName(base_name, syst="luminosity")
-    df = df.Define(
-        "luminosityScaling",
-        f"wrem::constantScaling(nominal_weight, {args.lumiUncertainty})",
-    )
-    add_syst_hist(
-        results,
-        df,
-        name,
-        axes,
-        cols,
-        "luminosityScaling",
-        common.down_up_axis,
-        **kwargs,
-    )
-
-    return df
-
-
 def add_theory_corr_hists(
     results,
     df,

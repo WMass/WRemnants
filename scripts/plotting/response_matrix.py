@@ -185,8 +185,12 @@ def plot_resolution(
         xedges = None
         for sel2, idx2 in selections_slices:
             if (
-                idx2 not in [hist.underflow, hist.overflow]
-                and h2d.axes[sel2].size - 1 < idx2
+                (
+                    idx2 not in [hist.underflow, hist.overflow]
+                    and h2d.axes[sel2].size - 1 < idx2
+                )
+                or (idx2 == hist.overflow and not h2d.axes[sel2].traits.overflow)
+                or (idx2 == hist.underflow and not h2d.axes[sel2].traits.underflow)
             ):
                 continue
 

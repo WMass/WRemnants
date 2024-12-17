@@ -10,8 +10,7 @@ import numpy as np
 import narf
 from utilities import common, logging
 from utilities.h5pyutils import writeFlatInChunks, writeSparse
-from utilities.io_tools import combinetf_input
-from wremnants.combine_helpers import projectABCD
+from utilities.io_tools import combinetf2_input
 
 logger = logging.child_logger(__name__)
 
@@ -33,17 +32,14 @@ class HDF5Writer(object):
         self.theoryFitMCStat = True  # Whether or not to include the MC stat uncertainty in the thoery fit (in the covariance matrix)
 
         self.dict_noigroups = defaultdict(lambda: set())
-        self.dict_noigroups_masked = defaultdict(lambda: set())
         self.dict_systgroups = defaultdict(lambda: set())
 
         self.systsstandard = set()
         self.systsnoi = set()
-        self.systsnoimasked = set()
         self.systsnoconstraint = set()
         self.systsnoprofile = set()
 
         self.channels = {}
-        self.masked_channels = []
 
         self.clipSystVariations = False
         self.clipSystVariationsSignal = False
@@ -87,46 +83,26 @@ class HDF5Writer(object):
             self.dict_logkavg[channel] = {p: {} for p in processes}
             self.dict_logkhalfdiff[channel] = {p: {} for p in processes}
 
-    def set_fitresult(
-        self, fitresult_filename, poi_type="pmaskedexp", gen_flow=False, mc_stat=True
-    ):
-        if poi_type != "pmaskedexp":
-            raise NotImplementedError(
-                "Theoryfit currently only supported for poi_type='pmaskedexp'"
-            )
+    def set_fitresult(self, fitresult_filename, mc_stat=True):
         if len(self.get_channels()) > 1:
             logger.warning(
                 "Theoryfit for more than one channels is currently experimental"
             )
         self.theoryFit = True
         self.theoryFitMCStat = mc_stat
-        base_processes = [
-            "W" if c.datagroups.mode == "w_mass" else "Z"
-            for c in self.get_channels().values()
-        ]
-        axes = [c.fit_axes for c in self.get_channels().values()]
-        fitresult = combinetf_input.get_fitresult(fitresult_filename)
-        data, self.theoryFitDataCov = combinetf_input.get_theoryfit_data(
-            fitresult,
-            axes=axes,
-            base_processes=base_processes,
-            poi_type=poi_type,
-            flow=gen_flow,
+
+        fitresult, meta = combinetf2_input.get_fitresult(fitresult_filename, meta=True)
+        self.theoryFitData, self.theoryFitDataCov = combinetf2_input.get_theoryfit_data(
+            fitresult
         )
-        # theoryfit data for each channel
-        self.theoryFitData = {c: d for c, d in zip(self.get_channels().keys(), data)}
 
     def add_channel(self, cardTool, name=None):
         if name is None:
             name = f"ch{len(self.channels)}"
-        if cardTool.xnorm and not self.theoryFit:
-            name += "_masked"
         self.channels[name] = cardTool
 
     def get_channels(self):
-        # return channels such that masked channels are last
-        sorted_channels = dict(sorted(self.channels.items(), key=lambda x: x[1].xnorm))
-        return sorted_channels
+        return self.channels
 
     def get_signals(self):
         signals = set()
@@ -146,18 +122,16 @@ class HDF5Writer(object):
             )
         return list(common.natural_sort(bkgs))
 
-    def get_flat_values(self, h, chanInfo, axes, return_variances=True, flow=False):
+    def get_flat_values(
+        self, h, chanInfo=None, axes=None, return_variances=True, flow=False
+    ):
         # check if variances are available
         if return_variances and (h.storage_type != hist.storage.Weight):
             logger.warning(
                 f"Sumw2 not filled for {h} but needed for binByBin uncertainties, variances are set to 0"
             )
 
-        if chanInfo.simultaneousABCD and set(chanInfo.getFakerateAxes()) != set(
-            chanInfo.fit_axes[: len(chanInfo.getFakerateAxes())]
-        ):
-            h = projectABCD(chanInfo, h, return_variances=return_variances)
-        elif h.axes.name != axes:
+        if axes is not None and h.axes.name != axes:
             h = h.project(*axes)
 
         if return_variances:
@@ -194,17 +168,11 @@ class HDF5Writer(object):
         self.init_data_dicts()
 
         for chan, chanInfo in self.get_channels().items():
-            masked = chanInfo.xnorm and not self.theoryFit
-            logger.info(f"Now in channel {chan} masked={masked}")
+            logger.info(f"Now in channel {chan}")
 
             dg = chanInfo.datagroups
-            if masked:
-                self.masked_channels.append(chan)
-                axes = chanInfo.fit_axes[:]
-                nbinschan = 1 if len(axes) == 1 and axes[0] == "count" else None
-            else:
-                axes = chanInfo.fit_axes[:]
-                nbinschan = None
+            axes = chanInfo.fit_axes[:]
+            nbinschan = None
 
             # load data and nominal and syst histograms
             dg.loadHistsForDatagroups(
@@ -214,7 +182,7 @@ class HDF5Writer(object):
                 label=chanInfo.nominalName,
                 scaleToNewLumi=chanInfo.lumiScale,
                 forceNonzero=forceNonzero,
-                sumFakesPartial=not chanInfo.simultaneousABCD,
+                sumFakesPartial=True,
             )
 
             procs_chan = chanInfo.predictedProcesses()
@@ -229,87 +197,86 @@ class HDF5Writer(object):
                 "axes": [hist_nominal.axes[a] for a in axes],
             }
 
-            if len(dg.gen_axes) and not masked:
+            if len(dg.gen_axes):
                 channel_info[chan]["gen_axes"] = dg.gen_axes
 
-            if not masked:
-                # pseudodata
-                if chanInfo.pseudoData:
-                    pseudoDataNameList = []
-                    data_pseudo_hists = chanInfo.loadPseudodata()
-                    for (
-                        data_pseudo_hist,
-                        pseudo_data_name,
-                        pseudo_hist_name,
-                        pseudo_axis_name,
-                        pseudo_idxs,
-                    ) in zip(
-                        data_pseudo_hists,
-                        chanInfo.pseudoDataName,
-                        chanInfo.pseudoData,
-                        chanInfo.pseudoDataAxes,
-                        chanInfo.pseudoDataIdxs,
-                    ):
+            # pseudodata
+            if chanInfo.pseudoData:
+                pseudoDataNameList = []
+                data_pseudo_hists = chanInfo.loadPseudodata()
+                for (
+                    data_pseudo_hist,
+                    pseudo_data_name,
+                    pseudo_hist_name,
+                    pseudo_axis_name,
+                    pseudo_idxs,
+                ) in zip(
+                    data_pseudo_hists,
+                    chanInfo.pseudoDataName,
+                    chanInfo.pseudoData,
+                    chanInfo.pseudoDataAxes,
+                    chanInfo.pseudoDataIdxs,
+                ):
 
-                        if pseudo_axis_name is not None:
-                            pseudo_axis = data_pseudo_hist.axes[pseudo_axis_name]
+                    if pseudo_axis_name is not None:
+                        pseudo_axis = data_pseudo_hist.axes[pseudo_axis_name]
 
-                            if (
-                                len(pseudo_idxs) == 1
-                                and pseudo_idxs[0] is not None
-                                and int(pseudo_idxs[0]) == -1
-                            ):
-                                pseudo_idxs = pseudo_axis
+                        if (
+                            len(pseudo_idxs) == 1
+                            and pseudo_idxs[0] is not None
+                            and int(pseudo_idxs[0]) == -1
+                        ):
+                            pseudo_idxs = pseudo_axis
 
-                            for syst_idx in pseudo_idxs:
-                                idx = 0 if syst_idx is None else syst_idx
-                                pseudo_hist = data_pseudo_hist[{pseudo_axis_name: idx}]
-                                data_pseudo = self.get_flat_values(
-                                    pseudo_hist, chanInfo, axes, return_variances=False
-                                )
-                                self.dict_pseudodata[chan].append(data_pseudo)
-                                if type(pseudo_axis) == hist.axis.StrCategory:
-                                    syst_bin = (
-                                        pseudo_axis.bin(idx)
-                                        if type(idx) == int
-                                        else str(idx)
-                                    )
-                                else:
-                                    syst_bin = (
-                                        str(pseudo_axis.index(idx))
-                                        if type(idx) == int
-                                        else str(idx)
-                                    )
-                                key = f"{pseudo_data_name}{f'_{syst_bin}' if syst_idx not in [None, 0] else ''}"
-                                logger.info(f"Write pseudodata {key}")
-                                pseudoDataNameList.append(key)
-                        else:
-                            # pseudodata from alternative histogram that has no syst axis
+                        for syst_idx in pseudo_idxs:
+                            idx = 0 if syst_idx is None else syst_idx
+                            pseudo_hist = data_pseudo_hist[{pseudo_axis_name: idx}]
                             data_pseudo = self.get_flat_values(
-                                data_pseudo_hist, chanInfo, axes, return_variances=False
+                                pseudo_hist, chanInfo, axes, return_variances=False
                             )
                             self.dict_pseudodata[chan].append(data_pseudo)
-                            logger.info(f"Write pseudodata {pseudo_data_name}")
-                            pseudoDataNameList.append(pseudo_data_name)
-
-                    if npseudodata == 0:
-                        npseudodata = len(self.dict_pseudodata[chan])
-                        pseudoDataNames = pseudoDataNameList
-                    elif (
-                        npseudodata != len(self.dict_pseudodata[chan])
-                        or pseudoDataNames != pseudoDataNameList
-                    ):
-                        raise RuntimeError(
-                            "Different pseudodata settings for different channels not supported!"
+                            if type(pseudo_axis) == hist.axis.StrCategory:
+                                syst_bin = (
+                                    pseudo_axis.bin(idx)
+                                    if type(idx) == int
+                                    else str(idx)
+                                )
+                            else:
+                                syst_bin = (
+                                    str(pseudo_axis.index(idx))
+                                    if type(idx) == int
+                                    else str(idx)
+                                )
+                            key = f"{pseudo_data_name}{f'_{syst_bin}' if syst_idx not in [None, 0] else ''}"
+                            logger.info(f"Write pseudodata {key}")
+                            pseudoDataNameList.append(key)
+                    else:
+                        # pseudodata from alternative histogram that has no syst axis
+                        data_pseudo = self.get_flat_values(
+                            data_pseudo_hist, chanInfo, axes, return_variances=False
                         )
+                        self.dict_pseudodata[chan].append(data_pseudo)
+                        logger.info(f"Write pseudodata {pseudo_data_name}")
+                        pseudoDataNameList.append(pseudo_data_name)
 
-                    # release memory
-                    del chanInfo.pseudodata_datagroups
-                    for proc in chanInfo.datagroups.groups:
-                        for pseudo in chanInfo.pseudoData:
-                            if pseudo in dg.groups[proc].hists:
-                                logger.debug(f"Delete pseudodata histogram {pseudo}")
-                                del dg.groups[proc].hists[pseudo]
+                if npseudodata == 0:
+                    npseudodata = len(self.dict_pseudodata[chan])
+                    pseudoDataNames = pseudoDataNameList
+                elif (
+                    npseudodata != len(self.dict_pseudodata[chan])
+                    or pseudoDataNames != pseudoDataNameList
+                ):
+                    raise RuntimeError(
+                        "Different pseudodata settings for different channels not supported!"
+                    )
+
+                # release memory
+                del chanInfo.pseudodata_datagroups
+                for proc in chanInfo.datagroups.groups:
+                    for pseudo in chanInfo.pseudoData:
+                        if pseudo in dg.groups[proc].hists:
+                            logger.debug(f"Delete pseudodata histogram {pseudo}")
+                            del dg.groups[proc].hists[pseudo]
 
             # nominal predictions (after pseudodata because some pseudodata changes the nominal model and/or its uncertainties)
             for proc in procs_chan:
@@ -325,22 +292,16 @@ class HDF5Writer(object):
 
                     norm_proc_hist = exponential(norm_proc_hist)
 
-                if not masked:
-                    norm_proc, sumw2_proc = self.get_flat_values(
-                        norm_proc_hist, chanInfo, axes
-                    )
-                    if proc in chanInfo.noStatUncProcesses:
-                        logger.info(f"Skip sumw2 for proc {proc}")
-                        sumw2_proc = 0
-                else:
-                    norm_proc = self.get_flat_values(
-                        norm_proc_hist, chanInfo, axes, return_variances=False
-                    )
+                norm_proc, sumw2_proc = self.get_flat_values(
+                    norm_proc_hist, chanInfo, axes
+                )
+                if proc in chanInfo.noStatUncProcesses:
+                    logger.info(f"Skip sumw2 for proc {proc}")
+                    sumw2_proc = 0
 
                 if nbinschan is None:
                     nbinschan = norm_proc.shape[0]
-                    if not masked:
-                        nbins += nbinschan
+                    nbins += nbinschan
                 elif nbinschan != norm_proc.shape[0]:
                     raise Exception(
                         f"Mismatch between number of bins in channel {chan} and process {proc} for expected ({nbinschan}) and ({norm_proc.shape[0]})"
@@ -349,12 +310,11 @@ class HDF5Writer(object):
                 if not allowNegativeExpectation:
                     norm_proc = np.maximum(norm_proc, 0.0)
 
-                if not masked:
-                    if not np.all(np.isfinite(sumw2_proc)):
-                        raise RuntimeError(
-                            f"{len(sumw2_proc)-sum(np.isfinite(sumw2_proc))} NaN or Inf values encountered in variances for {proc}!"
-                        )
-                    self.dict_sumw2[chan][proc] = sumw2_proc
+                if not np.all(np.isfinite(sumw2_proc)):
+                    raise RuntimeError(
+                        f"{len(sumw2_proc)-sum(np.isfinite(sumw2_proc))} NaN or Inf values encountered in variances for {proc}!"
+                    )
+                self.dict_sumw2[chan][proc] = sumw2_proc
 
                 if not np.all(np.isfinite(norm_proc)):
                     raise RuntimeError(
@@ -365,33 +325,37 @@ class HDF5Writer(object):
 
             ibins.append(nbinschan)
 
-            if not masked:
-                # data
-                if (
-                    self.theoryFit
-                    and self.theoryFitData is not None
-                    and self.theoryFitDataCov is not None
-                ):
-                    data_obs = self.theoryFitData[chan]
-                elif chanInfo.real_data and dg.dataName in dg.groups:
-                    data_obs_hist = dg.groups[dg.dataName].hists[chanInfo.nominalName]
-                    data_obs = self.get_flat_values(
-                        data_obs_hist, chanInfo, axes, return_variances=False
-                    )
-                else:
-                    # in case pseudodata is given, write first pseudodata into data hist, otherwise write sum of expected processes
-                    if chanInfo.pseudoData:
-                        logger.warning(
-                            "Writing combinetf hdf5 input without data, use first pseudodata."
-                        )
-                        data_obs = self.dict_pseudodata[chan][0]
-                    else:
-                        logger.warning(
-                            "Writing combinetf hdf5 input without data, use sum of processes."
-                        )
-                        data_obs = sum(self.dict_norm[chan].values())
+            # data
+            if (
+                self.theoryFit
+                and self.theoryFitData is not None
+                and self.theoryFitDataCov is not None
+            ):
+                h_data_obs = self.theoryFitData[chan].get()
 
-                self.dict_data_obs[chan] = data_obs
+                data_obs = self.get_flat_values(
+                    h_data_obs, chanInfo, axes, return_variances=False
+                )
+
+            elif chanInfo.real_data and dg.dataName in dg.groups:
+                data_obs_hist = dg.groups[dg.dataName].hists[chanInfo.nominalName]
+                data_obs = self.get_flat_values(
+                    data_obs_hist, chanInfo, axes, return_variances=False
+                )
+            else:
+                # in case pseudodata is given, write first pseudodata into data hist, otherwise write sum of expected processes
+                if chanInfo.pseudoData:
+                    logger.warning(
+                        "Writing combinetf hdf5 input without data, use first pseudodata."
+                    )
+                    data_obs = self.dict_pseudodata[chan][0]
+                else:
+                    logger.warning(
+                        "Writing combinetf hdf5 input without data, use sum of processes."
+                    )
+                    data_obs = sum(self.dict_norm[chan].values())
+
+            self.dict_data_obs[chan] = data_obs
 
             # free memory
             if dg.dataName in dg.groups:
@@ -404,54 +368,6 @@ class HDF5Writer(object):
 
             # initialize dictionaties for systematics
             self.init_data_dicts_channel(chan, procs_chan)
-
-            # lnN systematics
-            for var_name, syst in chanInfo.lnNSystematics.items():
-                logger.info(f"Now in channel {chan} at lnN systematic {var_name}")
-
-                if chanInfo.isExcludedNuisance(var_name):
-                    continue
-                procs_syst = [p for p in syst["processes"] if p in procs_chan]
-                if len(procs_syst) == 0:
-                    continue
-
-                ksyst = syst["size"]
-                asymmetric = type(ksyst) is list
-                if asymmetric:
-                    ksystup = ksyst[1]
-                    ksystdown = ksyst[0]
-                    if ksystup == 0.0 and ksystdown == 0.0:
-                        continue
-                    if ksystup == 0.0:
-                        ksystup = 1.0
-                    if ksystdown == 0.0:
-                        ksystdown = 1.0
-                    logkup_proc = math.log(ksystup) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-                    logkdown_proc = -math.log(ksystdown) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-                    logkavg_proc = 0.5 * (logkup_proc + logkdown_proc)
-                    logkhalfdiff_proc = 0.5 * (logkup_proc - logkdown_proc)
-                    logkup_proc = None
-                    logkdown_proc = None
-                else:
-                    if ksyst == 0.0:
-                        continue
-                    logkavg_proc = math.log(ksyst) * np.ones(
-                        [nbinschan], dtype=self.dtype
-                    )
-
-                for proc in procs_syst:
-                    logger.debug(f"Now at proc {proc}!")
-
-                    self.book_logk_avg(logkavg_proc, chan, proc, var_name)
-
-                    if asymmetric:
-                        self.book_logk_halfdiff(logkhalfdiff_proc, chan, proc, var_name)
-
-                self.book_systematic(syst, var_name, masked=masked)
 
             # shape systematics
             for systKey, syst in chanInfo.systematics.items():
@@ -495,8 +411,8 @@ class HDF5Writer(object):
                     # Needed to avoid always reading the variation for the fakes, even for procs not specified
                     forceToNominal=forceToNominal,
                     scaleToNewLumi=chanInfo.lumiScale,
-                    nominalIfMissing=not chanInfo.xnorm,  # for masked channels not all systematics exist (we can skip loading nominal since Fake does not exist)
-                    sumFakesPartial=not chanInfo.simultaneousABCD,
+                    nominalIfMissing=not chanInfo.xnorm,
+                    sumFakesPartial=True,
                 )
 
                 for proc in procs_syst:
@@ -598,7 +514,8 @@ class HDF5Writer(object):
                                     logkdiffavg_proc, chan, proc, var_name_out_diff
                                 )
                                 self.book_systematic(
-                                    syst, var_name_out_diff, masked=masked
+                                    syst,
+                                    var_name_out_diff,
                                 )
                         else:
                             logkup_proc = get_logk(var_name, "Up")
@@ -615,7 +532,7 @@ class HDF5Writer(object):
                             )
 
                         self.book_logk_avg(logkavg_proc, chan, proc, var_name_out)
-                        self.book_systematic(syst, var_name_out, masked=masked)
+                        self.book_systematic(syst, var_name_out)
 
                     # free memory
                     for var in var_map.keys():
@@ -635,9 +552,6 @@ class HDF5Writer(object):
         pseudodata = np.zeros([nbins, npseudodata], self.dtype)
         ibin = 0
         for nbinschan, (chan, chanInfo) in zip(ibins, self.get_channels().items()):
-            masked = chanInfo.xnorm and not self.theoryFit
-            if masked:
-                continue
             data_obs[ibin : ibin + nbinschan] = self.dict_data_obs[chan]
 
             for idx, hpseudo in enumerate(self.dict_pseudodata[chan]):
@@ -663,13 +577,7 @@ class HDF5Writer(object):
         if self.sparse:
             logger.info(f"Write out sparse array")
 
-            idxdtype = "int32"
-            maxsparseidx = max(nbinsfull * nproc, 2 * nsyst)
-            if maxsparseidx > np.iinfo(idxdtype).max:
-                logger.info(
-                    "sparse array shapes are too large for index datatype, switching to int64"
-                )
-                idxdtype = "int64"
+            idxdtype = "int64"
 
             norm_sparse_size = 0
             norm_sparse_indices = np.zeros([norm_sparse_size, 2], idxdtype)
@@ -909,45 +817,7 @@ class HDF5Writer(object):
         systsnoprofile = self.get_systsnoprofile()
         systsnoconstraint = self.get_systsnoconstraint()
         noigroups, noigroupidxs = self.get_noigroups()
-        maskednoigroups, maskednoigroupidxs = self.get_noigroups(masked=True)
         systgroups, systgroupidxs = self.get_systgroups()
-        poigroups = (
-            self.get_systsnoimasked()
-            if hasattr(args, "poiAsNoi") and args.poiAsNoi
-            else procs
-        )
-        sumgroups, sumgroupsegmentids, sumgroupidxs = self.get_sumgroups(poigroups)
-        chargegroups, chargegroupidxs = self.get_ntuple_groups(
-            poigroups, "cardAsymXsecGroups"
-        )
-        polgroups, polgroupidxs = self.get_polgroups()
-        helgroups, helgroupidxs = self.get_ntuple_groups(poigroups, "cardHelXsecGroups")
-        chargemetagroups, chargemetagroupidxs = self.get_ntuple_groups(
-            sumgroups, "cardAsymSumXsecGroups"
-        )
-        ratiometagroups, ratiometagroupidxs = self.get_ntuple_groups(
-            sumgroups, "cardRatioSumXsecGroups"
-        )
-        helmetagroups, helmetagroupidxs = self.get_ntuple_groups(
-            sumgroups, "cardHelSumXsecGroups"
-        )
-        reggroups, reggroupidxs = self.get_reggroups()
-        (
-            poly1dreggroups,
-            poly1dreggroupfirstorder,
-            poly1dreggrouplastorder,
-            poly1dreggroupnames,
-            poly1dreggroupbincenters,
-        ) = self.get_poly1dreggroups()
-        (
-            poly2dreggroups,
-            poly2dreggroupfirstorder,
-            poly2dreggrouplastorder,
-            poly2dreggroupfullorder,
-            poly2dreggroupnames,
-            poly2dreggroupbincenters0,
-            poly2dreggroupbincenters1,
-        ) = self.get_poly2dreggroups()
 
         # save some lists of strings to the file for later use
         def create_dataset(
@@ -974,73 +844,8 @@ class HDF5Writer(object):
             systgroupidxs,
             dtype=h5py.special_dtype(vlen=np.dtype("int32")),
         )
-        create_dataset("chargegroups", chargegroups)
-        create_dataset("chargegroupidxs", chargegroupidxs, 2, dtype="int32")
-        create_dataset("polgroups", polgroups)
-        create_dataset("polgroupidxs", polgroupidxs, 3, dtype="int32")
-        create_dataset("helgroups", helgroups)
-        create_dataset("helgroupidxs", helgroupidxs, 9, dtype="int32")
-        create_dataset("sumgroups", sumgroups)
-        create_dataset("sumgroupsegmentids", sumgroupsegmentids, dtype="int32")
-        create_dataset("sumgroupidxs", sumgroupidxs, dtype="int32")
-        create_dataset("chargemetagroups", chargemetagroups)
-        create_dataset("chargemetagroupidxs", chargemetagroupidxs, 2, dtype="int32")
-        create_dataset("ratiometagroups", ratiometagroups)
-        create_dataset("ratiometagroupidxs", ratiometagroupidxs, 2, dtype="int32")
-        create_dataset("helmetagroups", helmetagroups)
-        create_dataset("helmetagroupidxs", helmetagroupidxs, 9, dtype="int32")
-        create_dataset("reggroups", reggroups)
-        create_dataset(
-            "reggroupidxs",
-            reggroupidxs,
-            dtype=h5py.special_dtype(vlen=np.dtype("int32")),
-        )
-        create_dataset("poly1dreggroups", poly1dreggroups)
-        create_dataset(
-            "poly1dreggroupfirstorder", poly1dreggroupfirstorder, dtype="int32"
-        )
-        create_dataset(
-            "poly1dreggrouplastorder", poly1dreggrouplastorder, dtype="int32"
-        )
-        create_dataset(
-            "poly1dreggroupnames",
-            poly1dreggroupnames,
-            dtype=h5py.special_dtype(vlen="S256"),
-        )
-        create_dataset(
-            "poly1dreggroupbincenters",
-            poly1dreggroupbincenters,
-            dtype=h5py.special_dtype(vlen=np.dtype("float64")),
-        )
-        create_dataset("poly2dreggroups", poly2dreggroups)
-        create_dataset(
-            "poly2dreggroupfirstorder", poly2dreggroupfirstorder, 2, dtype="int32"
-        )
-        create_dataset(
-            "poly2dreggrouplastorder", poly2dreggrouplastorder, 2, dtype="int32"
-        )
-        create_dataset(
-            "poly2dreggroupfullorder", poly2dreggroupfullorder, 2, dtype="int32"
-        )
-        create_dataset(
-            "poly2dreggroupnames",
-            poly2dreggroupnames,
-            dtype=h5py.special_dtype(vlen="S256"),
-        )
-        create_dataset(
-            "poly2dreggroupbincenters0",
-            poly2dreggroupbincenters0,
-            dtype=h5py.special_dtype(vlen=np.dtype("float64")),
-        )
-        create_dataset(
-            "poly2dreggroupbincenters1",
-            poly2dreggroupbincenters1,
-            dtype=h5py.special_dtype(vlen=np.dtype("float64")),
-        )
         create_dataset("noigroups", noigroups)
         create_dataset("noigroupidxs", noigroupidxs, dtype="int32")
-        create_dataset("maskedchans", self.masked_channels)
-        create_dataset("maskednoigroupidxs", maskednoigroupidxs, dtype="int32")
         create_dataset("pseudodatanames", pseudoDataNames)
 
         # create h5py datasets with optimized chunk shapes
@@ -1063,7 +868,8 @@ class HDF5Writer(object):
         pseudodata = None
 
         if self.theoryFitDataCov is not None:
-            data_cov = self.theoryFitDataCov
+            data_cov = self.theoryFitDataCov.get().values()
+
             if data_cov.shape != (nbins, nbins):
                 raise RuntimeError(
                     f"covariance matrix has incompatible shape of {data_cov.shape}, expected is {(nbins,nbins)}!"
@@ -1071,8 +877,9 @@ class HDF5Writer(object):
             full_cov = (
                 np.add(data_cov, np.diag(sumw2)) if self.theoryFitMCStat else data_cov
             )
+            full_cov_inv = np.linalg.inv(full_cov)
             nbytes += writeFlatInChunks(
-                np.linalg.inv(full_cov),
+                full_cov_inv,
                 f,
                 "hdata_cov_inv",
                 maxChunkBytes=self.chunkSize,
@@ -1148,14 +955,12 @@ class HDF5Writer(object):
         else:
             dict_logk[chan][proc][syst_name] = logk
 
-    def book_systematic(self, syst, name, masked=False):
+    def book_systematic(self, syst, name):
         logger.debug(f"book systematic {name}")
         if syst.get("noProfile", False):
             self.systsnoprofile.add(name)
         elif syst.get("noi", False):
             self.systsnoi.add(name)
-            if masked:
-                self.systsnoimasked.add(name)
         elif syst.get("noConstraint", False):
             self.systsnoconstraint.add(name)
         else:
@@ -1172,10 +977,8 @@ class HDF5Writer(object):
             grp for grp, matchre in split_groups.items() if matchre.match(name)
         ]
 
-        if syst.get("noi", False) and not masked:
+        if syst.get("noi", False):
             target_dict = self.dict_noigroups
-        elif syst.get("noi", False):
-            target_dict = self.dict_noigroups_masked
         else:
             target_dict = self.dict_systgroups
 
@@ -1201,9 +1004,6 @@ class HDF5Writer(object):
             + self.get_systsnoprofile()
         )
 
-    def get_systsnoimasked(self):
-        return list(common.natural_sort(self.systsnoimasked))
-
     def get_constraintweights(self, dtype):
         systs = self.get_systs()
         constraintweights = np.ones([len(systs)], dtype=dtype)
@@ -1223,15 +1023,12 @@ class HDF5Writer(object):
             idxs.append(idx)
         return groups, idxs
 
-    def get_noigroups(self, masked=False):
+    def get_noigroups(self):
         # list of groups of systematics to be treated as additional outputs for impacts, etc (aka "nuisances of interest")
         systs = self.get_systs()
-        groupdict = (
-            self.dict_noigroups if masked is False else self.dict_noigroups_masked
-        )
         groups = []
         idxs = []
-        for group, members in common.natural_sort_dict(groupdict).items():
+        for group, members in common.natural_sort_dict(self.dict_noigroups).items():
             groups.append(group)
             for syst in members:
                 idxs.append(systs.index(syst))
@@ -1240,51 +1037,3 @@ class HDF5Writer(object):
     def get_systgroups(self):
         # list of groups of systematics (nuisances) and lists of indexes
         return self.get_groups(self.dict_systgroups)
-
-    def get_sumgroups(self, procs):
-        # list of groups of signal processes to be summed
-        sumgroups = []
-        sumgroupsegmentids = []
-        sumgroupidxs = []
-        dict_sumgroups = {}
-        for chanInfo in self.get_channels().values():
-            dict_sumgroups.update(chanInfo.cardSumXsecGroups)
-        for igroup, (group, members) in enumerate(
-            common.natural_sort_dict(dict_sumgroups).items()
-        ):
-            sumgroups.append(group)
-            for proc in members:
-                sumgroupsegmentids.append(igroup)
-                sumgroupidxs.append(procs.index(proc))
-        return sumgroups, sumgroupsegmentids, sumgroupidxs
-
-    def get_polgroups(self):
-        # list of groups of signal processes by polarization
-        return [], []
-
-    def get_ntuple_groups(self, groups, pairgroups):
-        pairmetagroups = []
-        pairmetagroupidxs = []
-        dict_pairroups = {}
-        for chanInfo in self.get_channels().values():
-            dict_pairroups.update(getattr(chanInfo, pairgroups))
-        for group, members in dict_pairroups.items():
-            pairmetagroups.append(group)
-            pairmetagroupidx = []
-            for proc in members:
-                pairmetagroupidx.append(groups.index(proc))
-            pairmetagroupidxs.append(pairmetagroupidx)
-
-        return pairmetagroups, pairmetagroupidxs
-
-    def get_reggroups(self):
-        # list of groups of signal processes for regularization
-        return [], []
-
-    def get_poly1dreggroups(self):
-        # list of groups of signal processes for regularization
-        return [], [], [], [], []
-
-    def get_poly2dreggroups(self):
-        # list of groups of signal processes for regularization
-        return [], [], [], [], [], [], []

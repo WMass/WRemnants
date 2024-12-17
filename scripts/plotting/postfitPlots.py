@@ -62,7 +62,7 @@ parser.add_argument(
 parser.add_argument(
     "--selectionAxes",
     type=str,
-    default=["charge", "passIso", "passMT", "cosThetaStarll"],
+    default=["charge", "passIso", "passMT", "cosThetaStarll", "qGen"],
     help="List of axes where for each bin a separate plot is created",
 )
 parser.add_argument(
@@ -154,6 +154,9 @@ parser.add_argument(
     default=None,
     help="Specify .json file to translate labels",
 )
+parser.add_argument(
+    "--unfoldedXsec", action="store_true", help="Plot unfolded cross sections"
+)
 
 args = parser.parse_args()
 
@@ -219,9 +222,14 @@ is_normalized = meta["args"].get("normalize", False) if meta is not None else Fa
 
 translate_selection = {
     "charge": r"$\mathit{q}^\mu$ = ",
+    "qGen": r"$\mathit{q}^\mu$ = ",
 }
 translate_selection_value = {
     "charge": {
+        -1.0: "-1",
+        1.0: "+1",
+    },
+    "qGen": {
         -1.0: "-1",
         1.0: "+1",
     },
@@ -249,13 +257,15 @@ def make_plot(
 ):
     axes_names = [a.name for a in axes]
 
-    if any(x in axes_names for x in ["ptll", "mll", "ptVgen", "ptVGen", "pt"]):
+    binwnorm = 1.0
+
+    if any(x.startswith("pt") or x.startswith("mll") for x in axes_names):
         # in case of variable bin width normalize to unit
-        binwnorm = 1.0
-        ylabel = r"$Events\,/\,GeV$"
+        ylabel = (
+            r"$Events\,/\,GeV$" if not args.unfoldedXsec else r"$d\sigma (pb\,/\,GeV)$"
+        )
     else:
-        binwnorm = None
-        ylabel = r"$Events\,/\,bin$"
+        ylabel = r"$Events\,/\,unit$" if not args.unfoldedXsec else r"$d\sigma (pb)$"
 
     if args.logTransform:
         ylabel = ylabel.replace("Events", "log(Events)")
@@ -290,7 +300,7 @@ def make_plot(
     }
 
     histtype_data = "errorbar"
-    histtype_mc = "fill"
+    histtype_mc = "fill" if not args.unfoldedXsec else "errorbar"
 
     # if any(x in axes_names for x in ["ptVgen", "absYVgen", "helicity"]):
     #     histtype_data = "step"
@@ -330,7 +340,11 @@ def make_plot(
         if args.noData:
             rlabel = ("Diff." if diff else "Ratio") + " to nominal"
         else:
-            rlabel = f"${args.dataName}" + ("-" if diff else r"\,/\,") + "Pred.$"
+            rlabel = (
+                f"${args.dataName.replace(" ",r"\ ")}"
+                + ("-" if diff else r"\,/\,")
+                + "Pred.$"
+            )
 
         fig, ax1, ratio_axes = plot_tools.figureWithRatio(
             h_data,
@@ -372,19 +386,20 @@ def make_plot(
             flow="none",
         )
 
-    hep.histplot(
-        h_stack,
-        xerr=False,
-        yerr=False,
-        histtype=histtype_mc,
-        color=colors,
-        stack=True,
-        density=False,
-        binwnorm=binwnorm,
-        ax=ax1,
-        zorder=1,
-        flow="none",
-    )
+    if len(h_stack):
+        hep.histplot(
+            h_stack,
+            xerr=False,
+            yerr=False,
+            histtype=histtype_mc,
+            color=colors,
+            stack=True,
+            density=False,
+            binwnorm=binwnorm,
+            ax=ax1,
+            zorder=1,
+            flow="none",
+        )
 
     if data:
         hep.histplot(
@@ -393,6 +408,19 @@ def make_plot(
             histtype=histtype_data,
             color="black",
             label=args.dataName,
+            binwnorm=binwnorm,
+            ax=ax1,
+            alpha=1.0,
+            zorder=2,
+            flow="none",
+        )
+    if args.unfoldedXsec:
+        hep.histplot(
+            h_inclusive,
+            yerr=False,
+            histtype="step",
+            color="black",
+            label="Prefit model",
             binwnorm=binwnorm,
             ax=ax1,
             alpha=1.0,
@@ -579,10 +607,11 @@ def make_plot(
     scale = max(1, np.divide(*ax1.get_figure().get_size_inches()) * 0.3)
 
     text_pieces = []
-    if is_normalized:
-        text_pieces.append(fittype.capitalize() + " (normalized)")
-    else:
-        text_pieces.append(fittype.capitalize())
+    if not args.unfoldedXsec:
+        if is_normalized:
+            text_pieces.append(fittype.capitalize() + " (normalized)")
+        else:
+            text_pieces.append(fittype.capitalize())
 
     if selection is not None:
         text_pieces.extend(selection)
@@ -834,10 +863,15 @@ if len(args.project) == 0:
             logger.info(f"Skip masked channel {channel}")
             continue
 
-        hist_data = fitresult["hist_data_obs"][channel].get()
-        hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
-        hist_stack = fitresult[f"hist_{fittype}"][channel].get()
-        hist_stack = [hist_stack[{"processes": p}] for p in procs]
+        if not args.unfoldedXsec:
+            hist_data = fitresult["hist_data_obs"][channel].get()
+            hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
+            hist_stack = fitresult[f"hist_{fittype}"][channel].get()
+            hist_stack = [hist_stack[{"processes": p}] for p in procs]
+        else:
+            hist_data = fitresult[f"hist_prefit_inclusive"][channel].get()
+            hist_inclusive = fitresult[f"hist_{fittype}_inclusive"][channel].get()
+            hist_stack = []
 
         # vary poi by postfit uncertainty
         if varNames is not None:
@@ -881,6 +915,13 @@ if len(args.project) == 0:
                 h.values()[...] = 1e5 * np.log(h.values())
                 h.variances()[...] = 1e10 * (h.variances()) / np.square(or_vals)
 
+        lumi = info["lumi"]
+        if args.unfoldedXsec:
+            # convert number in cross section in pb
+            hist_data = hh.scaleHist(hist_data, 1.0 / (lumi * 1000))
+            hist_inclusive = hh.scaleHist(hist_inclusive, 1.0 / (lumi * 1000))
+            hist_stack = [hh.scaleHist(h, 1.0 / (lumi * 1000)) for h in hist_stack]
+
         make_plots(
             hist_data,
             hist_inclusive,
@@ -894,7 +935,7 @@ if len(args.project) == 0:
             chi2=chi2,
             saturated_chi2=saturated_chi2,
             meta=meta,
-            lumi=info["lumi"],
+            lumi=lumi,
         )
 else:
     for result in fitresult["projections"]:
@@ -916,16 +957,29 @@ else:
         else:
             chi2 = None
 
-        hist_data = result["hist_data_obs"].get()
-        hist_inclusive = result[f"hist_{fittype}_inclusive"].get()
-        hist_stack = result[f"hist_{fittype}"].get()
-        hist_stack = [hist_stack[{"processes": p}] for p in procs]
+        if not args.unfoldedXsec:
+            hist_data = result["hist_data_obs"].get()
+            hist_inclusive = result[f"hist_{fittype}_inclusive"].get()
+            hist_stack = result[f"hist_{fittype}"].get()
+            hist_stack = [hist_stack[{"processes": p}] for p in procs]
+        else:
+            hist_data = result[f"hist_prefit_inclusive"].get()
+            hist_inclusive = result[f"hist_{fittype}_inclusive"].get()
+            hist_stack = []
 
         # vary poi by postfit uncertainty
         if varNames is not None:
             hist_var = result[f"hist_{fittype}_variations{correlated}"].get()
         else:
             hist_var = None
+
+        lumi = meta_input["channel_info"][channel]["lumi"]
+
+        if args.unfoldedXsec:
+            # convert number in cross section in pb
+            hist_data = hh.scaleHist(hist_data, 1.0 / (lumi * 1000))
+            hist_inclusive = hh.scaleHist(hist_inclusive, 1.0 / (lumi * 1000))
+            hist_stack = [hh.scaleHist(h, 1.0 / (lumi * 1000)) for h in hist_stack]
 
         make_plots(
             hist_data,
@@ -939,7 +993,7 @@ else:
             colors=colors,
             chi2=chi2,
             meta=meta,
-            lumi=meta_input["channel_info"][channel]["lumi"],
+            lumi=lumi,
         )
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:

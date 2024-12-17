@@ -1,6 +1,6 @@
 import argparse
 
-from utilities.io_tools import combinetf_input
+from utilities.io_tools import combinetf2_input
 
 
 def parseArgs():
@@ -15,16 +15,24 @@ def parseArgs():
         "-s", "--sort", action="store_true", help="Sort nuisances by impact"
     )
     parser.add_argument(
+        "--globalImpacts", action="store_true", help="Print global impacts"
+    )
+    parser.add_argument(
         "inputFile",
-        default="/Users/kenneth/cernbox/CombineStudies/WGen/etal_ptl_smear_unrolled_scetlib/fitresults_123456789.root",
-        help="fitresults output ROOT file from combinetf",
+        type=str,
+        help="fitresults output file from combinetf2",
     )
     return parser.parse_args()
 
 
 def printImpacts(args, fitresult, poi="Wmass"):
-    impacts, labels, _ = combinetf_input.read_impacts_poi(
-        fitresult, not args.ungroup, sort=args.sort, poi=poi, normalize=False
+    impacts, labels = combinetf2_input.read_impacts_poi(
+        fitresult,
+        poi,
+        grouped=not args.ungroup,
+        global_impacts=args.globalImpacts,
+        sort=args.sort,
+        normalize=False,
     )
     unit = "MeV" if poi.startswith("mass") else "n.u. %"
     if args.nuisance:
@@ -42,6 +50,6 @@ def printImpacts(args, fitresult, poi="Wmass"):
 
 if __name__ == "__main__":
     args = parseArgs()
-    fitresult = combinetf_input.get_fitresult(args.inputFile)
-    for poi in combinetf_input.get_poi_names(fitresult):
+    fitresult = combinetf2_input.get_fitresult(args.inputFile)
+    for poi in combinetf2_input.get_poi_names(fitresult):
         printImpacts(args, fitresult, poi)

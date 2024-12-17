@@ -1,17 +1,11 @@
 import itertools
-import math
-import os
-import pathlib
 import re
 
 import hist
 import numpy as np
-import ROOT
 
-import narf
 from utilities import boostHistHelpers as hh
-from utilities import common, logging
-from utilities.io_tools import output_tools
+from utilities import logging
 
 logger = logging.child_logger(__name__)
 
@@ -33,35 +27,14 @@ def checkFiniteBinValues(h, hname, flow=True, throw=True):
 
 
 class CardTool(object):
-    def __init__(
-        self, outpath="./", xnorm=False, simultaneousABCD=False, real_data=False
-    ):
+    def __init__(self, outpath="./", xnorm=False, real_data=False):
 
         self.skipHist = (
             False  # don't produce/write histograms, file with them already exists
         )
-        self.outfile = None
         self.systematics = {}
-        self.lnNSystematics = {}
         self.fakeEstimate = None
-        self.channels = ["inclusive"]
-        self.cardContent = {}
         self.cardGroups = {}
-        self.cardXsecGroups = []  # cross section sum xsec groups
-        self.cardSumXsecGroups = {}  # cross section sum xsec groups
-        self.cardRatioSumXsecGroups = {}  # cross section ratio based on sum xsec groups
-        self.cardAsymXsecGroups = {}  # cross section asymmetry based on xsec groups
-        self.cardAsymSumXsecGroups = (
-            {}
-        )  # cross section asymmetry based on sum xsec groups
-        self.cardHelXsecGroups = []  # helicity xsec groups
-        self.cardHelSumXsecGroups = []  # helicity sum xsec groups
-        self.nominalTemplate = (
-            f"{pathlib.Path(__file__).parent}/../scripts/combine/Templates/datacard.txt"
-        )
-        self.spacing = 28
-        self.systTypeSpacing = 16
-        self.procColumnsSpacing = 20
         self.nominalName = "nominal"
         self.datagroups = None
         self.pseudodata_datagroups = None
@@ -77,8 +50,6 @@ class CardTool(object):
         self.pseudoDataProcsRegexp = None
         self.pseudodataFitInput = None
         self.excludeSyst = None
-        self.writeByCharge = True
-        self.unroll = False  # unroll final histogram before writing to root
         self.keepSyst = (
             None  # to override previous one with exceptions for special cases
         )
@@ -86,17 +57,7 @@ class CardTool(object):
         self.lumiScaleVarianceLinearly = []
         self.fit_axes = None
         self.xnorm = xnorm
-        self.simultaneousABCD = simultaneousABCD
         self.real_data = real_data
-        self.absolutePathShapeFileInCard = False
-        self.excludeProcessForChannel = (
-            {}
-        )  # can be used to exclue some POI when runnig a specific name (use case, force gen and reco charges to match)
-        self.chargeIdDict = {
-            "minus": {"val": -1, "id": "q0", "badId": "q1"},
-            "plus": {"val": 1.0, "id": "q1", "badId": "q0"},
-            "inclusive": {"val": "sum", "id": "none", "badId": None},
-        }
         self.charge_ax = "charge"
         self.procGroups = {}
         self.binByBinStatScale = 1.0
@@ -134,10 +95,6 @@ class CardTool(object):
                 "Attention: histograms are not saved according to input options, thus statistical uncertainty won't be zeroed"
             )
 
-    def setExcludeProcessForChannel(self, channel, POIregexp, canUpdate=False):
-        if canUpdate or channel not in self.excludeProcessForChannel.keys():
-            self.excludeProcessForChannel[channel] = re.compile(POIregexp)
-
     def setFitAxes(self, axes):
         self.fit_axes = axes[:]
 
@@ -160,9 +117,6 @@ class CardTool(object):
     def setLumiScale(self, lumiScale, lumiScaleVarianceLinearly=[]):
         self.lumiScale = lumiScale
         self.lumiScaleVarianceLinearly = lumiScaleVarianceLinearly
-
-    def setAbsolutePathShapeInCard(self, setRelative=False):
-        self.absolutePathShapeFileInCard = False if setRelative else True
 
     def getProcsNoStatUnc(self):
         return self.noStatUncProcesses
@@ -240,18 +194,6 @@ class CardTool(object):
             for n, a in zip(self.pseudoData, self.pseudoDataAxes)
         ]
 
-    def setPseudodataFitInput(self, fitInput, channel, downup):
-        self.pseudodataFitInput = fitInput
-        self.pseudoDataFitInputChannel = channel
-        self.pseudodataFitInputDownUp = downup
-
-    # Needs to be increased from default for long proc names
-    def setSpacing(self, spacing):
-        self.spacing = spacing
-
-    def setProcColumnsSpacing(self, spacing):
-        self.procColumnsSpacing = spacing
-
     def setDatagroups(self, datagroups, resetGroups=False):
         self.datagroups = datagroups
         if self.pseudodata_datagroups is None:
@@ -266,17 +208,6 @@ class CardTool(object):
         self.pseudodata_datagroups = datagroups
         if self.nominalName:
             self.pseudodata_datagroups.setNominalName(self.nominalName)
-
-    def setChannels(self, channels):
-        self.channels = channels
-
-    def setWriteByCharge(self, writeByCharge):
-        self.writeByCharge = writeByCharge
-
-    def setNominalTemplate(self, template):
-        if not os.path.abspath(template):
-            raise IOError(f"Template file {template} is not a valid file")
-        self.nominalTemplate = template
 
     def predictedProcesses(self):
         return list(
@@ -327,22 +258,6 @@ class CardTool(object):
         if group not in splitGroupDict:
             splitGroupDict[group] = re.compile(".*")
         return splitGroupDict
-
-    def addLnNSystematic(
-        self, name, size, processes, group=None, groupFilter=None, splitGroup={}
-    ):
-        if not self.isExcludedNuisance(name):
-            self.lnNSystematics.update(
-                {
-                    name: {
-                        "size": size,
-                        "processes": self.expandProcesses(processes),
-                        "group": group,
-                        "groupFilter": groupFilter,
-                        "splitGroup": self.precompile_splitGroupDict(group, splitGroup),
-                    }
-                }
-            )
 
     # preOp is a function to apply per process, preOpMap can be used with a dict for a speratate function for each process,
     #   it is executed before summing the processes. Arguments can be specified with preOpArgs
@@ -433,11 +348,7 @@ class CardTool(object):
                 )
             }
 
-        if (
-            passToFakes
-            and self.getFakeName() not in procs_to_add
-            and not self.simultaneousABCD
-        ):
+        if passToFakes and self.getFakeName() not in procs_to_add:
             procs_to_add.append(self.getFakeName())
 
         # protection when the input list is empty because of filters but the systematic is built reading the nominal
@@ -683,8 +594,6 @@ class CardTool(object):
                 hvar = systInfo["action"](hvar, hnom, **systInfo["actionArgs"])
             else:
                 hvar = systInfo["action"](hvar, **systInfo["actionArgs"])
-        if self.outfile:
-            self.outfile.cd()  # needed to restore the current directory in case the action opens a new root file
 
         if len(systAxes) == 0:
             return {syst: hvar}
@@ -775,104 +684,6 @@ class CardTool(object):
             name: var for name, var in zip(systInfo["outNames"], variations) if name
         }
 
-    def getLogk(self, hvar, hnom, kfac=1.0, logkepsilon=math.log(1e-3)):
-        # check if there is a sign flip between systematic and nominal
-        _logk = kfac * np.log(hvar.values() / hnom.values())
-        _logk_view = np.where(
-            np.equal(np.sign(hnom.values() * hvar.values()), 1),
-            _logk,
-            logkepsilon * np.ones_like(_logk),
-        )
-        return _logk_view
-
-    def symmetrize(self, var_map, hnom, symmetrize=None):
-        if symmetrize is None:
-            # nothing to do
-            return var_map
-
-        var_map_out = {}
-
-        for var, hvar in var_map.items():
-            if not np.all(np.isfinite(hvar.values())):
-                raise RuntimeError(
-                    f"{len(hvar.values())-sum(np.isfinite(hvar.values()))} NaN or Inf values encountered in systematic {var}!"
-                )
-
-            if symmetrize is not None and var.endswith("Up"):
-                varbase = var.removesuffix("Up")
-
-                varup = var
-                vardown = varbase + "Down"
-
-                hvarup = hvar
-                hvardown = var_map[vardown]
-
-                logkup = self.getLogk(hvarup, hnom)
-                logkdown = -self.getLogk(hvardown, hnom)
-
-                if symmetrize in ["conservative", "average"]:
-                    if symmetrize == "conservative":
-                        # symmetrize by largest magnitude of up and down variations
-                        logk = np.where(
-                            np.abs(logkup) > np.abs(logkdown), logkup, logkdown
-                        )
-                    elif symmetrize == "average":
-                        # symmetrize by average of up and down variations
-                        logk = 0.5 * (logkup + logkdown)
-
-                    # reuse histograms to avoid copies
-                    # up and down variations are explicitly produced in this case
-                    hvarup.values()[...] = hnom.values() * np.exp(logk)
-                    hvardown.values()[...] = hnom.values() * np.exp(-logk)
-
-                    var_map_out[varup] = hvarup
-                    var_map_out[vardown] = hvardown
-
-                elif symmetrize in ["linear", "quadratic"]:
-                    # "linear" corresponds to a piecewise linear dependence of logk on theta
-                    # while "quadratic" corresponds to a quadratic dependence and leads
-                    # to a large variance
-                    diff_fact = np.sqrt(3.0) if symmetrize == "quadratic" else 1.0
-
-                    # split asymmetric variation into two symmetric variations
-                    logkavg = 0.5 * (logkup + logkdown)
-                    logkdiff = 0.5 * diff_fact * (logkup - logkdown)
-
-                    varavg = varbase + "SymAvg"
-                    vardiff = varbase + "SymDiff"
-
-                    # reuse histograms to minimize copies
-                    hvaravgup = hvarup
-                    hvaravgdown = hvardown
-
-                    hvardiffup = hvarup.copy()
-                    hvardiffdown = hvardown.copy()
-
-                    hvaravgup.values()[...] = hnom.values() * np.exp(logkavg)
-                    hvaravgdown.values()[...] = hnom.values() * np.exp(-logkavg)
-
-                    hvardiffup.values()[...] = hnom.values() * np.exp(logkdiff)
-                    hvardiffdown.values()[...] = hnom.values() * np.exp(-logkdiff)
-
-                    varavgup = varavg + "Up"
-                    varavgdown = varavg + "Down"
-
-                    var_map_out[varavgup] = hvaravgup
-                    var_map_out[varavgdown] = hvaravgdown
-
-                    vardiffup = vardiff + "Up"
-                    vardiffdown = vardiff + "Down"
-
-                    var_map_out[vardiffup] = hvardiffup
-                    var_map_out[vardiffdown] = hvardiffdown
-            elif symmetrize is not None and var.endswith("Down"):
-                # this is already handled above
-                pass
-            else:
-                var_map_out[var] = hvar
-
-        return var_map_out
-
     def variationName(self, proc, name):
         if name == self.nominalName:
             return f"{self.histName}_{proc}"
@@ -887,152 +698,6 @@ class CardTool(object):
                 )
             }
         ]
-
-    def checkSysts(
-        self, var_map, proc, thresh=0.25, skipSameSide=False, skipOneAsNomi=False
-    ):
-        # if self.check_variations:
-        var_names = set(
-            [
-                name.replace("Up", "").replace("Down", "")
-                for name in var_map.keys()
-                if name
-            ]
-        )
-        if len(var_names) != len(var_map.keys()) / 2:
-            raise ValueError(
-                f"Invalid syst names for process {proc}! Expected an up/down variation for each syst. "
-                f"Found systs {var_names} and outNames {var_map.keys()}"
-            )
-        # for wmass some systs are only expected to affect a reco charge, but the syst for other charge might still exist and be used
-        # although one expects it to be same as nominal. The following check would trigger on this case with spurious warnings
-        # so there is some customization based on what one expects to silent some noisy warnings
-
-        for name in sorted(var_names):
-            hnom = self.datagroups.groups[proc].hists[self.nominalName]
-            up = var_map[name + "Up"]
-            down = var_map[name + "Down"]
-            nCellsWithoutOverflows = np.prod(hnom.shape)
-
-            checkFiniteBinValues(up, name + "Up")
-            checkFiniteBinValues(down, name + "Down")
-
-            if not skipSameSide:
-                try:
-                    up_relsign = np.sign(
-                        up.values(flow=False) - hnom.values(flow=False)
-                    )
-                except ValueError as e:
-                    logger.error(
-                        f"Incompatible shapes between up {up.shape} and nominal {hnom.shape} for syst {name}"
-                    )
-                    raise e
-                down_relsign = np.sign(
-                    down.values(flow=False) - hnom.values(flow=False)
-                )
-                # protect against yields very close to nominal, for which it can be sign != 0 but should be treated as 0
-                # was necessary for Fake and effStat
-                vars_sameside = (
-                    (up_relsign != 0)
-                    & (up_relsign == down_relsign)
-                    & np.logical_not(
-                        np.isclose(
-                            up.values(flow=False),
-                            hnom.values(flow=False),
-                            rtol=1e-07,
-                            atol=1e-08,
-                        )
-                    )
-                )
-                perc_sameside = np.count_nonzero(vars_sameside) / nCellsWithoutOverflows
-                if perc_sameside > thresh:
-                    logger.warning(
-                        f"{perc_sameside:.1%} bins are one sided for syst {name} and process {proc}!"
-                    )
-            # check variations are not same as nominal
-            # it evaluates absolute(a - b) <= (atol + rtol * absolute(b))
-            up_nBinsSystSameAsNomi = (
-                np.count_nonzero(
-                    np.isclose(
-                        up.values(flow=False),
-                        hnom.values(flow=False),
-                        rtol=1e-07,
-                        atol=1e-08,
-                    )
-                )
-                / nCellsWithoutOverflows
-            )
-            down_nBinsSystSameAsNomi = (
-                np.count_nonzero(
-                    np.isclose(
-                        down.values(flow=False),
-                        hnom.values(flow=False),
-                        rtol=1e-06,
-                        atol=1e-08,
-                    )
-                )
-                / nCellsWithoutOverflows
-            )
-            # check against 100% bins equal to nominal, the tolerances in np.isclose should already catch bad cases with 1.0 != 1.0 because of numerical imprecisions
-            varEqNomiThreshold = 1.0
-            if (
-                up_nBinsSystSameAsNomi >= varEqNomiThreshold
-                or down_nBinsSystSameAsNomi >= varEqNomiThreshold
-            ):
-                if not skipOneAsNomi or (
-                    up_nBinsSystSameAsNomi >= varEqNomiThreshold
-                    and down_nBinsSystSameAsNomi >= varEqNomiThreshold
-                ):
-                    logger.warning(
-                        f"syst {name} has Up/Down variation with {up_nBinsSystSameAsNomi:.1%}/{down_nBinsSystSameAsNomi:.1%} of bins equal to nominal"
-                    )
-
-    def writeForProcess(self, h, proc, syst, check_systs=True):
-        hnom = None
-        systInfo = None
-        if syst != self.nominalName:
-            systInfo = self.systematics[syst]
-            procDict = self.datagroups.getDatagroups()
-            hnom = procDict[proc].hists[self.nominalName]
-            if systInfo["mirror"]:
-                h = hh.extendHistByMirror(
-                    h,
-                    hnom,
-                    downAsUp=systInfo["mirrorDownVarEqualToUp"],
-                    downAsNomi=systInfo["mirrorDownVarEqualToNomi"],
-                )
-
-        logger.info(f"   {syst} for process {proc}")
-        var_map = self.systHists(h, syst, hnom)
-
-        if syst != self.nominalName:
-            if not systInfo["mirror"] and systInfo["symmetrize"] is not None:
-                var_map = self.symmetrize(
-                    var_map, hnom, symmetrize=systInfo["symmetrize"]
-                )
-
-            # since the list of variations may have been modified, we need to
-            # resynchronize it
-            systInfo["outNamesFinal"] = list(var_map.keys())
-
-            if check_systs:
-                self.checkSysts(
-                    var_map,
-                    proc,
-                    skipSameSide=systInfo["mirrorDownVarEqualToUp"],
-                    skipOneAsNomi=systInfo["mirrorDownVarEqualToNomi"],
-                )
-
-        setZeroStatUnc = False
-        if proc in self.noStatUncProcesses:
-            logger.warning(f"Zeroing statistical uncertainty for process {proc}")
-            setZeroStatUnc = True
-        # this is a big loop a bit slow, but it might be mainly the hist->root conversion and writing into the root file
-        for name, var in var_map.items():
-            if name != "":
-                self.writeHist(
-                    var, proc, name, setZeroStatUnc=setZeroStatUnc, hnomi=hnom
-                )
 
     def loadPseudodataFakes(self, datagroups, forceNonzero=False):
         # get the nonclosure for fakes/multijet background from QCD MC
@@ -1067,18 +732,13 @@ class CardTool(object):
                 scaleToNewLumi=self.lumiScale,
                 lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
                 forceNonzero=forceNonzero,
-                sumFakesPartial=not self.simultaneousABCD,
+                sumFakesPartial=True,
             )
 
         if "QCD" not in procDict:
             # use truth MC as QCD
             logger.info(f"Have MC QCD truth {hTruth.sum()}")
             hFake = hTruth
-        elif self.simultaneousABCD:
-            # TODO: Make if work for simultaneous ABCD fit, apply the correction in the signal region (D) only
-            raise NotImplementedError(
-                "The multijet closure test is not implemented for simultaneous ABCD fit"
-            )
         else:
             # compute the nonclosure correction
             gPred = procDict["QCD"]
@@ -1168,7 +828,7 @@ class CardTool(object):
                         scaleToNewLumi=self.lumiScale,
                         lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
                         forceNonzero=forceNonzero,
-                        sumFakesPartial=not self.simultaneousABCD,
+                        sumFakesPartial=True,
                         applySelection=False,
                     )
                     hist_fake = datagroups.getDatagroups()[self.getFakeName()].hists[
@@ -1209,7 +869,7 @@ class CardTool(object):
                     scaleToNewLumi=self.lumiScale,
                     lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
                     forceNonzero=forceNonzero,
-                    sumFakesPartial=not self.simultaneousABCD,
+                    sumFakesPartial=True,
                 )
                 # adding the pseudodata
                 hdata = hh.sumHists(
@@ -1258,7 +918,7 @@ class CardTool(object):
                 scaleToNewLumi=self.lumiScale,
                 lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
                 forceNonzero=forceNonzero,
-                sumFakesPartial=not self.simultaneousABCD,
+                sumFakesPartial=True,
             )
             procDict = datagroups.getDatagroups()
             hists = [
@@ -1303,7 +963,7 @@ class CardTool(object):
                         scaleToNewLumi=self.lumiScale,
                         lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
                         forceNonzero=forceNonzero,
-                        sumFakesPartial=not self.simultaneousABCD,
+                        sumFakesPartial=True,
                     )
                 procDictFromNomi = datagroupsFromNomi.getDatagroups()
                 hists.extend(
@@ -1337,393 +997,6 @@ class CardTool(object):
 
         return hdatas
 
-    def addPseudodata(self):
-        if len(self.pseudoData) > 1 or len(self.pseudoDataIdxs) > 1:
-            raise RuntimeError(
-                f"Mutliple pseudo data sets from different histograms or indices is not supported in the root writer."
-            )
-        hdata = self.loadPseudodata()[0]
-        pseudoData = self.pseudoData[0]
-        pseudoDataAxis = self.pseudoDataAxes[0]
-        pseudoDataIdx = (
-            self.pseudoDataIdxs[0] if self.pseudoDataIdxs[0] is not None else 0
-        )
-        if pseudoDataAxis is not None:
-            hdata = hdata[{pseudoDataAxis: pseudoDataIdx}]
-        self.writeHist(hdata, self.getDataName(), pseudoData + "_sum")
-        procDict = self.pseudodata_datagroups.getDatagroups()
-        if self.getFakeName() in procDict:
-            self.writeHist(
-                procDict[self.getFakeName()].hists[pseudoData],
-                self.getFakeName(),
-                pseudoData + "_sum",
-            )
-
-    def writeForProcesses(self, syst, processes, label, check_systs=True):
-        logger.info("-" * 50)
-        logger.info(f"Preparing to write systematic {syst}")
-        for process in processes:
-            hvar = self.datagroups.groups[process].hists[label]
-            if not hvar:
-                raise RuntimeError(
-                    f"Failed to load hist for process {process}, systematic {syst}"
-                )
-            self.writeForProcess(hvar, process, syst, check_systs=check_systs)
-        if syst != self.nominalName:
-            self.fillCardWithSyst(syst)
-
-    def setOutfile(self, outfile):
-        if type(outfile) == str:
-            if self.skipHist:
-                self.outfile = outfile  # only store name, file will not be used and doesn't need to be opened
-            else:
-                self.outfile = ROOT.TFile(outfile, "recreate")
-                self.outfile.cd()
-        else:
-            self.outfile = outfile
-            self.outfile.cd()
-
-    def setOutput(self, outfolder, basename):
-        self.outfolder = outfolder
-        if not os.path.isdir(self.outfolder):
-            os.makedirs(self.outfolder)
-        suffix = f"_{self.datagroups.flavor}" if self.datagroups.flavor else ""
-        if self.xnorm:
-            suffix += "_xnorm"
-
-        self.cardName = f"{self.outfolder}/{basename}_{{chan}}{suffix}.txt"
-        self.setOutfile(
-            os.path.abspath(f"{self.outfolder}/{basename}CombineInput{suffix}.root")
-        )
-
-    def writeOutput(self, args=None, forceNonzero=False, check_systs=True):
-        self.datagroups.loadHistsForDatagroups(
-            baseName=self.nominalName,
-            syst=self.nominalName,
-            procsToRead=self.datagroups.groups.keys(),
-            label=self.nominalName,
-            scaleToNewLumi=self.lumiScale,
-            lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
-            forceNonzero=forceNonzero,
-            sumFakesPartial=not self.simultaneousABCD,
-        )
-
-        self.writeForProcesses(
-            self.nominalName,
-            processes=self.datagroups.groups.keys(),
-            label=self.nominalName,
-            check_systs=check_systs,
-        )
-        self.loadNominalCard()
-
-        if not self.pseudoData and not self.real_data and not self.xnorm:
-            # If real data is not explicitly requested, use pseudodata instead (but still store read data in root writer)
-            self.setPseudodata([self.nominalName])
-        if self.pseudoData and not self.xnorm:
-            self.addPseudodata()
-
-        self.writeLnNSystematics()
-        for syst in self.systematics.keys():
-            if self.isExcludedNuisance(syst):
-                continue
-            systMap = self.systematics[syst]
-            systName = syst if not systMap["name"] else systMap["name"]
-            processes = systMap["processes"]
-            if len(processes) == 0:
-                continue
-            # Needed to avoid always reading the variation for the fakes, even for procs not specified
-            forceToNominal = [
-                x
-                for x in self.datagroups.getProcNames()
-                if x
-                not in self.datagroups.getProcNames(
-                    [
-                        p
-                        for g in processes
-                        for p in self.expandProcesses(g)
-                        if p != self.getFakeName()
-                    ]
-                )
-            ]
-            self.datagroups.loadHistsForDatagroups(
-                systMap["nominalName"],
-                systName,
-                label="syst",
-                procsToRead=processes,
-                forceNonzero=forceNonzero and systName != "qcdScaleByHelicity",
-                preOpMap=systMap["preOpMap"],
-                preOpArgs=systMap["preOpArgs"],
-                applySelection=systMap["applySelection"],
-                scaleToNewLumi=self.lumiScale,
-                lumiScaleVarianceLinearly=self.lumiScaleVarianceLinearly,
-                forceToNominal=forceToNominal,
-                sumFakesPartial=not self.simultaneousABCD,
-            )
-            self.writeForProcesses(
-                syst, label="syst", processes=processes, check_systs=check_systs
-            )
-
-        output_tools.writeMetaInfoToRootFile(
-            self.outfile, exclude_diff="notebooks", args=args
-        )
-        if self.skipHist:
-            logger.info(
-                "Histograms will not be written because 'skipHist' flag is set to True"
-            )
-        logger.info(f"Writing text/root cards to {self.outfile}")
-        self.writeCard()
-
-    def match_str_axis_entries(self, str_axis, match_re):
-        return [x for x in str_axis if any(re.match(r, x) for r in match_re)]
-
-    def writeCard(self):
-        for chan in self.channels:
-            with open(self.cardName.format(chan=chan), "w") as card:
-                card.write(self.cardContent[chan])
-                card.write("\n")
-                card.write(self.cardGroups[chan])
-                card.write(self.writeXsecSumGroupToText())
-
-    def addSystToGroup(self, groupName, chan, members, groupLabel="group"):
-        group_expr = f"{groupName} {groupLabel} ="
-        if group_expr in self.cardGroups[chan]:
-            idx = self.cardGroups[chan].index(group_expr) + len(group_expr)
-            self.cardGroups[chan] = (
-                self.cardGroups[chan][:idx]
-                + " "
-                + members
-                + self.cardGroups[chan][idx:]
-            )
-        else:
-            self.cardGroups[chan] += f"\n{group_expr} {members}"
-
-    def addXsecGroups(self):
-        noi_names = []
-        datagroups = self.datagroups
-        for proc, axes in datagroups.gen_axes.items():
-            gen_bin_indices = datagroups.getGenBinIndices(axes)
-            noi_names.extend(
-                datagroups.getPOINames(
-                    gen_bin_indices,
-                    axes_names=[a.name for a in axes],
-                    base_name=proc,
-                    flow=False,
-                )
-            )
-        self.cardXsecGroups = noi_names
-
-    def addSumXsecGroups(
-        self,
-        gen_axes_names=None,
-        additional_axes=None,
-        genCharge=None,
-        all_param_names=None,
-    ):
-        if all_param_names is None:
-            all_param_names = self.unconstrainedProcesses
-        if gen_axes_names is None:
-            gen_axes_names = self.datagroups.gen_axes_names.copy()
-        if additional_axes is not None:
-            gen_axes_names += additional_axes
-        # make a sum group for inclusive cross section
-        axes_combinations = [[]]
-        # if only one or none gen axes, it is already included as main Param and no further sumXsecGroups are needed
-        if len(gen_axes_names) > 1:
-            # make a sum group for each gen axis
-            axes_combinations.extend(gen_axes_names)
-        # also include combinations of axes in case there are more than 2 axes
-        for n in range(2, len(gen_axes_names)):
-            axes_combinations += [k for k in itertools.combinations(gen_axes_names, n)]
-
-        for axes in axes_combinations:
-            logger.debug(
-                f"Add sum group for {axes}{' with ' + genCharge if genCharge else ''}"
-            )
-
-            if isinstance(axes, str):
-                axes = [axes]
-
-            param_names = [x for x in all_param_names if all([a in x for a in axes])]
-
-            # in case of multiple base processes (e.g. in simultaneous unfoldings) loop over all base processes
-            base_processes = set(map(lambda x: x.split("_")[0], param_names))
-
-            for base_process in base_processes:
-                params = [x for x in param_names if base_process in x.split("_")]
-                sum_groups = set(
-                    [
-                        "_".join(
-                            [
-                                base_process,
-                                *[a + p.split(a)[1].split("_")[0] for a in axes],
-                            ]
-                        )
-                        for p in params
-                    ]
-                )
-                for sum_group in sorted(sum_groups):
-                    membersList = [
-                        p
-                        for p in params
-                        if all([g in p.split("_") for g in sum_group.split("_")])
-                    ]
-                    sum_group_name = sum_group
-                    if genCharge is not None:
-                        membersList = list(
-                            filter(lambda x: genCharge in x, membersList)
-                        )
-                        sum_group_name += f"_{genCharge}"
-                    if len(membersList):
-                        self.addSumXsecGroup(sum_group_name, membersList)
-
-    def addSumXsecGroup(self, groupName, members):
-        logger.debug(f"Add xsec sum group {groupName}")
-        if groupName in self.cardSumXsecGroups:
-            self.cardSumXsecGroups[groupName].append(members)
-        else:
-            self.cardSumXsecGroups[groupName] = members
-
-    def writeXsecSumGroupToText(self, groupLabel="sumGroup"):
-        # newName sumGroup = param_bin1 param_bin2 param_bin3
-        text = ""
-        for groupName, membersList in self.cardSumXsecGroups.items():
-            members = " ".join(membersList)
-            logger.debug(f"Write X sec sum group {groupName} with members {members}")
-            text += f"\n{groupName} {groupLabel} = {members}"
-        return text
-
-    def writeLnNSystematics(self):
-        nondata = self.predictedProcesses()
-        nondata_chan = {chan: nondata.copy() for chan in self.channels}
-        for chan in self.excludeProcessForChannel.keys():
-            nondata_chan[chan] = list(
-                filter(
-                    lambda x: not self.excludeProcessForChannel[chan].match(x), nondata
-                )
-            )
-        # skip any syst that would be applied to no process (can happen when some are excluded)
-        for name, info in self.lnNSystematics.items():
-            if self.isExcludedNuisance(name):
-                continue
-            if all(x not in info["processes"] for x in nondata):
-                logger.warning(
-                    f"Trying to add lnN uncertainty {name} for {info['processes']}, which are not valid processes; see predicted processes: {nondata}.. It will be skipped"
-                )
-                continue
-
-            group = info["group"]
-            groupFilter = info["groupFilter"]
-            for chan in self.channels:
-                nameChan = name.replace("CHANNEL", chan)
-                include = [
-                    (str(info["size"]) if x in info["processes"] else "-").ljust(
-                        self.procColumnsSpacing
-                    )
-                    for x in nondata_chan[chan]
-                ]
-                self.cardContent[
-                    chan
-                ] += f'{nameChan.ljust(self.spacing)} lnN{" "*(self.systTypeSpacing-2)} {"".join(include)}\n'
-                if group and len(list(filter(groupFilter, [nameChan]))):
-                    self.addSystToGroup(group, chan, nameChan)
-
-    def fillCardWithSyst(self, syst):
-        # note: this function doesn't act on all systematics all at once
-        # but rather it deals with all those coming from each call to CardTool.addSystematics
-        systInfo = self.systematics[syst]
-        scale = systInfo["scale"]
-        procs = systInfo["processes"]
-        group = systInfo["group"]
-        groupFilter = systInfo["groupFilter"]
-        label = "group" if not systInfo["noi"] else "noiGroup"
-        nondata = self.predictedProcesses()
-        nondata_chan = {chan: nondata.copy() for chan in self.channels}
-        for chan in self.excludeProcessForChannel.keys():
-            nondata_chan[chan] = list(
-                filter(
-                    lambda x: not self.excludeProcessForChannel[chan].match(x), nondata
-                )
-            )
-
-        names = [
-            x[:-2] if "Up" in x[-2:] else (x[:-4] if "Down" in x[-4:] else x)
-            for x in filter(lambda x: x != "", systInfo["outNamesFinal"])
-        ]
-        # exit this function when a syst is applied to no process (can happen when some are excluded)
-        if all(x not in procs for x in nondata):
-            return 0
-
-        include_chan = {}
-        for chan in nondata_chan.keys():
-            include_chan[chan] = [
-                (str(scale) if x in procs else "-").ljust(self.procColumnsSpacing)
-                for x in nondata_chan[chan]
-            ]
-            # remove unnecessary trailing spaces after the last element
-            include_chan[chan][-1] = include_chan[chan][-1].rstrip()
-
-        shape = "shapeNoConstraint" if systInfo["noConstraint"] else "shape"
-
-        splitGroupDict = systInfo["splitGroup"]
-
-        # Deduplicate while keeping order
-        systNames = list(dict.fromkeys(names))
-
-        systnamesPruned = [s for s in systNames if not self.isExcludedNuisance(s)]
-        systNames = systnamesPruned[:]
-        for chan in self.channels:
-            systNamesChan = [x.replace("CHANNEL", chan) for x in systNames]
-            for systname in systNamesChan:
-                systShape = shape
-                include_line = include_chan[chan]
-                if systInfo["customizeNuisanceAttributes"]:
-                    for regexpCustom in systInfo["customizeNuisanceAttributes"]:
-                        if re.match(regexpCustom, systname):
-                            keys = list(
-                                systInfo["customizeNuisanceAttributes"][
-                                    regexpCustom
-                                ].keys()
-                            )
-                            if "scale" in keys:
-                                include_line = [
-                                    (
-                                        str(
-                                            systInfo["customizeNuisanceAttributes"][
-                                                regexpCustom
-                                            ]["scale"]
-                                        )
-                                        if x in procs
-                                        else "-"
-                                    ).ljust(self.procColumnsSpacing)
-                                    for x in nondata_chan[chan]
-                                ]
-                                include_line[-1] = include_line[-1].rstrip()
-                            if "shapeType" in keys:
-                                systShape = systInfo["customizeNuisanceAttributes"][
-                                    regexpCustom
-                                ]["shapeType"]
-                self.cardContent[
-                    chan
-                ] += f"{systname.ljust(self.spacing)} {systShape.ljust(self.systTypeSpacing)} {''.join(include_line)}\n"
-            # unlike for LnN systs, here it is simpler to act on the list of these systs to form groups, rather than doing it syst by syst
-            if group:
-                systNamesForGroupPruned = systNamesChan[:]
-                systNamesForGroup = list(
-                    systNamesForGroupPruned
-                    if not groupFilter
-                    else filter(groupFilter, systNamesForGroupPruned)
-                )
-                if len(systNamesForGroup):
-                    for subgroup, matchre in splitGroupDict.items():
-                        systNamesForSubgroup = list(
-                            filter(lambda x: matchre.match(x), systNamesForGroup)
-                        )
-                        if len(systNamesForSubgroup):
-                            members = " ".join(systNamesForSubgroup)
-                            self.addSystToGroup(
-                                subgroup, chan, members, groupLabel=label
-                            )
-
     def setUnconstrainedProcs(self, procs):
         self.unconstrainedProcesses = procs
 
@@ -1734,126 +1007,5 @@ class CardTool(object):
         labels[issig] = -np.arange(np.count_nonzero(issig)) - 1
         return labels
 
-    def loadNominalCard(self):
-        procs = self.predictedProcesses()
-        nprocs = len(procs)
-        for chan in self.channels:
-            if chan in self.excludeProcessForChannel.keys():
-                procs = list(
-                    filter(
-                        lambda x: not self.excludeProcessForChannel[chan].match(x),
-                        self.predictedProcesses(),
-                    )
-                )
-                nprocs = len(procs)
-            args = {
-                "channel": chan,
-                "channelPerProc": chan.ljust(self.procColumnsSpacing) * nprocs,
-                "processes": " ".join(
-                    [x.ljust(self.procColumnsSpacing) for x in procs]
-                ),
-                "labels": "".join(
-                    [
-                        str(x).ljust(self.procColumnsSpacing)
-                        for x in self.processLabels(procs)
-                    ]
-                ),
-                # Could write out the proper normalizations pretty easily
-                "rates": "-1".ljust(self.procColumnsSpacing) * nprocs,
-                "inputfile": (
-                    self.outfile
-                    if type(self.outfile) == str
-                    else self.outfile.GetName()
-                ),
-                "dataName": self.getDataName(),
-                "histName": self.histName,
-                "pseudodataHist": (
-                    f"{self.histName}_{self.getDataName()}_{self.pseudoData[0]}_sum"
-                    if self.pseudoData
-                    else f"{self.histName}_{self.getDataName()}"
-                ),
-            }
-            if not self.absolutePathShapeFileInCard:
-                # use the relative path because absolute paths are slow in text2hdf5.py conversion
-                args["inputfile"] = os.path.basename(args["inputfile"])
-
-            self.cardContent[chan] = output_tools.readTemplate(
-                self.nominalTemplate, args
-            )
-            self.cardGroups[chan] = ""
-
-    def writeHistByCharge(self, h, name):
-        for charge in self.channels:
-            q = self.chargeIdDict[charge]["val"]
-            hin = self.getBoostHistByCharge(h, q)
-            if (
-                self.binByBinStatScale != 1.0
-                and hin.storage_type == hist.storage.Weight
-            ):
-                hin = hin.copy()
-                hin.variances()[...] *= self.binByBinStatScale**2
-            hout = narf.hist_to_root(hin)
-            hout.SetName(name.replace("CHANNEL", charge) + f"_{charge}")
-            hout.Write()
-
-    def writeHistWithCharges(self, h, name):
-        hin = h
-        if self.binByBinStatScale != 1.0 and hin.storage_type == hist.storage.Weight:
-            hin = hin.copy()
-            hin.variances()[...] *= self.binByBinStatScale**2
-        hout = narf.hist_to_root(hin)
-        hout.SetName(f"{name}_{self.channels[0]}" if self.channels else name)
-        hout.Write()
-
-    def writeHist(self, h, proc, syst, setZeroStatUnc=False, hnomi=None):
-        if self.skipHist:
-            return
-        if self.fit_axes:
-            axes = self.fit_axes[:]
-            if self.simultaneousABCD and not self.xnorm:
-                if common.passIsoName not in axes:
-                    axes.append(common.passIsoName)
-                if self.nameMT not in axes:
-                    axes.append(self.nameMT)
-            # don't project h into itself when axes to project are all axes
-            if any(ax not in h.axes.name for ax in axes):
-                logger.error(
-                    "Request to project some axes not present in the histogram"
-                )
-                raise ValueError(
-                    f"Histogram has {h.axes.name} but requested axes for projection are {axes}"
-                )
-            if len(axes) < len(h.axes.name):
-                logger.debug(f"Projecting {h.axes.name} into {axes}")
-                h = h.project(*axes)
-
-        if self.unroll:
-            logger.debug(f"Unrolling histogram")
-            h = hh.unrolledHist(h, axes)
-
-        if not self.nominalDim:
-            self.nominalDim = h.ndim
-            if self.nominalDim - self.writeByCharge > 3:
-                raise ValueError(
-                    f"Cannot write hists with > 3 dimensions as combinetf does not accept THn. Axes are {h.axes.name}"
-                )
-
-        if h.ndim != self.nominalDim:
-            raise ValueError(
-                f"Histogram {proc}/{syst} does not have the correct dimensions. Found {h.ndim}, expected {self.nominalDim}"
-            )
-
-        if setZeroStatUnc:
-            h.variances(flow=True)[...] = 0.0
-
-        # make sub directories for each process or return existing sub directory
-        directory = self.outfile.mkdir(proc, proc, True)
-        directory.cd()
-
-        name = self.variationName(proc, syst)
-
-        if self.writeByCharge:
-            self.writeHistByCharge(h, name)
-        else:
-            self.writeHistWithCharges(h, name)
-        self.outfile.cd()
+    def match_str_axis_entries(self, str_axis, match_re):
+        return [x for x in str_axis if any(re.match(r, x) for r in match_re)]

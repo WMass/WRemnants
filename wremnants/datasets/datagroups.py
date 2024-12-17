@@ -81,12 +81,14 @@ class Datagroups(object):
             )
 
             self.era = "2017H"
+            self.lumi_uncertainty = 1.017
         else:
             from wremnants.datasets.datagroups2016 import (
                 make_datagroups_2016 as make_datagroups,
             )
 
             self.era = "2016postVFP"
+            self.lumi_uncertainty = 1.012
 
         make_datagroups(self, **kwargs)
 
@@ -347,6 +349,18 @@ class Datagroups(object):
             self.globalAction = lambda h, old_action=self.globalAction: action(
                 old_action(h)
             )
+
+    def setMemberOp(self, group_name, ops):
+        group = self.groups[group_name]
+        if not isinstance(ops, list):
+            ops = [ops for i in range(len(group.members))]
+        # To be used for applying a selection, rebinning, etc.
+        if group.memberOp is None:
+            group.memberOp = ops
+        else:
+            group.memberOp = [
+                lambda h, old=old: op(old(h)) for op, old in zip(ops, group.memberOp)
+            ]
 
     def setRebinOp(self, action):
         # To be used for applying a selection, rebinning, etc.
@@ -808,34 +822,16 @@ class Datagroups(object):
         for group_name, group in self.groups.items():
             if group_name != base_group:
                 continue
-            if group_name[0] == "W" and "qGen" in self.gen_axes_names:
-                for idx, sign in enumerate(["minus", "plus"]):
-                    # gen level bins, split by charge
-                    unfolding_hist = self.getHistForUnfolding(
-                        group_name,
-                        member_filter=lambda x: x.name.startswith(f"W{sign}")
-                        and not x.name.endswith("OOA"),
-                        histToReadAxes=histToReadAxes,
-                    )
-                    if unfolding_hist is None:
-                        continue
-                    gen_axes_to_read = [
-                        ax
-                        for ax in unfolding_hist.axes
-                        if ax.name != "qGen" and ax.name in self.gen_axes_names
-                    ]
-                    self.gen_axes[f"W_qGen{idx}"] = gen_axes_to_read
-            else:
-                unfolding_hist = self.getHistForUnfolding(
-                    group_name,
-                    member_filter=lambda x: not x.name.endswith("OOA"),
-                    histToReadAxes=histToReadAxes,
-                )
-                if unfolding_hist is None:
-                    continue
-                self.gen_axes[group_name[0]] = [
-                    ax for ax in unfolding_hist.axes if ax.name in self.gen_axes_names
-                ]
+            unfolding_hist = self.getHistForUnfolding(
+                group_name,
+                member_filter=lambda x: not x.name.endswith("OOA"),
+                histToReadAxes=histToReadAxes,
+            )
+            if unfolding_hist is None:
+                continue
+            self.gen_axes[group_name[0]] = [
+                ax for ax in unfolding_hist.axes if ax.name in self.gen_axes_names
+            ]
 
         logger.debug(f"New gen axes are: {self.gen_axes}")
 
@@ -859,19 +855,26 @@ class Datagroups(object):
             )
         base_members = self.groups[group_name].members[:]
         if member_filter is not None:
-            base_members = [
-                m for m in filter(lambda x, f=member_filter: f(x), base_members)
-            ]
+            base_member_idx = [
+                i for i, m in enumerate(base_members) if member_filter(m)
+            ][0]
+        else:
+            base_member_idx = 0
 
-        if histToReadAxes not in self.results[base_members[0].name]["output"]:
+        base_member = base_members[base_member_idx]
+
+        if histToReadAxes not in self.results[base_member.name]["output"]:
             logger.warning(
-                f"Results for member {base_members[0].name} does not include histogram {histToReadAxes}. Found {self.results[base_members[0].name]['output'].keys()}"
+                f"Results for member {base_member.name} does not include histogram {histToReadAxes}. Found {self.results[base_member.name]['output'].keys()}"
             )
             return None
-        nominal_hist = self.results[base_members[0].name]["output"][
-            histToReadAxes
-        ].get()
-        return nominal_hist
+        nominal_hist = self.results[base_member.name]["output"][histToReadAxes].get()
+
+        if self.groups[group_name].memberOp is not None:
+            base_member_op = self.groups[group_name].memberOp[base_member_idx]
+            return base_member_op(nominal_hist)
+        else:
+            return nominal_hist
 
     def getPOINames(self, gen_bin_indices, axes_names, base_name, flow=True):
         poi_names = []
@@ -899,6 +902,7 @@ class Datagroups(object):
         member_filter=None,
         histToReadAxes="xnorm",
         axesNamesToRead=None,
+        fitvar=[],
     ):
         nominal_hist = self.getHistForUnfolding(
             group_name, member_filter, histToReadAxes
@@ -907,6 +911,17 @@ class Datagroups(object):
             axesNamesToRead = self.gen_axes_names
 
         axesToRead = [nominal_hist.axes[n] for n in axesNamesToRead]
+
+        # if a gen var and fit var are the same we have to extand the axis before splitting into gen bin contributions
+        expand_vars = [x for x in axesNamesToRead if x in fitvar]
+        if len(expand_vars):
+            expand_vars_rename = [f"{x}_2" for x in expand_vars]
+            expandOp = lambda h, vars_exp=expand_vars, vars_exp_rename=expand_vars_rename: hh.expand_hist_by_duplicate_axes(
+                h, vars_exp, vars_exp_rename
+            )
+            self.setMemberOp(group_name, expandOp)
+        else:
+            expand_vars_rename = axesNamesToRead
 
         self.gen_axes[new_name] = axesToRead
         logger.debug(f"New gen axes are: {self.gen_axes}")
@@ -923,13 +938,11 @@ class Datagroups(object):
         ):
             logger.debug(f"Now at {proc_name} with indices {indices}")
             self.copyGroup(group_name, proc_name, member_filter=member_filter)
-            memberOp = lambda x, indices=indices, genvars=axesNamesToRead: x[
+
+            memberOp = lambda h, indices=indices, genvars=expand_vars_rename: h[
                 {var: i for var, i in zip(genvars, indices)}
             ]
-            self.groups[proc_name].memberOp = [
-                memberOp for m in self.groups[group_name].members[:]
-            ]
-
+            self.setMemberOp(proc_name, memberOp)
             self.unconstrainedProcesses.append(proc_name)
 
     def select_xnorm_groups(self, select_groups=None):
