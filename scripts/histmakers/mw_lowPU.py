@@ -7,12 +7,6 @@ from wremnants.datasets.datagroups import Datagroups
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 parser.add_argument(
-    "--lumiUncertainty",
-    type=float,
-    help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.017 means 1.7%)",
-    default=1.017,
-)
-parser.add_argument(
     "--noGenMatchMC",
     action="store_true",
     help="Don't use gen match filter for prompt muons with MC samples (note: QCD MC never has it anyway)",
@@ -487,12 +481,6 @@ def build_graph(df, dataset):
             "Eigen::TensorFixedSize<double, Eigen::Sizes<2>> res; auto w = nominal_weight*prefireCorr_syst; std::copy(std::begin(w), std::end(w), res.data()); return res;",
         )
 
-        # luminosity, done here as shape variation despite being a flat scaling so to facilitate propagating to fakes afterwards
-        df = df.Define(
-            "luminosityScaling",
-            f"wrem::constantScaling(nominal_weight, {args.lumiUncertainty})",
-        )
-
         for n, c, a in (("nominal", cols, axes), ("transverseMass", cols_mt, axes_mt)):
             results.append(
                 df.HistoBoost(
@@ -622,16 +610,6 @@ def build_graph(df, dataset):
             # else:
             #     df = lowPUcfg.lepSF_systs(df, results, "elSF_HLT_syst",      120, "wrem::lepSF_el_HLT_syst(Lep_pt, Lep_eta, Lep_charge)", n, a, c)
             #     df = lowPUcfg.lepSF_systs(df, results, "elSF_IDISO_syst",    36,  "wrem::lepSF_el_IDISO_syst(Lep_pt, Lep_eta, Lep_charge)", n, a, c)
-
-            results.append(
-                df.HistoBoost(
-                    f"{n}_luminosity",
-                    a,
-                    [*c, "luminosityScaling"],
-                    tensor_axes=[common.down_up_axis],
-                    storage=hist.storage.Double(),
-                )
-            )
 
             if not args.noRecoil and args.recoilUnc:
                 df = recoilHelper.add_recoil_unc_W(df, results, dataset, c, a, n)

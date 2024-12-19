@@ -255,10 +255,14 @@ jobs:
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
       - name: wmass combine fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge WMass.hdf5
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/WMass.hdf5'
+          -t -1 --binByBinStat --doImpacts
+          -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/fitresults.hdf5'
 
       - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/WMass_eta_pt_charge/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW.html
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/WMass_eta_pt_charge/fitresults.hdf5 $WEB_DIR/$PLOT_DIR impactsW.html
 
       # theory agnostic with POI as NOI
       - name: wmass theory agnostic combine setup
@@ -266,11 +270,15 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE 
           --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/ --analysisMode theoryAgnosticNormVar --poiAsNoi --scaleNormXsecHistYields 0.01
 
-      - name: wmass theory agnostic combine fit
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge WMass.hdf5
+      - name: wmass theory agnostic combine fit 
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          '$WREMNANTS_OUTDIR/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/WMass.hdf5'
+          -t -1 --binByBinStat --doImpacts
+          -o '$WREMNANTS_OUTDIR/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5'
 
       - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW_theoryAgnosticNormVar.html
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5 $WEB_DIR/$PLOT_DIR impactsW_theoryAgnosticNormVar.html
 
   w-plotting:
     # The type of runner that the job will run on
@@ -336,7 +344,7 @@ jobs:
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
-          echo "COMBINED_DIR=$WREMNANTS_OUTDIR/WMass_lowPU_mt" >> $GITHUB_ENV
+          echo "COMBINED_DIR=$WREMNANTS_OUTDIR" >> $GITHUB_ENV
           echo "HIST_FILE_MU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MU}" >> $GITHUB_ENV
           echo "HIST_FILE_E=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_E}" >> $GITHUB_ENV
 
@@ -410,18 +418,15 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py --fakeEstimation simple --fakeSmoothingMode binned
           -i $HIST_FILE_MU $HIST_FILE_E --baseName transverseMass transverseMass --fitvar mt-charge mt-charge -o $COMBINED_DIR
 
-      - name: lowpu combine mt fit 
-        run: >-
-          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $COMBINED_DIR Combination_WMass_lowPU//Combination.hdf5
+      - name: lowpu combine mt fit
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          '$COMBINED_DIR/Combination_WMass_lowPU/Combination.hdf5'
+          -t -1 --binByBinStat --doImpacts
+          -o '$COMBINED_DIR/Combination_WMass_lowPU/fitresults.hdf5'
 
-      - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $COMBINED_DIR/fitresults_123456789.root $WEB_DIR/$PLOT_DIR/lowPU impactsW.html
-      
-      # - name: lowpu w e combine unfolding fit 
-      #   run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfolding $WREMNANTS_OUTDIR/WMass_lowPU_ptW/ WMass_lowPU_plus.txt WMass_lowPU_minus.txt xnorm=WMass_lowPU_inclusive_xnorm.txt
-
-      # - name: lowpu w combine unfolding plot xsec 
-      #   run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py $HIST_FILE_E --fitresult $WREMNANTS_OUTDIR/WMass_lowPU_ptW/fitresults_123456789.root -o $WEB_DIR -f $PLOT_DIR/lowPU -v 4 --rrange 0.0 2.0 --lumi=0.200181002
+      - name: lowpu combine mt impacts
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $COMBINED_DIR/Combination_WMass_lowPU/fitresults.hdf5 $WEB_DIR/$PLOT_DIR/lowPU impactsW.html
 
   lowpu-z:
     # The type of runner that the job will run on
@@ -476,13 +481,6 @@ jobs:
       - name: lowpu z ee plot mt
         run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py --rebin 2 --baseName transverseMass --hists mt -p ee -o $WEB_DIR -f $PLOT_DIR/lowPU $HIST_FILE_EE
 
-      # - name: lowpu z combine unfolding fit 
-      #   run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfolding $WREMNANTS_OUTDIR/ZMassDilepton_lowPU_ptll/ ZMassDilepton_lowPU_inclusive.txt xnorm=ZMassDilepton_lowPU_inclusive_xnorm.txt
-
-      # - name: lowpu z combine unfolding plot xsec 
-      #   run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py $HIST_FILE_EE --fitresult $WREMNANTS_OUTDIR/ZMassDilepton_lowPU_ptll/fitresults_123456789.root -o $WEB_DIR -f $PLOT_DIR/lowPU -v 4 --rrange 0.0 2.0 --lumi=0.200181002
-
-
   lowpu-combined-unfolding:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, lowpu-w, lowpu-z]
@@ -508,21 +506,35 @@ jobs:
 
       - name: lowpu combine unfolding setup
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py --fakeEstimation simple --fakeSmoothingMode binned
-          --analysisMode unfolding -i $HIST_FILE_MU $HIST_FILE_E $HIST_FILE_MUMU $HIST_FILE_EE --fitvar ptW-charge ptW-charge ptll ptll -o $COMBINED_DIR --postfix ptll --sparse --ewUnc
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          --fakeEstimation simple --fakeSmoothingMode binned --ewUnc --analysisMode unfolding
+          --fitvar ptW-charge ptW-charge ptll ptll --genAxes ptVGen-qGen ptVGen-qGen ptVGen ptVGen
+          -i $HIST_FILE_MU $HIST_FILE_E $HIST_FILE_MUMU $HIST_FILE_EE -o $COMBINED_DIR --postfix ptll 
 
       - name: lowpu combine unfolding fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ unfolding $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll Combination.hdf5
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/Combination.hdf5 --binByBinStat -o $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5
 
-      - name: lowpu combine unfolding plot xsec 
-        run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/unfolding_xsec.py
-          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults_123456789.root -o $WEB_DIR -f $PLOT_DIR/lowPU -v 4 --rrange 0.0 2.0
+      - name: lowpu combine xsec setup
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          --ewUnc --baseName xnorm --filterProcGroups Zmumu Zee Wmunu Wenu --analysisMode unfolding
+          --fitvar ptVGen-qGen ptVGen-qGen ptVGen ptVGen --genAxes ptVGen-qGen ptVGen-qGen ptVGen ptVGen
+          -i $HIST_FILE_MU $HIST_FILE_E $HIST_FILE_MUMU $HIST_FILE_EE -o $COMBINED_DIR --postfix ptVGen
 
-      - name: lowpu combine unfolding result to hist
+      - name: lowpu combine unfolded xsec
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptVGen/Combination.hdf5 -o $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptVGen/fitresults.hdf5
+          --externalPostfit $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5
+          --saveHists --computeHistErrors --computeHistCov --computeHistImpacts --noChi2
+
+      - name: lowpu combine unfolded xsec plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/utilities/fitresult_pois_to_hist.py
-          --expected $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults_123456789.hdf5 -o $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py 
+          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptVGen/fitresults.hdf5 -o $WEB_DIR -f $PLOT_DIR/lowPU 
+          --rrange 0.0 2.0 --unfoldedXsec --noUncertainty --noChisq --legCols 1 --noSciy --logoPos 0
 
   wlike:
     # The type of runner that the job will run on
@@ -563,39 +575,36 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
           -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr
 
-      - name: wlike combine fit 
-        run: >-
-          cmssw-cc7 --command-to-run scripts/ci/setup_and_run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge 
-          ZMassWLike.hdf5 -t -1 --binByBinStat --doImpacts
-      
-      - name: wlike combine fit pseudodata
-        run: >-
-          cmssw-cc7 --command-to-run scripts/ci/setup_and_run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge 
-          ZMassWLike.hdf5 -p uncorr --binByBinStat --doImpacts --saveHists --computeHistErrors --postfix uncorr
-      
-      - name: wlike combinetf2 fit
+      - name: wlike combinetf2 fit asimov
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
           '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/ZMassWLike.hdf5'
-          -t 0 --binByBinStat --computeHistErrors --saveHists
-          -o '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5'
+          -t -1 --binByBinStat --computeHistErrors --saveHists --doImpacts
+          -o '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_asimov.hdf5'
+
+      - name: wlike combinetf2 fit pseudodata
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/ZMassWLike.hdf5'
+          -t 0 --binByBinStat --computeHistErrors --saveHists --doImpacts --pseudoData uncorr
+          -o '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5'
 
       - name: wlike prefit plot
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py
-          $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 
+          $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 
           -o $WEB_DIR -f $PLOT_DIR --legCols 6 --logoPos 1 --yscale 1.2  --prefit --legCol 6 --legSize large --logoPos 1
 
       - name: wlike postfit plot
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py
-          $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 
+          $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 
           -o $WEB_DIR -f $PLOT_DIR --legCols 6 --logoPos 1 --yscale 1.2 --rrange 1.03 0.97 --binSeparationLines -2.2 -2.1 1.2 1.3
 
       - name: wlike combine impacts
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/pullsAndImpacts.py
-          -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_123456789.hdf5 -f $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_123456789_uncorr.hdf5
+          -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_asimov.hdf5 -f $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5
           --showNumbers --diffPullAsym --refName asimov --pullrange '2.1'
           --oneSidedImpacts --grouping max -t utilities/styles/nuisance_translate.json output
           --outFolder $WEB_DIR/$PLOT_DIR -o impactsWlike.html --otherExtensions pdf png -n 50
@@ -674,26 +683,11 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
           -i $HIST_FILE --fitvar etaAbsEta-mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData
 
-      - name: dilepton combine mll_inc setup
-        run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
-          -i $HIST_FILE --fitvar mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData
-      
-      - name: dilepton combine mll fit
-        run: >-
-          cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/
-          dilepton $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll ZMassDilepton.hdf5
-
-      - name: dilepton combine impacts
-        run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults_123456789.root 
-          $WEB_DIR/$PLOT_DIR impactsZ.html
-
       - name: dilepton combinetf2 mll fit
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
           '$WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/ZMassDilepton.hdf5'
-          -t -1 --binByBinStat --computeHistErrors --saveHists --computeVariations --project ch0 mll
+          -t -1 --binByBinStat --computeHistErrors --saveHists --computeVariations --doImpacts --project ch0 mll
           -o '$WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5'
 
       - name: dilepton postfit mll-etaAbsEta plot
@@ -708,6 +702,11 @@ jobs:
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 
           --rrange 0.99 1.02 --legCols 1 -o $WEB_DIR -f $PLOT_DIR --yscale 1.05 --project ch0 mll
           --varName massShiftZ100MeV --extraTextLoc '0.05' '0.7' --varLabel '$\mathit{m}_\mathrm{Z}{\pm}1\sigma$'
+
+      - name: dilepton combine impacts
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 
+          $WEB_DIR/$PLOT_DIR impactsZ.html
 
   dilepton:
     # The type of runner that the job will run on
@@ -748,21 +747,16 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
           -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE --realData -o $WREMNANTS_OUTDIR --fitAlphaS
 
-      - name: dilepton combine alphaS fit
-        run: >-
-          cmssw-cc7 --command-to-run scripts/ci/setup_and_run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ 
-          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll ZMassDilepton.hdf5 -t -1 --binByBinStat --doImpacts
-
       - name: dilepton combinetf2 alphaS fit
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/ZMassDilepton.hdf5
-          -t 0 --binByBinStat --computeHistErrors --saveHists
+          -t -1 --binByBinStat --computeHistErrors --saveHists --doImpacts
           -o '$WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5'
 
       - name: dilepton combine alphaS impacts
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults_123456789.hdf5 
+          scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
           $WEB_DIR/$PLOT_DIR impactsZ.html
 
   dilepton-plotting:
@@ -824,13 +818,13 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ZMassDilepton.hdf5 --saveHists --computeHistErrors 
-          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_123456789_uncorr.hdf5 
-          -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresult_combinetf2.hdf5
+          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 
+          -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresult_from_ZMassWLike_eta_pt_charge.hdf5
 
       - name: dilepton ptll from wlike postfit
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py --postfix uncorr_fromWLike 
-          $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresult_combinetf2.hdf5 -o $WEB_DIR -f $PLOT_DIR --legCols 1 --yscale 1.2 --rrange 1.03 0.97
+          $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresult_from_ZMassWLike_eta_pt_charge.hdf5 -o $WEB_DIR -f $PLOT_DIR --legCols 1 --yscale 1.2 --rrange 1.03 0.97
 
   gen:
     # The type of runner that the job will run on
@@ -853,7 +847,6 @@ jobs:
         with:
           submodules: 'recursive'
           lfs: 'true'
-
 
       # As of now the gen output isn't used for anything, so there's no point in running more files
       - name: setup nonpr
@@ -880,19 +873,25 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
-          echo "COMBINED_DIR=$WREMNANTS_OUTDIR/WMass_ZDilepton" >> $GITHUB_ENV
+          echo "COMBINED_DIR=$WREMNANTS_OUTDIR/" >> $GITHUB_ENV
+          echo "HIST_FILE_WMASS=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+          echo "HIST_FILE_DILEPTON=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
 
-      - name: aggregate combine inputs
-        run: |
-          mkdir -p $COMBINED_DIR
-          cp -p $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/* $COMBINED_DIR
-          cp -p $WREMNANTS_OUTDIR/WMass_eta_pt_charge/* $COMBINED_DIR
+      - name: wmass combined setup
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py
+          -i $HIST_FILE_WMASS $HIST_FILE_DILEPTON --fitvar eta-pt-charge ptll-yll --lumiScale $LUMI_SCALE $LUMI_SCALE -o $COMBINED_DIR
 
-      - name: wmass combined fit 
-        run: cmssw-cc7 --command-to-run scripts/ci/run_combine.sh /home/c/cmsmwbot/combinetf/CMSSW_10_6_30/src/ mass $COMBINED_DIR WMass_plus.txt WMass_minus.txt ZMassDilepton_inclusive.txt
+      - name: wmass combined fit
+        run: >- 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py 
+          '$COMBINED_DIR/Combination_WMassZMassDilepton/Combination.hdf5'
+          -t -1 --binByBinStat --doImpacts
+          -o '$COMBINED_DIR/Combination_WMassZMassDilepton/fitresults.hdf5'
 
       - name: wmass combine impacts
-        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $COMBINED_DIR/fitresults_123456789.root $WEB_DIR/$PLOT_DIR impactsW_withZ.html
+        run: scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh $COMBINED_DIR/Combination_WMassZMassDilepton/fitresults.hdf5 $WEB_DIR/$PLOT_DIR impactsW_withZ.html
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
