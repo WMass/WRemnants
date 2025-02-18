@@ -8,9 +8,10 @@ import sys
 import narf
 
 # from wremnants import plot_tools,theory_tools,syst_tools
-from utilities import common, logging
+from utilities import common
 from wremnants import histselections as sel
 from wremnants.datasets.datagroups import Datagroups
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

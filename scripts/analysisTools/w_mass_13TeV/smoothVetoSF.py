@@ -19,8 +19,9 @@ from scipy.interpolate import RegularGridInterpolator
 
 import narf
 import narf.fitutils
-from utilities import boostHistHelpers as hh
+import wums.ioutils
 from utilities import common
+from wums import boostHistHelpers as hh
 
 utilities = utilitiesCMG.util()
 
@@ -439,7 +440,7 @@ if __name__ == "__main__":
         resultDict[f"vetoSF_{vetoType}_{step}_{charge}"] = vetoprodSF[step]
         resultDict[f"antiVetoSF_{vetoType}_{step}_{charge}"] = antivetoprodSF[step]
     resultDict.update(
-        {"meta_info": narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
+        {"meta_info": wums.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
     )
 
     outfile = f"{outdir}/allVetoSF_{vetoType}_{charge}.pkl.lz4"

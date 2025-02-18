@@ -1,7 +1,6 @@
 import os
 
-from utilities import common, differential, logging, parsing
-from utilities.io_tools import output_tools
+from utilities import common, differential, parsing
 from wremnants.datasets.datagroups import Datagroups
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
@@ -38,7 +37,12 @@ from wremnants import (
     unfolding_tools,
 )
 from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import aggregate_groups, scale_to_data
+from wremnants.histmaker_tools import (
+    aggregate_groups,
+    scale_to_data,
+    write_analysis_output,
+)
+from wums import logging
 
 ###################################
 flavor = args.flavor  # mu, e
@@ -647,4 +651,4 @@ if not args.noScaleToData:
     scale_to_data(resultdict)
     aggregate_groups(datasets, resultdict, groups_to_aggregate)
 
-output_tools.write_analysis_output(resultdict, f"mw_lowPU_{flavor}.hdf5", args)
+write_analysis_output(resultdict, f"mw_lowPU_{flavor}.hdf5", args)

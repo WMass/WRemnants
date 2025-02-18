@@ -5,10 +5,11 @@ import hist
 import lz4.frame
 from matplotlib import cm
 
-from utilities import boostHistHelpers as hh
-from utilities import logging, parsing
+from utilities import parsing
 from utilities.io_tools import input_tools
 from wremnants import plot_tools, theory_tools
+from wums import boostHistHelpers as hh
+from wums import logging
 
 s = hist.tag.Slicer()
 # Map hist_name argument to the actual hist and it's axis stored in files

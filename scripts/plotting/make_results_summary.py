@@ -1,10 +1,11 @@
+import combinetf2.io_tools
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
 from utilities import parsing
-from utilities.io_tools import combinetf_input, output_tools
 from wremnants import plot_tools
+from wums import output_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -46,7 +47,7 @@ dfw = pd.DataFrame.from_dict(
 if not args.pdg:
     dfw = dfw[dfw["Name"] != "PDG Average"]
 
-cms_res = combinetf_input.read_groupunc_df(
+cms_res = combinetf2.io_tools.read_groupunc_df(
     args.fitresult,
     [
         "stat",

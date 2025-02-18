@@ -1,7 +1,6 @@
 import os
 
-from utilities import common, differential, logging, parsing
-from utilities.io_tools import output_tools
+from utilities import common, differential, parsing
 from wremnants.datasets.datagroups import Datagroups
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
@@ -31,7 +30,12 @@ from wremnants import (
 )
 from wremnants.datasets.dataset_tools import getDatasets
 from wremnants.helicity_utils_polvar import makehelicityWeightHelper_polvar
-from wremnants.histmaker_tools import aggregate_groups, scale_to_data
+from wremnants.histmaker_tools import (
+    aggregate_groups,
+    scale_to_data,
+    write_analysis_output,
+)
+from wums import logging
 
 parser.add_argument(
     "--mtCut",
@@ -1477,6 +1481,6 @@ if not args.noScaleToData:
     scale_to_data(resultdict)
     aggregate_groups(datasets, resultdict, args.aggregateGroups)
 
-output_tools.write_analysis_output(
+write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )

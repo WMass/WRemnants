@@ -19,7 +19,7 @@ import re
 import sys
 from array import array
 
-from utilities import logging
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

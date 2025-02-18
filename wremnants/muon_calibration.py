@@ -10,8 +10,10 @@ import uproot
 
 import narf
 import narf.tfliteutils
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+import wums.ioutils
+from utilities import common
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
 
@@ -1489,7 +1491,7 @@ def transport_smearing_weights_to_reco(
 
                 bin_ratio = hh.divideHists(hist_gensmear, nominal_gensmear)
                 hist_reco = hh.multiplyHists(nominal_reco, bin_ratio)
-                proc_hists[reco_histname] = narf.ioutils.H5PickleProxy(hist_reco)
+                proc_hists[reco_histname] = wums.ioutils.H5PickleProxy(hist_reco)
             else:
                 logger.warning(f"Histogram {histname} not found in {proc}")
                 logger.warning(

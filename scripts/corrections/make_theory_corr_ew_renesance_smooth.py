@@ -5,9 +5,9 @@ import numpy as np
 import ROOT
 
 import narf
-from utilities import boostHistHelpers as hh
 from utilities import common
-from utilities.io_tools import output_tools
+from wums import boostHistHelpers as hh
+from wums import output_tools
 
 parser = argparse.ArgumentParser()
 

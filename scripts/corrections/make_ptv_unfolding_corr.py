@@ -4,10 +4,11 @@ import pickle
 import hist
 import numpy as np
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common
 from utilities.io_tools import input_tools, output_tools
 from wremnants import theory_corrections
+from wums import boostHistHelpers as hh
+from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--unfoldingFile", type=str, required=True)

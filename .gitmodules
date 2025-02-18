@@ -4,3 +4,9 @@
 [submodule "wremnants-data"]
 	path = wremnants-data
 	url = https://gitlab.cern.ch/cms-wmass/wremnants-data.git
+[submodule "combinetf2"]
+	path = combinetf2
+	url = git@github.com:wmass/combinetf2.git
+[submodule "wums"]
+	path = wums
+	url = git@github.com:WMass/wums.git

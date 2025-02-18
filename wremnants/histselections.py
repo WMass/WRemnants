@@ -2,9 +2,10 @@ import hist
 import numpy as np
 from scipy import interpolate
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common
 from wremnants.regression import Regressor, Regressor2D
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

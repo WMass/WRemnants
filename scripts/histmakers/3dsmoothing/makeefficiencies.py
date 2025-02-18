@@ -2,6 +2,7 @@ import h5py
 import ROOT
 
 import narf
+import wums.ioutils
 
 # FIRST STEP IN EFFICIENCY CREATION
 
@@ -42,7 +43,7 @@ histos = []
 counter = 0
 for idx, filename in enumerate(histlist):
     h5file = h5py.File(filename, "r")
-    results = narf.ioutils.pickle_load_h5py(h5file["results"])
+    results = wums.ioutils.pickle_load_h5py(h5file["results"])
     plus = results["WplusmunuPostVFP"]["output"]
     minus = results["WminusmunuPostVFP"]["output"]
     for i in range(0, len(listoflists[idx])):

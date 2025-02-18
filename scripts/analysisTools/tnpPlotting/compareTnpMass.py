@@ -9,7 +9,7 @@ import os
 ## safe batch mode
 import sys
 
-from utilities import logging
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

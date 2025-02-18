@@ -10,9 +10,8 @@ import numpy as np
 import ROOT
 import uproot
 
-from narf import ioutils
-from utilities import boostHistHelpers as hh
-from utilities import logging
+from wums import boostHistHelpers as hh
+from wums import ioutils, logging
 
 logger = logging.child_logger(__name__)
 
@@ -576,20 +575,6 @@ def safeOpenRootFile(fileName, quitOnFail=True, silent=False, mode="READ"):
             return None
     else:
         return fileObject
-
-
-def args_from_metadata(card_tool, arg):
-    meta_data = card_tool.datagroups.getMetaInfo()
-    if "args" not in meta_data.keys():
-        raise IOError(
-            f"The argument {arg} was not found in the metadata, maybe you run on an obsolete file."
-        )
-    elif arg not in meta_data["args"].keys():
-        raise IOError(
-            f"Did not find the argument {arg} in the meta_data dict. Maybe it is an outdated option"
-        )
-
-    return meta_data["args"][arg]
 
 
 def get_metadata(infile):

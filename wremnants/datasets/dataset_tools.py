@@ -5,7 +5,6 @@ import ROOT
 import XRootD.client
 
 import narf
-from utilities import logging
 from wremnants.datasets.datasetDict2017_v9 import dataDictV9_2017
 from wremnants.datasets.datasetDict2018_v9 import dataDictV9_2018
 from wremnants.datasets.datasetDict_gen import genDataDict
@@ -14,6 +13,7 @@ from wremnants.datasets.datasetDict_lowPU2023 import dataDictLowPU2023
 
 # set the debug level for logging incase of full printout
 from wremnants.datasets.datasetDict_v9 import dataDictV9, dataDictV9extended
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

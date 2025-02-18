@@ -1,7 +1,8 @@
 import argparse
 import os
 
-from utilities import common, logging
+from utilities import common
+from wums import logging
 
 # choices for legend padding
 choices_padding = ["auto", "lower left", "lower right", "upper left", "upper right"]

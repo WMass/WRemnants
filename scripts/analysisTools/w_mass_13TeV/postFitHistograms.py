@@ -44,7 +44,7 @@ from scripts.analysisTools.plotUtils.utility import (
     templateBinning,
     unroll2Dto1D,
 )
-from utilities import logging
+from wums import logging
 
 
 def normalizeTH2byBinWidth(h2):

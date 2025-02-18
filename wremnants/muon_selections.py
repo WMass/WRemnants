@@ -1,5 +1,6 @@
-from utilities import common, logging
+from utilities import common
 from wremnants import muon_calibration, theory_tools
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

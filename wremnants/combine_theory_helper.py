@@ -3,12 +3,16 @@ import re
 import hist
 import numpy as np
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
-from utilities.io_tools import input_tools
+from utilities import common
 from wremnants import syst_tools, theory_tools
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
+
+
+def match_str_axis_entries(str_axis, match_re):
+    return [x for x in str_axis if any(re.match(r, x) for r in match_re)]
 
 
 class TheoryHelper(object):
@@ -23,19 +27,19 @@ class TheoryHelper(object):
         "none",
     ]
 
-    def __init__(self, label, card_tool, args, hasNonsigSamples=False):
+    def __init__(self, label, datagroups, args, hasNonsigSamples=False):
         toCheck = ["signal_samples", "signal_samples_inctau", "single_v_samples"]
         if hasNonsigSamples:
             if label == "W":
                 toCheck.extend(["single_v_nonsig_samples", "wtau_samples"])
         for group in toCheck:
-            if group not in card_tool.procGroups:
+            if group not in datagroups.procGroups:
                 raise ValueError(
                     f"Must define '{group}' procGroup in CardTool for theory uncertainties"
                 )
 
-        self.card_tool = card_tool
-        corr_hists = input_tools.args_from_metadata(self.card_tool, "theoryCorr")
+        self.datagroups = datagroups
+        corr_hists = self.datagroups.args_from_metadata("theoryCorr")
         self.corr_hist_name = (corr_hists[0] + "Corr") if corr_hists else None
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -50,14 +54,14 @@ class TheoryHelper(object):
         self.label = label
 
     def sample_label(self, sample_group):
-        if sample_group not in self.card_tool.procGroups:
+        if sample_group not in self.datagroups.procGroups:
             raise ValueError(
                 f"Failed to find sample group {sample_group} in predefined groups"
             )
-        if not self.card_tool.procGroups[sample_group]:
+        if not self.datagroups.procGroups[sample_group]:
             logger.warning(f"Sample group {sample_group} is empty")
 
-        return self.card_tool.procGroups[sample_group][0][0]
+        return self.datagroups.procGroups[sample_group][0][0]
 
     def configure(
         self,
@@ -122,13 +126,13 @@ class TheoryHelper(object):
                 "Cannot add resummation uncertainties. No theory correction was applied!"
             )
 
-        if input_tools.args_from_metadata(self.card_tool, "theoryCorrAltOnly"):
+        if self.datagroups.args_from_metadata("theoryCorrAltOnly"):
             raise ValueError(
                 "The theory correction was only applied as an alternate hist. Using it for systs isn't well defined!"
             )
 
-        signal_samples = self.card_tool.procGroups["signal_samples"]
-        self.corr_hist = self.card_tool.getHistsForProcAndSyst(
+        signal_samples = self.datagroups.procGroups["signal_samples"]
+        self.corr_hist = self.datagroups.getHistsForProcAndSyst(
             signal_samples[0], self.corr_hist_name
         )
 
@@ -146,7 +150,7 @@ class TheoryHelper(object):
                 "s",
             ]
 
-            self.tnp_nuisances = self.card_tool.match_str_axis_entries(
+            self.tnp_nuisances = match_str_axis_entries(
                 self.corr_hist.axes[self.syst_ax], self.tnp_nuisance_names
             )
 
@@ -172,7 +176,7 @@ class TheoryHelper(object):
 
             if self.resumUnc == "tnp_minnlo":
                 for sample_group in self.samples:
-                    if self.card_tool.procGroups.get(sample_group, None):
+                    if self.datagroups.procGroups.get(sample_group, None):
                         # add sigma -1 uncertainty from minnlo for pt>27 GeV
                         self.add_minnlo_scale_uncertainty(
                             sample_group,
@@ -201,7 +205,7 @@ class TheoryHelper(object):
             # sigma_-1 uncertainty is covered by scetlib-dyturbo uncertainties if they are used
             helicities_to_exclude = None if self.resumUnc == "minnlo" else [-1]
             for sample_group in ["signal_samples_inctau", "single_v_nonsig_samples"]:
-                if self.card_tool.procGroups.get(sample_group, None):
+                if self.datagroups.procGroups.get(sample_group, None):
                     # two sets of nuisances, one binned in ~10% quantiles, and one inclusive in pt
                     # to avoid underestimating the correlated part of the uncertainty
                     # (but scale it down to avoid double counting)
@@ -243,7 +247,7 @@ class TheoryHelper(object):
         scale=1.0,
         symmetrize="quadratic",
     ):
-        if not sample_group or sample_group not in self.card_tool.procGroups:
+        if not sample_group or sample_group not in self.datagroups.procGroups:
             logger.warning(
                 f"Skipping QCD scale syst '{self.minnlo_unc}' for group '{sample_group}.' No process to apply it to"
             )
@@ -260,7 +264,7 @@ class TheoryHelper(object):
         # All possible syst_axes
         # TODO: Move the axes to common and refer to axis_chargeVgen etc by their name attribute, not just
         # assuming the name is unchanged
-        obs = self.card_tool.fit_axes
+        obs = self.datagroups.fit_axes
         pt_ax = "ptVgen" if "ptVgen" not in obs else "ptVgenAlt"
 
         syst_axes = [pt_ax, "vars"]
@@ -286,7 +290,7 @@ class TheoryHelper(object):
 
         # NOTE: The map needs to be keyed on the base procs not the group names, which is
         # admittedly a bit nasty
-        expanded_samples = self.card_tool.getProcNames([sample_group])
+        expanded_samples = self.datagroups.getProcGroupNames([sample_group])
         logger.debug(f"using {scale_hist} histogram for QCD scale systematics")
         logger.debug(f"expanded_samples: {expanded_samples}")
 
@@ -294,10 +298,10 @@ class TheoryHelper(object):
         preop_args = {}
 
         if pt_binned:
-            signal_samples = self.card_tool.procGroups["signal_samples"]
+            signal_samples = self.datagroups.procGroups["signal_samples"]
             binning = np.array(rebin_pt) if rebin_pt else None
 
-            hscale = self.card_tool.getHistsForProcAndSyst(
+            hscale = self.datagroups.getHistsForProcAndSyst(
                 signal_samples[0], scale_hist
             )
             # A bit janky, but refer to the original ptVgen ax since the alt hasn't been added yet
@@ -345,14 +349,13 @@ class TheoryHelper(object):
         else:
             # FIXME Maybe put W and Z nuisances in the same group
             group_name += f"MiNNLO"
-            self.card_tool.addSystematic(
+            self.datagroups.addSystematic(
                 scale_hist,
                 preOpMap=preop_map,
                 preOpArgs=preop_args,
                 symmetrize=symmetrize,
                 processes=[sample_group],
-                group=group_name,
-                splitGroup={"QCDscale": ".*", "angularCoeffs": ".*", "theory": ".*"},
+                groups=[group_name, "QCDscale", "angularCoeffs", "theory"],
                 systAxes=syst_axes,
                 labelsByAxis=syst_ax_labels,
                 skipEntries=skip_entries,
@@ -360,39 +363,38 @@ class TheoryHelper(object):
                 formatWithValue=format_with_values,
                 passToFakes=self.propagate_to_fakes,
                 scale=scale,
-                rename=base_name,  # Needed to allow it to be called multiple times
+                name=base_name,  # Needed to allow it to be called multiple times
             )
 
     def add_helicity_shower_kt_uncertainty(self):
         # select the proper variation and project over gen pt unless it is one of the fit variables
-        if "ptVgen" in self.card_tool.fit_axes:
+        if "ptVgen" in self.datagroups.fit_axes:
             op = lambda h: h[{self.syst_ax: ["pythia_shower_kt"]}]
         else:
             op = lambda h: h[{"ptVgen": hist.sum, self.syst_ax: ["pythia_shower_kt"]}]
 
         processes = ["single_v_samples"]
-        self.card_tool.addSystematic(
-            name="qcdScaleByHelicity",
+        self.datagroups.addSystematic(
+            "qcdScaleByHelicity",
             processes=processes,
             passToFakes=self.propagate_to_fakes,
             systAxes=[self.syst_ax],
             preOp=op,
-            group="helicity_shower_kt",
-            splitGroup={"angularCoeffs": ".*", "theory": ".*"},
-            rename="helicity_shower_kt",
+            groups=["helicity_shower_kt", "angularCoeffs", "theory"],
+            name="helicity_shower_kt",
             mirror=True,
         )
 
     def add_scetlib_dyturbo_scale_uncertainty(
         self, extra_name="", transition=True, rebin_pt=None
     ):
-        obs = self.card_tool.fit_axes[:]
+        obs = self.datagroups.fit_axes[:]
         pt_ax = "ptVgen" if "ptVgen" not in obs else "ptVgenAlt"
 
         binning = np.array(rebin_pt) if rebin_pt else None
 
-        signal_samples = self.card_tool.procGroups["signal_samples"]
-        hscale = self.card_tool.getHistsForProcAndSyst(
+        signal_samples = self.datagroups.procGroups["signal_samples"]
+        hscale = self.datagroups.getHistsForProcAndSyst(
             signal_samples[0], self.scale_hist_name
         )
         # A bit janky, but refer to the original ptVgen ax since the alt hasn't been added yet
@@ -404,7 +406,7 @@ class TheoryHelper(object):
             binning = orig_binning
 
         for sample_group in self.samples:
-            if not self.card_tool.procGroups.get(sample_group, None):
+            if not self.datagroups.procGroups.get(sample_group, None):
                 continue
 
             name_append = self.sample_label(sample_group)
@@ -446,11 +448,10 @@ class TheoryHelper(object):
             if pt_ax == "ptVgenAlt":
                 preop_args["gen_obs"] = ["ptVgen"]
 
-            self.card_tool.addSystematic(
-                name=self.scale_hist_name,
+            self.datagroups.addSystematic(
+                self.scale_hist_name,
                 processes=[sample_group],
-                group="resumTransitionFOScale",
-                splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+                groups=["resumTransitionFOScale", "resum", "pTModeling", "theory"],
                 systAxes=[pt_ax, "vars"],
                 symmetrize="quadratic",
                 passToFakes=self.propagate_to_fakes,
@@ -460,7 +461,7 @@ class TheoryHelper(object):
                 labelsByAxis=syst_ax_labels,
                 baseName=name_append + "_",
                 formatWithValue=format_with_values,
-                rename=name_append,  # Needed to allow it to be called multiple times
+                name=name_append,  # Needed to allow it to be called multiple times
             )
 
     def set_propagate_to_fakes(self, to_fakes):
@@ -498,11 +499,10 @@ class TheoryHelper(object):
         )
         processes = processesW if self.label == "W" else processesZ
 
-        self.card_tool.addSystematic(
-            name=self.corr_hist_name,
+        self.datagroups.addSystematic(
+            self.corr_hist_name,
             processes=processes,
-            group="resumTNP",
-            splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+            groups=["resumTNP", "resum", "pTModeling", "theory"],
             systAxes=["vars"],
             passToFakes=self.propagate_to_fakes,
             systNameReplace=name_replace,
@@ -512,8 +512,8 @@ class TheoryHelper(object):
             skipEntries=[
                 {self.syst_ax: central_var},
             ],
-            rename=f"resumTNP",
-            systNamePrepend=f"resumTNP_",
+            name=f"resumTNP",
+            baseName=f"resumTNP_",
         )
 
     def add_nonpert_unc(self, model):
@@ -540,9 +540,9 @@ class TheoryHelper(object):
                 f"Model choice {model} is not a supported model. Valid choices are {TheoryHelper.valid_np_models}"
             )
 
-        signal_samples = self.card_tool.procGroups["signal_samples"]
+        signal_samples = self.datagroups.procGroups["signal_samples"]
         self.np_hist_name = self.corr_hist_name.replace("Corr", "FlavDepNP")
-        self.np_hist = self.card_tool.getHistsForProcAndSyst(
+        self.np_hist = self.datagroups.getHistsForProcAndSyst(
             signal_samples[0], self.np_hist_name
         )
 
@@ -584,29 +584,28 @@ class TheoryHelper(object):
         processesW = ["single_v_samples"]
         processes = processesW if self.label == "W" else processesZ
 
-        self.card_tool.addSystematic(
-            name=self.corr_hist_name,
+        self.datagroups.addSystematic(
+            self.corr_hist_name,
             processes=processes,
             passToFakes=self.propagate_to_fakes,
             systAxes=[self.syst_ax],
             preOp=lambda h: h[{self.syst_ax: var_vals}],
             outNames=var_names,
-            group="resumNonpert",
-            splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
-            rename="scetlibNP",
+            groups=["resumNonpert", "resum", "pTModeling", "theory"],
+            name="scetlibNP",
         )
 
     def add_resum_scale_uncertainty(self, name_append):
-        obs = self.card_tool.fit_axes[:]
+        obs = self.datagroups.fit_axes[:]
         if not obs:
             raise ValueError(
                 "Failed to find the observable names for the resummation uncertainties"
             )
 
-        theory_hist = self.card_tool.getHistsForProcAndSyst(
+        theory_hist = self.datagroups.getHistsForProcAndSyst(
             self.samples[0],  # theory_hist_name #FIXME
         )
-        resumscale_nuisances = self.card_tool.match_str_axis_entries(
+        resumscale_nuisances = match_str_axis_entries(
             theory_hist.axes[self.syst_ax],
             [
                 "^nuB.*",
@@ -616,14 +615,13 @@ class TheoryHelper(object):
             ],
         )
 
-        expanded_samples = self.card_tool.datagroups.getProcNames(self.samples)
+        expanded_samples = self.datagroups.getProcGroupNames(self.samples)
         # syst_ax = "vars" # FIXME
 
-        self.card_tool.addSystematic(
-            name=theory_hist,
+        self.datagroups.addSystematic(
+            theory_hist,
             processes=self.samples,
-            group="resumScale",
-            splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+            groups=["resumScale", "resum", "pTModeling", "theory"],
             passToFakes=self.propagate_to_fakes,
             # skipEntries=[{syst_ax: x} for x in both_exclude + tnp_nuisances], # FIXME
             systAxes=["downUpVar"],  # Is added by the preOpMap
@@ -637,15 +635,14 @@ class TheoryHelper(object):
                 f"scetlibResumScale{name_append}Up",
                 f"scetlibResumScale{name_append}Down",
             ],
-            rename=f"resumScale{name_append}",
-            systNamePrepend=f"resumScale{name_append}_",
+            name=f"resumScale{name_append}",
+            baseName=f"resumScale{name_append}_",
         )
         # TODO: check if this is actually the proper treatment of these uncertainties
-        self.card_tool.addSystematic(
-            name=theory_hist,
+        self.datagroups.addSystematic(
+            theory_hist,
             processes=self.samples,
-            group="resumScale",
-            splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+            groups=["resumScale", "resum", "pTModeling", "theory"],
             passToFakes=self.propagate_to_fakes,
             systAxes=["vars"],
             preOpMap={
@@ -667,8 +664,8 @@ class TheoryHelper(object):
                 f"scetlib_muF{name_append}Up",
                 f"scetlib_muF{name_append}Down",
             ],
-            rename=f"resumFOScale{name_append}",
-            systNamePrepend=f"resumScale{name_append}_",
+            name=f"resumFOScale{name_append}",
+            baseName=f"resumScale{name_append}_",  # TODO: check if intented or should it be 'resumFOScale' instead?
         )
 
     def add_correlated_np_uncertainties(self):
@@ -704,17 +701,16 @@ class TheoryHelper(object):
             entries = [nuisance + v for v in vals]
             rename = f"scetlibNP{nuisance}"
             # operation = lambda h : h[{self.syst_ax : entries}]
-            self.card_tool.addSystematic(
-                name=self.corr_hist_name,
+            self.datagroups.addSystematic(
+                self.corr_hist_name,
                 processes=["single_v_samples"],
-                group="resumNonpert",
-                splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+                groups=["resumNonpert", "resum", "pTModeling", "theory"],
                 systAxes=[self.syst_ax],
                 passToFakes=self.propagate_to_fakes,
                 preOp=operation,
                 preOpArgs=dict(entries=entries),
                 outNames=[f"{rename}Down", f"{rename}Up"],
-                rename=rename,
+                name=rename,
             )
 
     def add_uncorrelated_np_uncertainties(self):
@@ -775,17 +771,16 @@ class TheoryHelper(object):
             sum_axes=sum_axes,
         )
         for sample_group in self.samples:
-            if not self.card_tool.procGroups.get(sample_group, None):
+            if not self.datagroups.procGroups.get(sample_group, None):
                 continue
             label = self.sample_label(sample_group)
             for nuisance, vals in np_map.items():
                 entries = [nuisance + v for v in vals]
                 rename = f"scetlibNP{label}{nuisance}"
-                self.card_tool.addSystematic(
-                    name=self.np_hist_name,
+                self.datagroups.addSystematic(
+                    self.np_hist_name,
                     processes=[sample_group],
-                    group="resumNonpert",
-                    splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+                    groups=["resumNonpert", "resum", "pTModeling", "theory"],
                     systAxes=syst_axes,
                     passToFakes=self.propagate_to_fakes,
                     preOp=operation,
@@ -796,11 +791,11 @@ class TheoryHelper(object):
                         (entries[0], f"{rename}Down"),
                     ],
                     skipEntries=[{self.syst_ax: central_var}],
-                    rename=rename,
+                    name=rename,
                 )
 
     def add_pdf_uncertainty(self, operation=None, scale=-1.0):
-        pdf = input_tools.args_from_metadata(self.card_tool, "pdfs")[0]
+        pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
         scale = scale if scale != -1.0 else pdfInfo["inflationFactor"]
@@ -811,7 +806,7 @@ class TheoryHelper(object):
         symmetrize = "quadratic"
 
         if self.pdf_from_corr:
-            theory_unc = input_tools.args_from_metadata(self.card_tool, "theoryCorr")
+            theory_unc = self.datagroups.args_from_metadata("theoryCorr")
             if not theory_unc:
                 logger.error(
                     "Can not add resummation uncertainties. No theory correction was applied!"
@@ -832,8 +827,7 @@ class TheoryHelper(object):
         pdf_args = dict(
             processes=processes,
             mirror=True if symHessian else False,
-            group=pdfName,
-            splitGroup={f"{pdfName}NoAlphaS": ".*", "theory": ".*"},
+            groups=[pdfName, f"{pdfName}NoAlphaS", "theory"],
             passToFakes=self.propagate_to_fakes,
             preOpMap=operation,
             scale=pdfInfo.get("scale", 1) * scale,
@@ -841,7 +835,7 @@ class TheoryHelper(object):
             systAxes=[pdf_ax],
         )
         if self.pdf_from_corr:
-            self.card_tool.addSystematic(
+            self.datagroups.addSystematic(
                 pdf_hist,
                 outNames=[""]
                 + theory_tools.pdfNamesAsymHessian(pdfInfo["entries"], pdfset=pdfName)[
@@ -850,17 +844,16 @@ class TheoryHelper(object):
                 **pdf_args,
             )
         else:
-            self.card_tool.addSystematic(
+            self.datagroups.addSystematic(
                 pdf_hist, skipEntries=[{pdf_ax: "^pdf0[a-z]*"}], **pdf_args
             )
             if pdfName == "pdfHERAPDF20":
-                self.card_tool.addSystematic(
+                self.datagroups.addSystematic(
                     pdf_hist + "ext",
                     skipEntries=[{pdf_ax: "^pdf0[a-z]*"}],
                     processes=processes,
                     mirror=True,
-                    group=pdfName,
-                    splitGroup={f"{pdfName}NoAlphaS": ".*", "theory": ".*"},
+                    groups=[pdfName, f"{pdfName}NoAlphaS", "theory"],
                     passToFakes=self.propagate_to_fakes,
                     preOpMap=operation,
                     scale=pdfInfo.get("scale", 1) * scale,
@@ -869,7 +862,7 @@ class TheoryHelper(object):
                 )
 
     def add_pdf_alphas_variation(self, noi=False, scale=-1.0):
-        pdf = input_tools.args_from_metadata(self.card_tool, "pdfs")[0]
+        pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
         scale = scale if scale != -1.0 else pdfInfo["inflationFactor"]
@@ -890,29 +883,29 @@ class TheoryHelper(object):
             else [("0117", "Down"), ("0119", "Up")]
         )
         as_args = dict(
-            name=asname,
+            histname=asname,
             processes=["single_v_samples"],
             mirror=False,
             noi=noi,
             noConstraint=noi,
-            group=pdfName,
+            groups=[pdfName],
             systAxes=["vars" if self.as_from_corr else "alphasVar"],
             scale=(0.75 if asRange == "002" else 1.5) * scale,
             symmetrize=symmetrize,
             passToFakes=self.propagate_to_fakes,
         )
         if not noi:
-            as_args["splitGroup"] = {f"{pdfName}AlphaS": ".*", "theory": ".*"}
+            as_args["groups"].extend([f"{pdfName}AlphaS", "theory"])
         if self.as_from_corr:
             as_args["outNames"] = ["", "pdfAlphaSDown", "pdfAlphaSUp"]
         else:
             as_args["systNameReplace"] = as_replace
             as_args["skipEntries"] = [{"alphasVar": "as0118"}]
-        self.card_tool.addSystematic(**as_args)
+        self.datagroups.addSystematic(**as_args)
 
     def add_transition_fo_scale_uncertainties(self, transition=True, scale=True):
         for sample_group in self.samples:
-            if not self.card_tool.procGroups.get(sample_group, None):
+            if not self.datagroups.procGroups.get(sample_group, None):
                 continue
 
             name_append = self.sample_label(sample_group)
@@ -943,22 +936,21 @@ class TheoryHelper(object):
                 # nothing to do
                 continue
 
-            self.card_tool.addSystematic(
-                name=self.corr_hist_name,
+            self.datagroups.addSystematic(
+                self.corr_hist_name,
                 processes=[sample_group],
-                group="resumTransitionFOScale",
-                splitGroup={"resum": ".*", "pTModeling": ".*", "theory": ".*"},
+                groups=["resumTransitionFOScale", "resum", "pTModeling", "theory"],
                 systAxes=["vars"],
                 symmetrize="quadratic",
                 passToFakes=self.propagate_to_fakes,
                 preOp=lambda h: h[{"vars": sel_vars}],
                 outNames=outNames,
-                rename=f"resumTransitionFOScale{name_append}",
+                name=f"resumTransitionFOScale{name_append}",
             )
 
     def add_quark_mass_vars(self, from_minnlo=True):
-        pdfs = input_tools.args_from_metadata(self.card_tool, "pdfs")
-        theory_corrs = input_tools.args_from_metadata(self.card_tool, "theoryCorr")
+        pdfs = self.datagroups.args_from_metadata("pdfs")
+        theory_corrs = self.datagroups.args_from_metadata("theoryCorr")
 
         from_minnlo = not (
             "scetlib_dyturboMSHT20mcrange" in theory_corrs
@@ -995,13 +987,12 @@ class TheoryHelper(object):
         )
         syst_ax = "pdfVar" if from_minnlo else "vars"
 
-        self.card_tool.addSystematic(
-            name=bhist,
+        self.datagroups.addSystematic(
+            bhist,
             processes=self.samples,
             systAxes=[syst_ax],
             symmetrize="quadratic",
-            group="bcQuarkMass",
-            splitGroup={"pTModeling": ".*", "theory": ".*"},
+            groups=["bcQuarkMass", "pTModeling", "theory"],
             passToFakes=self.propagate_to_fakes,
             outNames=[
                 "",
@@ -1011,13 +1002,12 @@ class TheoryHelper(object):
             + ["pdfMSHT20mbrangeUp"],
         )
 
-        self.card_tool.addSystematic(
-            name=bhist.replace("brange", "crange"),
+        self.datagroups.addSystematic(
+            bhist.replace("brange", "crange"),
             processes=self.samples,
             systAxes=[syst_ax],
             symmetrize="quadratic",
-            group="bcQuarkMass",
-            splitGroup={"pTModeling": ".*", "theory": ".*"},
+            groups=["bcQuarkMass", "pTModeling", "theory"],
             passToFakes=self.propagate_to_fakes,
             outNames=[
                 "",

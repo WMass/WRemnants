@@ -4,9 +4,7 @@ import hist
 import numpy as np
 
 import narf
-from utilities import boostHistHelpers as hh
-from utilities import common, differential, logging, parsing
-from utilities.io_tools import output_tools
+from utilities import common, differential, parsing
 from wremnants import (
     helicity_utils,
     syst_tools,
@@ -16,6 +14,9 @@ from wremnants import (
 )
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.datasets.dataset_tools import getDatasets
+from wremnants.histmaker_tools import write_analysis_output
+from wums import boostHistHelpers as hh
+from wums import logging
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
@@ -847,7 +848,7 @@ def build_graph(df, dataset):
 
 
 resultdict = narf.build_and_run(datasets, build_graph)
-output_tools.write_analysis_output(
+write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
 
@@ -911,4 +912,4 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
         if args.useTheoryAgnosticBinning:
             outfname += "_theoryAgnosticBinning"
         outfname += ".hdf5"
-        output_tools.write_analysis_output(helicity_xsecs_out, outfname, args)
+        write_analysis_output(helicity_xsecs_out, outfname, args)

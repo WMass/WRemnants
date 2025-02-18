@@ -10,11 +10,12 @@ import lz4.frame
 import numpy as np
 import ROOT
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common
 from utilities.io_tools import input_tools
 from wremnants import theory_tools
 from wremnants.correctionsTensor_helper import makeCorrectionsTensor
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

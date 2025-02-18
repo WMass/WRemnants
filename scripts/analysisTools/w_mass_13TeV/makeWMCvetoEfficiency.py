@@ -17,11 +17,13 @@ import hist
 import lz4.frame
 
 import narf
+import wums.ioutils
+from utilities import common
+from wremnants.datasets.datagroups import Datagroups
 
 # from wremnants import plot_tools,theory_tools,syst_tools
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
-from wremnants.datasets.datagroups import Datagroups
+from wums import boostHistHelpers as hh
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]
@@ -445,7 +447,7 @@ if __name__ == "__main__":
         postfix = "_" + postfix
 
     resultDict.update(
-        {"meta_info": narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
+        {"meta_info": wums.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
     )
 
     outfile = outdir + f"vetoEfficienciesEtaPt{postfix}.pkl.lz4"

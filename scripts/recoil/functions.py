@@ -13,7 +13,7 @@ ROOT.gStyle.SetOptTitle(0)
 import hist
 
 import narf
-from utilities import boostHistHelpers as hh
+from wums import boostHistHelpers as hh
 
 
 def loadJSON(jsIn):

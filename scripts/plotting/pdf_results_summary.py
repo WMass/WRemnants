@@ -1,9 +1,10 @@
+import combinetf2.io_tools
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import ticker
 
 from utilities import parsing
-from utilities.io_tools import combinetf_input, hepdata_tools, output_tools
+from utilities.io_tools import hepdata_tools, output_tools
 from wremnants import plot_tools, theory_tools
 
 parser = parsing.plot_parser()
@@ -74,13 +75,13 @@ ref_unc = 6.0 if isW else 2.0
 
 pdf_name = lambda p: theory_tools.pdfMap[p]["name"]
 
-dfs = combinetf_input.read_all_groupunc_df(
+dfs = combinetf2.io_tools.read_all_groupunc_df(
     [args.reffile.format(pdf=pdf) for pdf in args.pdfs],
     rename_cols={f"err_{pdf_name(pdf)}": "err_pdf" for pdf in args.pdfs},
     uncs=[pdf_name(pdf) for pdf in args.pdfs],
     names=[pdf_name(pdf)[3:] for pdf in args.pdfs],
 )
-# pdf_infdfs = {pdf_name(pdf)[3:] : combinetf_input.read_groupunc_df(args.reffileinf.format(pdf=pdf), pdf_name(pdf)) for pdf in args.pdfs}
+# pdf_infdfs = {pdf_name(pdf)[3:] : combinetf2.io_tools.read_groupunc_df(args.reffileinf.format(pdf=pdf), pdf_name(pdf)) for pdf in args.pdfs}
 
 if args.print:
     for k, v in dfs.iterrows():

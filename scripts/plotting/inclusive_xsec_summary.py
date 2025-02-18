@@ -5,22 +5,18 @@
 import json
 import math
 
+import combinetf2.io_tools
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 import pandas as pd
 
-from narf import ioutils
-from utilities import logging, parsing
-from utilities.io_tools import (
-    combinetf_input,
-    conversion_tools,
-    output_tools,
-    tex_tools,
-)
+from utilities import parsing
+from utilities.io_tools import conversion_tools, output_tools, tex_tools
 from utilities.styles.styles import nuisance_groupings
 from wremnants import plot_tools
+from wums import ioutils, logging
 
 parser = parsing.plot_parser()
 parser.add_argument("infile", type=str, help="Combine fitresult file")
@@ -41,7 +37,7 @@ if args.infile.endswith(".root"):
 
 grouping = nuisance_groupings["max"]
 
-fitresult = combinetf_input.get_fitresult(args.infile)
+fitresult = combinetf2.io_tools.get_fitresult(args.infile)
 meta = ioutils.pickle_load_h5py(fitresult["meta"])
 
 translate_label = {}
@@ -105,7 +101,7 @@ for poi, poi_name in zip(pois, poi_names):
     elif poi.endswith("ratio"):
         scale = 1.0
 
-    impacts, labels, norm = combinetf_input.read_impacts_poi(
+    impacts, labels, norm = combinetf2.io_tools.read_impacts_poi(
         fitresult, True, add_total=True, stat=0.0, poi=poi, normalize=False
     )
 

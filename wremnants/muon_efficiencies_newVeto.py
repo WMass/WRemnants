@@ -7,7 +7,8 @@ import lz4.frame
 import ROOT
 
 import narf
-from utilities import common, logging
+from utilities import common
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

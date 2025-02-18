@@ -6,11 +6,11 @@ import numpy as np
 from matplotlib import cm
 from matplotlib.colors import LogNorm
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging, parsing
-from utilities.io_tools import output_tools
+from utilities import common, parsing
 from utilities.styles import styles
 from wremnants import plot_tools, theory_corrections
+from wums import boostHistHelpers as hh
+from wums import logging, output_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(

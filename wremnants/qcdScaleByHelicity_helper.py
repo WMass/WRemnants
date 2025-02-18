@@ -5,8 +5,9 @@ import lz4.frame
 import numpy as np
 import ROOT
 
-from utilities import common, logging
+from utilities import common
 from wremnants.correctionsTensor_helper import makeCorrectionsTensor
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

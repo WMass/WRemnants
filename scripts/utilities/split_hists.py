@@ -5,9 +5,8 @@ import copy
 import boost_histogram as bh
 import h5py
 
-import narf
-import narf.ioutils
-from utilities import logging
+import wums.ioutils
+from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", type=str, help="Input hdf5 file")
@@ -41,7 +40,7 @@ def copy_and_slice(h5proxy, axis, idx):
             print("slicing")
             obj = obj[{axis: idx}]
 
-    return narf.ioutils.H5PickleProxy(obj)
+    return wums.ioutils.H5PickleProxy(obj)
 
 
 class DeepCopyOverride:
@@ -75,7 +74,7 @@ print(keys)
 for key in keys:
 
     with h5py.File(args.input, "r") as h5file:
-        res = narf.ioutils.pickle_load_h5py(h5file[key])
+        res = wums.ioutils.pickle_load_h5py(h5file[key])
         # print("res.keys", res.keys())
         # print(res["dataset"].keys())
         # quit()
@@ -83,8 +82,8 @@ for key in keys:
         # preload all the proxied objects so we can close the file
         # TODO should this be an option in pickle_load_h5py directly?
         with DeepCopyOverride(
-            narf.ioutils.H5PickleProxy,
-            lambda h5proxy, memo: narf.ioutils.H5PickleProxy(h5proxy.get()),
+            wums.ioutils.H5PickleProxy,
+            lambda h5proxy, memo: wums.ioutils.H5PickleProxy(h5proxy.get()),
         ):
             copy.deepcopy(res)
 
@@ -92,9 +91,9 @@ for key in keys:
 
         # for isplit in range(args.start, args.end):
         print("isplit", isplit)
-        # narf.ioutils.H5PickleProxy.__deepcopy__ = lambda h5proxy, memo : copy_and_slice(h5proxy, args.axis, isplit)
+        # wums.ioutils.H5PickleProxy.__deepcopy__ = lambda h5proxy, memo : copy_and_slice(h5proxy, args.axis, isplit)
         # outres = copy.deepcopy(res)
-        # del narf.ioutils.H5PickleProxy.__deepcopy__
+        # del wums.ioutils.H5PickleProxy.__deepcopy__
 
         if args.nominalData and "dataset" in res and res["dataset"]["is_data"]:
             isplitsource = 0
@@ -102,7 +101,7 @@ for key in keys:
             isplitsource = isplit
 
         with DeepCopyOverride(
-            narf.ioutils.H5PickleProxy,
+            wums.ioutils.H5PickleProxy,
             lambda h5proxy, memo: copy_and_slice(h5proxy, args.axis, isplitsource),
         ):
             outres = copy.deepcopy(res)
@@ -115,7 +114,7 @@ for key in keys:
         print("outfile", outfile, mode)
 
         with h5py.File(outfile, mode) as h5out:
-            narf.ioutils.pickle_dump_h5py(key, outres, h5out)
+            wums.ioutils.pickle_dump_h5py(key, outres, h5out)
 
         outres = None
 

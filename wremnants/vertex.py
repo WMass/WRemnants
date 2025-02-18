@@ -1,7 +1,8 @@
 import ROOT
 
 import narf
-from utilities import common, logging
+from utilities import common
+from wums import logging
 
 narf.clingutils.Declare('#include "vertex.hpp"')
 

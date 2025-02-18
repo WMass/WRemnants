@@ -1,5 +1,5 @@
 from utilities import common, parsing
-from utilities.io_tools import output_tools
+from wums import output_tools
 
 parser, initargs = parsing.common_parser()
 

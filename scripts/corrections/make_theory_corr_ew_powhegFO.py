@@ -4,8 +4,8 @@ import os
 import hist
 import numpy as np
 
-from utilities import logging
 from utilities.io_tools import input_tools, output_tools
+from wums import logging
 
 parser = argparse.ArgumentParser()
 

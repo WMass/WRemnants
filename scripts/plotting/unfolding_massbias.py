@@ -1,16 +1,16 @@
+import combinetf2.io_tools
 import matplotlib as mpl
 import mplhep as hep
 import numpy as np
 import pandas as pd
 
-from utilities import logging, parsing
-from utilities.io_tools import output_tools
-from utilities.io_tools.combinetf_input import get_fitresult
+from utilities import parsing
 from wremnants import plot_tools
+from wums import logging, output_tools
 
 
 def get_mass_obs(filename):
-    fitresult = get_fitresult(filename)
+    fitresult = combinetf2.io_tools.get_fitresult(filename)
 
     val = 100 * fitresult["nois_outvals"][...][0]
     err = 100 * (fitresult["nois_outcov"][...][0, 0] ** 0.5)

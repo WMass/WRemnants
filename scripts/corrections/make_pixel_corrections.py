@@ -3,8 +3,8 @@ import pickle
 
 import lz4.frame
 
-from utilities import logging
 from wremnants.datasets.datagroups import Datagroups
+from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--inputFile", type=str, required=True)

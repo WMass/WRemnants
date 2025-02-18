@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import uproot
 
-from utilities import logging
+from wums import logging
 
 mpl.rcParams.update(
     {

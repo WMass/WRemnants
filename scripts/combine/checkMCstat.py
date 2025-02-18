@@ -15,7 +15,7 @@ args = sys.argv[:]
 sys.argv = ["-b"]
 import ROOT
 
-from utilities import logging
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

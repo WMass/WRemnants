@@ -7,8 +7,8 @@ import uproot
 
 os.sys.path.append(os.path.expandvars("/home/submit/tyjyang/analysis/wmass/WRemnants"))
 
-from utilities import logging
 from utilities.io_tools import input_tools
+from wums import logging
 
 logger = logging.setup_logger(__file__, 3, True)
 

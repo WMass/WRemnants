@@ -6,10 +6,11 @@ import hist
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common
 from utilities.io_tools import input_tools, output_tools
 from wremnants import plot_tools, theory_corrections
+from wums import boostHistHelpers as hh
+from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument(

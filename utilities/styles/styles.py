@@ -1,7 +1,25 @@
-from utilities import boostHistHelpers as hh
-from utilities import logging
+import matplotlib.cm as cm
+
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
+
+
+def translate_html_to_latex(n):
+    # transform html style formatting into latex style
+    if "</" in n:
+        n = (
+            f"${n}$".replace("<i>", r"\mathit{")
+            .replace("<sub>", "_{")
+            .replace("<sup>", "^{")
+            .replace("</i>", "}")
+            .replace("</sub>", "}")
+            .replace("</sup>", "}")
+            .replace(" ", r"\ ")
+        )
+    return n
+
 
 # colors from CAT (https://cms-analysis.docs.cern.ch/guidelines/plotting/colors/)
 # #5790fc blue
@@ -90,47 +108,69 @@ process_labels = {
     "Prompt": "Prompt",
 }
 
-xlabels = {
-    "pt": r"$\mathit{p}_{T}^{\mu}$ (GeV)",
-    "ptGen": r"$\mathit{p}_{T}^{\mu}$ (GeV)",
-    "ptW": r"$\mathit{p}_{T}^{\mu+MET}$ (GeV)",
-    "ptVGen": r"$\mathit{p}_{T}^\mathrm{V}$ (GeV)",
-    "ptVgen": r"$\mathit{p}_{T}^\mathrm{V}$ (GeV)",
-    "ptWgen": r"$\mathit{p}_{T}^\mathrm{W}$ (GeV)",
-    "ptZgen": r"$\mathit{p}_{T}^\mathrm{Z}$ (GeV)",
-    "muonJetPt": r"$\mathit{p}_{T}^\mathrm{jet[\mu]}$ (GeV)",
+axis_labels = {
+    "pt": {"label": r"$\mathit{p}_{T}^{\mu}$", "unit": "GeV"},
+    "ptGen": {"label": r"$\mathit{p}_{T}^{\mu}$", "unit": "GeV"},
+    "ptW": {"label": r"$\mathit{p}_{T}^{\mu+MET}$", "unit": "GeV"},
+    "ptVGen": {"label": r"$\mathit{p}_{T}^\mathrm{V}$", "unit": "GeV"},
+    "ptVgen": {"label": r"$\mathit{p}_{T}^\mathrm{V}$", "unit": "GeV"},
+    "ptWgen": {"label": r"$\mathit{p}_{T}^\mathrm{W}$", "unit": "GeV"},
+    "ptZgen": {"label": r"$\mathit{p}_{T}^\mathrm{Z}$", "unit": "GeV"},
+    "muonJetPt": {"label": r"$\mathit{p}_{T}^\mathrm{jet[\mu]}$", "unit": "GeV"},
+    "qGen": r"$|\mathit{q}^{\mu}|$",
     "eta": r"$\mathit{\eta}^{\mu}$",
     "etaGen": r"$\mathit{\eta}^{\mu}$",
     "abseta": r"$|\mathit{\eta}^{\mu}|$",
     "absEta": r"$|\mathit{\eta}^{\mu}|$",
     "absEtaGen": r"$|\mathit{\eta}^{\mu}|$",
-    "ptll": r"$\mathit{p}_{\mathrm{T}}^{\mu\mu}$ (GeV)",
+    "ptll": {"label": r"$\mathit{p}_{\mathrm{T}}^{\mu\mu}$", "unit": "GeV"},
     "yll": r"$\mathit{y}^{\mu\mu}$",
     "absYVGen": r"|$\mathit{Y}^\mathrm{V}$|",
-    "mll": r"$\mathit{m}_{\mu\mu}$ (GeV)",
-    "ewMll": r"$\mathit{m}^{\mathrm{EW}}_{\mu\mu}$ (GeV)",
-    "ewMlly": r"$\mathit{m}^{\mathrm{EW}}_{\mu\mu\gamma}$ (GeV)",
+    "mll": {"label": r"$\mathit{m}_{\mu\mu}$", "unit": "GeV"},
+    "ewMll": {"label": r"$\mathit{m}^{\mathrm{EW}}_{\mu\mu}$", "unit": "GeV"},
+    "ewMlly": {"label": r"$\mathit{m}^{\mathrm{EW}}_{\mu\mu\gamma}$", "unit": "GeV"},
     "costhetastarll": r"$\cos{\mathit{\theta}^{\star}_{\mu\mu}}$",
     "cosThetaStarll": r"$\cos{\mathit{\theta}^{\star}_{\mu\mu}}$",
     "phistarll": r"$\mathit{\phi}^{\star}_{\mu\mu}$",
     "phiStarll": r"$\mathit{\phi}^{\star}_{\mu\mu}$",
-    "MET_pt": r"$\mathit{p}_{\mathrm{T}}^{miss}$ (GeV)",
-    "MET": r"$\mathit{p}_{\mathrm{T}}^{miss}$ (GeV)",
-    "met": r"$\mathit{p}_{\mathrm{T}}^{miss}$ (GeV)",
-    "mt": r"$\mathit{m}_{T}^{\mu,MET}$ (GeV)",
-    "mtfix": r"$\mathit{m}_{T}^\mathrm{fix}$ (GeV)",
+    "MET_pt": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
+    "MET": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
+    "met": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
+    "mt": {"label": r"$\mathit{m}_{T}^{\mu,MET}$", "unit": "GeV"},
+    "mtfix": {"label": r"$\mathit{m}_{T}^\mathrm{fix}$", "unit": "GeV"},
     "etaPlus": r"$\mathit{\eta}^{\mu(+)}$",
     "etaMinus": r"$\mathit{\eta}^{\mu(-)}$",
-    "ptPlus": r"$\mathit{p}_{\mathrm{T}}^{\mu(+)}$ (GeV)",
-    "ptMinus": r"$\mathit{p}_{\mathrm{T}}^{\mu(-)}$ (GeV)",
+    "ptPlus": {"label": r"$\mathit{p}_{\mathrm{T}}^{\mu(+)}$", "unit": "GeV"},
+    "ptMinus": {"label": r"$\mathit{p}_{\mathrm{T}}^{\mu(-)}$", "unit": "GeV"},
     "etaSum": r"$\mathit{\eta}^{\mu(+)} + \mathit{\eta}^{\mu(-)}$",
     "etaDiff": r"$\mathit{\eta}^{\mu(+)} - \mathit{\eta}^{\mu(-)}$",
     "etaDiff": r"$\mathit{\eta}^{\mu(+)} - \mathit{\eta}^{\mu(-)}$",
     "etaAbsEta": r"$\mathit{\eta}^{\mu[\mathrm{argmax(|\mathit{\eta}^{\mu}|)}]}$",
     "ewLogDeltaM": "ewLogDeltaM",
     "dxy": r"$\mathit{d}_\mathrm{xy}$ (cm)",
-    "iso": r"$I$ (GeV)",
+    "iso": {"label": r"$I$", "unit": "GeV"},
     "relIso": r"$I_\mathrm{rel}$",
+    # "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
+    # "ewMll": r"$\mathrm{Post\ FSR}\ m^{\mu\mu}$",
+    # "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\mu\mu}$",
+    # "ewAbsYll": r"$\mathrm{Post\ FSR}\ |Y^{\mu\mu}|$",
+    # "csCosTheta": r"$\mathrm{Post\ FSR\ \cos{\theta^{\star}_{\mu\mu}}}$",
+    # "ptgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu}$",
+    # "etagen": r"$\mathrm{Pre\ FSR}\ \eta^{\mu}$",
+    # "ptVgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
+    # "absYVgen": r"$\mathrm{Pre\ FSR}\ |Y^{\mu\mu}|$",
+    # "massVgen": r"$\mathrm{Pre\ FSR}\ m^{\mu\mu}$",
+    # "csCosThetagen": r"$\mathrm{Pre\ FSR\ \cos{\theta^{\star}_{\mu\mu}}}$",
+    # "ptlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\mu}$",
+    # "etalhe": r"$\mathrm{LHE}\ \eta^{\mu}$",
+    # "ptVlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\mu\mu}$",
+    # "absYVlhe": r"$\mathrm{LHE}\ |Y^{\mu\mu}|$",
+    # "massVlhe": r"$\mathrm{LHE}\ m^{\mu\mu}$",
+    # "cosThetaStarlhe": r"$\mathrm{LHE\ \cos{\theta^{\star}_{\mu\mu}}}$",
+    # "qT": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
+    # "Q": r"$\mathrm{Pre\ FSR}\ m^{\mu\mu}$",
+    # "absY": r"$\mathrm{Pre\ FSR}\ Y^{\mu\mu}$",
+    # "charge": r"$\mathrm{Pre\ FSR\ charge}$",
 }
 
 legend_labels = {
@@ -186,6 +226,8 @@ common_groups = [
     "Total",
     "stat",
     "binByBinStat",
+    "binByBinStatZ",
+    "binByBinStatW",
     "luminosity",
     "recoil",
     "CMS_background",
@@ -196,7 +238,7 @@ common_groups = [
     "massAndWidth",
     "normXsecZ",
 ]
-nuisance_groupings = {
+nuisance_grouping = {
     "super": [
         "Total",
         "stat",
@@ -340,68 +382,221 @@ poi_types = {
     "helmetapois": "Ai",
 }
 
-axis_labels = {
-    "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
-    "ewMll": r"$\mathrm{Post\ FSR}\ m^{\mu\mu}$",
-    "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\mu\mu}$",
-    "ewAbsYll": r"$\mathrm{Post\ FSR}\ |Y^{\mu\mu}|$",
-    "csCosTheta": r"$\mathrm{Post\ FSR\ \cos{\theta^{\star}_{\mu\mu}}}$",
-    "ptgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu}$",
-    "etagen": r"$\mathrm{Pre\ FSR}\ \eta^{\mu}$",
-    "ptVgen": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
-    "absYVgen": r"$\mathrm{Pre\ FSR}\ |Y^{\mu\mu}|$",
-    "massVgen": r"$\mathrm{Pre\ FSR}\ m^{\mu\mu}$",
-    "csCosThetagen": r"$\mathrm{Pre\ FSR\ \cos{\theta^{\star}_{\mu\mu}}}$",
-    "ptlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\mu}$",
-    "etalhe": r"$\mathrm{LHE}\ \eta^{\mu}$",
-    "ptVlhe": r"$\mathrm{LHE}\ p_\mathrm{T}^{\mu\mu}$",
-    "absYVlhe": r"$\mathrm{LHE}\ |Y^{\mu\mu}|$",
-    "massVlhe": r"$\mathrm{LHE}\ m^{\mu\mu}$",
-    "cosThetaStarlhe": r"$\mathrm{LHE\ \cos{\theta^{\star}_{\mu\mu}}}$",
-    "qT": r"$\mathrm{Pre\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
-    "Q": r"$\mathrm{Pre\ FSR}\ m^{\mu\mu}$",
-    "absY": r"$\mathrm{Pre\ FSR}\ Y^{\mu\mu}$",
-    "charge": r"$\mathrm{Pre\ FSR\ charge}$",
+impact_labels = {
+    "angularCoeffs": "Angular coefficients",
+    "QCDscale": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale",
+    "QCDscaleZMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (Z)",
+    "QCDscaleWMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
+    "QCDscalePtChargeMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale",
+    "QCDscaleZPtChargeMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (Z)",
+    "QCDscaleWPtChargeMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
+    "QCDscaleZPtHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (Z)",
+    "QCDscaleWPtHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
+    "QCDscaleZPtChargeHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (Z)",
+    "QCDscaleWPtChargeHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
+    "binByBinStat": "Simulated samples stat.",
+    "binByBinStatW": "Bin-by-bin stat. (W)",
+    "binByBinStatZ": "Bin-by-bin stat. (Z)",
+    "recoil": "recoil",
+    "CMS_background": "Bkg.",
+    "FakeHighMT": "FakeHighMT",
+    "FakeLowMT": "FakeLowMT",
+    "rFake": "fakerate",
+    "rFakemu": "fakerate",
+    "rFakee": "fakerate",
+    "FakemuHighMT": "FakeHighMT",
+    "FakemuLowMT": "FakeLowMT",
+    "FakeeHighMT": "FakeHighMT",
+    "FakeeLowMT": "FakeLowMT",
+    "massShiftZ": "Z boson mass",
+    "massShiftW": "W boson mass",
+    "pdfMSHT20": "PDF",
+    "pdfCT18Z": "PDF",
+    "pdfMSHT20NoAlphaS": "PDF",
+    "pdfMSHT20AlphaS": "<i>α</i><sub>S</sub> PDF",
+    "pdfCT18ZAlphaS": "<i>α</i><sub>S</sub> PDF",
+    "pTModeling": "<i>p</i><sub>T</sub><sup>V</sup> modelling",
+    "resum": "Resummation",
+    "resumTNP": "Non pert. trans.",
+    "resumNonpert": "Non pert.",
+    "muonCalibration": "Muon calibration",
+    "muonScale": "Muon scale",
+    "nonClosure": "Muon scale",
+    "resolutionCrctn": "Muon resolution",
+    "muon_eff_stat": "<i>ε</i><sup>μ</sup><sub>stat</sub>",
+    "muon_eff_syst": "<i>ε</i><sup>μ</sup><sub>syst</sub>",
+    "prefire": "L1 prefire",
+    "muonPrefire": "L1 muon prefire",
+    "ecalPrefire": "L1 ecal prefire",
+    "stat": "Data stat.",
+    "luminosity": "Luminosity",
+    "theory_ew": "EW",
+    "FakeRate": "Fake rate factors",
+    "FakeShape": "Fake shape corrections",
+    "Fake": "Fakes",
+    "widthW": "W width",
+    "widthZ": "Z width",
+    "ZmassAndWidth": "Z mass & width",
+    "bcQuarkMass": "b,c quark masses",
+    "experiment": "Experiment",
+    "expNoCalib": "Experiment (excl. calib.)",
+    "theory": "Theory",
+    "nlo_ew_virtual": "EW (virtual)",
+    "pythia_shower_kt": "Pythia shower <i>k</i><sub>T</sub>",
+    "Scale_correction_unc117": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (117)",
+    "Scale_correction_unc128": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (128)",
+    "Scale_correction_unc129": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (129)",
+    "Scale_correction_unc137": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (137)",
+    "Scale_correction_unc138": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (138)",
+    "Scale_correction_unc139": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (139)",
+    "Scale_correction_unc140": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (140)",
+    "Scale_correction_unc141": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (141)",
+    "Scale_correction_unc142": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (142)",
+    "Scale_correction_unc143": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (143)",
+    "ScaleClosA_correction_unc0": "<i>p</i><sub>T</sub><sup>μ</sup> calib. Δ<i>m</i><sub>Z</sub><sup>PDG</sup>",
+    "ScaleClos_correction_unc48": "<i>p</i><sub>T</sub><sup>μ</sup> calib. Z closure stat. (48)",
+    "FakeParam0var0": "Nonprompt syst. (0)",
+    "FakeParam1var0": "Nonprompt syst. (1)",
+    "FakeParam2var0": "Nonprompt syst. (2)",
+    "pdf1CT18ZSymAvg": "PDF (1) [avg.]",
+    "pdf2CT18ZSymAvg": "PDF (2) [avg.]",
+    "pdf3CT18ZSymAvg": "PDF (3) [avg.]",
+    "pdf4CT18ZSymAvg": "PDF (4) [avg.]",
+    "pdf5CT18ZSymAvg": "PDF (5) [avg.]",
+    "pdf6CT18ZSymAvg": "PDF (6) [avg.]",
+    "pdf7CT18ZSymAvg": "PDF (7) [avg.]",
+    "pdf8CT18ZSymAvg": "PDF (8) [avg.]",
+    "pdf9CT18ZSymAvg": "PDF (9) [avg.]",
+    "pdf10CT18ZSymAvg": "PDF (10) [avg.]",
+    "pdf11CT18ZSymAvg": "PDF (11) [avg.]",
+    "pdf12CT18ZSymAvg": "PDF (12) [avg.]",
+    "pdf13CT18ZSymAvg": "PDF (13) [avg.]",
+    "pdf14CT18ZSymAvg": "PDF (14) [avg.]",
+    "pdf15CT18ZSymAvg": "PDF (15) [avg.]",
+    "pdf16CT18ZSymAvg": "PDF (16) [avg.]",
+    "pdf17CT18ZSymAvg": "PDF (17) [avg.]",
+    "pdf18CT18ZSymAvg": "PDF (18) [avg.]",
+    "pdf19CT18ZSymAvg": "PDF (19) [avg.]",
+    "pdf20CT18ZSymAvg": "PDF (20) [avg.]",
+    "pdf21CT18ZSymAvg": "PDF (21) [avg.]",
+    "pdf22CT18ZSymAvg": "PDF (22) [avg.]",
+    "pdf23CT18ZSymAvg": "PDF (23) [avg.]",
+    "pdf24CT18ZSymAvg": "PDF (24) [avg.]",
+    "pdf25CT18ZSymAvg": "PDF (25) [avg.]",
+    "pdf26CT18ZSymAvg": "PDF (26) [avg.]",
+    "pdf27CT18ZSymAvg": "PDF (27) [avg.]",
+    "pdf28CT18ZSymAvg": "PDF (28) [avg.]",
+    "pdf29CT18ZSymAvg": "PDF (29) [avg.]",
+    "pdf1CT18ZSymDiff": "PDF (1) [diff.]",
+    "pdf2CT18ZSymDiff": "PDF (2) [diff.]",
+    "pdf3CT18ZSymDiff": "PDF (3) [diff.]",
+    "pdf4CT18ZSymDiff": "PDF (4) [diff.]",
+    "pdf5CT18ZSymDiff": "PDF (5) [diff.]",
+    "pdf6CT18ZSymDiff": "PDF (6) [diff.]",
+    "pdf7CT18ZSymDiff": "PDF (7) [diff.]",
+    "pdf8CT18ZSymDiff": "PDF (8) [diff.]",
+    "pdf9CT18ZSymDiff": "PDF (9) [diff.]",
+    "pdf10CT18ZSymDiff": "PDF (10) [diff.]",
+    "pdf11CT18ZSymDiff": "PDF (11) [diff.]",
+    "pdf12CT18ZSymDiff": "PDF (12) [diff.]",
+    "pdf13CT18ZSymDiff": "PDF (13) [diff.]",
+    "pdf14CT18ZSymDiff": "PDF (14) [diff.]",
+    "pdf15CT18ZSymDiff": "PDF (15) [diff.]",
+    "pdf16CT18ZSymDiff": "PDF (16) [diff.]",
+    "pdf17CT18ZSymDiff": "PDF (17) [diff.]",
+    "pdf18CT18ZSymDiff": "PDF (18) [diff.]",
+    "pdf19CT18ZSymDiff": "PDF (19) [diff.]",
+    "pdf20CT18ZSymDiff": "PDF (20) [diff.]",
+    "pdf21CT18ZSymDiff": "PDF (21) [diff.]",
+    "pdf22CT18ZSymDiff": "PDF (22) [diff.]",
+    "pdf23CT18ZSymDiff": "PDF (23) [diff.]",
+    "pdf24CT18ZSymDiff": "PDF (24) [diff.]",
+    "pdf25CT18ZSymDiff": "PDF (25) [diff.]",
+    "pdf26CT18ZSymDiff": "PDF (26) [diff.]",
+    "pdf27CT18ZSymDiff": "PDF (27) [diff.]",
+    "pdf28CT18ZSymDiff": "PDF (28) [diff.]",
+    "pdf29CT18ZSymDiff": "PDF (29) [diff.]",
+    "pdfAlphaSSymAvg": "PDF <i>α</i><sub>S</sub> [avg.]",
+    "pdfAlphaSSymDiff": "PDF <i>α</i><sub>S</sub> [diff.]",
+    "pdfMSHT20mcrangeSymAvg": "PDF Δ<i>m</i><sub>c</sub> [avg.]",
+    "pdfMSHT20mcrangeSymDiff": "PDF Δ<i>m</i><sub>c</sub> [diff.]",
+    "pdfMSHT20mbrangeSymAvg": "PDF Δ<i>m</i><sub>b</sub> [avg.]",
+    "pdfMSHT20mbrangeSymDiff": "PDF Δ<i>m</i><sub>b</sub> [diff.]",
+    "QCDscaleWinclusive_PtV0_13000helicity_0_SymAvg": "<i>A</i><sub>0</sub> angular coeff., W, inc.",
+    "QCDscaleWinclusive_PtV0_13000helicity_2_SymAvg": "<i>A</i><sub>2</sub> angular coeff., W, inc.",
+    "scetlibNPgamma": "SCETLib γ",
+    "chargeVgenNP0scetlibNPZLambda2": "SCETLib λ²(Z)",
+    "chargeVgenNP1scetlibNPWLambda2": "SCETLib λ²(W⁻)",
+    "chargeVgenNP0scetlibNPWLambda2": "SCETLib λ²(W⁺)",
+    "chargeVgenNP0scetlibNPWDelta_Lambda2": "SCETLib Δλ²(W⁻)",
+    "chargeVgenNP1scetlibNPWDelta_Lambda2": "SCETLib Δλ²(W⁺)",
+    "chargeVgenNP0scetlibNPZDelta_Lambda2": "SCETLib Δλ²(Z)",
+    "chargeVgenNP0scetlibNPWLambda4": "SCETLib λ⁴(W⁻)",
+    "chargeVgenNP1scetlibNPWLambda4": "SCETLib λ⁴(W⁺)",
+    "chargeVgenNP0scetlibNPZLambda4": "SCETLib λ⁴(Z)",
+    "resumTransitionWSymDiff": "resum. transition W [diff.]",
+    "resumTransitionZSymDiff": "resum. transition Z [diff.]",
+    "resumTransitionZSymAvg": "resum. transition W [avg.]",
+    "resumTransitionWSymAvg": "resum. transition Z [avg.]",
+    "resumFOScaleWSymAvg": "resum. FO scale W [avg.]",
+    "resumFOScaleWSymDiff": "resum. FO scale W [diff.]",
+    "resumFOScaleZSymAvg": "resum. FO scale Z [avg.]",
+    "resumFOScaleZSymDiff": "resum. FO scale Z [diff.]",
+    "resumTNP_b_qqV": "resum. TNP BF qqV",
+    "resumTNP_b_qg": "resum. TNP BF qg",
+    "resumTNP_b_qqS": "resum. TNP BF qqS",
+    "resumTNP_b_qqbarV": "resum. TNP BF q$\\bar{q}$V",
+    "resumTNP_b_qqDS": "resum. TNP BF qqΔS",
+    "resumTNP_gamma_nu": "resum. TNP γ<sub>ν</sub>",
+    "resumTNP_gamma_mu_q": "resum. TNP γ<sub>μ</sub>",
+    "resumTNP_gamma_cusp": "resum. TNP Γ<sub>cusp</sub>",
+    "resumTNP_h_qqV": "resum. TNP Hard func.",
+    "resumTNP_s": "resum. TNP Soft func.",
 }
 
-systematics_labels = {
-    "massShiftZ100MeV": r"$\Delta m_\mathrm{Z} = \pm 100\mathrm{MeV}$",
-    "massShiftW100MeV": r"$\Delta m_\mathrm{W} = \pm 100\mathrm{MeV}$",
-    "widthZ": r"$\Delta \Gamma_\mathrm{Z} = \pm 0.8\mathrm{MeV}$",
-    "widthW": r"$\Delta \Gamma_\mathrm{W} = \pm 0.6\mathrm{MeV}$",
-    # powhegFOEW variations
-    "weak_no_ew": "no EW",
-    "weak_no_ho": "no HO",
-    "weak_ps": "PS",
-    "weak_mt_dn": r"$m_\mathrm{t}^\mathrm{down}$",
-    "weak_mt_up": r"$m_\mathrm{t}^\mathrm{up}$",
-    "weak_mz_dn": r"$m_\mathrm{Z}^\mathrm{down}$",
-    "weak_mz_up": r"$m_\mathrm{Z}^\mathrm{up}$",
-    "weak_gmu_dn": r"$G_\mu^\mathrm{up}$",
-    "weak_gmu_up": r"$G_\mu^\mathrm{down}$",
-    "weak_aem": r"$\alpha_\mathrm{EM}$",
-    "weak_fs": "FS",
-    "weak_mh_dn": r"$m_\mathrm{H}^\mathrm{down}$",
-    "weak_mh_up": r"$m_\mathrm{H}^\mathrm{up}$",
-    "weak_s2eff_0p23125": r"$\mathrm{sin}^2_\mathrm{eff}=0.23125$",
-    "weak_s2eff_0p23105": r"$\mathrm{sin}^2_\mathrm{eff}=0.23105$",
-    "weak_s2eff_0p22155": r"$\mathrm{sin}^2_\mathrm{eff}=0.22155$",
-    "weak_s2eff_0p23185": r"$\mathrm{sin}^2_\mathrm{eff}=0.23185$",
-    "weak_s2eff_0p23205": r"$\mathrm{sin}^2_\mathrm{eff}=0.23205$",
-    "weak_s2eff_0p23255": r"$\mathrm{sin}^2_\mathrm{eff}=0.23255$",
-    "weak_s2eff_0p23355": r"$\mathrm{sin}^2_\mathrm{eff}=0.23355$",
-    "weak_s2eff_0p23455": r"$\mathrm{sin}^2_\mathrm{eff}=0.23455$",
-    "weak_s2eff_0p22955": r"$\mathrm{sin}^2_\mathrm{eff}=0.22955$",
-    "weak_s2eff_0p22655": r"$\mathrm{sin}^2_\mathrm{eff}=0.22655$",
-    # EW
-    "pythiaew_ISRCorr1": "Pythia ISR on / off",
-    "horacelophotosmecoffew_FSRCorr1": "Photos MEC off / on",
-    "horaceqedew_FSRCorr1": "Horace FSR / Photos",
-    "nlo_ew_virtual": "EW virtual",
-    "weak_default": "EW virtual",
-    # alternative generators
-    "matrix_radish": "MATRIX+RadISH",
-}
+
+# same as impact labels but in latex format
+systematics_labels = {k: translate_html_to_latex(v) for k, v in impact_labels.items()}
+
+
+# systematics_labels = {
+#     "massShiftZ100MeV": r"$\Delta m_\mathrm{Z} = \pm 100\mathrm{MeV}$",
+#     "massShiftW100MeV": r"$\Delta m_\mathrm{W} = \pm 100\mathrm{MeV}$",
+#     "widthZ": r"$\Delta \Gamma_\mathrm{Z} = \pm 0.8\mathrm{MeV}$",
+#     "widthW": r"$\Delta \Gamma_\mathrm{W} = \pm 0.6\mathrm{MeV}$",
+#     # powhegFOEW variations
+#     "weak_no_ew": "no EW",
+#     "weak_no_ho": "no HO",
+#     "weak_ps": "PS",
+#     "weak_mt_dn": r"$m_\mathrm{t}^\mathrm{down}$",
+#     "weak_mt_up": r"$m_\mathrm{t}^\mathrm{up}$",
+#     "weak_mz_dn": r"$m_\mathrm{Z}^\mathrm{down}$",
+#     "weak_mz_up": r"$m_\mathrm{Z}^\mathrm{up}$",
+#     "weak_gmu_dn": r"$G_\mu^\mathrm{up}$",
+#     "weak_gmu_up": r"$G_\mu^\mathrm{down}$",
+#     "weak_aem": r"$\alpha_\mathrm{EM}$",
+#     "weak_fs": "FS",
+#     "weak_mh_dn": r"$m_\mathrm{H}^\mathrm{down}$",
+#     "weak_mh_up": r"$m_\mathrm{H}^\mathrm{up}$",
+#     "weak_s2eff_0p23125": r"$\mathrm{sin}^2_\mathrm{eff}=0.23125$",
+#     "weak_s2eff_0p23105": r"$\mathrm{sin}^2_\mathrm{eff}=0.23105$",
+#     "weak_s2eff_0p22155": r"$\mathrm{sin}^2_\mathrm{eff}=0.22155$",
+#     "weak_s2eff_0p23185": r"$\mathrm{sin}^2_\mathrm{eff}=0.23185$",
+#     "weak_s2eff_0p23205": r"$\mathrm{sin}^2_\mathrm{eff}=0.23205$",
+#     "weak_s2eff_0p23255": r"$\mathrm{sin}^2_\mathrm{eff}=0.23255$",
+#     "weak_s2eff_0p23355": r"$\mathrm{sin}^2_\mathrm{eff}=0.23355$",
+#     "weak_s2eff_0p23455": r"$\mathrm{sin}^2_\mathrm{eff}=0.23455$",
+#     "weak_s2eff_0p22955": r"$\mathrm{sin}^2_\mathrm{eff}=0.22955$",
+#     "weak_s2eff_0p22655": r"$\mathrm{sin}^2_\mathrm{eff}=0.22655$",
+#     # EW
+#     "pythiaew_ISRCorr1": "Pythia ISR on / off",
+#     "horacelophotosmecoffew_FSRCorr1": "Photos MEC off / on",
+#     "horaceqedew_FSRCorr1": "Horace FSR / Photos",
+#     "nlo_ew_virtual": "EW virtual",
+#     "weak_default": "EW virtual",
+#     # alternative generators
+#     "matrix_radish": "MATRIX+RadISH",
+# }
 
 systematics_labels_idxs = {
     "powhegnloewew": {0: "nominal", 1: "powheg EW NLO / LO"},
@@ -429,21 +624,6 @@ systematics_labels_idxs = {
     },
 }
 systematics_labels_idxs["virtual_ew_wlike"] = systematics_labels_idxs["virtual_ew"]
-
-
-def translate_html_to_latex(n):
-    # transform html style formatting into latex style
-    if "</" in n:
-        n = (
-            f"${n}$".replace("<i>", r"\mathit{")
-            .replace("<sub>", "_{")
-            .replace("<sup>", "^{")
-            .replace("</i>", "}")
-            .replace("</sub>", "}")
-            .replace("</sup>", "}")
-            .replace(" ", r"\ ")
-        )
-    return n
 
 
 def get_systematics_label(key, idx=0):
@@ -485,14 +665,19 @@ def get_labels_colors_procs_sorted(procs):
         "PhotonInduced",
         "Prompt",
         "Rare",
+        "sig",
+        "bkg_2",
+        "bkg",
     ][::-1]
+
+    cmap = cm.get_cmap("tab10")
 
     procs = sorted(
         procs, key=lambda x: procs_sort.index(x) if x in procs_sort else len(procs_sort)
     )
     logger.info(f"Found processes {procs} in fitresult")
     labels = [process_labels.get(p, p) for p in procs]
-    colors = [process_colors.get(p, "red") for p in procs]
+    colors = [process_colors.get(p, cmap(i % cmap.N)) for i, p in enumerate(procs)]
     return labels, colors, procs
 
 

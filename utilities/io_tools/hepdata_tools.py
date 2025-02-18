@@ -1,8 +1,8 @@
 import ROOT
 
 import narf
-from utilities import logging
 from utilities.io_tools import input_tools
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

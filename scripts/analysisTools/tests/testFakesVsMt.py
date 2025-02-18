@@ -20,10 +20,10 @@ import numpy as np
 
 import narf
 import narf.fitutils
-from utilities import boostHistHelpers as hh
-from utilities import logging
 from wremnants import legacy_functions as sel
 from wremnants.datasets.datagroups import Datagroups
+from wums import boostHistHelpers as hh
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

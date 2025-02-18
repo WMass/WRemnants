@@ -1,7 +1,7 @@
 import hist
 
-from utilities import logging
 from wremnants import helicity_utils, syst_tools, theory_tools
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

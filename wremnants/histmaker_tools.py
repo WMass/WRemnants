@@ -1,7 +1,10 @@
+import os
 import time
 
-from narf.ioutils import H5PickleProxy
-from utilities import logging
+import h5py
+
+from utilities import common
+from wums import ioutils, logging, output_tools
 
 logger = logging.child_logger(__name__)
 
@@ -98,7 +101,7 @@ def aggregate_groups(datasets, result_dict, groups_to_aggregate):
                 )
                 logger.warning("Summing them up probably leads to wrong behaviour")
 
-            output[h_name] = H5PickleProxy(sum(histograms))
+            output[h_name] = ioutils.H5PickleProxy(sum(histograms))
 
         result_dict[group] = resdict
         result_dict[group]["output"] = output
@@ -108,3 +111,89 @@ def aggregate_groups(datasets, result_dict, groups_to_aggregate):
             del result_dict[name]
 
     logger.info(f"Aggregate groups: {time.time() - time0}")
+
+
+def writeMetaInfoToRootFile(rtfile, exclude_diff="notebooks", args=None):
+    import ROOT
+
+    meta_dict = ioutils.make_meta_info_dict(exclude_diff, args=args, wd=common.base_dir)
+    d = rtfile.mkdir("meta_info")
+    d.cd()
+
+    for key, value in meta_dict.items():
+        out = ROOT.TNamed(str(key), str(value))
+        out.Write()
+
+
+def analysis_debug_output(results):
+    logger.debug("")
+    logger.debug("Unweighted (Weighted) events, before cut")
+    logger.debug("-" * 30)
+    for key, val in results.items():
+        if "event_count" in val:
+            logger.debug(
+                f"Dataset {key.ljust(30)}:  {str(val['event_count']).ljust(15)} ({round(val['weight_sum'],1)})"
+            )
+            logger.debug("-" * 30)
+    logger.debug("")
+
+
+def write_analysis_output(results, outfile, args):
+    analysis_debug_output(results)
+
+    to_append = []
+    if args.theoryCorr and not args.theoryCorrAltOnly:
+        to_append.append(args.theoryCorr[0] + "Corr")
+    if args.maxFiles is not None:
+        to_append.append(f"maxFiles_{args.maxFiles}".replace("-", "m"))
+    if len(args.pdfs) >= 1 and args.pdfs[0] != "ct18z":
+        to_append.append(args.pdfs[0])
+    if hasattr(args, "ptqVgen") and args.ptqVgen:
+        to_append.append("vars_qtbyQ")
+
+    if to_append and not args.forceDefaultName:
+        outfile = outfile.replace(".hdf5", f"_{'_'.join(to_append)}.hdf5")
+
+    if args.postfix:
+        outfile = outfile.replace(".hdf5", f"_{args.postfix}.hdf5")
+
+    if args.outfolder:
+        if not os.path.exists(args.outfolder):
+            logger.info(f"Creating output folder {args.outfolder}")
+            os.makedirs(args.outfolder)
+        outfile = os.path.join(args.outfolder, outfile)
+
+    if args.appendOutputFile:
+        outfile = args.appendOutputFile
+        if os.path.isfile(outfile):
+            logger.info(f"Analysis output will be appended to file {outfile}")
+            open_as = "a"
+        else:
+            logger.warning(
+                f"Analysis output requested to be appended to file {outfile}, but the file does not exist yet, it will be created instead"
+            )
+            open_as = "w"
+    else:
+        if os.path.isfile(outfile):
+            logger.warning(
+                f"Output file {outfile} exists already, it will be overwritten"
+            )
+        open_as = "w"
+
+    time0 = time.time()
+    with h5py.File(outfile, open_as) as f:
+        for k, v in results.items():
+            logger.debug(f"Pickle and dump {k}")
+            ioutils.pickle_dump_h5py(k, v, f)
+
+        if "meta_info" not in f.keys():
+            ioutils.pickle_dump_h5py(
+                "meta_info",
+                output_tools.make_meta_info_dict(args=args, wd=common.base_dir),
+                f,
+            )
+
+    logger.info(f"Writing output: {time.time()-time0}")
+    logger.info(f"Output saved in {outfile}")
+
+    return outfile

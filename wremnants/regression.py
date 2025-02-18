@@ -3,7 +3,7 @@ from scipy import stats
 from scipy.optimize import nnls
 from scipy.special import comb
 
-from utilities import logging
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

@@ -3,11 +3,10 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 
-from utilities import boostHistHelpers as hh
-from utilities import logging, parsing
-from utilities.io_tools import output_tools
-from wremnants import plot_tools
+from utilities import parsing
 from wremnants.datasets.datagroups import Datagroups
+from wums import boostHistHelpers as hh
+from wums import logging, output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -87,7 +86,7 @@ logger.info(f"Will plot datasets {datasets}")
 
 groups.loadHistsForDatagroups(args.baseName, syst=args.histName, procsToRead=datasets)
 
-datagroups = groups.getDatagroups()
+datagroups = groups.groups
 
 translate_label = {
     "pt": r"$\mathrm{Reco}\ p_\mathrm{T}\ [\mathrm{GeV}]$",
@@ -185,8 +184,12 @@ def plot_resolution(
         xedges = None
         for sel2, idx2 in selections_slices:
             if (
-                idx2 not in [hist.underflow, hist.overflow]
-                and h2d.axes[sel2].size - 1 < idx2
+                (
+                    idx2 not in [hist.underflow, hist.overflow]
+                    and h2d.axes[sel2].size - 1 < idx2
+                )
+                or (idx2 == hist.overflow and not h2d.axes[sel2].traits.overflow)
+                or (idx2 == hist.underflow and not h2d.axes[sel2].traits.underflow)
             ):
                 continue
 
@@ -266,7 +269,7 @@ def plot_resolution(
             outfile += f"_{suffix}"
         plot_tools.save_pdf_and_png(outdir, outfile)
 
-        plot_tools.write_index_and_log(
+        output_tools.write_index_and_log(
             outdir,
             outfile,
             analysis_meta_info={args.infile: groups.getMetaInfo()},
@@ -533,7 +536,7 @@ for g_name, group in datagroups.items():
 
             plot_tools.save_pdf_and_png(outdir, outfile)
 
-            plot_tools.write_index_and_log(
+            output_tools.write_index_and_log(
                 outdir,
                 outfile,
                 #     yield_tables={"Values" : cov_mat}, nround=2 if "correlation" in matrix else 10,

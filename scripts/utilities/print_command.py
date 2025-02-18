@@ -2,9 +2,9 @@ import argparse
 import os
 import pathlib
 
-from utilities import logging
 from utilities.io_tools import input_tools
 from wremnants.datasets.datagroups import Datagroups
+from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("infile", type=str, help=".pkl.lz4 from with meta_info")

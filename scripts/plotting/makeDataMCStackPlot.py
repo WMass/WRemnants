@@ -1,14 +1,14 @@
 import hist
 from matplotlib import colormaps
 
-from utilities import boostHistHelpers as hh
-from utilities import logging, parsing
-from utilities.io_tools import output_tools
+from utilities import parsing
 from utilities.styles import styles
-from wremnants import plot_tools, syst_tools
+from wremnants import syst_tools
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.histselections import FakeSelectorSimpleABCD
 from wremnants.regression import Regressor
+from wums import boostHistHelpers as hh
+from wums import logging, output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -463,7 +463,7 @@ if addVariation:
         unstack.append(varname)
 
 groups.sortByYields(args.baseName, nominalName=nominalName)
-histInfo = groups.getDatagroups()
+histInfo = groups.groups
 
 logger.info(f"Unstacked processes are {exclude}")
 prednames = list(
@@ -532,18 +532,17 @@ for h in args.hists:
     else:
         rlabel = args.rlabel
 
-    if len(h.split("-")) > 1:
-        sp = h.split("-")
+    sp = h.split("-")
+    xlabel = plot_tools.get_axis_label(styles, sp)
+    if len(sp) > 1:
         base_action = lambda x: collapseSyst(x[select])
         action = lambda x: hh.unrolledHist(base_action(x), binwnorm=binwnorm, obs=sp)
-        xlabel = f"({', '.join([styles.xlabels.get(s,s).replace('(GeV)','') for s in sp])}) bin"
     else:
         base_action = lambda x: hh.projectNoFlow(
             collapseSyst(x[select]), h, overflow_ax
         )
         action = base_action
         href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
-        xlabel = styles.xlabels.get(href, href)
 
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")
@@ -626,14 +625,18 @@ for h in args.hists:
     unstacked_yields = groups.make_yields_df(
         args.baseName, unstack, norm_proc="Data", action=base_action
     )
-    plot_tools.write_index_and_log(
+    output_tools.write_index_and_log(
         outdir,
         outfile,
-        yield_tables={
+        # yield_tables={
+        #
+        #
+        # },
+        analysis_meta_info={
             "Stacked processes": stack_yields,
             "Unstacked processes": unstacked_yields,
+            "AnalysisOutput": groups.getMetaInfo(),
         },
-        analysis_meta_info={"AnalysisOutput": groups.getMetaInfo()},
         args=args,
     )
 

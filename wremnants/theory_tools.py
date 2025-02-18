@@ -4,8 +4,9 @@ import ROOT
 from scipy import ndimage
 
 import narf.clingutils
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+from utilities import common
+from wums import boostHistHelpers as hh
+from wums import logging
 
 logger = logging.child_logger(__name__)
 narf.clingutils.Declare('#include "theoryTools.hpp"')

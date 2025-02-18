@@ -21,8 +21,10 @@ from scipy.interpolate import RegularGridInterpolator
 
 import narf
 import narf.fitutils
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+import wums.ioutils
+from utilities import common
+from wums import boostHistHelpers as hh
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]
@@ -906,7 +908,7 @@ if __name__ == "__main__":
                 resultDict[ret.name] = ret
 
     resultDict.update(
-        {"meta_info": narf.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
+        {"meta_info": wums.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
     )
 
     outfile = outdir + args.outfilename

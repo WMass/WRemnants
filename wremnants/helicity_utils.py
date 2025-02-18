@@ -7,10 +7,11 @@ import ROOT
 
 import narf
 import narf.clingutils
-from utilities import common, logging
+from utilities import common
 from utilities.io_tools import input_tools
 from wremnants.correctionsTensor_helper import makeCorrectionsTensor
 from wremnants.theory_tools import helicity_xsec_to_angular_coeffs
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

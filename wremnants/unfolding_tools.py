@@ -3,8 +3,9 @@ from copy import deepcopy
 import hist
 import numpy as np
 
-from utilities import common, logging
+from utilities import common
 from wremnants import syst_tools, theory_corrections, theory_tools, theoryAgnostic_tools
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

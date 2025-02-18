@@ -1,7 +1,7 @@
 from copy import deepcopy
 
-from utilities import logging
 from utilities.styles import styles
+from wums import logging
 
 logger = logging.child_logger(__name__)
 

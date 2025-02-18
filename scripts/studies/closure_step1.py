@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from utilities import logging
+from wums import logging
 
 logger = logging.setup_logger(__file__, 3, True)
 

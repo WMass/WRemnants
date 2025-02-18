@@ -9,9 +9,9 @@ from hepdata_lib.helpers import round_value_and_uncertainty
 from scripts.analysisTools.plotUtils.utility import (
     common_plot_parser,  # TODO: move to main common parser
 )
-from utilities import logging
 from utilities.common import base_dir, data_dir
 from utilities.io_tools import conversion_tools, input_tools
+from wums import logging
 
 
 def getFitInfo():

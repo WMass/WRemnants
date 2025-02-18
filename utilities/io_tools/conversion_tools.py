@@ -1,12 +1,12 @@
 import itertools
 import re
 
+import combinetf2.io_tools
 import hist
 import numpy as np
 
-from narf import ioutils
-from utilities import logging
-from utilities.io_tools import combinetf_input
+from utilities.io_tools import combinetf2_input
+from wums import ioutils, logging
 
 logger = logging.child_logger(__name__)
 
@@ -327,7 +327,7 @@ def fitresult_pois_to_hist(
         "sumpoisnorm": "xsec_normalized",
     }
 
-    fitresult = combinetf_input.get_fitresult(infile.replace(".root", ".hdf5"))
+    fitresult = combinetf2.io_tools.get_fitresult(infile)
     meta = ioutils.pickle_load_h5py(fitresult["meta"])
     meta_info = meta["meta_info"]
 
@@ -361,7 +361,7 @@ def fitresult_pois_to_hist(
     for poi_type in poi_types:
         logger.debug(f"Now at POI type {poi_type}")
 
-        df = combinetf_input.read_impacts_pois(
+        df = combinetf2.io_tools.read_impacts_pois(
             fitresult, poi_type=poi_type, group=grouped, uncertainties=uncertainties
         )
         if df is None or len(df) == 0:
@@ -458,14 +458,14 @@ def fitresult_pois_to_hist(
                         if proc not in result[poi_key][channel]:
                             result[poi_key][channel][proc] = {}
 
-                        data = combinetf_input.select_pois(
+                        data = combinetf2_input.select_pois(
                             df, axes_names, base_processes=proc, flow=True
                         )
                         data = data.loc[
                             data["Name"].apply(lambda x: not x.endswith("totalxsec"))
                         ]
                     else:
-                        data = combinetf_input.select_pois(
+                        data = combinetf2_input.select_pois(
                             df, axes_names, base_processes=proc, flow=True
                         )
 

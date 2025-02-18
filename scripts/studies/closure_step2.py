@@ -5,7 +5,7 @@ import os
 
 os.sys.path.append(os.path.expandvars("/home/submit/tyjyang/analysis/wmass/WRemnants/"))
 
-from utilities import logging
+from wums import logging
 
 logger = logging.setup_logger(__file__, 3, True)
 

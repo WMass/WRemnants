@@ -14,11 +14,11 @@ import sys
 import hist
 
 import narf
+from wremnants.datasets.datagroups import Datagroups
 
 # from wremnants import plot_tools,theory_tools,syst_tools
-from utilities import boostHistHelpers as hh
-from utilities import logging
-from wremnants.datasets.datagroups import Datagroups
+from wums import boostHistHelpers as hh
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

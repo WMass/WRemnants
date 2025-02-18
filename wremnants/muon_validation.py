@@ -1,8 +1,10 @@
 import hist
 
 import narf
-from utilities import boostHistHelpers as hh
-from utilities import common, logging
+import wums.ioutils
+from utilities import common
+from wums import boostHistHelpers as hh
+from wums import logging
 
 narf.clingutils.Declare('#include "muon_validation.hpp"')
 
@@ -333,7 +335,7 @@ def muon_scale_variation_from_manual_shift(
             proc_hists["nominal_muonScaleVariationDnTenthmil"].get(),
             proc_hists["nominal_muonScaleVariationUpTenthmil"].get(),
         ]
-        proc_hists["muonScaleSyst_manualShift"] = narf.ioutils.H5PickleProxy(
+        proc_hists["muonScaleSyst_manualShift"] = wums.ioutils.H5PickleProxy(
             hh.combineUpDownVarHists(*manual_shift_hists)
         )
 

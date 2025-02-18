@@ -2,8 +2,8 @@ import pandas as pd
 import ROOT
 from scipy.stats import chi2
 
-from utilities import logging, parsing
-from utilities.io_tools import output_tools, tex_tools
+from utilities import parsing
+from wums import logging, output_tools, tex_tools
 
 translate = {}
 

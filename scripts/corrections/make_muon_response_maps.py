@@ -9,6 +9,7 @@ import tensorflow_probability as tfp
 import narf
 import narf.fitutils
 import narf.tfutils
+import wums.ioutils
 
 mpl.rcParams["figure.dpi"] = 300
 
@@ -30,7 +31,7 @@ procs.append("WminustaunuPostVFP")
 
 with h5py.File(infile, "r") as f:
     for proc in procs:
-        results = narf.ioutils.pickle_load_h5py(f[proc])
+        results = wums.ioutils.pickle_load_h5py(f[proc])
         hist_response_proc = results["output"]["hist_qopr"].get()
         hist_response_scaled_proc = results["output"]["hist_qopr_shifted"].get()
         hist_response_smeared_proc = results["output"]["hist_qopr_smearedmulti"].get()

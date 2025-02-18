@@ -18,7 +18,7 @@ sys.argv = args
 ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
-from utilities import logging
+from wums import logging
 
 
 def isBadRootFile(fname, checkTree=True, treeName="Events"):

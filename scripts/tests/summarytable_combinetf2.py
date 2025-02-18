@@ -1,9 +1,9 @@
+import combinetf2.io_tools
 import pandas as pd
 from scipy.stats import chi2
 
-from utilities import logging, parsing
-from utilities.io_tools import output_tools, tex_tools
-from utilities.io_tools.combinetf2_input import get_fitresult
+from utilities import parsing
+from wums import logging, output_tools, tex_tools
 
 translate = {
     "asimov": "Asimov",
@@ -20,7 +20,7 @@ translate = {
 
 def read_fitresult(filename):
     try:
-        fitresult = get_fitresult(filename)
+        fitresult = combinetf2.io_tools.get_fitresult(filename)
         ndf = fitresult[f"ndf"]
         chi2_prefit = fitresult[f"chi2_prefit"]
         chi2_postfit = fitresult[f"chi2_postfit"]

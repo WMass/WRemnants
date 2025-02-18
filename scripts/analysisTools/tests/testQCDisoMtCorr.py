@@ -6,8 +6,8 @@ import os
 import sys
 
 import narf
-from utilities import logging
 from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wums import logging
 
 args = sys.argv[:]
 sys.argv = ["-b"]

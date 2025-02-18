@@ -1,5 +1,5 @@
-from utilities import common, logging, parsing
-from utilities.io_tools import output_tools
+from utilities import common, parsing
+from wums import logging
 
 parser, initargs = parsing.common_parser("w_mass")
 
@@ -10,7 +10,7 @@ import ROOT
 
 import narf
 from wremnants import muon_calibration, muon_selections, pileup, vertex
-from wremnants.datasets.dataset_tools import getDatasets
+from wremnants.datasets.dataset_tools import getDatasets, write_analysis_output
 
 parser.add_argument(
     "--testHelpers", action="store_true", help="Test the smearing weights helper"
@@ -486,6 +486,6 @@ def build_graph(df, dataset):
 
 resultdict = narf.build_and_run(datasets, build_graph)
 
-output_tools.write_analysis_output(
+write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )

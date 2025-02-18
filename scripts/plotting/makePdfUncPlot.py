@@ -7,12 +7,12 @@ import hist
 import numpy as np
 from matplotlib import cm
 
-import narf.ioutils
-from utilities import boostHistHelpers as hh
+import wums.ioutils
 from utilities.differential import get_theoryAgnostic_axes
 from utilities.io_tools import input_tools, output_tools
 from wremnants import plot_tools, theory_tools
 from wremnants.helicity_utils import axis_helicity_multidim
+from wums import boostHistHelpers as hh
 
 xlabels = {
     "pt": r"p$_{T}^{\ell}$ (GeV)",
@@ -417,4 +417,4 @@ for dataset in args.datasets:
 
 outfile = "theoryband_variations_corr.hdf5"
 with h5py.File(outfile, "w") as f:
-    narf.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
+    wums.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
