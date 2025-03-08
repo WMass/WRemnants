@@ -853,7 +853,7 @@ def setup(
             f"When running lowPU mode, fakeEstimation should be set to 'simple' and fakeSmoothingMode set to 'binned'."
         )
 
-    if "run" in fitvar:
+    if dilepton and "run" in fitvar:
         # in case fit is split by runs/ cumulated lumi
         # run axis only exists for data, add it for MC, and scale the MC according to the luminosity fractions
         run_edges = common.run_edges
@@ -1232,6 +1232,8 @@ def setup(
                     mirror=False,
                     systAxes=["massShift", *new_names],
                     passToFakes=passSystToFakes,
+                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                    isPoiHistDecorr=len(args.fitMassDecorr),
                     actionRequiresNomi=True,
                     action=syst_tools.decorrelateByAxes,
                     actionArgs=dict(
@@ -1614,12 +1616,12 @@ def setup(
         fakeselector = datagroups.groups[datagroups.fakeName].histselector
 
         syst_axes = (
-            ["eta", "charge"]
+            [f"_{x}" for x in args.fakerateAxes if x != "pt"]
             if (
                 args.fakeSmoothingMode != "binned"
                 or args.fakeEstimation not in ["extrapolate"]
             )
-            else ["eta", "pt", "charge"]
+            else [f"_{x}" for x in args.fakerateAxes]
         )
         info = dict(
             histname=inputBaseName,
@@ -1629,8 +1631,7 @@ def setup(
             scale=1,
             applySelection=False,  # don't apply selection, all regions will be needed for the action
             action=fakeselector.get_hist,
-            systAxes=[f"_{x}" for x in syst_axes if x in args.fakerateAxes]
-            + ["_param", "downUpVar"],
+            systAxes=syst_axes + ["_param", "downUpVar"],
         )
         if args.fakeSmoothingMode in ["hybrid", "full"]:
             subgroup = f"{datagroups.fakeName}Smoothing"
@@ -1786,6 +1787,7 @@ def setup(
                         f"{groupName}_{x}": f".*effSyst.*{x}"
                         for x in list(effTypesNoIso + ["iso"])
                     }
+                    actionSF = None
                 else:
                     nameReplace = (
                         []
@@ -1796,7 +1798,9 @@ def setup(
                     if args.binnedScaleFactors:
                         axes = ["SF eta", "nPtBins", "SF charge"]
                     else:
+                        # axes = ["SF eta", "nPtEigenBins", "SF charge", "runSystAxis"] if "run" in fitvar else ["SF eta", "nPtEigenBins", "SF charge"]
                         axes = ["SF eta", "nPtEigenBins", "SF charge"]
+                    # axlabels = ["eta", "pt", "q", "run"] if "run" in fitvar else ["eta", "pt", "q"]
                     axlabels = ["eta", "pt", "q"]
                     nameReplace = nameReplace + [("effStatTnP_sf_", "effStat_")]
                     scale = 1
@@ -1804,6 +1808,10 @@ def setup(
                     splitGroupDict = {
                         f"{groupName}_{x}": f".*effStat.*{x}" for x in effStatTypes
                     }
+                    # actionSF = lambda h: hh.addHists(
+                    #    h, hh.expand_hist_by_duplicate_axis(h, "run", "runSystAxis"),
+                    # ) if "run" in fitvar else None
+                    actionSF = None
                 if args.effStatLumiScale and "Syst" not in name:
                     scale /= math.sqrt(args.effStatLumiScale)
 
@@ -1814,6 +1822,7 @@ def setup(
                     splitGroup=splitGroupDict,
                     systAxes=axes,
                     labelsByAxis=axlabels,
+                    action=actionSF,
                     baseName=name + "_",
                     processes=["MCnoQCD"],
                     passToFakes=passSystToFakes,
@@ -2039,27 +2048,50 @@ def setup(
     #     passToFakes=passSystToFakes,
     #     scale = args.scaleMuonCorr,
     # )
+    prefireSystAxes = ["downUpVar"]
+    prefireSystLabels = ["downUpVar"]
+    prefireSystAction = None
+    if "run" in fitvar:
+        prefireSystAxes = ["runSystAxis"] + prefireSystAxes
+        prefireSystLabels = ["run"] + prefireSystLabels
+        prefireSystAction = lambda h: hh.addHists(
+            h,
+            hh.expand_hist_by_duplicate_axis(h, "run", "runSystAxis"),
+        )
     datagroups.addSystematic(
         "muonL1PrefireSyst",
         processes=["MCnoQCD"],
         groups=["muonPrefire", "prefire", "experiment", "expNoCalib"],
         baseName="CMS_prefire_syst_m",
-        systAxes=["downUpVar"],
-        labelsByAxis=["downUpVar"],
+        systAxes=prefireSystAxes,
+        labelsByAxis=prefireSystLabels,
         passToFakes=passSystToFakes,
+        action=prefireSystAction,
     )
+
+    prefireStatAxes = (
+        ["etaPhiRegion", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
+    )
+    prefireStatLabels = (
+        ["etaPhiReg", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
+    )
+    prefireStatAction = None
+    if "run" in fitvar:
+        prefireStatAxes = ["runSystAxis"] + prefireStatAxes
+        prefireStatLabels = ["run"] + prefireStatLabels
+        prefireStatAction = lambda h: hh.addHists(
+            h,
+            hh.expand_hist_by_duplicate_axis(h, "run", "runSystAxis"),
+        )
     datagroups.addSystematic(
         "muonL1PrefireStat",
         processes=["MCnoQCD"],
         groups=["muonPrefire", "prefire", "experiment", "expNoCalib"],
         baseName="CMS_prefire_stat_m_",
-        systAxes=(
-            ["etaPhiRegion", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
-        ),
-        labelsByAxis=(
-            ["etaPhiReg", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
-        ),
         passToFakes=passSystToFakes,
+        systAxes=prefireStatAxes,
+        labelsByAxis=prefireStatLabels,
+        action=prefireStatAction,
     )
     datagroups.addSystematic(
         "ecalL1Prefire",
@@ -2151,7 +2183,7 @@ def setup(
             passToFakes=passSystToFakes,
         )
 
-    if "run" in fitvar:
+    if dilepton and "run" in fitvar:
         # add ad-hoc normalization uncertainty uncorrelated across run bins
         #   accounting for time instability (e.g. reflecting the corrections applied as average like pileup, prefiring, ...)
         datagroups.addSystematic(
