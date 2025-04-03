@@ -2235,11 +2235,11 @@ def drawNTH1(
             latCMS.SetNDC()
             latCMS.SetTextFont(42)
             latCMS.SetTextSize(0.05)
-            latCMS.DrawLatex(0.1, 0.95, "#bf{CMS} #it{Preliminary}")
+            latCMS.DrawLatex(canvas.GetLeftMargin(), 0.95, "#bf{CMS} #it{Preliminary}")
             if lumi != None:
-                latCMS.DrawLatex(0.85, 0.95, "%s fb^{-1} (13 TeV)" % lumi)
+                latCMS.DrawLatex(0.7, 0.95, "%s fb^{-1} (13 TeV)" % lumi)
             else:
-                latCMS.DrawLatex(0.90, 0.95, "(13 TeV)")
+                latCMS.DrawLatex(0.8, 0.95, "(13 TeV)")
 
     if drawLineTopPanel != None:
         topline = ROOT.TF1(
