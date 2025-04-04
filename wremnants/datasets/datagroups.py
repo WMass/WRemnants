@@ -1161,6 +1161,7 @@ class Datagroups(object):
         exclude_bin_by_bin_stat=None,
         bin_by_bin_stat_scale=1.0,
         fitresult_data=None,
+        masked=False,
     ):
         if self.writer is None:
             raise RuntimeError("Writer must be defined to add nominal histograms")
@@ -1174,7 +1175,7 @@ class Datagroups(object):
             sumFakesPartial=True,
         )
 
-        for proc in self.predictedProcesses():
+        for i, proc in enumerate(self.predictedProcesses()):
             logger.info(f"Add process {proc} in channel {self.channel}")
 
             # nominal histograms of prediction
@@ -1194,7 +1195,9 @@ class Datagroups(object):
                 )
 
             if self.channel not in self.writer.channels:
-                self.writer.add_channel(axes=norm_proc_hist.axes, name=self.channel)
+                self.writer.add_channel(
+                    axes=norm_proc_hist.axes, name=self.channel, masked=masked
+                )
 
             self.writer.add_process(
                 norm_proc_hist,
@@ -1202,6 +1205,19 @@ class Datagroups(object):
                 self.channel,
                 signal=proc in self.unconstrainedProcesses,
             )
+
+        # add metadata to channel info
+        self.writer.channels[self.channel].update(
+            {
+                "era": self.era,
+                "flavor": self.flavor,
+                "lumi": self.lumi,
+            }
+        )
+
+        if masked:
+            # no data histogram for masked channel
+            return
 
         if fitresult_data is not None:
             fitresult_axes = [n for n in fitresult_data.axes.name]
@@ -1225,15 +1241,6 @@ class Datagroups(object):
         if data_obs_hist.axes.name != self.fit_axes:
             data_obs_hist = data_obs_hist.project(*self.fit_axes)
         self.writer.add_data(data_obs_hist, self.channel)
-
-        # add metadata to channel info
-        self.writer.channels[self.channel].update(
-            {
-                "era": self.era,
-                "flavor": self.flavor,
-                "lumi": self.lumi,
-            }
-        )
 
     def addNormSystematic(self, norm, **kwargs):
         self.addSystematic(
@@ -1373,6 +1380,7 @@ class Datagroups(object):
                         ]
                     )
 
+                logger.debug(f"Add systematic {var_name}")
                 self.writer.add_systematic(
                     hists,
                     var_name,

@@ -327,6 +327,7 @@ def add_noi_unfolding_variations(
     noi_args = dict(
         histname=gen_level if xnorm else f"nominal_{gen_level}_yieldsUnfolding",
         name=f"nominal_{gen_level}_yieldsUnfolding",
+        baseName=f"{label}_",
         group=f"normXsec{label}",
         passToFakes=passSystToFakes,
         systAxes=poi_axes_syst,
@@ -385,7 +386,6 @@ def add_noi_unfolding_variations(
 
         datagroups.addSystematic(
             **noi_args,
-            baseName=f"{label}_",
             action=make_poi_xnorm_variations,
             actionArgs=dict(
                 poi_axes=poi_axes,
@@ -414,7 +414,6 @@ def add_noi_unfolding_variations(
 
         datagroups.addSystematic(
             **noi_args,
-            baseName=f"{label}_",
             systAxesFlow=[n for n in poi_axes if n in poi_axes_flow],
             preOpMap={
                 m.name: make_poi_variations
