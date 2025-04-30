@@ -104,45 +104,6 @@ axis_mt = hist.axis.Variable(
 )
 axis_lin = hist.axis.Regular(5, 0, 5, name="lin")
 
-qcdScaleByHelicity_helper = (
-    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity()
-)
-axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
-axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
-
-gen_axes = {
-    "ptVGen": hist.axis.Variable(
-        [0, 8, 14, 20, 30, 40, 50, 60, 75, 90, 150],
-        name="ptVGen",
-        underflow=False,
-        overflow=False,
-    ),
-    "qVGen": hist.axis.Regular(
-        2, -2.0, 2.0, underflow=False, overflow=False, name=f"qVGen"
-    ),
-}
-
-groups_to_aggregate = args.aggregateGroups
-
-if args.unfolding:
-    unfolding_axes = {}
-    unfolding_cols = {}
-    unfolding_selections = {}
-    for level in args.unfoldingLevels:
-        a, c, s = differential.get_dilepton_axes(args.unfoldingAxes, gen_axes, level)
-        unfolding_axes[level] = a
-        unfolding_cols[level] = c
-        unfolding_selections[level] = s
-
-        if not args.poiAsNoi:
-            datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
-            if len(args.unfoldingLevels) > 1:
-                logger.warning(
-                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
-                )
-                break
-    groups_to_aggregate.append(f"{base_group}OOA")
-
 # axes/columns for unfolding ptW
 nominal_axes = [
     axis_fakes_pt,
@@ -179,6 +140,40 @@ columns_fakerate = [
     "passIso",
     "transverseMass",
 ]  ## was transverseMass
+
+
+qcdScaleByHelicity_helper = (
+    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity()
+)
+axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
+axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
+
+groups_to_aggregate = args.aggregateGroups
+
+if args.unfolding:
+    unfolding_axes = {}
+    unfolding_cols = {}
+    unfolding_selections = {}
+    for level in args.unfoldingLevels:
+        a, c, s = differential.get_dilepton_axes(
+            args.unfoldingAxes,
+            {"ptll": axis_ptW.edges},
+            level,
+            add_out_of_acceptance_axis=args.poiAsNoi,
+        )
+
+        unfolding_axes[level] = a
+        unfolding_cols[level] = c
+        unfolding_selections[level] = s
+
+        if not args.poiAsNoi:
+            datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
+            if len(args.unfoldingLevels) > 1:
+                logger.warning(
+                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
+                )
+                break
+    groups_to_aggregate.append(f"{base_group}OOA")
 
 
 # extra axes which can be used to label tensor_axes

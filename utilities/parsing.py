@@ -521,7 +521,7 @@ def common_parser(analysis_label=""):
         "--sfFile", type=str, help="File with muon scale factors", default=sfFile
     )
 
-    if analysis_label not in ["vgen"]:
+    if analysis_label in ["w_lowpu", "z_lowpu", "w_mass", "z_wlike", "z_dilepton"]:
         parser.add_argument(
             "--eta",
             nargs=3,

@@ -18,7 +18,7 @@ logger = logging.child_logger(__name__)
 # are produced from wremnants/scripts/histmakers/w_z_gen_dists.py
 
 
-def makeQCDScaleByHelicityHelper(is_w_like=False, filename=None):
+def makeQCDScaleByHelicityHelper(is_z=False, filename=None):
     if filename is None:
         #
         # filename = f"{common.data_dir}/angularCoefficients/w_z_coeffs.pkl.lz4" # Vpt binning based on common.ptV_binning
@@ -27,7 +27,7 @@ def makeQCDScaleByHelicityHelper(is_w_like=False, filename=None):
     with lz4.frame.open(filename, "rb") as f:
         out = pickle.load(f)
 
-    corrh = out["Z"] if is_w_like else out["W"]
+    corrh = out["Z"] if is_z else out["W"]
     if np.count_nonzero(corrh[{"helicity": -1.0j}] == 0):
         logger.warning(
             "Zeros in sigma UL for the angular coefficients will give undefined behaviour!"

@@ -2,8 +2,13 @@ import os
 import time
 
 import h5py
+import hist
+import numpy as np
+import ROOT
 
 from utilities import common
+from utilities.io_tools import input_tools
+from wums import boostHistHelpers as hh
 from wums import ioutils, logging, output_tools
 
 logger = logging.child_logger(__name__)
@@ -197,3 +202,109 @@ def write_analysis_output(results, outfile, args):
     logger.info(f"Output saved in {outfile}")
 
     return outfile
+
+
+import narf
+
+narf.clingutils.Declare('#include "histHelpers.hpp"')
+
+
+def make_quantile_helper(
+    filename,
+    axes,
+    dependent_axes=[],
+    name="nominal",
+    processes=["ZmumuPostVFP"],
+    n_quantiles=[],
+):
+    """
+    Helper to compute the quantile for `axes` from fine binned histogram with `name` in bins of the dependent axes
+    The helper takes colums for `axes` and `dependent_axes` and returns the quantile the event falls as a fraction of 1
+    If quantiles are performed in more than 1 dimension, the number of quantiles in the n lower dimensions must be given in 'n_quantiles'
+    """
+
+    h5file = h5py.File(filename, "r")
+    results = input_tools.load_results_h5py(h5file)
+
+    hIn = hh.sumHists(results[p]["output"][name].get() for p in processes)
+
+    if isinstance(axes, str):
+        axes = [axes]
+
+    def hist_to_helper(h):
+        hConv = narf.hist_to_pyroot_boost(h, tensor_rank=0)
+
+        tensor = getattr(ROOT.wrem, f"HistHelper{len(h.axes)}D", None)
+        if tensor == None:
+            raise NotImplementedError(f"HistHelper{len(h.axes)}D not yet implemented")
+
+        helper = tensor[type(hConv).__cpp_name__](ROOT.std.move(hConv))
+        helper.hist = h
+        helper.axes = h.axes
+        return helper
+
+    def cdf(arr):
+        cdf_arr = np.cumsum(arr, axis=0)
+        # Normalize to get values between 0 and 1
+        slices_norm = [-1 if i == 0 else slice(None) for i in range(len(arr.shape))]
+        slices_bc = [
+            np.newaxis if i == 0 else slice(None) for i in range(len(arr.shape))
+        ]
+        cdf_arr /= cdf_arr[*slices_norm][*slices_bc]
+        # if there are completely empty slices, set them to 0
+        cdf_arr = np.nan_to_num(cdf_arr, nan=0)
+        # first or last bin(s) could be negative, ensure values between 0 and 1
+        cdf_arr = np.minimum(1, np.maximum(0, cdf_arr))
+        return cdf_arr
+
+    hIn = hIn.project(*axes, *dependent_axes)
+
+    helpers = []
+    if len(axes) in [1, 2]:
+        # make 1D quantiles
+        hFirst = hIn.project(axes[-1], *dependent_axes)
+        cdf_arr = cdf(hFirst.values(flow=True))
+
+        hFirstOut = hist.Hist(*hFirst.axes, storage=hist.storage.Double())
+        hFirstOut.values(flow=True)[...] = cdf_arr
+
+        helpers.append(hist_to_helper(hFirstOut))
+
+        cdf_arr_second = np.empty(hIn.values(flow=True).shape)
+        if len(axes) == 2:
+            n = n_quantiles[-1]
+
+            # make 2D quantiles
+            if len(hIn.axes[axes[-1]]) % n != 0:
+                raise RuntimeError(
+                    f"Can not make {n} quantiles from axis with {len(hIn.axes[axes[-1]])} bins"
+                )
+
+            for i in range(n):
+                lo = i / n
+                hi = (i + 1) / n
+                if hi == 1:
+                    mask = cdf_arr >= lo
+                else:
+                    mask = (cdf_arr >= lo) & (cdf_arr < hi)
+
+                arr = hIn.values(flow=True).copy()
+                if mask is not None:
+                    arr[:, ~mask] = 0
+                    arr = np.sum(arr, axis=1)
+
+                arr = cdf(arr)[:, np.newaxis, ...]
+                arr = np.broadcast_to(arr, cdf_arr_second.shape)
+                mask_out = np.broadcast_to(mask[np.newaxis, ...], cdf_arr_second.shape)
+                cdf_arr_second = np.where(mask_out, arr, cdf_arr_second)
+
+            hSecondOut = hist.Hist(*hIn.axes, storage=hist.storage.Double())
+            hSecondOut.values(flow=True)[...] = cdf_arr_second
+
+            helpers.append(hist_to_helper(hSecondOut))
+    else:
+        raise NotImplementedError(
+            f"Making quantiles in {len(axes)} dimensions is not implemented."
+        )
+
+    return helpers

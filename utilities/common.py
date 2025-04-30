@@ -179,6 +179,8 @@ absYV_binning = [
     4,
 ]
 
+yll_10quantiles_binning = [-2.5, -1.5, -1.1, -0.7, -0.35, 0, 0.35, 0.7, 1.1, 1.5, 2.5]
+
 # categorical axes in python bindings always have an overflow bin, so use a regular axis for the charge
 axis_charge = hist.axis.Regular(
     2, -2.0, 2.0, underflow=False, overflow=False, name="charge"
@@ -276,33 +278,51 @@ def get_binning_fakes_relIso(high_iso_bins=False):
 
 def get_dilepton_ptV_binning(fine=False):
     return (
-        [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 20, 23, 27, 32, 40, 54, 100]
+        [
+            0,
+            1,
+            2,
+            2.5,
+            3,
+            3.5,
+            4,
+            4.5,
+            5,
+            5.5,
+            6,
+            6.5,
+            7,
+            7.5,
+            8,
+            8.5,
+            9,
+            9.5,
+            10,
+            10.5,
+            11,
+            11.5,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            22,
+            24,
+            26,
+            28,
+            30,
+            33,
+            37,
+            44,
+            100,
+        ]
         if not fine
-        else range(60)
+        else range(200)
     )
-
-
-def get_gen_axes(dilepton_ptV_binning=None, inclusive=False, flow=False):
-    if dilepton_ptV_binning is None:
-        dilepton_ptV_binning = get_dilepton_ptV_binning()
-
-    gen_axes = {
-        "ptVGen": hist.axis.Variable(
-            dilepton_ptV_binning[:-1], name="ptVGen", underflow=False, overflow=flow
-        ),
-        # "absYVGen": hist.axis.Regular(10, 0, 2.5, name = "absYVGen", underflow=False, overflow=flow)
-        "absYVGen": hist.axis.Variable(
-            [0, 0.35, 0.7, 1.1, 1.5, 2.5],
-            name="absYVGen",
-            underflow=False,
-            overflow=False,
-        ),
-    }
-    # if inclusive:
-    #     binning = (*gen_axes["absYVGen"].edges[:-1], 5.)
-    #     gen_axes["absYVGen"] = hist.axis.Variable(binning, name="absYVGen", underflow=False, overflow=flow)
-
-    return gen_axes
 
 
 def get_default_ptbins(analysis_label, unfolding=False, gen=False):

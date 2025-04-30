@@ -88,42 +88,6 @@ axis_ptl = hist.axis.Regular(100, 0.0, 200.0, name="ptl")
 axis_etal = hist.axis.Regular(50, -2.5, 2.5, name="etal")
 axis_lin = hist.axis.Regular(5, 0, 5, name="lin")
 
-qcdScaleByHelicity_helper = (
-    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_w_like=True)
-)
-axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
-axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
-
-gen_axes = {
-    "ptVGen": hist.axis.Variable(
-        [0, 8, 14, 20, 30, 40, 50, 60, 75, 90, 150],
-        name="ptVGen",
-        underflow=False,
-        overflow=False,
-    ),
-    "absYVGen": hist.axis.Regular(
-        10, 0, 2.5, name="absYVGen", underflow=False, overflow=False
-    ),
-}
-
-if args.unfolding:
-    unfolding_axes = {}
-    unfolding_cols = {}
-    unfolding_selections = {}
-    for level in args.unfoldingLevels:
-        a, c, s = differential.get_dilepton_axes(args.unfoldingAxes, gen_axes, level)
-        unfolding_axes[level] = a
-        unfolding_cols[level] = c
-        unfolding_selections[level] = s
-
-        if not args.poiAsNoi:
-            datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
-            if len(args.unfoldingLevels) > 1:
-                logger.warning(
-                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
-                )
-                break
-
 # axes for final cards/fitting
 nominal_axes = [
     hist.axis.Variable(
@@ -144,6 +108,36 @@ axis_met = hist.axis.Regular(200, 0, 200, name="MET")
 axis_wlike_met = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axes_mt = [axis_mt]
 cols_mt = ["transverseMass"]
+
+qcdScaleByHelicity_helper = (
+    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_z=True)
+)
+axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
+axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
+
+if args.unfolding:
+    unfolding_axes = {}
+    unfolding_cols = {}
+    unfolding_selections = {}
+    for level in args.unfoldingLevels:
+        a, c, s = differential.get_dilepton_axes(
+            args.unfoldingAxes,
+            {"ptll": nominal_axes[0].edges, "yll": nominal_axes[1].edges},
+            level,
+            add_out_of_acceptance_axis=args.poiAsNoi,
+        )
+
+        unfolding_axes[level] = a
+        unfolding_cols[level] = c
+        unfolding_selections[level] = s
+
+        if not args.poiAsNoi:
+            datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
+            if len(args.unfoldingLevels) > 1:
+                logger.warning(
+                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
+                )
+                break
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(

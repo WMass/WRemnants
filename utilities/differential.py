@@ -98,8 +98,17 @@ def get_pt_eta_charge_axes(
     return axes, cols
 
 
-def get_dilepton_axes(gen_vars, gen_axes, gen_level, add_out_of_acceptance_axis=False):
-    # axes for fiducial measurement of Z in dilepton e.g. pT(Z), |yZ|
+def get_dilepton_axes(
+    gen_vars, reco_edges, gen_level, add_out_of_acceptance_axis=False
+):
+    """
+    construct axes, columns, and selections for differential Z dilepton measurement from correponding reco edges. Currently supported: pT(Z), |yZ|
+
+    gen_vars (list of str): names of gen axes to be constructed
+    reco_edges (dict of lists): the key is the corresponding reco axis name and the values the edges
+    gen_level (str): generator level definition (e.g. `prefsr`, `postfsr`)
+    add_out_of_acceptance_axis (boolean): To add a boolean axis for the use of out of acceptance contribution
+    """
 
     axes = []
     cols = []
@@ -107,14 +116,48 @@ def get_dilepton_axes(gen_vars, gen_axes, gen_level, add_out_of_acceptance_axis=
 
     # selections for out of fiducial region, use overflow bin in ptVGen (i.e. not treated as out of acceptance)
     for v in gen_vars:
+        if v == "helicitySig":
+            # helicity is added as a tensor axis
+            continue
         var = v.replace("qVGen", "charge").replace("VGen", "")
-        axes.append(gen_axes[v])
         cols.append(f"{gen_level}V_{var}")
 
-        if v == "ptVGen" and not gen_axes["ptVGen"].traits.overflow:
-            selections.append(f"{gen_level}V_pt < {gen_axes['ptVGen'].edges[-1]}")
+        if v == "ptVGen":
+            # use 2 ptll bin for each ptVGen bin, last bin is overflow
+            edges = reco_edges["ptll"]
+            if len(edges) % 2:
+                # in case it's an odd number of edges, last two bins are overflow
+                edges = edges[:-1]
+            # 1 gen bin for 2 reco bins
+            edges = edges[::2]
+
+            axes.append(
+                hist.axis.Variable(
+                    edges, name="ptVGen", underflow=False, overflow=True
+                ),
+            )
         elif v == "absYVGen":
-            selections.append(f"{gen_level}V_absY < {gen_axes['absYVGen'].edges[-1]}")
+            # 1 absYVGen for 2 yll bins (negative and positive)
+            edges = reco_edges["yll"]
+            if edges[len(edges) // 2] != 0:
+                raise RuntimeError("Central bin edge must be 0")
+            axes.append(
+                hist.axis.Variable(
+                    edges[len(edges) // 2 :],
+                    name="absYVGen",
+                    underflow=False,
+                    overflow=False,
+                ),
+            )
+            selections.append(f"{gen_level}V_absY < {edges[-1]}")
+        elif v in ["qVGen"]:
+            axes.append(
+                hist.axis.Regular(
+                    2, -2.0, 2.0, underflow=False, overflow=False, name="qVGen"
+                )
+            )
+        else:
+            raise NotImplementedError(f"Unfolding dilepton axis {v} is not supported.")
 
     if add_out_of_acceptance_axis:
         axes.append(hist.axis.Boolean(name="acceptance"))

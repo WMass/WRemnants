@@ -397,6 +397,7 @@ translate_selection = {
     "qGen": lambda x: rf"$\mathit{{q}}^\mu = {int(x)}$",
     "absYVGen": lambda l, h: rf"${round(l,3)} < |Y| < {round(h,3)}$",
     "helicitySig": lambda x: rf"$\sigma_{{{'UL' if x==-1 else int(x)}}}$",
+    "ai": lambda x: rf"$A_{int(x)}$",
 }
 
 impact_labels = {
@@ -663,6 +664,13 @@ def get_systematics_label(key, idx=0):
     # default return key
     logger.info(f"No label found for {key}")
     return key
+
+
+for i_hel in range(0, 9):
+    for ipt in range(0, 17):
+        for iy in range(0, 10):
+            k = f"Z_ptVGen{ipt}_absYVGen{iy}_helicitySig{i_hel}"
+            systematics_labels[k] = get_systematics_label(k)
 
 
 def get_labels_colors_procs_sorted(procs):
