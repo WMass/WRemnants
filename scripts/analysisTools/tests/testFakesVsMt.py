@@ -672,7 +672,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         inputHistName, syst="", procsToRead=datasets, applySelection=False
     )
 
-    histInfo = groups.getDatagroups()  # keys are same as returned by groups.getNames()
+    histInfo = groups.groups  # keys are same as returned by groups.getNames()
 
     for charge in charges:
         outfolder = f"{mainOutputFolder}/{charge}/"

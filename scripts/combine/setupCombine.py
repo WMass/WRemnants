@@ -321,6 +321,14 @@ def make_parser(parser=None):
         help="Restrict axis to this range (assumes pairs of values by axis, with trailing axes optional)",
     )
     parser.add_argument(
+        "--decorrSystByRun",
+        type=str,
+        nargs="*",
+        default=[],
+        choices=["prefire", "effi", "lumi", "fakenorm", "effisyst"],
+        help="Customize what uncertainties to decorrelate by run, to facilitate tests (note: effi is for both effStat and effSyst, while effisyst is only for effSyst).",
+    )
+    parser.add_argument(
         "--fitresult",
         type=str,
         nargs="+",
@@ -881,7 +889,7 @@ def setup(
             f"When running lowPU mode, fakeEstimation should be set to 'simple' and fakeSmoothingMode set to 'binned'."
         )
 
-    if "run" in fitvar:
+    if dilepton and "run" in fitvar:
         # in case fit is split by runs/ cumulated lumi
         # run axis only exists for data, add it for MC, and scale the MC according to the luminosity fractions
         run_edges = common.run_edges
@@ -1273,6 +1281,8 @@ def setup(
                     mirror=False,
                     systAxes=["massShift", *new_names],
                     passToFakes=passSystToFakes,
+                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                    isPoiHistDecorr=len(args.fitMassDecorr),
                     actionRequiresNomi=True,
                     action=syst_tools.decorrelateByAxes,
                     actionArgs=dict(
@@ -1545,23 +1555,45 @@ def setup(
             )
             return hVar
 
-        datagroups.addSystematic(
-            name="lumi",
-            processes=["MCnoQCD"],
-            groups=[f"luminosity", "experiment", "expNoCalib"],
-            passToFakes=passSystToFakes,
-            outNames=["lumiDown", "lumiUp"],
-            systAxes=["downUpVar"],
-            labelsByAxis=["downUpVar"],
-            preOp=scale_hist_up_down,
-            preOpArgs={
-                "scale": (
-                    datagroups.lumi_uncertainty
-                    if args.lumiUncertainty is None
-                    else args.lumiUncertainty
-                )
-            },
-        )
+        if "lumi" in args.decorrSystByRun and "run" in fitvar:
+            datagroups.addSystematic(
+                name="lumi",
+                processes=["MCnoQCD"],
+                groups=[f"luminosity", "experiment", "expNoCalib"],
+                passToFakes=passSystToFakes,
+                baseName="lumi_",
+                systAxes=["run_", "downUpVar"],
+                labelsByAxis=["run", "downUpVar"],
+                actionRequiresNomi=True,
+                action=syst_tools.decorrelateByAxes,
+                actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
+                preOp=scale_hist_up_down,
+                preOpArgs={
+                    "scale": (
+                        datagroups.lumi_uncertainty
+                        if args.lumiUncertainty is None
+                        else args.lumiUncertainty
+                    )
+                },
+            )
+        else:
+            datagroups.addSystematic(
+                name="lumi",
+                processes=["MCnoQCD"],
+                groups=[f"luminosity", "experiment", "expNoCalib"],
+                passToFakes=passSystToFakes,
+                outNames=["lumiDown", "lumiUp"],
+                systAxes=["downUpVar"],
+                labelsByAxis=["downUpVar"],
+                preOp=scale_hist_up_down,
+                preOpArgs={
+                    "scale": (
+                        datagroups.lumi_uncertainty
+                        if args.lumiUncertainty is None
+                        else args.lumiUncertainty
+                    )
+                },
+            )
     else:
         datagroups.addNormSystematic(
             name="lumi",
@@ -1612,13 +1644,29 @@ def setup(
             )
 
         if args.logNormalFake > 0.0:
-            datagroups.addNormSystematic(
-                name=f"CMS_{datagroups.fakeName}",
-                processes=[datagroups.fakeName],
-                groups=["Fake", "experiment", "expNoCalib"],
-                passToFakes=False,
-                norm=args.logNormalFake,
-            )
+            if "fakenorm" in args.decorrSystByRun and "run" in fitvar:
+                datagroups.addNormSystematic(
+                    name=f"CMS_{datagroups.fakeName}",
+                    processes=[datagroups.fakeName],
+                    groups=["Fake", "experiment", "expNoCalib"],
+                    passToFakes=False,
+                    norm=args.logNormalFake,
+                    systAxes=["run_"],
+                    labelsByAxis=["run"],
+                    actionRequiresNomi=True,
+                    action=syst_tools.decorrelateByAxes,
+                    actionArgs=dict(
+                        axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                    ),
+                )
+            else:
+                datagroups.addNormSystematic(
+                    name=f"CMS_{datagroups.fakeName}",
+                    processes=[datagroups.fakeName],
+                    groups=["Fake", "experiment", "expNoCalib"],
+                    passToFakes=False,
+                    norm=args.logNormalFake,
+                )
 
         datagroups.addNormSystematic(
             name="CMS_Top",
@@ -1655,12 +1703,12 @@ def setup(
         fakeselector = datagroups.groups[datagroups.fakeName].histselector
 
         syst_axes = (
-            ["eta", "charge"]
+            [f"_{x}" for x in args.fakerateAxes if x != "pt"]
             if (
                 args.fakeSmoothingMode != "binned"
                 or args.fakeEstimation not in ["extrapolate"]
             )
-            else ["eta", "pt", "charge"]
+            else [f"_{x}" for x in args.fakerateAxes]
         )
         info = dict(
             histname=inputBaseName,
@@ -1670,8 +1718,7 @@ def setup(
             scale=1,
             applySelection=False,  # don't apply selection, all regions will be needed for the action
             action=fakeselector.get_hist,
-            systAxes=[f"_{x}" for x in syst_axes if x in args.fakerateAxes]
-            + ["_param", "downUpVar"],
+            systAxes=syst_axes + ["_param", "downUpVar"],
         )
         if args.fakeSmoothingMode in ["hybrid", "full"]:
             subgroup = f"{datagroups.fakeName}Smoothing"
@@ -1827,6 +1874,22 @@ def setup(
                         f"{groupName}_{x}": f".*effSyst.*{x}"
                         for x in list(effTypesNoIso + ["iso"])
                     }
+                    actionSF = None
+                    effActionArgs = {}
+                    if (
+                        any(x in args.decorrSystByRun for x in ["effi", "effisyst"])
+                        and "run" in fitvar
+                    ):
+                        axes = [
+                            "reco-tracking-idip-trigger-iso",
+                            "n_syst_variations",
+                            "run_",
+                        ]
+                        axlabels = ["WPSYST", "_etaDecorr", "run"]
+                        actionSF = syst_tools.decorrelateByAxes
+                        effActionArgs = dict(
+                            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                        )
                 else:
                     nameReplace = (
                         []
@@ -1845,6 +1908,15 @@ def setup(
                     splitGroupDict = {
                         f"{groupName}_{x}": f".*effStat.*{x}" for x in effStatTypes
                     }
+                    actionSF = None
+                    effActionArgs = {}
+                    if "effi" in args.decorrSystByRun and "run" in fitvar:
+                        axes = ["SF eta", "nPtEigenBins", "SF charge", "run_"]
+                        axlabels = ["eta", "pt", "q", "run"]
+                        actionSF = syst_tools.decorrelateByAxes
+                        effActionArgs = dict(
+                            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                        )
                 if args.effStatLumiScale and "Syst" not in name:
                     scale /= math.sqrt(args.effStatLumiScale)
 
@@ -1855,6 +1927,9 @@ def setup(
                     splitGroup=splitGroupDict,
                     systAxes=axes,
                     labelsByAxis=axlabels,
+                    actionRequiresNomi=True,
+                    action=actionSF,
+                    actionArgs=effActionArgs,
                     baseName=name + "_",
                     processes=["MCnoQCD"],
                     passToFakes=passSystToFakes,
@@ -2080,27 +2155,57 @@ def setup(
     #     passToFakes=passSystToFakes,
     #     scale = args.scaleMuonCorr,
     # )
+    prefireSystAxes = ["downUpVar"]
+    prefireSystLabels = ["downUpVar"]
+    prefireSystAction = None
+    prefireSystActionArgs = {}
+    if "prefire" in args.decorrSystByRun and "run" in fitvar:
+        prefireSystAxes = ["run_"] + prefireSystAxes
+        prefireSystLabels = ["run"] + prefireSystLabels
+        prefireSystAction = syst_tools.decorrelateByAxes
+        prefireSystActionArgs = dict(
+            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+        )
     datagroups.addSystematic(
         "muonL1PrefireSyst",
         processes=["MCnoQCD"],
         groups=["muonPrefire", "prefire", "experiment", "expNoCalib"],
         baseName="CMS_prefire_syst_m",
-        systAxes=["downUpVar"],
-        labelsByAxis=["downUpVar"],
+        systAxes=prefireSystAxes,
+        labelsByAxis=prefireSystLabels,
         passToFakes=passSystToFakes,
+        action=prefireSystAction,
+        actionArgs=prefireSystActionArgs,
+        actionRequiresNomi=True,
     )
+
+    prefireStatAxes = (
+        ["etaPhiRegion", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
+    )
+    prefireStatLabels = (
+        ["etaPhiReg", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
+    )
+    prefireStatAction = None
+    prefireStatActionArgs = {}
+    if "prefire" in args.decorrSystByRun and "run" in fitvar:
+        prefireStatAxes = ["run_"] + prefireStatAxes
+        prefireStatLabels = ["run"] + prefireStatLabels
+        prefireStatAction = syst_tools.decorrelateByAxes
+        prefireStatActionArgs = dict(
+            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+        )
+
     datagroups.addSystematic(
         "muonL1PrefireStat",
         processes=["MCnoQCD"],
         groups=["muonPrefire", "prefire", "experiment", "expNoCalib"],
         baseName="CMS_prefire_stat_m_",
-        systAxes=(
-            ["etaPhiRegion", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
-        ),
-        labelsByAxis=(
-            ["etaPhiReg", "downUpVar"] if era == "2016PostVFP" else ["downUpVar"]
-        ),
         passToFakes=passSystToFakes,
+        systAxes=prefireStatAxes,
+        labelsByAxis=prefireStatLabels,
+        action=prefireStatAction,
+        actionArgs=prefireStatActionArgs,
+        actionRequiresNomi=True,
     )
     datagroups.addSystematic(
         "ecalL1Prefire",
@@ -2192,7 +2297,7 @@ def setup(
             passToFakes=passSystToFakes,
         )
 
-    if "run" in fitvar:
+    if dilepton and "run" in fitvar:
         # add ad-hoc normalization uncertainty uncorrelated across run bins
         #   accounting for time instability (e.g. reflecting the corrections applied as average like pileup, prefiring, ...)
         datagroups.addSystematic(
