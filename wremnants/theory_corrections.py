@@ -9,6 +9,7 @@ import hist
 import lz4.frame
 import numpy as np
 import ROOT
+from scipy.interpolate import make_smoothing_spline
 
 from utilities import common
 from utilities.io_tools import input_tools
@@ -309,6 +310,69 @@ def rebin_corr_hists(hists, ndim=-1, binning=None):
     return hists
 
 
+# Apply an iterative smoothing in 2D (effectively assumed to be Y, the qT)
+def smooth_theory_corr(corrh, minnloh, numh, ax2_start=5):
+    if corrh.ndim != 5:
+        raise NotImplementedError(
+            f"Currently only dimension 5 hists are supported for smoothing. Found ndim={corrh.ndim} ({corrh.axes.name})"
+        )
+
+    nc = corrh.axes["charge"].size
+
+    # First smooth in 1D (should be rapidity)
+    corrh1D = hh.divideHists(numh[{"vars": 0}].project(1), minnloh.project(1))
+    ax1 = corrh.axes[1]
+    spl = make_smoothing_spline(ax1.centers, corrh1D.values())
+    smooth = spl(ax1.centers) / corrh1D.values()
+    corrh.values()[...] = (corrh.values().T * smooth[:, np.newaxis]).T
+
+    # This should be qT
+    ax2 = corrh.axes[2]
+    for i1 in range(ax1.size):
+        for ic in range(corrh.axes["charge"].size):
+            for iv in range(corrh.axes["vars"].size):
+                spl = make_smoothing_spline(
+                    ax2.centers[ax2_start:], corrh[0, i1, ax2_start:, ic, iv].values()
+                )
+                corrh.values()[0, i1, ax2_start:, ic, iv] = spl(ax2.centers[ax2_start:])
+
+    return corrh
+
+
+def smooth_hist(h, ax1name=None, ax2name=None, ax2start=0):
+
+    hnew = h.copy()
+
+    ax1 = h.axes[ax1name]
+    smooth1D = hist.Hist(ax1, h.axes["vars"])
+
+    for var in h.axes["vars"]:
+        h1D = h[{"vars": var}].project(ax1name)
+        spl = make_smoothing_spline(ax1.centers, h1D.values())
+        smooth1D[:, var] = spl(ax1.centers)
+
+    indices = tuple(
+        slice(None) if ax in [ax1name, "vars"] else None for ax in h.axes.name
+    )
+    hnew.values()[...] = h.values() * hh.divideHists(smooth1D, h1D).values()[indices]
+
+    if ax2name is not None:
+        if hnew.ndim != 5:
+            raise NotImplementedError(
+                "Currently only dimension 5 hists are supported for smoothing"
+            )
+        ax2 = hnew.axes[ax2name]
+        for iv in range(hnew.axes["vars"].size):
+            for ic in range(hnew.axes["charge"].size):
+                for j in range(ax1.size):
+                    spl = make_smoothing_spline(
+                        ax2.centers[ax2start:], hnew[0, j, ax2start:, ic, iv].values()
+                    )
+                    hnew.values()[0, j, ax2start:, ic, iv] = spl(ax2.centers[ax2start:])
+
+    return hnew
+
+
 # Assuming the 3 physics variable dimensions are first
 def set_corr_ratio_flow(corrh):
     # Probably there's a better way to do this...
@@ -333,10 +397,21 @@ def set_corr_ratio_flow(corrh):
     return corrh
 
 
-def make_corr_from_ratio(denom_hist, num_hist, rebin=False):
+def make_corr_from_ratio(denom_hist, num_hist, rebin=None, smooth="numerator"):
     denom_hist, num_hist = rebin_corr_hists([denom_hist, num_hist], binning=rebin)
 
+    if smooth == "numerator":
+        logger.info(
+            "Applying spline-based smoothing to numerator before making correction hist"
+        )
+        num_hist = smooth_hist(num_hist, "absY", "qT")
+
     corrh = hh.divideHists(num_hist, denom_hist, flow=False, by_ax_name=False)
+
+    if smooth == "ratio":
+        logger.info("Applying spline-based smoothing to correction hist ratio")
+        corrh = smooth_theory_corr(corrh, denom_hist, num_hist, ax2_start=5)
+
     return set_corr_ratio_flow(corrh), denom_hist, num_hist
 
 
