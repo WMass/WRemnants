@@ -29,14 +29,16 @@ axis_helicity_multidim = hist.axis.Integer(
 
 
 # creates the helicity weight tensor
-def makehelicityWeightHelper(is_w_like=False, filename=None):
-    if filename is None:
-        filename = f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_theoryAgnosticBinning_scetlib_dyturboCorr_maxFiles_m1.hdf5"
+def make_helicity_weight_helper(
+    is_z=False,
+    filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_theoryAgnosticBinning_scetlib_dyturboCorr_maxFiles_m1.hdf5",
+    rebi_ptVgen=False,
+):
 
     with h5py.File(filename, "r") as ff:
         out = input_tools.load_results_h5py(ff)
 
-    hist_helicity_xsec_scales = out["Z"] if is_w_like else out["W"]
+    hist_helicity_xsec_scales = out["Z"] if is_z else out["W"]
 
     corrh = helicity_xsec_to_angular_coeffs(hist_helicity_xsec_scales)
 
@@ -66,6 +68,8 @@ def makehelicityWeightHelper(is_w_like=False, filename=None):
     # histogram has to be without errors to load the tensor directly
     corrh_noerrs = hist.Hist(*corrh.axes, storage=hist.storage.Double())
     corrh_noerrs.values(flow=True)[...] = corrh.values(flow=True)
+    if rebi_ptVgen:
+        corrh_noerrs = corrh_noerrs[{"ptVgen": hist.rebin(2)}]
 
     return makeCorrectionsTensor(
         corrh_noerrs, ROOT.wrem.WeightByHelicityHelper, tensor_rank=1
@@ -86,3 +90,25 @@ def make_helper_helicity(axes, nhelicity=6):
         )
     tensor_axes = [axis_helicity_multidim, *axes]
     return helper, tensor_axes
+
+
+def define_helicity_weights(df, weightsByHelicity_helper):
+    # define the helicity tensor, here nominal_weight will only have theory weights, no experimental pieces, it is defined in theory_tools.define_theory_weights_and_corrs
+    df = df.Define(
+        "helWeight_tensor",
+        weightsByHelicity_helper,
+        [
+            "massVgen",
+            "absYVgen",
+            "ptVgen",
+            "chargeVgen",
+            "csSineCosThetaPhigen",
+        ],
+    )
+
+    df = df.Define(
+        "nominal_weight_helicity",
+        "wrem::scalarmultiplyHelWeightTensor(nominal_weight, helWeight_tensor)",
+    )
+
+    return df

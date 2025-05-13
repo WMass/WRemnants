@@ -286,7 +286,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
 )
 
 qcdScaleByHelicity_helper = theory_corrections.make_qcd_uncertainty_helper_by_helicity(
-    is_w_like=True
+    is_z=True
 )
 
 # extra axes which can be used to label tensor_axes
@@ -805,7 +805,7 @@ def build_graph(df, dataset):
     )
 
     if isZ and args.theoryAgnostic:
-        df = theoryAgnostic_tools.define_helicity_weights(df, is_w_like=True)
+        df = theoryAgnostic_tools.define_helicity_weights(df, is_z=True)
 
     if not args.noRecoil:
         leps_uncorr = [

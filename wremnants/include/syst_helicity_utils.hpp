@@ -51,7 +51,7 @@ public:
   using base_t::base_t;
 
   helweight_tensor_t operator()(double mV, double yV, double ptV, int qV,
-                                const CSVars &csvars, double nominal_weight) {
+                                const CSVars &csvars) {
     // static_assert(nhelicity == NHELICITY);
     const auto angular = csAngularFactors(csvars);
     const auto coeffs = base_t::get_tensor(mV, yV, ptV, qV);

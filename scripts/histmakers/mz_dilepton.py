@@ -31,6 +31,7 @@ from wremnants import (
 from wremnants.datasets.dataset_tools import getDatasets
 from wremnants.histmaker_tools import (
     aggregate_groups,
+    make_quantile_helper,
     scale_to_data,
     write_analysis_output,
 )
@@ -81,6 +82,12 @@ parser.add_argument(
     action="store_true",
     help="To read efficiency scale factors, use the same muon variables as used to measure them with tag-and-probe (by default the final corrected ones are used)",
 )
+parser.add_argument(
+    "--makeCSQuantileHists",
+    action="store_true",
+    help="Make hists with fine binned CS variables for producing quantiles",
+)
+
 
 parser = parsing.set_parser_default(
     parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"]
@@ -125,6 +132,16 @@ if args.useTheoryAgnosticBinning:
     axis_ptV_thag = theoryAgnostic_axes[0]
     dilepton_ptV_binning = axis_ptV_thag.edges
 
+if "yll" in args.axes:
+    # use 10 quantiles in case "yll" is used as nominal axis
+    edges_yll = common.yll_10quantiles_binning
+    edges_absYll = edges_yll[len(edges_yll) // 2 :]
+    axis_yll = hist.axis.Variable(edges_yll, name="yll")
+    axis_absYll = hist.axis.Variable(edges_absYll, name="absYll", underflow=False)
+else:
+    axis_yll = hist.axis.Regular(20, -2.5, 2.5, name="yll")
+    axis_absYll = hist.axis.Regular(10, 0.0, 2.5, name="absYll", underflow=False)
+
 # available axes for dilepton validation plots
 all_axes = {
     "mll": hist.axis.Variable(
@@ -158,8 +175,8 @@ all_axes = {
         ],
         name="mll",
     ),
-    "yll": hist.axis.Regular(20, -2.5, 2.5, name="yll"),
-    "absYll": hist.axis.Regular(10, 0.0, 2.5, name="absYll", underflow=False),
+    "yll": axis_yll,
+    "absYll": axis_absYll,
     "ptll": hist.axis.Variable(dilepton_ptV_binning, name="ptll", underflow=False),
     "etaPlus": hist.axis.Variable([-2.4, -1.2, -0.3, 0.3, 1.2, 2.4], name="etaPlus"),
     "etaMinus": hist.axis.Variable([-2.4, -1.2, -0.3, 0.3, 1.2, 2.4], name="etaMinus"),
@@ -200,10 +217,19 @@ all_axes = {
         int(args.pt[0]), args.pt[1], args.pt[2], name="ptMinus"
     ),
     "cosThetaStarll": hist.axis.Regular(
-        20, -1.0, 1.0, name="cosThetaStarll", underflow=False, overflow=False
+        200 if args.makeCSQuantileHists else 20,
+        -1.0,
+        1.0,
+        name="cosThetaStarll",
+        underflow=False,
+        overflow=False,
     ),
     "phiStarll": hist.axis.Regular(
-        20, -math.pi, math.pi, circular=True, name="phiStarll"
+        200 if args.makeCSQuantileHists else 20,
+        -math.pi,
+        math.pi,
+        circular=True,
+        name="phiStarll",
     ),
     # "charge": hist.axis.Regular(2, -2., 2., underflow=False, overflow=False, name = "charge") # categorical axes in python bindings always have an overflow bin, so use a regular
     "massVgen": hist.axis.Variable(ewMassBins, name="massVgen"),
@@ -231,16 +257,68 @@ auxiliary_gen_axes = [
     "ewLogDeltaM",  # ew variables
 ]
 
+for a in args.axes:
+    if a not in all_axes.keys():
+        logger.error(
+            f" {a} is not a known axes! Supported axes choices are {list(all_axes.keys())}"
+        )
+
+nominal_cols = args.axes
+
+if args.csVarsHist:
+    # in case CS variables are added to the main histogram, use optimized binning
+    # CS variables will be binned in nxn quantiles; quantiles are computed in each bin of args.axes as provided by the quantile_file
+    n_quantiles = 8
+    all_axes["cosThetaStarll_quantile"] = hist.axis.Regular(
+        n_quantiles,
+        0,
+        1,
+        name="cosThetaStarll_quantile",
+        underflow=False,
+        overflow=False,
+    )
+    all_axes["phiStarll_quantile"] = hist.axis.Regular(
+        n_quantiles,
+        0,
+        1,
+        name="phiStarll_quantile",
+        underflow=False,
+        overflow=False,
+    )
+
+    quantile_file = f"{common.data_dir}/angularCoefficients/mz_dilepton_scetlib_dyturboCorr_maxFiles_m1_csQuantiles.hdf5"
+    quantile_helper_csVars = make_quantile_helper(
+        quantile_file,
+        ["cosThetaStarll", "phiStarll"],
+        ["ptll", "absYll"],
+        name="nominal_csQuantiles",
+        processes=["ZmumuPostVFP"],
+        n_quantiles=[n_quantiles],
+    )
+
+    nominal_cols += ["cosThetaStarll_quantile", "phiStarll_quantile"]
+
+nominal_axes = [all_axes[a] for a in nominal_cols]
+
+
 if args.unfolding:
+    add_helicity_axis = "helicitySig" in args.unfoldingAxes
+
+    if add_helicity_axis:
+        # helper to derive helicity xsec shape from event by event reweighting
+        weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
+            is_z=True,
+            filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
+            rebi_ptVgen=True,
+        )
+
     unfolding_axes = {}
     unfolding_cols = {}
     unfolding_selections = {}
     for level in args.unfoldingLevels:
         a, c, s = differential.get_dilepton_axes(
             args.unfoldingAxes,
-            common.get_gen_axes(
-                dilepton_ptV_binning, args.unfoldingInclusive, flow=True
-            ),
+            {a: all_axes[a].edges for a in args.axes},
             level,
             add_out_of_acceptance_axis=args.poiAsNoi,
         )
@@ -256,49 +334,42 @@ if args.unfolding:
                 )
                 break
 
+        if add_helicity_axis:
+            for ax in a:
+                if ax.name == "acceptance":
+                    continue
+                # check if binning is consistent between correction helper and unfolding axes
+                wbh_axis = weightsByHelicity_helper_unfolding.hist.axes[
+                    ax.name.replace("Gen", "gen")
+                ]
+                if any(ax.edges != wbh_axis.edges):
+                    raise RuntimeError(
+                        f"""
+                        Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
+                        Found unfolding axis {ax}\n
+                        And weightsByHelicity_helper axis {wbh_axis}
+                        """
+                    )
+
     if args.fitresult:
         unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
-
-for a in args.axes:
-    if a not in all_axes.keys():
-        logger.error(
-            f" {a} is not a known axes! Supported axes choices are {list(all_axes.keys())}"
-        )
-
-nominal_cols = args.axes
-
-if args.csVarsHist:
-    # in case CS variables are added to the main histogram, use optimized binning
-    # 8 quantiles
-    all_axes["cosThetaStarll"] = hist.axis.Variable(
-        [-1, -0.56, -0.375, -0.19, 0.0, 0.19, 0.375, 0.56, 1.0],
-        name="cosThetaStarll",
-        underflow=False,
-        overflow=False,
-    )
-    all_axes["phiStarll"] = hist.axis.Variable(
-        [-math.pi, -2.27, -1.57, -0.87, 0, 0.87, 1.57, 2.27, math.pi],
-        name="phiStarll",
-        underflow=False,
-        overflow=False,
-    )
-    # 10 quantiles
-    all_axes["yll"] = hist.axis.Variable(
-        [-2.5, -1.5, -1.1, -0.7, -0.35, 0, 0.35, 0.7, 1.1, 1.5, 2.5], name="yll"
-    )
-
-    nominal_cols += ["cosThetaStarll", "phiStarll"]
-
-nominal_axes = [all_axes[a] for a in nominal_cols]
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
 
-qcdScaleByHelicity_helper = theory_corrections.make_qcd_uncertainty_helper_by_helicity(
-    is_w_like=True
-)
+
+if args.unfolding and add_helicity_axis:
+    qcdScaleByHelicity_helper = theory_corrections.make_qcd_uncertainty_helper_by_helicity(
+        is_z=True,
+        filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
+        rebi_ptVgen=False,
+    )
+else:
+    qcdScaleByHelicity_helper = (
+        theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_z=True)
+    )
 
 # extra axes which can be used to label tensor_axes
 if args.binnedScaleFactors:
@@ -498,7 +569,7 @@ def build_graph(df, dataset):
                     qcdScaleByHelicity_helper,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
-                    add_helicity_axis="helicitySig" in args.unfoldingAxes,
+                    add_helicity_axis=add_helicity_axis,
                     base_name=level,
                 )
                 if not args.poiAsNoi:
@@ -666,6 +737,26 @@ def build_graph(df, dataset):
     )
     df = df.Define("cosThetaStarll", "csSineCosThetaPhill.costheta")
     df = df.Define("phiStarll", "csSineCosThetaPhill.phi()")
+
+    if args.csVarsHist:
+        for c, h, a in (
+            (
+                "phiStarll_quantile",
+                quantile_helper_csVars[0],
+                ["phiStarll", "ptll", "absYll"],
+            ),
+            (
+                "cosThetaStarll_quantile",
+                quantile_helper_csVars[1],
+                ["cosThetaStarll", "phiStarll", "ptll", "absYll"],
+            ),
+        ):
+            if [a for a in h.axes.name] != a:
+                raise RuntimeError(
+                    f"Invalid helper axes: {[a for a in h.axes.name]} != {a}"
+                )
+
+            df = df.Define(c, h, a)
 
     # TODO might need to add an explicit cut on trigMuons_pt0 in case nominal pt range
     # extends below 26 GeV e.g. for calibration test purposes
@@ -837,7 +928,9 @@ def build_graph(df, dataset):
             )
             axis_helicity = helicity_utils.axis_helicity_multidim
 
-            df = theoryAgnostic_tools.define_helicity_weights(df)
+            df_theory_agnostic = theoryAgnostic_tools.define_helicity_weights(
+                df, is_z=True
+            )
             noiAsPoiHistName = Datagroups.histName(
                 "nominal", syst="yieldsTheoryAgnostic"
             )
@@ -845,18 +938,12 @@ def build_graph(df, dataset):
                 f"Creating special histogram '{noiAsPoiHistName}' for theory agnostic to treat POIs as NOIs"
             )
             results.append(
-                df.HistoBoost(
+                df_theory_agnostic.HistoBoost(
                     noiAsPoiHistName,
                     [*axes, *theoryAgnostic_axes],
                     [*cols, *theoryAgnostic_cols, "nominal_weight_helicity"],
                     tensor_axes=[axis_helicity],
                 )
-            )
-
-        if "helicitySig" in getattr(args, "genAxes", []):
-            df = theoryAgnostic_tools.define_helicity_weights(
-                df,
-                filename=f"{common.data_dir}/angularCoefficients/w_z_moments_unfoldingBinning.hdf5",
             )
 
     # histograms for corrections/uncertainties for pixel hit multiplicity
@@ -894,6 +981,13 @@ def build_graph(df, dataset):
     results.append(hNValidPixelHitsNonTrig)
 
     if args.unfolding and args.poiAsNoi and dataset.name == "ZmumuPostVFP":
+        if add_helicity_axis:
+            df_unfolding = helicity_utils.define_helicity_weights(
+                df, weightsByHelicity_helper_unfolding
+            )
+        else:
+            df_unfolding = df
+
         for level in args.unfoldingLevels:
             noiAsPoiHistName = Datagroups.histName(
                 "nominal", syst=f"{level}_yieldsUnfolding"
@@ -903,11 +997,11 @@ def build_graph(df, dataset):
             )
             yield_axes = [*nominal_axes, *unfolding_axes[level]]
             yield_cols = [*nominal_cols, *unfolding_cols[level]]
-            if "helicitySig" in getattr(args, "genAxes", []):
+            if add_helicity_axis:
                 from wremnants.helicity_utils import axis_helicity_multidim
 
                 results.append(
-                    df.HistoBoost(
+                    df_unfolding.HistoBoost(
                         noiAsPoiHistName,
                         yield_axes,
                         [*yield_cols, "nominal_weight_helicity"],
@@ -916,12 +1010,24 @@ def build_graph(df, dataset):
                 )
             else:
                 results.append(
-                    df.HistoBoost(
+                    df_unfolding.HistoBoost(
                         noiAsPoiHistName,
                         yield_axes,
                         [*yield_cols, "nominal_weight"],
                     )
                 )
+
+    if args.makeCSQuantileHists:
+        results.append(
+            df.HistoBoost(
+                f"nominal_csQuantiles",
+                [
+                    all_axes[o]
+                    for o in ["ptll", "absYll", "phiStarll", "cosThetaStarll"]
+                ],
+                ["ptll", "absYll", "phiStarll", "cosThetaStarll"],
+            )
+        )
 
     if not args.noAuxiliaryHistograms:
         for obs in [

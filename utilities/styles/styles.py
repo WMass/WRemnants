@@ -397,6 +397,7 @@ translate_selection = {
     "qGen": lambda x: rf"$\mathit{{q}}^\mu = {int(x)}$",
     "absYVGen": lambda l, h: rf"${round(l,3)} < |Y| < {round(h,3)}$",
     "helicitySig": lambda x: rf"$\sigma_{{{'UL' if x==-1 else int(x)}}}$",
+    "ai": lambda x: rf"$A_{int(x)}$",
 }
 
 impact_labels = {

@@ -2038,8 +2038,9 @@ class Datagroups(object):
     @staticmethod
     def analysisLabel(filename):
         if filename not in Datagroups.mode_map:
-            raise ValueError(
+            logger.warning(
                 f"Unrecognized analysis script {filename}! Expected one of {Datagroups.mode_map.keys()}"
             )
-
-        return Datagroups.mode_map[filename]
+            return filename.replace(".py", "")
+        else:
+            return Datagroups.mode_map[filename]

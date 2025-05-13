@@ -2350,7 +2350,7 @@ if __name__ == "__main__":
                 "Theoryfit for more than one channels is currently experimental"
             )
         fitresult, fitresult_meta = combinetf2.io_tools.get_fitresult(
-            args.fitresult[0], meta=True
+            args.fitresult[0], meta=True, result=None if args.realData else "asimov"
         )
 
         if len(args.fitresult) > 1:
