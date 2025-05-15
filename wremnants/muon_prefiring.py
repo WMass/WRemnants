@@ -20,7 +20,9 @@ def make_muon_prefiring_helpers(
     fin = ROOT.TFile.Open(filename)
 
     eradict = {
+        "2016G": "2016BG",
         "2016H": "2016H",
+        "2016BG": "2016BG",
         # "2016PreVFP", "2016preVFP",
         # BG should be like preVFP, but more data was used to derive corrections
         "2016PreVFP": "2016BG",
