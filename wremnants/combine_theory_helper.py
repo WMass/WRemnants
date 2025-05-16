@@ -869,6 +869,8 @@ class TheoryHelper(object):
         pdf_hist = pdfName
         pdf_corr_hist = (
             f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
+            if self.corr_hist_name == "scetlib_dyturboCorr"
+            else self.corr_hist_name.replace("Corr", "VarsCorr")
         )
         symmetrize = "average" if noi else "quadratic"
         asRange = pdfInfo["alphasRange"]

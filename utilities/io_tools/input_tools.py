@@ -193,6 +193,7 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
 
     # map from scetlib fo variations naming to dyturbo naming
     # *FIXME* this is sensitive to presence or absence of trailing zeros for kappas
+    # NOTE: kappaFO varies muR and muF together, muf varies only muF
     scales_map = {
         "pdf0": "mur1-muf1",
         "kappaFO0.5-kappaf2.": "murH-muf1",
@@ -228,6 +229,87 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
         var_hist[..., i] = h.view()
 
     return var_hist
+
+
+def read_nnlojet_file(
+    filename, axnames=["qT"], all_scales=True, other_axes=[], charge=None
+):
+    data = read_text_data(filename)
+
+    edges = np.append(data[:, 0], data[-1, 2])
+    step = data[0, 2] - data[0, 0]
+    if np.all(edges[1:] - edges[:-1] == step):
+        ax = hist.axis.Regular(len(edges) - 1, edges[0], edges[-1], name=axnames[0])
+    else:
+        ax = hist.axis.Variable(edges, name=axnames[0])
+
+    # NOTE: The order of the scale variations in NNLOjet is set in the config file.
+    # This assumes that the "desired" order has been set there
+    # Very confusingly kappaFO varies muR and muF together. muf is a variation (multiplicative) of mu_F.
+    # See the read_dyturbo_vars_hist for the correct mapping
+    axes = [*other_axes, ax]
+    if all_scales:
+        var_ax = hist.axis.StrCategory(
+            [
+                "pdf0",
+                "kappaFO0.5-kappaf2.",
+                "kappaFO2.-kappaf0.5",
+                "kappaf0.5",
+                "kappaf2.",
+                "kappaFO0.5",
+                "kappaFO2.",
+            ],
+            name="vars",
+        )
+        axes.append(var_ax)
+
+    h = hist.Hist(*axes, storage=hist.storage.Weight())
+    # Switch y and pT order
+    ax_idx = len(other_axes)
+    res = data[:, 3:].reshape(
+        h.shape[ax_idx], *h.shape[:ax_idx], *h.shape[ax_idx + 1 :], 2
+    )
+    h[...] = np.moveaxis(res, 0, ax_idx)
+
+    # Text file stores errors, convert to variance
+    h.variances()[...] = h.variances() * h.variances()
+
+    if charge is not None:
+        h = add_charge_axis(h, charge)
+
+    return h * 1e-3
+
+
+def read_nnlojet_ybin(refname, ybins, charge=None):
+    format_decimal = lambda x: (
+        "0" if x == 0 else f"{round(x, 1+(x % 1 in [0.25, 0.75]))}".replace(".", "p")
+    )
+    yax = hist.axis.Variable(ybins, name="Y")
+    return read_nnlojet_file(
+        f"{refname}__{format_decimal(ybins[0])}__{format_decimal(ybins[1])}.dat",
+        other_axes=[yax],
+        charge=charge,
+    )
+
+
+def read_nnlojet_pty_hist(
+    reffile,
+    ybins=np.append(
+        np.append(np.array((-5.0, -4.0)), np.arange(-3.5, 3.75, 0.25)),
+        np.array((4.0, 5.0)),
+    ),
+    charge=None,
+):
+
+    h = read_nnlojet_ybin(reffile, ybins[:2], charge=charge)
+
+    for pair in zip(ybins[1:-1], ybins[2:]):
+        yax = hist.axis.Variable(pair, name="Y")
+        h = hh.concatenateHists(
+            h, read_nnlojet_ybin(reffile, pair, charge=charge), allowBroadcast=False
+        )
+
+    return h
 
 
 def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None, coeff=None):
@@ -388,6 +470,8 @@ def read_dyturbo_file(filename, axnames=("Y", "qT"), charge=None, coeff=None):
         h[...] = np.reshape(
             data[: len(data) - offset, len(axes) * 2 :], (*h.axes.size, 2)
         )
+        # Text file stores errors, convert to variance
+        h.variances()[...] = h.variances() * h.variances()
 
     if charge is not None:
         h = add_charge_axis(h, charge)
@@ -413,13 +497,11 @@ def add_charge_axis(h, charge):
     return hnew
 
 
-def read_matched_scetlib_dyturbo_hist(
+def read_scetlib_resum_and_fosing(
     scetlib_resum,
     scetlib_fo_sing,
-    dyturbo_fo,
     axes=None,
     charge=None,
-    fix_nons_bin0=True,
     coeff=None,
 ):
     hresum = read_scetlib_hist(scetlib_resum, charge=charge, flip_y_sign=coeff == "a4")
@@ -443,12 +525,34 @@ def read_matched_scetlib_dyturbo_hist(
             hfo_sing.view()[..., indices] = hfo_sing[..., 0].view()[..., np.newaxis]
         hresum = hresum.project(*newaxes)
 
+    return hresum, hfo_sing
+
+
+def read_matched_scetlib_dyturbo_hist(
+    scetlib_resum,
+    scetlib_fo_sing,
+    dyturbo_fo,
+    axes=None,
+    charge=None,
+    zero_nons_bins=0,
+    coeff=None,
+):
+
+    hresum, hfo_sing = read_scetlib_resum_and_fosing(
+        scetlib_resum,
+        scetlib_fo_sing,
+        axes,
+        charge,
+        coeff,
+    )
+
     dyturbo_axes = axes if axes else hfo_sing.axes.name[:-1]
     dyturbo_vars = (
         hfo_sing.axes["vars"].size > 1
         and "{scale}" in dyturbo_fo
         or "{i}" in dyturbo_fo
     )
+
     if dyturbo_vars:
         hfo = read_dyturbo_vars_hist(
             dyturbo_fo, var_axis=hfo_sing.axes["vars"], axes=dyturbo_axes, charge=charge
@@ -458,6 +562,54 @@ def read_matched_scetlib_dyturbo_hist(
             [dyturbo_fo], axes=dyturbo_axes, charge=charge, coeff=coeff
         )
 
+    return read_matched_scetlib_hist(hresum, hfo_sing, hfo, zero_nons_bins)
+
+
+def read_matched_scetlib_nnlojet_hist(
+    scetlib_resum,
+    scetlib_fo_sing,
+    nnlojet_fo,
+    axes=None,
+    charge=None,
+    zero_nons_bins=0,
+    coeff=None,
+    smooth_nnlojet=False,
+):
+    hresum, hfo_sing = read_scetlib_resum_and_fosing(
+        scetlib_resum,
+        scetlib_fo_sing,
+        axes,
+        charge,
+        coeff,
+    )
+
+    if not axes:
+        axes = hresum.axes[:-1]
+
+    if "Y" in axes and "qT" in axes:
+        nnlojeth = read_nnlojet_pty_hist(
+            nnlojet_fo, ybins=hresum.axes["Y"].edges, charge=charge
+        )
+    else:
+        nnlojeth = read_nnlojet_file(nnlojet_fo, axnames=axes, charge=charge)
+
+    if smooth_nnlojet:
+        if "qT" in axes:
+            print("To smooth!")
+            nnlojeth = hh.smooth_hist(nnlojeth, "qT", start_bin=4)
+        if "Y" in axes:
+            print("To smooth Y!", nnlojeth.axes.name)
+            nnlojeth = hh.smooth_hist(nnlojeth, "Y", exclude_axes=["qT"])
+
+    return read_matched_scetlib_hist(hresum, hfo_sing, nnlojeth, zero_nons_bins)
+
+
+def read_matched_scetlib_hist(
+    hresum,
+    hfo_sing,
+    hfo,
+    zero_nons_bins=0,
+):
     for ax in ["Y", "Q"]:
         if ax in set(hfo.axes.name).intersection(set(hfo_sing.axes.name)).intersection(
             set(hresum.axes.name)
@@ -468,34 +620,34 @@ def read_matched_scetlib_dyturbo_hist(
         and hfo.axes["vars"].size != hfo_sing.axes["vars"].size
         and hfo.axes["vars"].size == 1
     ):
+        logger.warning("No variations found for fixed order histogram!")
         hfo = hfo[{"vars": 0}]
 
     hnonsing = hh.addHists(-1 * hfo_sing, hfo, flow=False, by_ax_name=False)
 
-    if fix_nons_bin0:
-        # The 2 is for the WeightedSum
-        res = np.zeros((*hnonsing[{"qT": 0}].shape, 2))
-        if "charge" in hnonsing.axes.name:
-            hnonsing[..., 0, :, :] = res
-        else:
-            hnonsing[..., 0, :] = res
+    if "qT" in hfo.axes.name and zero_nons_bins is not None:
+        slices = tuple(
+            zero_nons_bins if ax == "qT" else slice(None) for ax in hnonsing.axes.name
+        )
+        hnonsing.view()[slices] = np.zeros_like(hnonsing[{"qT": zero_nons_bins}])
 
     # variations are driven by resummed result, collect common variations from nonsingular piece
     # if needed
+
+    # remapping is needed for scale variations which have slightly different parameter
+    # definitions for resummed vs fixed-order pieces
+    # *FIXME* this is sensitive to presence or absence of trailing zeros for kappas
+    sing_scales_map = {
+        "mufdown": "kappaf0.5",
+        "mufup": "kappaf2.",
+        "mufdown-kappaFO0.5-kappaf2.": "kappaFO0.5",
+        "mufup-kappaFO2.-kappaf0.5": "kappaFO2.",
+    }
+
     if hnonsing.axes["vars"] != hresum.axes["vars"]:
-        if not dyturbo_vars:
+        if not all(x in hfo.axes["vars"] for x in sing_scales_map.values()):
             hnonsing = hnonsing[..., 0]
         else:
-            # remapping is needed for scale variations which have slightly different parameter
-            # definitions for resummed vs fixed-order pieces
-            # *FIXME* this is sensitive to presence or absence of trailing zeros for kappas
-            scales_map = {
-                "mufdown": "kappaf0.5",
-                "mufup": "kappaf2.",
-                "mufdown-kappaFO0.5-kappaf2.": "kappaFO0.5",
-                "mufup-kappaFO2.-kappaf0.5": "kappaFO2.",
-            }
-
             htmp_nonsing = hist.Hist(
                 *hnonsing.axes[:-1],
                 hresum.axes["vars"],
@@ -503,7 +655,7 @@ def read_matched_scetlib_dyturbo_hist(
             )
 
             for i, var in enumerate(hresum.axes["vars"]):
-                var_nonsing = scales_map.get(var, var)
+                var_nonsing = sing_scales_map.get(var, var)
                 if (
                     "muf" in var or "kappaf" in var or "kappaFO" in var
                 ) and var_nonsing not in hnonsing.axes["vars"]:
