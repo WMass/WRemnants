@@ -1,16 +1,64 @@
 import re
 
 import numpy as np
-import uproot
+import pandas as pd
 from matplotlib.patches import Polygon
 from scipy.stats import chi2
 
 import combinetf2.io_tools
 from utilities import parsing
-from utilities.io_tools import combinetf2_input, output_tools
+from utilities.io_tools import combinetf2_input
 from utilities.styles import styles
-from wremnants import plot_tools
-from wums import logging
+from wums import logging, output_tools, plot_tools
+
+
+def get_values_and_impacts_as_panda(
+    input_file,
+    partial_impacts_to_read=None,
+    print_debug=False,
+    global_impacts=False,
+    scale=1.0,
+    scale_from_poi_name=False,
+):
+
+    fitres, meta = combinetf2.io_tools.get_fitresult(input_file, meta=True)
+    poi_names = combinetf2.io_tools.get_poi_names(meta)
+    poi_values = []
+    totals = []
+    uncertainties = {}
+    for poi in poi_names:
+        impacts, labels = combinetf2.io_tools.read_impacts_poi(
+            fitres, poi, grouped=True, global_impacts=global_impacts
+        )
+        scale_factor = (
+            float(re.findall(r"(\d+)MeV", poi.astype(str))[0])
+            if scale_from_poi_name
+            else scale
+        )
+        impacts = scale_factor * impacts
+        totals.append([impacts[i] for i, k in enumerate(labels) if k == "Total"][0])
+        if uncertainties == {}:
+            uncertainties = {
+                f"err_{k}": [impacts[i]]
+                for i, k in enumerate(labels)
+                if (partial_impacts_to_read is None or k in partial_impacts_to_read)
+            }
+        else:
+            for i, k in enumerate(labels):
+                if partial_impacts_to_read and k not in partial_impacts_to_read:
+                    continue
+                uncertainties[f"err_{k}"].append(impacts[i])
+        poi_values.append(scale_factor * fitres["parms"].get()[poi].value)
+
+    df = pd.DataFrame(
+        {"Name": poi_names, "value": poi_values, "err_Total": totals, **uncertainties}
+    )
+
+    if print_debug:
+        print(df)
+
+    return df
+
 
 if __name__ == "__main__":
     parser = parsing.plot_parser()
@@ -34,7 +82,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Specify if the fit is performed on data, needed for correct p-value calculation",
     )
-    parser.add_argument("--poiType", type=str, default="nois", help="Parameter type")
     parser.add_argument(
         "--axes",
         nargs="+",
@@ -51,6 +98,11 @@ if __name__ == "__main__":
         "--showMCInput", action="store_true", help="Show MC input value in the plot"
     )
     parser.add_argument(
+        "--showInclusiveDiff",
+        action="store_true",
+        help="Print shift between inclusive and nominal (reference), if inclusive was given",
+    )
+    parser.add_argument(
         "--title",
         type=str,
         default=None,
@@ -62,6 +114,18 @@ if __name__ == "__main__":
         default=1.5,
         help="Scale the width of the figure with this factor",
     )
+    parser.add_argument(
+        "--partialImpact",
+        nargs=2,
+        type=str,
+        default=["muonCalibration", "Calib. unc."],
+        help="Uncertainty group to plot as partial error bar (in addition to data stat, which is always there)",
+    )
+    parser.add_argument(
+        "--globalImpacts",
+        action="store_true",
+        help="Use the global impacts to plot uncertainties (they must be present in the input file)",
+    )
 
     parser = parsing.set_parser_default(parser, "legCols", 1)
 
@@ -70,40 +134,37 @@ if __name__ == "__main__":
 
     outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
-    fitresult, meta = combinetf2.io_tools.get_fitresult(args.infile, meta=True)
-    meta_info = meta["meta_info"]
-    lumi = sum([c["lumi"] for c in meta["channel_info"].values()])
+    partialImpact, partialImpactLegend = args.partialImpact
+    partial_impacts_to_read = ["stat", partialImpact]
 
-    with uproot.open(f"{args.infile.replace('.hdf5','.root')}:fitresults") as utree:
-        nll = utree["nllvalfull"].array(library="np")
+    fitresult, meta = combinetf2.io_tools.get_fitresult(args.infile, meta=True)
+    poi_names = combinetf2.io_tools.get_poi_names(meta)
+    meta_info = meta["meta_info"]
+    lumi = sum([c["lumi"] for c in meta["meta_info_input"]["channel_info"].values()])
+
+    nll = fitresult["nllvalfull"]
 
     if args.infileInclusive:
-        fInclusive = combinetf2.io_tools.get_fitresult(args.infileInclusive)
-        dfInclusive = combinetf2.io_tools.read_impacts_pois(
-            fInclusive,
-            poi_type=args.poiType,
-            group=True,
-            uncertainties=["stat", "muonCalibration"],
+        dfInclusive = get_values_and_impacts_as_panda(
+            args.infileInclusive,
+            partial_impacts_to_read=partial_impacts_to_read,
+            global_impacts=args.globalImpacts,
         )
-        with uproot.open(
-            f"{args.infileInclusive.replace('.hdf5','.root')}:fitresults"
-        ) as utree:
-            nll_inclusive = utree["nllvalfull"].array(library="np")
+        fInclusive = combinetf2.io_tools.get_fitresult(args.infileInclusive)
+        nll_inclusive = fInclusive["nllvalfull"]
 
     if args.infileNominal:
         fNominal = combinetf2.io_tools.get_fitresult(args.infileNominal)
-        dfNominal = combinetf2.io_tools.read_impacts_pois(
-            fNominal,
-            poi_type=args.poiType,
-            group=True,
-            uncertainties=["stat", "muonCalibration"],
+        dfNominal = get_values_and_impacts_as_panda(
+            args.infileNominal,
+            partial_impacts_to_read=partial_impacts_to_read,
+            global_impacts=args.globalImpacts,
         )
 
-    df = combinetf2.io_tools.read_impacts_pois(
-        fitresult,
-        poi_type=args.poiType,
-        group=True,
-        uncertainties=["stat", "muonCalibration"],
+    df = get_values_and_impacts_as_panda(
+        args.infile,
+        partial_impacts_to_read=partial_impacts_to_read,
+        global_impacts=args.globalImpacts,
     )
 
     df["Params"] = df["Name"].apply(lambda x: x.split("_")[0])
@@ -140,13 +201,15 @@ if __name__ == "__main__":
             xlabel = r"$\Delta " + xlabel[1:]
             offset = 0
 
+        logger.info(f"offset = {offset}")
+
         df_p["Names"] = df_p["Name"].apply(
             lambda x: "".join(
                 [x.split("MeV")[-1].split("_")[0] for x in x.split("_decorr")]
             )
         )
 
-        ylabels = [styles.xlabels.get(v, v) for v in args.axes]
+        ylabels = [styles.axis_labels.get(v, v) for v in args.axes]
 
         axes = []
         for i, v in enumerate(args.axes):
@@ -179,7 +242,7 @@ if __name__ == "__main__":
             df_p["yticks"] = df_p["yticks"].apply(lambda x: f"${x}$")
             ylabel = None
         elif "etaAbsEta" in axes:
-            axis_label = styles.xlabels.get("etaAbsEta", "etaAbsEta")
+            axis_label = styles.axis_labels.get("etaAbsEta", "etaAbsEta")
             axis_ranges = [
                 -2.4,
                 -2.0,
@@ -257,6 +320,43 @@ if __name__ == "__main__":
                 df_p["etaRegionSign"].apply(lambda x: str(axis_ranges[x])).astype(str)
             )
             # ylabel="$\mathrm{sign}(\mathit{\eta}^{\mu^+}) + \mathrm{sign}(\mathit{\eta}^{\mu^-})$"
+        elif "run" in axes:
+            nRunBins = df.shape[0]
+            if nRunBins == 2:
+                axis_ranges = {
+                    0: r"Data FG: 8.07 $\mathrm{fb}^{-1}$",
+                    1: r"Data H: 8.74 $\mathrm{fb}^{-1}$",
+                    # 0: r"Data v1: 8.4 $\mathrm{fb}^{-1}$",
+                    # 1: r"Data v2: 8.4 $\mathrm{fb}^{-1}$",
+                }
+            elif nRunBins == 3:
+                axis_ranges = {
+                    0: r"0: 4.33 $\mathrm{fb}^{-1}$",
+                    1: r"1: 7.94 $\mathrm{fb}^{-1}$",
+                    2: r"2: 4.55 $\mathrm{fb}^{-1}$",
+                }
+            elif nRunBins == 4:
+                axis_ranges = {
+                    0: r"FG v1: 4.33 $\mathrm{fb}^{-1}$",
+                    1: r"FG v2: 3.74 $\mathrm{fb}^{-1}$",
+                    2: r" H v1: 4.19 $\mathrm{fb}^{-1}$",
+                    3: r" H v2: 4.55 $\mathrm{fb}^{-1}$",
+                }
+            elif nRunBins == 5:
+                axis_ranges = {
+                    0: r"0: 2.33 $\mathrm{fb}^{-1}$",
+                    1: r"1: 3.92 $\mathrm{fb}^{-1}$",
+                    2: r"2: 3.90 $\mathrm{fb}^{-1}$",
+                    3: r"3: 3.92 $\mathrm{fb}^{-1}$",
+                    4: r"4: 2.74 $\mathrm{fb}^{-1}$",
+                }
+            else:
+                raise RuntimeError(
+                    f"Found {nRunBins} run bins, which is not yet implemented."
+                )
+            df_p["yticks"] = (
+                df_p["run"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
         else:
             # otherwise just take noi name
             df_p["yticks"] = df_p["Names"]
@@ -267,9 +367,9 @@ if __name__ == "__main__":
         xCenter = 0
 
         val = df_p["value"].values * scale + offset
-        err = df_p["err_total"].values * scale
+        err = df_p["err_Total"].values * scale
         err_stat = df_p["err_stat"].values * scale
-        err_cal = df_p["err_muonCalibration"].values * scale
+        err_cal = df_p[f"err_{partialImpact}"].values * scale
 
         if args.infileNominal:
             if len(dfNominal) > 1:
@@ -281,7 +381,10 @@ if __name__ == "__main__":
                     f"Found 0 values from the inclusive fit but was expecting 1"
                 )
 
-            central = dfNominal["value"].values[0] * scale + offset
+            central_no_offset = dfNominal["value"].values[0] * scale
+            central = central_no_offset + offset
+            logger.info(f"Nominal (no offset) = {central_no_offset}")
+            logger.info(f"Nominal (w/ offset) = {central}")
         else:
             central = 0
 
@@ -296,16 +399,18 @@ if __name__ == "__main__":
                 )
 
             c_err_stat = dfInclusive["err_stat"].values[0] * scale
-            c_err_cal = dfInclusive["err_muonCalibration"].values[0] * scale
-            c_err = dfInclusive["err_total"].values[0] * scale
+            c_err_cal = dfInclusive[f"err_{partialImpact}"].values[0] * scale
+            c_err = dfInclusive["err_Total"].values[0] * scale
             c = dfInclusive["value"].values[0] * scale + offset
 
+            logger.info(f"Inclusive (before subtracting central) = {c}")
             if args.infileNominal:
                 c -= central
             else:
                 if not args.showMCInput:
                     central = c
                     c = 0
+            logger.info(f"Inclusive (after subtracting central) = {c}")
 
         val -= central
 
@@ -338,7 +443,7 @@ if __name__ == "__main__":
 
             logger.info(f"nll_inclusive = {nll_inclusive}; nll = {nll}")
 
-            chi2_stat = 2 * (nll_inclusive - nll)[0]
+            chi2_stat = 2 * (nll_inclusive - nll)
             if args.data:
                 chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
             else:
@@ -369,6 +474,20 @@ if __name__ == "__main__":
                 y_chi2,
                 text_size=args.legSize,
             )
+
+            if args.showInclusiveDiff:
+                plot_tools.wrap_text(
+                    [
+                        r"$\Delta\mathit{m}_\mathrm{"
+                        + str(proc)
+                        + r"}^\mathrm{Incl} =$ "
+                        + f"{round(c, 1)}",
+                    ],
+                    ax1,
+                    x_chi2,
+                    y_chi2 + 0.14,
+                    text_size=args.legSize,
+                )
 
             ax1.fill_between(
                 [c - c_err, c + c_err], ylim[0], ylim[1], color="gray", alpha=0.3
@@ -412,7 +531,7 @@ if __name__ == "__main__":
             marker="",
             linestyle="",
             linewidth=5,
-            label="Calib. unc.",
+            label=partialImpactLegend,
             zorder=2,
         )
         ax1.errorbar(
@@ -488,7 +607,7 @@ if __name__ == "__main__":
             outfile += "_preliminary"
 
         plot_tools.save_pdf_and_png(outdir, outfile)
-        plot_tools.write_index_and_log(
+        output_tools.write_index_and_log(
             outdir,
             outfile,
             analysis_meta_info={"AnalysisOutput": meta_info},

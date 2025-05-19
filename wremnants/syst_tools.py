@@ -1903,6 +1903,8 @@ def add_muon_efficiency_unc_hists(
             "tnpUT0",
             "tnpCharge0",
         ]  # passIso0 required only for iso stat variations, added later
+        if not smooth3D:
+            muvars_stat.remove("tnpUT0")
         muon_columns_stat_trig = [f"trigMuons_{v}" for v in muvars_stat]
         muon_columns_stat_nonTrig = [f"nonTrigMuons_{v}" for v in muvars_stat]
 
@@ -1915,6 +1917,8 @@ def add_muon_efficiency_unc_hists(
             "tnpCharge0",
             "passIso0",
         ]
+        if not smooth3D:
+            muvars_syst.remove("tnpUT0")
         muon_columns_syst_trig = [f"trigMuons_{v}" for v in muvars_syst]
         muon_columns_syst_nonTrig = [f"nonTrigMuons_{v}" for v in muvars_syst]
 

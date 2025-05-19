@@ -854,6 +854,33 @@ private:
   std::vector<std::mt19937> rng_;
 };
 
+// function to do stuff with run splitting in MC should define a helper
+// to have flexibility to set the internal arrays once at run-time
+unsigned int get_dummy_run_by_lumi_quantile(const unsigned int run,
+                                            const unsigned int lumi,
+                                            const unsigned long long event,
+                                            const Vec_d lumi_edges,
+                                            const Vec_ui run_vals) {
+
+  std::seed_seq seq{std::size_t(run), std::size_t(lumi), std::size_t(event)};
+  std::mt19937 rng(seq);
+
+  int bin = 0;
+  // generate uniformly distributed double in [0,1)
+  std::uniform_real_distribution<> dis(0.0, 1.0);
+  double rn = dis(rng);
+  // std::cout << "rn = " << rn << std::endl;
+  // loop from second edge
+  for (int i = 1; i < lumi_edges.size(); i++) {
+    if (rn < lumi_edges[i]) {
+      bin = i - 1;
+      break;
+    }
+  }
+  // std::cout << "rn, bin = " << rn << ", " << ret << std::endl;
+  return run_vals[bin];
+}
+
 } // namespace wrem
 
 #endif

@@ -1,4 +1,7 @@
+import pickle
+
 import hist
+import lz4.frame
 import numpy as np
 from scipy import interpolate
 
@@ -114,6 +117,67 @@ def spline_smooth(binvals, edges, edges_out, axis, binvars=None, syst_variations
             )
 
     return ynom, yvars
+
+
+def apply_correction_from_file(
+    h,
+    hnomi=None,
+    corr_file=None,
+    corr_hist=None,
+    scale=1.0,
+    offset_corr=0.0,
+    createNew=False,
+):
+    # FIXME: this might not be thread safe, but it is a test for now
+
+    # hnomi is just a dummy, only needed when this function is called within
+    # a nested set of actions from setupCombine and it is actionRequiresNomi=True
+
+    # the correction must be given as a histogram with axes compatible with the input h
+    # scale applies an additional constant scaling BEFORE the correction from corr_hist
+    # offset_corr is for utility, to add to the correction from the file,
+    # e.g. if the histogram is a scaling of x (e.g. 5%) one has to multiply the input histogram h by 1+x, so offset should be 1
+    with lz4.frame.open(corr_file) as f:
+        corrs = pickle.load(f)
+    boost_corr = corrs[corr_hist]
+
+    # if offset_corr:
+    #     pass
+
+    if createNew:
+        hnew = hist.Hist(*h.axes, storage=hist.storage.Weight())
+        hnew.values(flow=True)[...] = scale * h.values(flow=True)
+        hnew.variances(flow=True)[...] = scale * scale * h.variances(flow=True)
+        hnew = hh.multiplyHists(hnew, boost_corr)
+        return hnew
+    else:
+        h.values(flow=True)[...] *= scale
+        h.variances(flow=True)[...] *= scale * scale
+        h = hh.multiplyHists(h, boost_corr)
+        return h
+
+
+def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
+    # FIXME: this might not be thread safe, but it is a test for now
+    with lz4.frame.open(corr_file) as f:
+        corrs = pickle.load(f)
+    boost_corr = corrs[corr_hist]
+
+    hUp = hh.multiplyHists(h, boost_corr)
+    hDown = hh.divideHists(h, boost_corr)
+
+    hVar = hist.Hist(
+        *[a for a in h.axes],
+        common.down_up_axis,
+        storage=hist.storage.Weight(),
+    )
+    hVar.values(flow=True)[...] = np.stack(
+        [hDown.values(flow=True), hUp.values(flow=True)], axis=-1
+    )
+    hVar.variances(flow=True)[...] = np.stack(
+        [hDown.variances(flow=True), hUp.variances(flow=True)], axis=-1
+    )
+    return hVar
 
 
 class HistselectorABCD(object):
