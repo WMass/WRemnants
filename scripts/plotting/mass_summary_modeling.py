@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
 from utilities.io_tools import hepdata_tools, output_tools
 from wremnants import plot_tools
@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 basename = args.reffile
 
-dfs = combinetf2.io_tools.read_all_groupunc_df(
+dfs = rabbit.io_tools.read_all_groupunc_df(
     [
         args.reffile.format(postfix=p)
         for p in [
@@ -53,7 +53,7 @@ dfs = combinetf2.io_tools.read_all_groupunc_df(
 isW = "WMass" in args.reffile
 
 if isW:
-    combdf = combinetf2.io_tools.read_all_groupunc_df(
+    combdf = rabbit.io_tools.read_all_groupunc_df(
         [args.reffile.format(postfix="_CombinedPtll")],
         names=(
             [

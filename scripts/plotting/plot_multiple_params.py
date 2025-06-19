@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Polygon
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from scripts.plotting import plot_decorr_params as pdp
 from utilities import parsing
 from wums import logging, output_tools, plot_tools
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
         )
-        fReference, mReference = combinetf2.io_tools.get_fitresult(
+        fReference, mReference = rabbit.io_tools.get_fitresult(
             args.infileReference, meta=True
         )
         lumi = sum(
@@ -119,7 +119,7 @@ if __name__ == "__main__":
         meta_info = None
 
     if args.infileNominal:
-        fNominal = combinetf2.io_tools.get_fitresult(args.infileNominal)
+        fNominal = rabbit.io_tools.get_fitresult(args.infileNominal)
         dfNominal = pdp.get_values_and_impacts_as_panda(
             args.infileNominal,
             partial_impacts_to_read=partial_impacts_to_read,

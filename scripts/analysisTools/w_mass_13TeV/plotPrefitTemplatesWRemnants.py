@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # example
-# input file is the output of setupCombineWmass.py, with all TH2D inside
+# input file is the output of setupRabbitWmass.py, with all TH2D inside
 #
 # python w-mass-13TeV/plotPrefitTemplatesWRemnants.py input.root outdir [--wlike]
 #

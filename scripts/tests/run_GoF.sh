@@ -93,13 +93,13 @@ for FITVAR in "${FITVARS[@]}"; do
                 echo Transfer wlike fitresults to dilepton distributions: ${VAR}
                 VARSTING=$(echo "$VAR" | tr '-' '_')
 
-                ./scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/combinetf2.py \
+                ./scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh narf/scripts/fitting/rabbit.py \
                     ${COMBINE_OUTDIR}/ZMassDilepton_${VARSTING}/ZMassDilepton.hdf5 --binByBinStat --pseudoData $PSEUDO --saveHists --computeHistErrors \
-                    --externalPostfit $COMBINE_ANALYSIS_OUTDIR/fitresults_123456789_${PSEUDO}.hdf5 -o $COMBINE_ANALYSIS_OUTDIR/fitresult_combinetf2_${PSEUDO}_${VARSTING}.hdf5
+                    --externalPostfit $COMBINE_ANALYSIS_OUTDIR/fitresults_123456789_${PSEUDO}.hdf5 -o $COMBINE_ANALYSIS_OUTDIR/fitresult_rabbit_${PSEUDO}_${VARSTING}.hdf5
                 ./scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py \
-                    $COMBINE_ANALYSIS_OUTDIR/fitresult_combinetf2_${PSEUDO}_${VARSTING}.hdf5 -f ${WEBDIR}/$PSEUDO --yscale '1.2' --rrange '0.9' '1.1' --prefit
+                    $COMBINE_ANALYSIS_OUTDIR/fitresult_rabbit_${PSEUDO}_${VARSTING}.hdf5 -f ${WEBDIR}/$PSEUDO --yscale '1.2' --rrange '0.9' '1.1' --prefit
                 ./scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/postfitPlots.py \
-                    $COMBINE_ANALYSIS_OUTDIR/fitresult_combinetf2_${PSEUDO}_${VARSTING}.hdf5 -f ${WEBDIR}/$PSEUDO --yscale '1.2' --rrange '0.9' '1.1'
+                    $COMBINE_ANALYSIS_OUTDIR/fitresult_rabbit_${PSEUDO}_${VARSTING}.hdf5 -f ${WEBDIR}/$PSEUDO --yscale '1.2' --rrange '0.9' '1.1'
             done
         fi
 

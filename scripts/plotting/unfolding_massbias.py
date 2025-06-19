@@ -3,14 +3,14 @@ import mplhep as hep
 import numpy as np
 import pandas as pd
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
 from wremnants import plot_tools
 from wums import logging, output_tools
 
 
 def get_mass_obs(filename):
-    fitresult = combinetf2.io_tools.get_fitresult(filename)
+    fitresult = rabbit.io_tools.get_fitresult(filename)
 
     val = 100 * fitresult["nois_outvals"][...][0]
     err = 100 * (fitresult["nois_outcov"][...][0, 0] ** 0.5)

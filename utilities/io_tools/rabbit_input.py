@@ -3,7 +3,7 @@ import re
 
 import pandas as pd
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from wums import logging
 
 logger = logging.child_logger(__name__)
@@ -13,8 +13,8 @@ def read_groupunc_df(filename, uncs, rename_cols={}, name=None):
     ref_massw = 80379
     ref_massz = 91187.6
 
-    fitresult = combinetf2.io_tools.get_fitresult(filename)
-    df = combinetf2.io_tools.read_impacts_pois(
+    fitresult = rabbit.io_tools.get_fitresult(filename)
+    df = rabbit.io_tools.read_impacts_pois(
         fitresult, poi_type="nois", group=True, uncertainties=uncs
     )
 

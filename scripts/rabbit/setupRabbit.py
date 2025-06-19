@@ -5,9 +5,9 @@ import math
 import hist
 import numpy as np
 
-import combinetf2.debugdata
-import combinetf2.io_tools
-from combinetf2 import tensorwriter
+import rabbit.debugdata
+import rabbit.io_tools
+from rabbit import tensorwriter
 from utilities import common, parsing
 from wremnants import (
     combine_helpers,
@@ -426,7 +426,7 @@ def make_parser(parser=None):
         "--doStatOnly",
         action="store_true",
         default=False,
-        help="Set up fit to get stat-only uncertainty (currently combinetf with -S 0 doesn't work)",
+        help="Set up fit to get stat-only uncertainty",
     )
     parser.add_argument(
         "--noTheoryUnc",
@@ -763,7 +763,7 @@ def make_parser(parser=None):
     parser.add_argument(
         "--muRmuFPolVar",
         action="store_true",
-        help="Use polynomial variations (like in theoryAgnosticPolVar) instead of binned variations for muR and muF (of course in setupCombine these are still constrained nuisances)",
+        help="Use polynomial variations (like in theoryAgnosticPolVar) instead of binned variations for muR and muF (of course in setupRabbit these are still constrained nuisances)",
     )
     parser.add_argument(
         "--binByBinStatScaleForMW",
@@ -1217,8 +1217,8 @@ def setup(
         datagroups.addPseudodataHistogramFakes(pseudodata, pseudodataGroups)
     if args.pseudoData:
         if args.pseudoDataFitInputFile:
-            indata = combinetf2.debugdata.FitInputData(args.pseudoDataFitInputFile)
-            debugdata = combinetf2.debugdata.FitDebugData(indata)
+            indata = rabbit.debugdata.FitInputData(args.pseudoDataFitInputFile)
+            debugdata = rabbit.debugdata.FitDebugData(indata)
             datagroups.addPseudodataHistogramsFitInput(
                 debugdata,
                 args.pseudoData,
@@ -1262,7 +1262,7 @@ def setup(
 
     if args.doStatOnly and isUnfolding and not isPoiAsNoi:
         # At least one nuisance parameter is needed to run combine impacts (e.g. needed for unfolding postprocessing chain)
-        # TODO: fix combineTF2 to run w/o nuisances
+        # TODO: fix Rabbit to run w/o nuisances
         datagroups.addNormSystematic(
             name="dummy",
             processes=["MCnoQCD"],
@@ -2419,7 +2419,7 @@ def setup(
                 actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
             )
 
-    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupCombineWMass.py#L359
+    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupRabbitWMass.py#L359
 
     return datagroups
 
@@ -2516,7 +2516,7 @@ if __name__ == "__main__":
             logger.warning(
                 "Theoryfit for more than one channels is currently experimental"
             )
-        fitresult, fitresult_meta = combinetf2.io_tools.get_fitresult(
+        fitresult, fitresult_meta = rabbit.io_tools.get_fitresult(
             args.fitresult[0], meta=True, result=None if args.realData else "asimov"
         )
 
@@ -2531,7 +2531,7 @@ if __name__ == "__main__":
             channels = None
 
         fitresult_hist, fitresult_cov, fitresult_channels = (
-            combinetf2.io_tools.get_postfit_hist_cov(
+            rabbit.io_tools.get_postfit_hist_cov(
                 fitresult, physics_model=physics_model, channels=channels
             )
         )

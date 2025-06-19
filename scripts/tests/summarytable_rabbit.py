@@ -1,7 +1,7 @@
 import pandas as pd
 from scipy.stats import chi2
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
 from wums import logging, output_tools, tex_tools
 
@@ -20,7 +20,7 @@ translate = {
 
 def read_fitresult(filename):
     try:
-        fitresult = combinetf2.io_tools.get_fitresult(filename)
+        fitresult = rabbit.io_tools.get_fitresult(filename)
         ndf = fitresult[f"ndf"]
         chi2_prefit = fitresult[f"chi2_prefit"]
         chi2_postfit = fitresult[f"chi2_postfit"]
@@ -78,7 +78,7 @@ for channel, df_c in df.groupby("channel"):
     tex_tools.make_latex_table(
         df_c,
         output_dir=outdir,
-        output_name=f"table_combinetf2_prefit_{channel}",
+        output_name=f"table_rabbit_prefit_{channel}",
         column_title="Axes (bins)",
         caption=r"Resulting prefit $\chi^2$ values (and p-values) from WLike fits on different data, and pseudodata sets.",
         label="Pseudodata",
@@ -93,7 +93,7 @@ for channel, df_c in df.groupby("channel"):
     tex_tools.make_latex_table(
         df_c,
         output_dir=outdir,
-        output_name=f"table_combinetf2_postfit_{channel}",
+        output_name=f"table_rabbit_postfit_{channel}",
         column_title="Axes (bins)",
         caption=r"Resulting postfit $\chi^2$ values (and p-values) from WLike fits on different data, and pseudodata sets.",
         label="Pseudodata",

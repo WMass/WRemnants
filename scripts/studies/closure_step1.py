@@ -204,8 +204,8 @@ for nominal, pseudodata in datasets:
             "correlatedNonClosureNP", "correlatedNonClosureNP_NonClosureCorl"
         )
         EXE(
-            f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_nominal_comb} --pseudoDataFile {file_pseudodata} --pseudoData nominal --muonScaleVariation smearingWeights {freeze_command} --correlatedNonClosureNuisances --filterProcGroups Wmunu --excludeProcGroups Fake"
+            f"python3 scripts/combine/setupRabbitWMass.py -o {dir_combine} -i {file_nominal_comb} --pseudoDataFile {file_pseudodata} --pseudoData nominal --muonScaleVariation smearingWeights {freeze_command} --correlatedNonClosureNuisances --filterProcGroups Wmunu --excludeProcGroups Fake"
         )
 # dir_combine = f"{args.combineOutFolder}/sepImpact"
 # if not os.path.isfile(f"{dir_combine}/WMassCombineInput.root"):
-#    EXE(f"python3 scripts/combine/setupCombineWMass.py -o {dir_combine} -i {file_sep_impact} --muonScaleVariation smearingWeights --sepImpactForNC")
+#    EXE(f"python3 scripts/combine/setupRabbitWMass.py -o {dir_combine} -i {file_sep_impact} --muonScaleVariation smearingWeights --sepImpactForNC")

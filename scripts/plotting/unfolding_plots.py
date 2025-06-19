@@ -1,7 +1,7 @@
 import mplhep as hep
 import numpy as np
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
 from wremnants import plot_tools
 from wremnants.datasets.datagroups import Datagroups
@@ -63,7 +63,7 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
-fitresult = combinetf2.io_tools.get_fitresult(args.fitresult)
+fitresult = rabbit.io_tools.get_fitresult(args.fitresult)
 
 datagroups = Datagroups(args.infile)
 isW = datagroups.mode[0] == "w"

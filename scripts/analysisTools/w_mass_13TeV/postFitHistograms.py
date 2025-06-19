@@ -253,7 +253,7 @@ if __name__ == "__main__":
         nargs="*",
         help="Edges for eta bins (if not given it uses a default)",
     )
-    # parser.add_argument(     '--rootAndTxtFitInputs', action='store_true', help="If the fit was from the old root + txt datacard setup, it affects the way the unrolled plots are stored in the fit output file (the hdf5 version of setupCombine.py does not use channels for the charge)")
+    # parser.add_argument(     '--rootAndTxtFitInputs', action='store_true', help="If the fit was from the old root + txt datacard setup, it affects the way the unrolled plots are stored in the fit output file (the hdf5 version of setupRabbit.py does not use channels for the charge)")
     args = parser.parse_args()
 
     logger = logging.setup_logger(os.path.basename(__file__), args.verbose)

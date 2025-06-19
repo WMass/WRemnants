@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import combinetf2.io_tools
 import narf
+import rabbit.io_tools
 from utilities import parsing
 from utilities.io_tools import input_tools, output_tools
 from wremnants import plot_tools, syst_tools
@@ -68,7 +68,7 @@ def quadrature_sum_hist(hists, is_down):
 
 
 def load_hist(filename, fittype="postfit", helicity=False):
-    fitresult = combinetf2.io_tools.get_fitresult(filename)
+    fitresult = rabbit.io_tools.get_fitresult(filename)
     obs = {args.obs, "helicity", "chargeVgen"} if helicity else {args.obs}
     if "projections" in fitresult.keys() and len(fitresult["projections"]):
         fitresult = fitresult["projections"]

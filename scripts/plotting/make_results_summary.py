@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
 from wremnants import plot_tools
 from wums import output_tools
@@ -47,7 +47,7 @@ dfw = pd.DataFrame.from_dict(
 if not args.pdg:
     dfw = dfw[dfw["Name"] != "PDG Average"]
 
-cms_res = combinetf2.io_tools.read_groupunc_df(
+cms_res = rabbit.io_tools.read_groupunc_df(
     args.fitresult,
     [
         "stat",

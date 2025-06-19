@@ -16,7 +16,7 @@ Each independent fit has a separate driver script in this directory. The driver 
 The driver script may have special configuration arguments. For the W mass, the simplest running command is:
 
 ```bash
-python ./scripts/combine/setupCombine.py -i mw_with_mu_eta_pt.pkl.hdf5 -o outputFolder
+python ./scripts/combine/setupRabbit.py -i mw_with_mu_eta_pt.hdf5 -o outputFolder
 ```
 
 Additional options are available to configure some systematics.

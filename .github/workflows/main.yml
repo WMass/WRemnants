@@ -74,21 +74,21 @@ jobs:
 
       - name: run isort
         run: |
-          scripts/ci/run_with_singularity.sh isort . --check-only --diff --skip narf --skip combinetf2 --skip wremnants-data --skip wums --profile black --line-length 88
+          scripts/ci/run_with_singularity.sh isort . --check-only --diff --skip narf --skip rabbit --skip wremnants-data --skip wums --profile black --line-length 88
 
       - name: run Flake8
         run: >-
-          scripts/ci/run_with_singularity.sh flake8 . --exclude=narf,combinetf2,wremnants-data,wums --max-line-length 88
+          scripts/ci/run_with_singularity.sh flake8 . --exclude=narf,rabbit,wremnants-data,wums --max-line-length 88
           --select=F401,F402,F403,F404,F405,F406,F407,F601,F602,F621,F622,F631,F632,F633,F634,F701,F702,F704,F706,F707,F721,F722,F723,F821,F822,F823,F831,F901
 
       - name: run Black
         run: |
-          scripts/ci/run_with_singularity.sh black --exclude '(^\.git|\.github|\.ipynb|narf|combinetf2|wremnants-data|wums)' --check .
+          scripts/ci/run_with_singularity.sh black --exclude '(^\.git|\.github|\.ipynb|narf|rabbit|wremnants-data|wums)' --check .
 
       - name: check Python Files
         run: |
           # Find all Python files and check their syntax in parallel
-          find . -name '*.py' -not -path '*/narf/*' -not -path '*/combinetf2/*' -not -path '*/wremnants-data/*' -not -path '*/wums/*' | \
+          find . -name '*.py' -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/*' -not -path '*/wums/*' | \
           xargs -P 16 -I {} bash -c '
             echo "Checking python file: {}"
             scripts/ci/run_with_singularity.sh python -m py_compile "{}" || \
@@ -98,7 +98,7 @@ jobs:
       - name: check JSON Files
         run: |
           # Find all JSON files and check their syntax
-          for FILE in $(find . -name '*.json' -not -path '*/narf/*' -not -path '*/combinetf2/*' -not -path '*/wremnants-data/* -not -path '*/wums/*''); do
+          for FILE in $(find . -name '*.json' -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/* -not -path '*/wums/*''); do
             echo "Checking JSON file: $FILE"
             scripts/ci/run_with_singularity.sh python -m json.tool "$FILE" > /dev/null
             if [ $? -ne 0 ]; then
@@ -110,7 +110,7 @@ jobs:
       - name: check C++ Files
         run: |
           # Find all C++ files and check their syntax in parallel
-          find . \( -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -not -path '*/narf/*' -not -path '*/combinetf2/*' -not -path '*/wremnants-data/* -not -path '*/wums/*'' | \
+          find . \( -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/* -not -path '*/wums/*'' | \
           xargs -P 16 -I {} bash -c '
             echo "Checking {}"
             scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -std=c++20 -fsyntax-only "{}" || \
@@ -248,36 +248,36 @@ jobs:
         run: | 
           echo "LUMI_SCALE=120" >> $GITHUB_ENV
 
-      - name: wmass combine setup
-        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
+      - name: wmass rabbit setup
+        run: scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR
 
-      - name: wmass combine fit 
+      - name: wmass rabbit fit 
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/WMass.hdf5'
           -t -1 --doImpacts -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/'
 
-      - name: wmass combine impacts
+      - name: wmass rabbit impacts
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge/fitresults.hdf5 $WEB_DIR/$PLOT_DIR
 
       # theory agnostic with POI as NOI
-      - name: wmass theory agnostic combine setup
+      - name: wmass theory agnostic rabbit setup
         run:  >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py -i $HIST_FILE 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py -i $HIST_FILE 
           --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/ --analysisMode theoryAgnosticNormVar --poiAsNoi --scaleNormXsecHistYields 0.01
 
-      - name: wmass theory agnostic combine fit 
+      - name: wmass theory agnostic rabbit fit 
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/WMass.hdf5'
           -t -1 --doImpacts
           -o '$WREMNANTS_OUTDIR/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/'
 
-      - name: wmass combine impacts
+      - name: wmass rabbit impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix theoryAgnosticNormVar --scaleImpacts 100
@@ -374,62 +374,62 @@ jobs:
 
       - name: setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR --lumiScale $LUMI_SCALE
           --analysisMode unfolding --unfoldingLevel postfsr --genAxes absEtaGen-ptGen-qGen --poiAsNoi --postfix poiAsNoi --scaleNormXsecHistYields '0.01'
 
       - name: fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/WMass.hdf5
           -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/ -t -1
           --saveHists --computeHistErrors --computeHistImpacts --computeHistCov -m Select ch0_masked -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen
 
       - name: plot xsec
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_uncertainties.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary  --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/ 
           --fitresult $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5 Select
           --fitvar absEtaGen-ptGen-qGen --postfix theoryfit --baseName postfsr --explicitSignalMCstat
       
       - name: run theory fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/WMass_absEtaGen_ptGen_qGen_theoryfit/WMass.hdf5
           -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/WMass_absEtaGen_ptGen_qGen_theoryfit/
           --doImpacts --globalImpacts --saveHists --computeHistErrors --chisqFit --externalCovariance -t -1 -m Project ch0 ptGen -m Project ch0 absEtaGen
       
       - name: plot pulls & impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/WMass_absEtaGen_ptGen_qGen_theoryfit/fitresults.hdf5
           --grouping max --config 'utilities/styles/styles.py' --postfix poiAsNoi
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scale 1.5
@@ -451,7 +451,7 @@ jobs:
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
-          echo "COMBINED_DIR=$WREMNANTS_OUTDIR" >> $GITHUB_ENV
+          echo "RABBIT_DIR=$WREMNANTS_OUTDIR" >> $GITHUB_ENV
           echo "HIST_FILE_MU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MU}" >> $GITHUB_ENV
           echo "HIST_FILE_E=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_E}" >> $GITHUB_ENV
 
@@ -520,22 +520,22 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/response_matrix.py 
           --axes ptW-ptVGen --procFilters Wenu -p e -o $WEB_DIR -f $PLOT_DIR/lowPU $HIST_FILE_E
 
-      - name: w mu/e combine mt setup
+      - name: w mu/e rabbit mt setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py --fakeEstimation simple --fakeSmoothingMode binned
-          -i $HIST_FILE_MU $HIST_FILE_E --baseName transverseMass transverseMass --fitvar mt-charge mt-charge -o $COMBINED_DIR
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py --fakeEstimation simple --fakeSmoothingMode binned
+          -i $HIST_FILE_MU $HIST_FILE_E --baseName transverseMass transverseMass --fitvar mt-charge mt-charge -o $RABBIT_DIR
 
-      - name: lowpu combine mt fit
+      - name: lowpu rabbit mt fit
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
-          '$COMBINED_DIR/Combination_WMass_lowPU/Combination.hdf5'
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
+          '$RABBIT_DIR/Combination_WMass_lowPU/Combination.hdf5'
           -t -1 --doImpacts
-          -o '$COMBINED_DIR/Combination_WMass_lowPU/'
+          -o '$RABBIT_DIR/Combination_WMass_lowPU/'
 
-      - name: lowpu combine mt impacts
+      - name: lowpu rabbit mt impacts
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh 
-          $COMBINED_DIR/Combination_WMass_lowPU/fitresults.hdf5 $WEB_DIR/$PLOT_DIR/lowPU
+          $RABBIT_DIR/Combination_WMass_lowPU/fitresults.hdf5 $WEB_DIR/$PLOT_DIR/lowPU
 
   lowpu-z:
     # The type of runner that the job will run on
@@ -614,7 +614,7 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
-          echo "COMBINED_DIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "RABBIT_DIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "HIST_FILE_MU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MU}" >> $GITHUB_ENV
           echo "HIST_FILE_E=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_E}" >> $GITHUB_ENV
           echo "HIST_FILE_MUMU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MUMU}" >> $GITHUB_ENV
@@ -625,24 +625,24 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: lowpu combine unfolding setup
+      - name: lowpu rabbit unfolding setup
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           --fakeEstimation simple --fakeSmoothingMode binned --ewUnc --analysisMode unfolding --unfoldingLevel postfsr
           --fitvar ptW-charge ptW-charge ptll ptll --genAxes ptVGen-qVGen ptVGen-qVGen ptVGen ptVGen
-          -i $HIST_FILE_MU $HIST_FILE_E $HIST_FILE_MUMU $HIST_FILE_EE -o $COMBINED_DIR --postfix ptll 
+          -i $HIST_FILE_MU $HIST_FILE_E $HIST_FILE_MUMU $HIST_FILE_EE -o $RABBIT_DIR --postfix ptll 
 
-      - name: lowpu combine unfolding fit 
+      - name: lowpu rabbit unfolding fit 
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
-          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/Combination.hdf5 -t -1 -o $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
+          $RABBIT_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/Combination.hdf5 -t -1 -o $RABBIT_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/
           --doImpacts --globalImpacts
           --saveHists --computeHistErrors --computeHistCov
 
-      - name: lowpu combine unfolded xsec plot
+      - name: lowpu rabbit unfolded xsec plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py
-          $COMBINED_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR/lowPU
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          $RABBIT_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR/lowPU
           --rrange 0.0 2.0 --unfoldedXsec --noUncertainty --chisq none --legCols 1 --noSciy --titlePos 0 --title CMS --subtitle Preliminary
 
   wlike:
@@ -679,40 +679,40 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_wlike_with_mu_eta_pt.py 
           --dataPath $DATAPATH -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --forceDefaultName
 
-      - name: wlike combine setup
+      - name: wlike rabbit setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr
 
-      - name: wlike combinetf2 fit asimov
+      - name: wlike rabbit fit asimov
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/ZMassWLike.hdf5'
           -t -1 --computeHistErrors --saveHists --saveHistsPerProcess --doImpacts
           -o '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/'
 
-      - name: wlike combinetf2 fit pseudodata
+      - name: wlike rabbit fit pseudodata
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/ZMassWLike.hdf5'
-          -t 0 --unblind 'r:.*' --computeHistErrors --saveHists --saveHistsPerProcess --doImpacts --pseudoData uncorr --postfix uncorr
+          -t 0 --unblind '.*' --computeHistErrors --saveHists --saveHistsPerProcess --doImpacts --pseudoData uncorr --postfix uncorr
           -o '$WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/'
 
       - name: wlike prefit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --title CMS --titlePos 1 --subtitle Preliminary
           -o $WEB_DIR/$PLOT_DIR --legCols 6 --yscale 1.2  --prefit --legCol 6 --legSize large -m Basemodel
 
       - name: wlike postfit plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --title CMS --titlePos 1 --subtitle Preliminary
           -o $WEB_DIR/$PLOT_DIR --legCols 6 --yscale 1.2 --rrange 1.03 0.97 --binSeparationLines -2.2 -2.1 1.2 1.3 -m Basemodel
 
-      - name: wlike combine impacts
+      - name: wlike rabbit impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --title CMS --subtitle Preliminary
           -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 --refName asimov --postfix Wlike
           --showNumbers --diffPullAsym --pullrange '2.1' --config utilities/styles/styles.py
@@ -794,32 +794,32 @@ jobs:
           --yscale 1.3 --baseName nominal --nominalRef nominal --hists etaAbsEta-mll mll -o $WEB_DIR -f $PLOT_DIR -p z $HIST_FILE variation 
           --varName 'powhegFOEWCorr' --selectEntries weak_default --varLabel 'EW(virtual)' --selectAxis weak --color blue
 
-      - name: dilepton combine mll setup
+      - name: dilepton rabbit mll setup
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE --fitvar etaAbsEta-mll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --realData
 
-      - name: dilepton combinetf2 mll fit
+      - name: dilepton rabbit mll fit
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/ZMassDilepton.hdf5'
           -t -1 --computeHistErrors --saveHists --saveHistsPerProcess --computeVariations --doImpacts -m Basemodel -m Project ch0 mll
           -o '$WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/'
 
       - name: dilepton postfit mll-etaAbsEta plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR -m Basemodel
           --yscale 1.4 --binSeparationLines -0.6 0.0 --titlePos 1 --title CMS --subtitle Preliminary
 
       - name: dilepton postfit mll plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 --title CMS --subtitle Preliminary
           --rrange 0.99 1.02 --legCols 1 -o $WEB_DIR/$PLOT_DIR --yscale 1.05 -m Project ch0 mll
           --varName massShiftZ100MeV --extraTextLoc '0.05' '0.7' --varLabel '$\mathit{m}_\mathrm{Z}{\pm}1\sigma$'
 
-      - name: dilepton combine impacts
+      - name: dilepton rabbit impacts
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/show_impacts.sh 
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 $WEB_DIR/$PLOT_DIR
@@ -858,83 +858,83 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mz_dilepton.py --dataPath $DATAPATH 
           -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --axes ptll yll --forceDefaultName --unfolding --poiAsNoi
 
-      - name: combine alphaS setup
+      - name: rabbit alphaS setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE --fitvar ptll-yll --lumiScale $LUMI_SCALE --realData -o $WREMNANTS_OUTDIR --fitAlphaS
 
-      - name: combinetf2 alphaS fit
+      - name: rabbit alphaS fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/ZMassDilepton.hdf5
           -t -1 --computeHistErrors --saveHists --saveHistsPerProcess --doImpacts
           -o '$WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/'
 
       - name: alphaS impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/ZMassDilepton_ptll_yll/fitresults.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --scaleImpacts 1.5 
 
       - name: setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR --fitvar ptll-yll --lumiScale $LUMI_SCALE
           --analysisMode unfolding --unfoldingLevel prefsr --genAxes ptVGen-absYVGen --poiAsNoi --postfix poiAsNoi --scaleNormXsecHistYields '0.01'
 
       - name: unfolding fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ZMassDilepton.hdf5
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ -t -1
           --saveHists --computeHistErrors --computeHistCov -m Select ch0_masked -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen
 
       - name: plot xsec
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_uncertainties.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ 
           --fitresult $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5 Select
           --fitAlphaS --fitvar ptVGen-absYVGen --postfix theoryfit --baseName prefsr
       
       - name: run theory fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ZMassDilepton_ptVGen_absYVGen_theoryfit/ZMassDilepton.hdf5
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ZMassDilepton_ptVGen_absYVGen_theoryfit/
           --doImpacts --globalImpacts --saveHists --computeHistErrors --chisqFit --externalCovariance -t -1 -m Project ch0 ptVGen -m Project ch0 absYVGen
       
       - name: plot pulls & impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ZMassDilepton_ptVGen_absYVGen_theoryfit/fitresults.hdf5
           --grouping max --config 'utilities/styles/styles.py' --postfix poiAsNoi
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scale 1.5
@@ -980,68 +980,68 @@ jobs:
 
       - name: unfolding setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR --fitvar ptll-yll --lumiScale $LUMI_SCALE
           --analysisMode unfolding --unfoldingLevel prefsr --genAxes ptVGen-absYVGen --postfix unfolding
 
       - name: unfolding fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ZMassDilepton.hdf5
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ -t -1
           --saveHists --computeHistErrors --computeHistCov  -m Select ch0_masked -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen
 
       - name: unfolding plot pulls 
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 -m ungrouped --sortDescending -s constraint --debug --noImpacts
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding -n 50 --otherExtensions png pdf
 
       - name: plot xsec
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_uncertainties.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary 
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ 
           --fitresult $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 Select
           --fitAlphaS --fitvar ptVGen-absYVGen --postfix theoryfit --baseName prefsr --explicitSignalMCstat
       
       - name: run theory fit
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ZMassDilepton_ptVGen_absYVGen_theoryfit/ZMassDilepton.hdf5
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ZMassDilepton_ptVGen_absYVGen_theoryfit/
           --doImpacts --globalImpacts --saveHists --computeHistErrors --chisqFit --externalCovariance -t -1 -m Project ch0 ptVGen -m Project ch0 absYVGen
       
       - name: plot pulls & impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ZMassDilepton_ptVGen_absYVGen_theoryfit/fitresults.hdf5
           --grouping max --config 'utilities/styles/styles.py' --postfix unfolding
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scale 1.5
@@ -1074,12 +1074,12 @@ jobs:
 
       - name: dilepton prefit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
           --config utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --prefit --title CMS --subtitle Preliminary -m Basemodel
 
       - name: dilepton postfit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
           --config utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --title CMS --subtitle Preliminary -m Basemodel
 
       - name: dilepton plotting ptll
@@ -1104,21 +1104,21 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/plotting/makeDataMCStackPlot.py
           --yscale 1.3 --baseName nominal_phiStarll --nominalRef nominal_phiStarll --hists phiStarll --fineGroups -o $WEB_DIR -f $PLOT_DIR -p z $HIST_FILE
 
-      - name: dilepton combine ptll setup
+      - name: dilepton rabbit ptll setup
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
           -i $HIST_FILE --fitvar ptll --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr
 
       - name: dilepton ptll from wlike
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ZMassDilepton.hdf5 --saveHists --saveHistsPerProcess --computeHistErrors 
           --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --pseudoData uncorr
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ --postfix from_ZMassWLike_eta_pt_charge
 
       - name: dilepton ptll from wlike postfit
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_hists.py --config utilities/styles/styles.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresults_from_ZMassWLike_eta_pt_charge.hdf5 --postfix uncorr_fromWLike 
           -o $WEB_DIR/$PLOT_DIR --legCols 1 --yscale 1.2 --rrange 1.03 0.97 --title CMS --subtitle Preliminary -m Basemodel
 
@@ -1169,7 +1169,7 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
-          echo "COMBINED_DIR=$WREMNANTS_OUTDIR/" >> $GITHUB_ENV
+          echo "RABBIT_DIR=$WREMNANTS_OUTDIR/" >> $GITHUB_ENV
           echo "HIST_FILE_WMASS=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
           echo "HIST_FILE_DILEPTON=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
           echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
@@ -1181,19 +1181,19 @@ jobs:
 
       - name: wmass combined setup
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/combine/setupCombine.py
-          -i $HIST_FILE_WMASS $HIST_FILE_DILEPTON --fitvar eta-pt-charge ptll-yll --lumiScale $LUMI_SCALE $LUMI_SCALE -o $COMBINED_DIR
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py
+          -i $HIST_FILE_WMASS $HIST_FILE_DILEPTON --fitvar eta-pt-charge ptll-yll --lumiScale $LUMI_SCALE $LUMI_SCALE -o $RABBIT_DIR
 
       - name: wmass combined fit
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_fit.py 
-          '$COMBINED_DIR/Combination_WMassZMassDilepton/Combination.hdf5'
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
+          '$RABBIT_DIR/Combination_WMassZMassDilepton/Combination.hdf5'
           -t -1 --doImpacts
-          -o '$COMBINED_DIR/Combination_WMassZMassDilepton/'
+          -o '$RABBIT_DIR/Combination_WMassZMassDilepton/'
 
-      - name: wmass combine impacts
+      - name: wmass rabbit impacts
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh combinetf2_plot_pulls_and_impacts.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/Combination_WMassZMassDilepton/fitresults.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix withZ --scaleImpacts 100

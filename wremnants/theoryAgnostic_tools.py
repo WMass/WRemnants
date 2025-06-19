@@ -11,7 +11,7 @@ def select_fiducial_space(
     df, ptVgenMax, absYVgenMax, accept=True, select=True, usePtOverM=False
 ):
     # accept defines the selection for in-acceptance (IA) or out-of-acceptance (OOA)
-    # select is needed to actually apply the selection. For --poiAsNoi one integrates over the gen bins to build the nominal histogram in setupCombine/CardTool.py,
+    # select is needed to actually apply the selection. For --poiAsNoi one integrates over the gen bins to build the nominal histogram in setupRabbit/CardTool.py,
     # so all bins must be kept including overflows, and thus the explicit cut must be removed, although this is only for IA, since OOA is usually built as an independent histogram)
     # In the future the OOA might be build from the overflow bins directly (it might be possible to define multiple pieces too)
     ptvar = "qtOverQ" if usePtOverM else "ptVgen"

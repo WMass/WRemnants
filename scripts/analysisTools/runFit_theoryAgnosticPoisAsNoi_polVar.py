@@ -84,21 +84,21 @@ outdir = f"{baseOutdir}/{testFolder}/{procFolder}/"
 
 theoryAgnosticOptions = " --analysisMode theoryAgnosticPolVar --poiAsNoi"
 
-setupCombineOptions = setupLumiOption + setupFakeOption
+setupRabbitOptions = setupLumiOption + setupFakeOption
 if doStatOnly:
-    setupCombineOptions += " --doStatOnly"
+    setupRabbitOptions += " --doStatOnly"
 elif noPDFandQCDtheorySystOnSignal:
-    setupCombineOptions += " --noPDFandQCDtheorySystOnSignal"
+    setupRabbitOptions += " --noPDFandQCDtheorySystOnSignal"
 
 if onlySignal:
-    setupCombineOptions += " --filterProcGroups Data Wmunu"
+    setupRabbitOptions += " --filterProcGroups Data Wmunu"
     if not onlySignalAndOOA:
-        setupCombineOptions += " --excludeProcGroups WmunuOOA"
+        setupRabbitOptions += " --excludeProcGroups WmunuOOA"
 elif noFake:
-    setupCombineOptions += " --excludeProcGroups Fake"
+    setupRabbitOptions += " --excludeProcGroups Fake"
 
-setupCombineOptionsTraditional = setupCombineOptions.replace("--noPolVarOnFake", "")
-setupCombineOptions += f" {theoryAgnosticOptions}"
+setupRabbitOptionsTraditional = setupRabbitOptions.replace("--noPolVarOnFake", "")
+setupRabbitOptions += f" {theoryAgnosticOptions}"
 
 baseCoeffs = ["UL", "A0", "A1", "A2", "A3", "A4"]
 # coeffs = [x for x in baseCoeffs]
@@ -177,10 +177,10 @@ for c in coeffs:
 
     mainOutputFolder = f"{outdir}/{subFolder}"
 
-    setupCombineOpts = (
-        setupCombineOptionsTraditional if c == "traditional" else setupCombineOptions
+    setupRabbitOpts = (
+        setupRabbitOptionsTraditional if c == "traditional" else setupRabbitOptions
     )
-    cmdCard = f"/usr/bin/time -v python scripts/combine/setupCombine.py -i {inputFileHDF5} -o {mainOutputFolder}/ --absolutePathInCard {setupCombineOpts} {customOpt}"
+    cmdCard = f"/usr/bin/time -v python scripts/combine/setupRabbit.py -i {inputFileHDF5} -o {mainOutputFolder}/ --absolutePathInCard {setupRabbitOpts} {customOpt}"
 
     # etaVar = "abseta" if foldEtaIntoAbsEta else "eta"
     etaVar = "eta"  # patch, it seems the folder name stays eta also with --absval 1
@@ -280,8 +280,8 @@ if oneMCfileEveryN == 1 and not skipTemplates:
 
 
 # fit setup traditonal (here for 1/2 stat) with eta or abseta
-# /usr/bin/time -v python scripts/combine/setupCombine.py -i /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_testTApolvar_x0p30_y3p00_V8_oneMCfileEvery2.hdf5 -o /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//oneMCfileEvery2_splitOOA/allProcs//traditionalFit_allSysts_abseta/ --absolutePathInCard  -x '.*recoil'  --absval 1
-# /usr/bin/time -v python scripts/combine/setupCombine.py -i /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_testTApolvar_x0p30_y3p00_V8_oneMCfileEvery2.hdf5 -o /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//oneMCfileEvery2_splitOOA/allProcs//traditionalFit_allSysts/ --absolutePathInCard  -x '.*recoil'
+# /usr/bin/time -v python scripts/combine/setupRabbit.py -i /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_testTApolvar_x0p30_y3p00_V8_oneMCfileEvery2.hdf5 -o /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//oneMCfileEvery2_splitOOA/allProcs//traditionalFit_allSysts_abseta/ --absolutePathInCard  -x '.*recoil'  --absval 1
+# /usr/bin/time -v python scripts/combine/setupRabbit.py -i /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_testTApolvar_x0p30_y3p00_V8_oneMCfileEvery2.hdf5 -o /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//oneMCfileEvery2_splitOOA/allProcs//traditionalFit_allSysts/ --absolutePathInCard  -x '.*recoil'
 
 # Fit traditional (full and 1/2 stat), eta and abseta
 # python WRemnants/scripts/combine/fitManager.py -i /scratch/mciprian/CombineStudies/theoryAgnostic_pol/x0p30_y3p00_V8//fullStat_splitOOA/allProcs/traditionalFit_allSysts_abseta/WMass_eta_pt_charge/ --skip-fit-data --comb

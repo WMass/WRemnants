@@ -957,7 +957,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         # get a copy of the eta-pt-charge histogram to use as template with same binning as the analysis histograms
         # it will be filled with the correction uncertainty to be used as a systematic
         # adding charge in its name even if this is a TH3: in this way we will have the correction for plus defined for both charges,
-        # but the wrong charge is filled with 0, so that it will be a dummy variation equal to nominal when it is used in setupCombineWmass.py
+        # but the wrong charge is filled with 0, so that it will be a dummy variation equal to nominal when it is used in setupRabbitWmass.py
         etaPtChargeTemplate = copy.deepcopy(
             rootHists_nominal[d].Clone(f"etaPtCharge_mtCorrection_{charge}")
         )

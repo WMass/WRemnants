@@ -5,9 +5,9 @@ import pandas as pd
 from matplotlib.patches import Polygon
 from scipy.stats import chi2
 
-import combinetf2.io_tools
+import rabbit.io_tools
 from utilities import parsing
-from utilities.io_tools import combinetf2_input
+from utilities.io_tools import rabbit_input
 from utilities.styles import styles
 from wums import logging, output_tools, plot_tools
 
@@ -21,13 +21,13 @@ def get_values_and_impacts_as_panda(
     scale_from_poi_name=False,
 ):
 
-    fitres, meta = combinetf2.io_tools.get_fitresult(input_file, meta=True)
-    poi_names = combinetf2.io_tools.get_poi_names(meta)
+    fitres, meta = rabbit.io_tools.get_fitresult(input_file, meta=True)
+    poi_names = rabbit.io_tools.get_poi_names(meta)
     poi_values = []
     totals = []
     uncertainties = {}
     for poi in poi_names:
-        impacts, labels = combinetf2.io_tools.read_impacts_poi(
+        impacts, labels = rabbit.io_tools.read_impacts_poi(
             fitres, poi, grouped=True, global_impacts=global_impacts
         )
         scale_factor = (
@@ -137,8 +137,8 @@ if __name__ == "__main__":
     partialImpact, partialImpactLegend = args.partialImpact
     partial_impacts_to_read = ["stat", partialImpact]
 
-    fitresult, meta = combinetf2.io_tools.get_fitresult(args.infile, meta=True)
-    poi_names = combinetf2.io_tools.get_poi_names(meta)
+    fitresult, meta = rabbit.io_tools.get_fitresult(args.infile, meta=True)
+    poi_names = rabbit.io_tools.get_poi_names(meta)
     meta_info = meta["meta_info"]
     lumi = sum([c["lumi"] for c in meta["meta_info_input"]["channel_info"].values()])
 
@@ -150,11 +150,11 @@ if __name__ == "__main__":
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
         )
-        fInclusive = combinetf2.io_tools.get_fitresult(args.infileInclusive)
+        fInclusive = rabbit.io_tools.get_fitresult(args.infileInclusive)
         nll_inclusive = fInclusive["nllvalfull"]
 
     if args.infileNominal:
-        fNominal = combinetf2.io_tools.get_fitresult(args.infileNominal)
+        fNominal = rabbit.io_tools.get_fitresult(args.infileNominal)
         dfNominal = get_values_and_impacts_as_panda(
             args.infileNominal,
             partial_impacts_to_read=partial_impacts_to_read,
@@ -213,9 +213,7 @@ if __name__ == "__main__":
 
         axes = []
         for i, v in enumerate(args.axes):
-            df_p[v] = df_p["Names"].apply(
-                lambda x: combinetf2_input.decode_poi_bin(x, v)
-            )
+            df_p[v] = df_p["Names"].apply(lambda x: rabbit_input.decode_poi_bin(x, v))
             if all(df_p[v].values == None):
                 continue
             axes.append(v)

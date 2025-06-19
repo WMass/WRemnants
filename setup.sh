@@ -6,7 +6,7 @@ WREM_BASE=$( cd "$( dirname "${SCRIPT_FILE_REL_PATH}" )" && pwd )
 export WREM_BASE=$(readlink -f "$WREM_BASE")
 
 source ${WREM_BASE}/narf/setup.sh
-source ${WREM_BASE}/combinetf2/setup.sh
+source ${WREM_BASE}/rabbit/setup.sh
 source ${WREM_BASE}/wums/setup.sh
 
 export PYTHONPATH="${WREM_BASE}:$PYTHONPATH"

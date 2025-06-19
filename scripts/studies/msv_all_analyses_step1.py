@@ -79,9 +79,9 @@ for histmaker in histmakers:
     sep = "--sepImpactForNC --sepImpactForReso"
     if histmaker == "mz_dilepton":
         EXE(
-            f"python3 scripts/combine/setupCombine.py -o {dir_combine} -i {args.outfolder}/{file_hdf5} --fitvar mll {sep}"
+            f"python3 scripts/combine/setupRabbit.py -o {dir_combine} -i {args.outfolder}/{file_hdf5} --fitvar mll {sep}"
         )
     else:
         EXE(
-            f"python3 scripts/combine/setupCombine.py -o {dir_combine} -i {args.outfolder}/{file_hdf5} {sep}"
+            f"python3 scripts/combine/setupRabbit.py -o {dir_combine} -i {args.outfolder}/{file_hdf5} {sep}"
         )
