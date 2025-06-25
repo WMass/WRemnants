@@ -104,6 +104,7 @@ class TheoryHelper(object):
         self.helicity_fit_unc = helicity_fit_unc
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
+        self.add_stat_unc()
         # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
         self.add_helicity_shower_kt_uncertainty()
 
@@ -466,6 +467,24 @@ class TheoryHelper(object):
 
     def set_propagate_to_fakes(self, to_fakes):
         self.propagate_to_fakes = to_fakes
+
+    def add_stat_unc(self):
+        processesZ = ["single_v_samples"]
+        processesW = ["single_v_samples"]
+        processes = processesW if self.label == "W" else processesZ
+        var_names = [f"per_bin_stat_unc_theory_corr_bin{i}{direction}" for i in range(1600) for direction in ["Up", "Down"]]
+        logger.debug(f"Adding theory-correction statistical uncertainties from syst entries {var_names}")
+
+        self.datagroups.addSystematic(
+            histname=self.corr_hist_name,
+            processes=processes,
+            groups=["theory"],
+            systAxes=[self.syst_ax],
+            passToFakes=self.propagate_to_fakes,
+            preOp=lambda h: h[{self.syst_ax: var_names}],
+            outNames=var_names,
+            name="theoryCorrStat",
+        )
 
     def add_resum_tnp_unc(self, magnitude, scale=1):
         syst_ax = self.corr_hist.axes[self.syst_ax]

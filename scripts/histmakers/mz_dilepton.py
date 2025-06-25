@@ -45,6 +45,9 @@ parser.add_argument(
     "--finePtBinning", action="store_true", help="Use fine binning for ptll"
 )
 parser.add_argument(
+    "--originalPtBinning", action="store_true", help="Use original binning for ptll"
+)
+parser.add_argument(
     "--useTheoryAgnosticBinning",
     action="store_true",
     help="Use theory agnostic binning (coarser) to produce the results",
@@ -119,7 +122,7 @@ mass_min, mass_max = common.get_default_mz_window()
 
 ewMassBins = theory_tools.make_ew_binning(mass=91.1535, width=2.4932, initialStep=0.010)
 
-dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
+dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning, args.originalPtBinning)
 if args.useTheoryAgnosticBinning:
     theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike=True

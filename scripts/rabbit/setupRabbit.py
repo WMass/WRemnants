@@ -772,6 +772,12 @@ def make_parser(parser=None):
         help="scaling of bin by bin statistical uncertainty for W mass analysis",
     )
     parser.add_argument(
+        "--binByBinStatScaleForDilepton",
+        type=float,
+        default=1.,
+        help="scaling of bin by bin statistical uncertainty for Z-dilepton analysis",
+    )
+    parser.add_argument(
         "--exponentialTransform",
         action="store_true",
         help="apply exponential transformation to yields (useful for gen-level fits to helicity cross sections for example)",
@@ -1255,7 +1261,7 @@ def setup(
     datagroups.addNominalHistograms(
         real_data=args.realData,
         exclude_bin_by_bin_stat="signal_samples" if args.explicitSignalMCstat else None,
-        bin_by_bin_stat_scale=args.binByBinStatScaleForMW if wmass else 1.0,
+        bin_by_bin_stat_scale=args.binByBinStatScaleForMW if wmass else args.binByBinStatScaleForDilepton if dilepton else 1.0,
         fitresult_data=fitresult_data,
         masked=xnorm and fitresult_data is None,
     )
