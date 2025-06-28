@@ -43,6 +43,7 @@ def load_corr_helpers(
     generators,
     make_tensor=True,
     base_dir=f"{common.data_dir}/TheoryCorrections/",
+    minnlo_ratio=True
 ):
     corr_helpers = {}
     for proc in procs:
@@ -55,7 +56,7 @@ def load_corr_helpers(
                 )
                 continue
             logger.debug(f"Make theory correction helper for file: {fname}")
-            corrh = load_corr_hist(fname, proc[0], get_corr_name(generator))
+            corrh = load_corr_hist(fname, proc[0], get_corr_name(generator, minnlo_ratio=minnlo_ratio))
             corrh = postprocess_corr_hist(corrh)
             if not make_tensor:
                 corr_helpers[proc][generator] = corrh
@@ -279,16 +280,23 @@ def postprocess_corr_hist(corrh):
     return corrh
 
 
-def get_corr_name(generator):
+def get_corr_name(generator, minnlo_ratio=True):
     # Hack for now
     label = generator.replace("1D", "")
     if "dataPtll" in generator or "dataRecoPtll" in generator:
         return "MC_data_ratio"
-    return (
-        f"{label}_minnlo_ratio"
-        if "Helicity" not in generator
-        else f"{label.replace('Helicity', '')}_minnlo_coeffs"
-    )
+    if minnlo_ratio:
+        return (
+            f"{label}_minnlo_ratio"
+            if "Helicity" not in generator
+            else f"{label.replace('Helicity', '')}_minnlo_coeffs"
+        )
+    else:
+        return (
+            f"{label}_hist"
+            if "Helicity" not in generator
+            else f"{label.replace('Helicity', '')}_coeffs"
+        )
 
 
 def rebin_corr_hists(hists, ndim=-1, binning=None):
@@ -401,7 +409,7 @@ def make_corr_by_helicity(
 
 
 def make_qcd_uncertainty_helper_by_helicity(
-    is_z=False, filename=None, rebi_ptVgen=True
+    is_z=False, filename=None, rebi_ptVgen=True, return_tensor=True
 ):
     if filename is None:
         filename = f"{common.data_dir}/angularCoefficients/w_z_moments.hdf5"
@@ -488,15 +496,17 @@ def make_qcd_uncertainty_helper_by_helicity(
         ].values()[..., None]
     )
 
-    helper = makeCorrectionsTensor(
-        corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3
-    )
+    if return_tensor:
+        helper = makeCorrectionsTensor(
+            corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3
+        )
 
-    # override tensor_axes since the output is different here
-    helper.tensor_axes = [vars_ax]
+        # override tensor_axes since the output is different here
+        helper.tensor_axes = [vars_ax]
 
-    return helper
-
+        return helper
+    else:
+        return corr_coeffs
 
 def make_helicity_test_corrector(is_z=False, filename=None):
 
