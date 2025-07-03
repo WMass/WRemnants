@@ -652,11 +652,6 @@ def make_parser(parser=None):
         type=float,
         help="Specify normalization uncertainty for Fake background (for W analysis). If negative, treat as free floating, if 0 nothing is added",
     )
-    parser.add_argument(
-        "--passNormUncToFakes",
-        action="store_true",
-        help="Propagate normalization uncertainties into the fake estimation",
-    )
     # pseudodata
     parser.add_argument(
         "--pseudoData", type=str, nargs="+", help="Histograms to use as pseudodata"
@@ -1613,7 +1608,7 @@ def setup(
             name="CMS_PhotonInduced",
             processes=["PhotonInduced"],
             groups=[f"CMS_background", "experiment", "expNoCalib"],
-            passToFakes=args.passNormUncToFakes,
+            passToFakes=passSystToFakes,
             norm=2.0,
         )
     if wmass:
@@ -1675,14 +1670,14 @@ def setup(
             name="CMS_Top",
             processes=["Top"],
             groups=[f"CMS_background", "experiment", "expNoCalib"],
-            passToFakes=args.passNormUncToFakes,
+            passToFakes=passSystToFakes,
             norm=1.06,
         )
         datagroups.addNormSystematic(
             name="CMS_VV",
             processes=["Diboson"],
             groups=[f"CMS_background", "experiment", "expNoCalib"],
-            passToFakes=args.passNormUncToFakes,
+            passToFakes=passSystToFakes,
             norm=1.16,
         )
     else:
