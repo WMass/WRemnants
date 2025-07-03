@@ -458,7 +458,6 @@ def build_graph(df, dataset):
     df = df.Define(
         "isEvenEvent", f"event % 2 {'!=' if args.flipEventNumberSplitting else '=='} 0"
     )
-
     weightsum = df.SumAndCount("weight")
 
     axes = nominal_axes

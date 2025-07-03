@@ -2,8 +2,9 @@ from copy import deepcopy
 
 import hist
 
-from utilities import common
-from wremnants import syst_tools, theory_tools
+from utilities import common, differential
+from wremnants import helicity_utils, syst_tools, theory_tools
+from wremnants.datasets.datagroups import Datagroups
 from wums import logging
 
 logger = logging.child_logger(__name__)
@@ -278,3 +279,173 @@ def reweight_to_fitresult(filename, result=None, channel="ch0", flow=True):
     corr_helper.level = level
 
     return corr_helper
+
+
+class UnfolderZ:
+    """
+    To be used in histmakers to define columns and add histograms for unfolding of Z dilepton kinematics
+    """
+
+    def __init__(
+        self,
+        cutsmap,
+        reco_axes_edges,
+        unfolding_axes_names=None,
+        unfolding_levels=None,
+        poi_as_noi=True,
+        fitresult=None,
+        low_pu=False,
+    ):
+        self.analysis_label = "z_lowpu" if low_pu else "z_dilepton"
+        self.cutsmap = cutsmap
+        self.add_helicity_axis = "helicitySig" in unfolding_axes_names
+
+        if not poi_as_noi and len(unfolding_levels) > 1:
+            raise RuntimeError(
+                "More than 1 unfolding levels at a time is only supported in poi as noi mode"
+            )
+        self.poi_as_noi = poi_as_noi
+        self.unfolding_levels = unfolding_levels
+
+        # self.qcdScaleByHelicity_helper =
+
+        if self.add_helicity_axis:
+            # helper to derive helicity xsec shape from event by event reweighting
+            self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
+                is_z=True,
+                filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
+                rebi_ptVgen=True,
+            )
+
+        self.unfolding_axes = {}
+        self.unfolding_cols = {}
+        self.unfolding_selections = {}
+        for level in self.unfolding_levels:
+            a, c, s = differential.get_dilepton_axes(
+                unfolding_axes_names,
+                reco_axes_edges,
+                level,
+                add_out_of_acceptance_axis=self.poi_as_noi,
+            )
+            self.unfolding_axes[level] = a
+            self.unfolding_cols[level] = c
+            self.unfolding_selections[level] = s
+
+            if self.add_helicity_axis:
+                for ax in a:
+                    if ax.name == "acceptance":
+                        continue
+                    # check if binning is consistent between correction helper and unfolding axes
+                    wbh_axis = self.weightsByHelicity_helper_unfolding.hist.axes[
+                        ax.name.replace("Gen", "gen")
+                    ]
+                    if any(ax.edges != wbh_axis.edges):
+                        raise RuntimeError(
+                            f"""
+                            Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
+                            Found unfolding axis {ax}\n
+                            And weightsByHelicity_helper axis {wbh_axis}
+                            """
+                        )
+
+        self.unfolding_corr_helper = (
+            reweight_to_fitresult(fitresult) if fitresult else None
+        )
+
+    def add_gen_histograms(
+        self, args, df, results, dataset, corr_helpers, qcdScaleByHelicity_helper
+    ):
+        df = define_gen_level(
+            df, dataset.name, self.unfolding_levels, mode=self.analysis_label
+        )
+
+        if hasattr(dataset, "out_of_acceptance"):
+            # only for exact unfolding
+            df = select_fiducial_space(
+                df,
+                self.unfolding_levels[0],
+                mode=self.analysis_label,
+                selections=self.unfolding_selections[self.unfolding_levels[0]],
+                accept=False,
+                **self.cutsmap,
+            )
+        else:
+            if self.unfolding_corr_helper:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define(
+                    "unfoldingWeight_tensor",
+                    self.unfolding_corr_helper,
+                    [*self.unfolding_corr_helper.hist.axes.name[:-1], "unity"],
+                )
+                df = df.Define(
+                    "central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity"
+                )
+            for level in self.unfolding_levels:
+                df = select_fiducial_space(
+                    df,
+                    level,
+                    mode=self.analysis_label,
+                    selections=self.unfolding_selections[level],
+                    select=not self.poi_as_noi,
+                    accept=True,
+                    **self.cutsmap,
+                )
+
+                if self.poi_as_noi:
+                    df_xnorm = df.Filter(f"{level}_acceptance")
+                else:
+                    df_xnorm = df
+
+                add_xnorm_histograms(
+                    results,
+                    df_xnorm,
+                    args,
+                    dataset.name,
+                    corr_helpers,
+                    qcdScaleByHelicity_helper,
+                    [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
+                    [
+                        c
+                        for c in self.unfolding_cols[level]
+                        if c != f"{level}_acceptance"
+                    ],
+                    add_helicity_axis=self.add_helicity_axis,
+                    base_name=level,
+                )
+        return df
+
+    def add_poi_as_noi_histograms(self, df, results, nominal_axes, nominal_cols):
+
+        if self.add_helicity_axis:
+            df = helicity_utils.define_helicity_weights(
+                df, self.weightsByHelicity_helper_unfolding
+            )
+
+        for level in self.unfolding_levels:
+            noiAsPoiHistName = Datagroups.histName(
+                "nominal", syst=f"{level}_yieldsUnfolding"
+            )
+            logger.debug(
+                f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
+            )
+            yield_axes = [*nominal_axes, *self.unfolding_axes[level]]
+            yield_cols = [*nominal_cols, *self.unfolding_cols[level]]
+            if self.add_helicity_axis:
+                from wremnants.helicity_utils import axis_helicity_multidim
+
+                results.append(
+                    df.HistoBoost(
+                        noiAsPoiHistName,
+                        yield_axes,
+                        [*yield_cols, "nominal_weight_helicity"],
+                        tensor_axes=[axis_helicity_multidim],
+                    )
+                )
+            else:
+                results.append(
+                    df.HistoBoost(
+                        noiAsPoiHistName,
+                        yield_axes,
+                        [*yield_cols, "nominal_weight"],
+                    )
+                )

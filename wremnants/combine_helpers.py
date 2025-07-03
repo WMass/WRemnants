@@ -312,6 +312,32 @@ def add_electroweak_uncertainty(
             )
 
 
+def get_scalemap(datagroups, axes, gen_level, select={}, rename_axes={}):
+    # make sure each gen bin variation has a similar effect in the reco space so that
+    #  we have similar sensitivity to all parameters within the given up/down variations
+    # FIXME: this currently doesn't work, not sure why ...
+    signal_samples = datagroups.procGroups["signal_samples"]
+    hScale = datagroups.getHistsForProcAndSyst(
+        signal_samples[0],
+        f"{gen_level}_yieldsUnfolding",
+        nominal_name="nominal",
+    )
+    hScale = hScale[{"acceptance": True, **select}]
+    hScale.values(flow=True)[...] = abs(hScale.values(flow=True))
+    hScale = hScale.project(*axes)
+    hScale = hh.disableFlow(hScale, ["absYVGen", "absEtaGen"])
+    for o, n in rename_axes.items():
+        hScale.axes[o]._ax.metadata["name"] = n
+    # scalemap with preserving normalization
+    hScale.values(flow=True)[...] = (
+        1.0
+        / hScale.values(flow=True)
+        * hScale.sum(flow=True).value
+        / np.prod(hScale.values(flow=True).shape)
+    )
+    return hScale
+
+
 def add_noi_unfolding_variations(
     datagroups,
     label,
@@ -322,6 +348,8 @@ def add_noi_unfolding_variations(
     scale_norm=0.01,
     poi_axes_flow=["ptGen", "ptVGen"],
     gen_level="postfsr",
+    process="signal_samples",
+    scalemap=None,
 ):
     poi_axes_syst = [f"_{n}" for n in poi_axes] if xnorm else poi_axes[:]
     noi_args = dict(
@@ -331,7 +359,7 @@ def add_noi_unfolding_variations(
         group=f"normXsec{label}",
         passToFakes=passSystToFakes,
         systAxes=poi_axes_syst,
-        processes=["signal_samples"],
+        processes=[process],
         noConstraint=True,
         noi=True,
         mirror=True,
@@ -341,48 +369,24 @@ def add_noi_unfolding_variations(
         labelsByAxis=[f"_{p}" if p != poi_axes[0] else p for p in poi_axes],
     )
 
-    def disable_flow(h, axes_names=["absYVGen", "absEtaGen"]):
-        # disable flow for syst axes to not add systematic uncertainties in these bins
-        for var in axes_names:
-            if var in h.axes.name:
-                h = hh.disableFlow(h, var)
-        return h
-
-    def get_scalemap(axes, select={}, rename_axes={}):
-        # make sure each gen bin variation has a similar effect in the reco space so that
-        #  we have similar sensitivity to all parameters within the given up/down variations
-        # FIXME: this currently doesn't work, not sure why ...
-        signal_samples = datagroups.procGroups["signal_samples"]
-        hScale = datagroups.getHistsForProcAndSyst(
-            signal_samples[0],
-            f"{gen_level}_yieldsUnfolding",
-            nominal_name="nominal",
-        )
-        hScale = hScale[{"acceptance": True, **select}]
-        hScale.values(flow=True)[...] = abs(hScale.values(flow=True))
-        hScale = hScale.project(*axes)
-        hScale = disable_flow(hScale)
-        for o, n in rename_axes.items():
-            hScale.axes[o]._ax.metadata["name"] = n
-        # scalemap with preserving normalization
-        hScale.values(flow=True)[...] = (
-            1.0
-            / hScale.values(flow=True)
-            * hScale.sum(flow=True).value
-            / np.prod(hScale.values(flow=True).shape)
-        )
-        return hScale
-
     if xnorm:
 
         def make_poi_xnorm_variations(h, poi_axes, poi_axes_syst, norm, h_scale=None):
             hVar = hh.expand_hist_by_duplicate_axes(
                 h, poi_axes[::-1], poi_axes_syst[::-1]
             )
-            hVar = disable_flow(hVar, axes_names=["_absYVGen", "_absEtaGen"])
+            hVar = hh.disableFlow(hVar, ["_absYVGen", "_absEtaGen"])
             if h_scale is not None:
                 hVar = hh.multiplyHists(hVar, h_scale)
             return hh.addHists(h, hVar, scale2=norm)
+
+        if scalemap is None:
+            scalemap = get_scalemap(
+                datagroups,
+                poi_axes,
+                gen_level,
+                rename_axes={o: n for o, n in zip(poi_axes, poi_axes_syst)},
+            )
 
         datagroups.addSystematic(
             **noi_args,
@@ -391,10 +395,7 @@ def add_noi_unfolding_variations(
                 poi_axes=poi_axes,
                 poi_axes_syst=poi_axes_syst,
                 norm=scale_norm,
-                h_scale=get_scalemap(
-                    poi_axes,
-                    rename_axes={o: n for o, n in zip(poi_axes, poi_axes_syst)},
-                ),
+                h_scale=scalemap,
             ),
         )
     else:
@@ -407,22 +408,25 @@ def add_noi_unfolding_variations(
                 }
             ]
             hVar = h[{"acceptance": True}]
-            hVar = disable_flow(hVar)
+            hVar = hh.disableFlow(hVar, ["absYVGen", "absEtaGen"])
             if h_scale is not None:
                 hVar = hh.multiplyHists(hVar, h_scale)
             return hh.addHists(hNom, hVar, scale2=norm)
+
+        if scalemap is None:
+            scalemap = get_scalemap(datagroups, poi_axes, gen_level)
 
         datagroups.addSystematic(
             **noi_args,
             systAxesFlow=[n for n in poi_axes if n in poi_axes_flow],
             preOpMap={
                 m.name: make_poi_variations
-                for g in datagroups.procGroups["signal_samples"]
+                for g in datagroups.expandProcess(process)
                 for m in datagroups.groups[g].members
             },
             preOpArgs=dict(
                 poi_axes=poi_axes,
                 norm=scale_norm,
-                h_scale=get_scalemap(poi_axes),
+                h_scale=scalemap,
             ),
         )

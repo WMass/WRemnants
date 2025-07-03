@@ -119,13 +119,14 @@ mass_min, mass_max = common.get_default_mz_window()
 
 ewMassBins = theory_tools.make_ew_binning(mass=91.1535, width=2.4932, initialStep=0.010)
 
-dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
 if args.useTheoryAgnosticBinning:
     theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike=True
     )
     axis_ptV_thag = theoryAgnostic_axes[0]
     dilepton_ptV_binning = axis_ptV_thag.edges
+else:
+    dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
 
 if "yll" in args.axes:
     # use 10 quantiles in case "yll" is used as nominal axis
@@ -295,68 +296,39 @@ if args.csVarsHist:
 
 nominal_axes = [all_axes[a] for a in nominal_cols]
 
-
 if args.unfolding:
     add_helicity_axis = "helicitySig" in args.unfoldingAxes
 
-    if add_helicity_axis:
-        # helper to derive helicity xsec shape from event by event reweighting
-        weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
-            is_z=True,
-            filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
-            rebi_ptVgen=True,
-        )
+    if args.unfoldingInclusive:
+        cutsmap = {"fiducial": "masswindow"}
+    else:
+        cutsmap = {
+            "pt_min": args.pt[1],
+            "pt_max": args.pt[2],
+            "abseta_max": args.eta[2],
+            "mass_min": mass_min,
+            "mass_max": mass_max,
+        }
 
-    unfolding_axes = {}
-    unfolding_cols = {}
-    unfolding_selections = {}
-    for level in args.unfoldingLevels:
-        a, c, s = differential.get_dilepton_axes(
-            args.unfoldingAxes,
-            {a: all_axes[a].edges for a in args.axes},
-            level,
-            add_out_of_acceptance_axis=args.poiAsNoi,
-        )
-        unfolding_axes[level] = a
-        unfolding_cols[level] = c
-        unfolding_selections[level] = s
+    unfolder_z = unfolding_tools.UnfolderZ(
+        reco_axes_edges={a: all_axes[a].edges for a in args.axes},
+        unfolding_axes_names=args.unfoldingAxes,
+        unfolding_levels=args.unfoldingLevels,
+        poi_as_noi=args.poiAsNoi,
+        fitresult=args.fitresult,
+        cutsmap=cutsmap,
+    )
 
-        if not args.poiAsNoi:
-            datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
-            if len(args.unfoldingLevels) > 1:
-                logger.warning(
-                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
-                )
-                break
-
-        if add_helicity_axis:
-            for ax in a:
-                if ax.name == "acceptance":
-                    continue
-                # check if binning is consistent between correction helper and unfolding axes
-                wbh_axis = weightsByHelicity_helper_unfolding.hist.axes[
-                    ax.name.replace("Gen", "gen")
-                ]
-                if any(ax.edges != wbh_axis.edges):
-                    raise RuntimeError(
-                        f"""
-                        Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
-                        Found unfolding axis {ax}\n
-                        And weightsByHelicity_helper axis {wbh_axis}
-                        """
-                    )
-
-    if args.fitresult:
-        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
+    if not args.poiAsNoi:
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
 
-
 if args.unfolding and add_helicity_axis:
-    qcdScaleByHelicity_helpers = theory_corrections.make_qcd_uncertainty_helper_by_helicity(
+    qcdScaleByHelicity_helpers = theory_corrections.make_qcd_uncertainty_helpers_by_helicity(
         filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
         rebin_ptZgen=False,
     )
@@ -506,73 +478,19 @@ def build_graph(df, dataset):
         cols = [*cols, "run"]
 
     if args.unfolding and dataset.name == "ZmumuPostVFP":
-        df = unfolding_tools.define_gen_level(
-            df, dataset.name, args.unfoldingLevels, mode=analysis_label
+        df = unfolder_z.add_gen_histograms(
+            args, df, results, dataset, corr_helpers, qcdScaleByHelicity_helper
         )
-        cutsmap = {
-            "pt_min": args.pt[1],
-            "pt_max": args.pt[2],
-            "abseta_max": args.eta[2],
-            "mass_min": mass_min,
-            "mass_max": mass_max,
-        }
 
-        if args.unfoldingInclusive:
-            cutsmap = {"fiducial": "masswindow"}
-
-        if hasattr(dataset, "out_of_acceptance"):
-            # only for exact unfolding
-            df = unfolding_tools.select_fiducial_space(
-                df,
-                args.unfoldingLevels[0],
-                mode=analysis_label,
-                selections=unfolding_selections[args.unfoldingLevels[0]],
-                accept=False,
-                **cutsmap,
-            )
-        else:
-            if args.fitresult:
-                logger.debug("Apply reweighting based on unfolded result")
-                df = df.Define(
-                    "unfoldingWeight_tensor",
-                    unfolding_corr_helper,
-                    [*unfolding_corr_helper.hist.axes.name[:-1], "unity"],
-                )
-                df = df.Define(
-                    "central_weight", "acceptance ? unfoldingWeight_tensor(0) : unity"
-                )
-            for level in args.unfoldingLevels:
-                df = unfolding_tools.select_fiducial_space(
-                    df,
-                    level,
-                    mode=analysis_label,
-                    selections=unfolding_selections[level],
-                    select=not args.poiAsNoi,
-                    accept=True,
-                    **cutsmap,
-                )
-
-                if args.poiAsNoi:
-                    df_xnorm = df.Filter(f"{level}_acceptance")
-                else:
-                    df_xnorm = df
-
-                unfolding_tools.add_xnorm_histograms(
-                    results,
-                    df_xnorm,
-                    args,
-                    dataset.name,
-                    corr_helpers,
-                    qcdScaleByHelicity_helper,
-                    [a for a in unfolding_axes[level] if a.name != "acceptance"],
-                    [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
-                    add_helicity_axis=add_helicity_axis,
-                    base_name=level,
-                )
-                if not args.poiAsNoi:
-                    axes = [*nominal_axes, *unfolding_axes[level]]
-                    cols = [*nominal_cols, *unfolding_cols[level]]
-                    break
+        if not unfolder_z.poi_as_noi:
+            axes = [
+                *nominal_axes,
+                *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+            ]
+            cols = [
+                *nominal_cols,
+                *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+            ]
 
     if not args.noAuxiliaryHistograms and isZ and len(auxiliary_gen_axes):
         # gen level variables before selection
@@ -978,41 +896,12 @@ def build_graph(df, dataset):
     results.append(hNValidPixelHitsNonTrig)
 
     if args.unfolding and args.poiAsNoi and dataset.name == "ZmumuPostVFP":
-        if add_helicity_axis:
-            df_unfolding = helicity_utils.define_helicity_weights(
-                df, weightsByHelicity_helper_unfolding
-            )
-        else:
-            df_unfolding = df
-
-        for level in args.unfoldingLevels:
-            noiAsPoiHistName = Datagroups.histName(
-                "nominal", syst=f"{level}_yieldsUnfolding"
-            )
-            logger.debug(
-                f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
-            )
-            yield_axes = [*nominal_axes, *unfolding_axes[level]]
-            yield_cols = [*nominal_cols, *unfolding_cols[level]]
-            if add_helicity_axis:
-                from wremnants.helicity_utils import axis_helicity_multidim
-
-                results.append(
-                    df_unfolding.HistoBoost(
-                        noiAsPoiHistName,
-                        yield_axes,
-                        [*yield_cols, "nominal_weight_helicity"],
-                        tensor_axes=[axis_helicity_multidim],
-                    )
-                )
-            else:
-                results.append(
-                    df_unfolding.HistoBoost(
-                        noiAsPoiHistName,
-                        yield_axes,
-                        [*yield_cols, "nominal_weight"],
-                    )
-                )
+        unfolder_z.add_poi_as_noi_histograms(
+            df,
+            results,
+            nominal_axes,
+            nominal_cols,
+        )
 
     if args.makeCSQuantileHists:
         results.append(
@@ -1248,8 +1137,6 @@ def build_graph(df, dataset):
             helper_syst=muon_prefiring_helper_syst,
         )
 
-        # n.b. this is the W analysis so mass weights shouldn't be propagated
-        # on the Z samples (but can still use it for dummy muon scale)
         if isWorZ:
 
             df = syst_tools.add_theory_hists(
