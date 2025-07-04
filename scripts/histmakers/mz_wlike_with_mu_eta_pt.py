@@ -97,9 +97,6 @@ args = parser.parse_args()
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 isFloatingPOIsTheoryAgnostic = args.theoryAgnostic and not args.poiAsNoi
 
-if args.randomizeDataByRun and not args.addRunAxis:
-    raise ValueError("Options --randomizeDataByRun only works with --addRunAxis.")
-
 if isFloatingPOIsTheoryAgnostic:
     raise ValueError(
         "Theory agnostic fit with floating POIs is not currently implemented"
@@ -990,6 +987,7 @@ def build_graph(df, dataset):
             ],
         )
         results.append(nominal_bin)
+
         nominal_testIsoMtFakeRegions = df.HistoBoost(
             "nominal_testIsoMtFakeRegions",
             [*axes, axis_isoCat, axis_mtCat],
@@ -1357,25 +1355,14 @@ def build_graph(df, dataset):
                 muons="nonTrigMuons",
             )
 
-        if era == "2016PostVFP" and args.addRunAxis and not args.randomizeDataByRun:
-            # to simplify the code, use helper with largest uncertainty for all eras when splitting data
-            df = syst_tools.add_L1Prefire_unc_hists(
-                results,
-                df,
-                axes,
-                cols,
-                helper_stat=muon_prefiring_helper_stat_BG,
-                helper_syst=muon_prefiring_helper_syst_BG,
-            )
-        else:
-            df = syst_tools.add_L1Prefire_unc_hists(
-                results,
-                df,
-                axes,
-                cols,
-                helper_stat=muon_prefiring_helper_stat,
-                helper_syst=muon_prefiring_helper_syst,
-            )
+        df = syst_tools.add_L1Prefire_unc_hists(
+            results,
+            df,
+            axes,
+            cols,
+            helper_stat=muon_prefiring_helper_stat,
+            helper_syst=muon_prefiring_helper_syst,
+        )
 
         # n.b. this is the W analysis so mass weights shouldn't be propagated
         # on the Z samples (but can still use it for dummy muon scale)

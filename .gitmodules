@@ -9,4 +9,4 @@
 	url = https://github.com/WMass/wums.git
 [submodule "rabbit"]
 	path = rabbit
-	url = https://github.com/WMass/rabbit
+	url = git@github.com:WMass/rabbit.git

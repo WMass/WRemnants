@@ -1,7 +1,7 @@
 import pandas as pd
+import rabbit.io_tools
 from scipy.stats import chi2
 
-import rabbit.io_tools
 from utilities import parsing
 from wums import logging, output_tools, tex_tools
 

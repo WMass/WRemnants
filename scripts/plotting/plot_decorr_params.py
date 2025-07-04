@@ -2,10 +2,10 @@ import re
 
 import numpy as np
 import pandas as pd
+import rabbit.io_tools
 from matplotlib.patches import Polygon
 from scipy.stats import chi2
 
-import rabbit.io_tools
 from utilities import parsing
 from utilities.io_tools import rabbit_input
 from utilities.styles import styles

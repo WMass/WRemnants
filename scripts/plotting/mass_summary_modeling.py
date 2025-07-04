@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+import rabbit.io_tools
 from matplotlib import ticker
 
-import rabbit.io_tools
 from utilities import parsing
 from utilities.io_tools import hepdata_tools, output_tools
 from wremnants import plot_tools

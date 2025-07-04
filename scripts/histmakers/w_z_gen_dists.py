@@ -85,6 +85,11 @@ parser.add_argument(
     action="store_true",
     help="Add axis to store info if the event has an outgoing charm quark",
 )
+parser.add_argument(
+    "--finePtVBinning",
+    action="store_true",
+    help="Use 1 GeV binning for ptVgen (e.g., for theory corrections)",
+)
 
 parser = parsing.set_parser_default(parser, "filterProcs", common.vprocs)
 args = parser.parse_args()
@@ -204,7 +209,6 @@ def build_graph(df, dataset):
         )
         axis_ptVgen = hist.axis.Variable(
             axis_ptV_thag.edges,  # same axis as theory agnostic norms,
-            # common.ptV_binning,
             name="ptVgen",
             underflow=False,
         )
@@ -233,7 +237,7 @@ def build_graph(df, dataset):
             underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            (*common.get_dilepton_ptV_binning(fine=False), 13000.0),
+            (*common.get_dilepton_ptV_binning(fine=args.finePtVBinning), 13000.0),
             name="ptVgen",
             underflow=False,
         )
