@@ -3,8 +3,8 @@ import re
 
 import hist
 import numpy as np
-
 import rabbit.io_tools
+
 from utilities.io_tools import rabbit_input
 from wums import ioutils, logging
 

@@ -247,10 +247,10 @@ for name, corr_dict in corrh.items():
     outname = name.replace("-", "")
     if args.postfix:
         outname += f"_{args.postfix}"
-    outfile = f"{args.outpath}/{outname}"
+    outfile = f"{args.outpath}/{outname}Corr{args.proc}.pkl.lz4"
 
     if "Zmumu" in corr_dict:
-        output_tools.write_theory_corr_hist(
+        output_tools.write_lz4_pkl_output(
             outfile,
             "Z",
             {
@@ -267,7 +267,7 @@ for name, corr_dict in corrh.items():
             corr_dict["W"][key] = (
                 corr_dict["Wplusmunu"][key] + corr_dict["Wminusmunu"][key]
             )
-        output_tools.write_theory_corr_hist(
+        output_tools.write_lz4_pkl_output(
             outfile,
             "W",
             {

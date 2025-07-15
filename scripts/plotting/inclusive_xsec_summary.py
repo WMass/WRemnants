@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 import pandas as pd
-
 import rabbit.io_tools
+
 from utilities import parsing
 from utilities.io_tools import conversion_tools, output_tools, tex_tools
 from utilities.styles.styles import nuisance_groupings

@@ -9,6 +9,44 @@ from wums import logging
 
 logger = logging.child_logger(__name__)
 
+# thresholds,
+abcd_thresholds = {
+    "pt": [26, 28, 30],
+    "mt": [0, 20, 40],
+    "iso": [0, 4, 8, 12],
+    "relIso": [0, 0.15, 0.3, 0.45],
+    "relJetLeptonDiff": [0, 0.2, 0.35, 0.5],
+    "dxy": [0, 0.01, 0.02, 0.03],
+}
+
+# default abcd_variables to look for
+abcd_variables = (
+    ("mt", "passMT"),
+    ("relIso", "passIso"),
+    ("iso", "passIso"),
+    ("relJetLeptonDiff", "passIso"),
+    ("dxy", "passDxy"),
+)
+
+
+def get_selection_edges(axis_name, upper_bound=False):
+    # returns edges from pass to fail regions [x0, x1, x2, x3] e.g. x=[x0,x1], dx=[x1,x2], d2x=[x2,x3]
+    if axis_name in abcd_thresholds:
+        ts = abcd_thresholds[axis_name]
+        if axis_name in ["mt", "pt"]:
+            # low: failing, high: passing, no upper bound
+            return None, complex(0, ts[2]), complex(0, ts[1]), complex(0, ts[0])
+        if axis_name in ["dxy", "iso", "relIso", "relJetLeptonDiff"]:
+            # low: passing, high: failing, no upper bound
+            return (
+                complex(0, ts[0]),
+                complex(0, ts[1]),
+                complex(0, ts[2]),
+                (complex(0, ts[3]) if upper_bound else None),
+            )
+    else:
+        raise RuntimeError(f"Can not find threshold for abcd axis {axis_name}")
+
 
 def extend_edges(traits, x):
     # extend array for underflow/overflow with distance from difference of two closest values
@@ -127,57 +165,7 @@ class HistselectorABCD(object):
         rebin_smoothing_axis="automatic",  # can be a list of bin edges, "automatic", or None
         upper_bound_y=None,  # using an upper bound on the abcd y-axis (e.g. isolation)
         integrate_x=True,  # integrate the abcd x-axis in final histogram (allows simplified procedure e.g. for extrapolation method)
-        abcdExplicitAxisEdges={},
-        ABCDmode="simple",
     ):
-
-        self.ABCDmode = ABCDmode
-        self.abcdExplicitAxisEdges = abcdExplicitAxisEdges
-
-        # default thresholds, modifed later based on actual axis edges
-        # or if abcdExplicitAxisEdges is provided from outside
-        self.abcd_thresholds = {
-            "pt": [26, 28, 30],
-            "mt": [0, 40] if self.ABCDmode == "simple" else [0, 20, 40],
-            "iso": [0, 4, 8, 12],
-            "relIso": [0, 0.15, 0.3, 0.45],
-            "relJetLeptonDiff": [0, 0.2, 0.35, 0.5],
-            "dxy": [0, 0.01, 0.02, 0.03],
-        }
-
-        # default abcd_variables to look for
-        # Beware that there is a priority logic: mT will be the x axis if found,
-        # then any of the following (the first that is found) will become the y axis
-        self.abcd_variables = (
-            ("mt", "passMT"),
-            ("relIso", "passIso"),
-            ("iso", "passIso"),
-            ("relJetLeptonDiff", "passIso"),
-            ("dxy", "passDxy"),
-        )
-
-        if self.abcdExplicitAxisEdges:
-            for k in self.abcdExplicitAxisEdges:
-                new_edges = self.abcdExplicitAxisEdges[k]
-                if k in self.abcd_thresholds:
-                    # change default
-                    old_edges = self.abcd_thresholds[k]
-                    logger.warning(
-                        f"ABCD method: default edges for axis {k} changed from {old_edges} to {new_edges}"
-                    )
-                    self.abcd_thresholds[k] = new_edges
-                else:
-                    # add new axes for enhanced flexibility
-                    # although it might be safer to just raise an error
-                    logger.warning(
-                        f"ABCD method: adding new axis {k} with default edges {new_edges}"
-                    )
-                    self.abcd_thresholds[k] = new_edges
-                    self.abcd_variables = (
-                        *self.abcd_variables,
-                        (k, f"pass{k.capitalize()}"),
-                    )
-
         self.upper_bound_y = upper_bound_y
         self.integrate_x = integrate_x
 
@@ -221,74 +209,6 @@ class HistselectorABCD(object):
         self.smoothing_axis_min = edges[0]
         self.smoothing_axis_max = edges[-1]
 
-    def get_selection_edges(self, axis_name, upper_bound=False, hist_axis_edges=None):
-        # returns edges from pass to fail regions [x0, x1, x2, x3] e.g. x=[x0,x1], dx=[x1,x2], d2x=[x2,x3]
-        if axis_name in self.abcd_thresholds:
-            ts = self.abcd_thresholds[axis_name]
-            if hist_axis_edges is not None:
-                if len(ts) == len(hist_axis_edges):
-                    # consistent number of edges: take them from axis
-                    ts = [x for x in hist_axis_edges]
-                    logger.warning(
-                        f"ABCD method: using edges {ts} for axis {axis_name}"
-                    )
-                elif len(ts) < len(hist_axis_edges):
-                    if all(tsi in hist_axis_edges for i, tsi in enumerate(ts)):
-                        # more edges in axis, but default ones are a subset: keep edges from default
-                        logger.warning(
-                            f"ABCD method: using subset of edges {ts} for axis {axis_name}, out of {hist_axis_edges}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Axis {axis_name} has inconsistent edges ({hist_axis_edges}): expected {ts}"
-                        )
-                        logger.warning(
-                            f"Please, explicitly provide the edges to be used for ABCD method."
-                        )
-                        raise RuntimeError(
-                            f"Inconsistent edges for ABCD method with axis {axis_name}."
-                        )
-                else:
-                    if all(xi in ts for i, xi in enumerate(hist_axis_edges)):
-                        # less edges in axis, but subset of default ones: use them filling remaining elements with None
-                        ts = [x for x in hist_axis_edges]
-                        ts.extend([None] * (len(ts) - len(hist_axis_edges)))
-                        logger.warning(
-                            f"ABCD method: using edges {ts} for axis {axis_name}"
-                        )
-                    else:
-                        # less edges in axis but also inconsistent: request the user to explicitly provide what to use
-                        logger.warning(
-                            f"ABCD method: axis {axis_name} has less edges ({hist_axis_edges}) than expected ({ts})"
-                        )
-                        logger.warning(
-                            f"and inconsistent too. Please, explicitly provide the edges to use"
-                        )
-                        raise RuntimeError(
-                            f"Inconsistent edges for ABCD method with axis {axis_name}."
-                        )
-
-            if axis_name in ["mt", "pt"]:
-                # low: failing, high: passing, no upper bound
-                if self.ABCDmode == "simple":
-                    return None, complex(0, ts[1]), None, complex(0, ts[0])
-                else:
-                    return None, complex(0, ts[2]), complex(0, ts[1]), complex(0, ts[0])
-            if axis_name in ["dxy", "iso", "relIso", "relJetLeptonDiff"]:
-                # need a hack because later on the code expects 4 values, but there might be
-                # only 2 or 3: extend the array with None times the missing items
-                if len(ts) < 4:
-                    ts.extend([None] * (4 - len(ts)))
-                # low: passing, high: failing, no upper bound
-                return (
-                    complex(0, ts[0]),
-                    complex(0, ts[1]),
-                    (complex(0, ts[2]) if ts[2] is not None else None),
-                    (complex(0, ts[3]) if upper_bound and ts[3] is not None else None),
-                )
-        else:
-            raise RuntimeError(f"Can not find threshold for abcd axis {axis_name}")
-
     # A
     def get_hist_failX_failY(self, h):
         return h[{self.name_x: self.sel_dx, self.name_y: self.sel_dy}]
@@ -306,7 +226,7 @@ class HistselectorABCD(object):
         return h[{self.name_x: self.sel_x, self.name_y: self.sel_y}]
 
     def set_abcd_axes(self, h):
-        for a, b in self.abcd_variables:
+        for a, b in abcd_variables:
             if self.name_x is None and a in h.axes.name:
                 self.name_x = a
                 continue
@@ -331,9 +251,7 @@ class HistselectorABCD(object):
             self.sel_x = 1
             self.sel_dx = 0
         else:
-            x0, x1, x2, x3 = self.get_selection_edges(
-                self.name_x, hist_axis_edges=self.axis_x.edges
-            )
+            x0, x1, x2, x3 = get_selection_edges(self.name_x)
             s = hist.tag.Slicer()
             do = hist.sum if self.integrate_x else None
             self.sel_x = (
@@ -350,10 +268,8 @@ class HistselectorABCD(object):
             self.sel_y = 1
             self.sel_dy = 0
         else:
-            y0, y1, y2, y3 = self.get_selection_edges(
-                self.name_y,
-                upper_bound=self.upper_bound_y,
-                hist_axis_edges=self.axis_y.edges,
+            y0, y1, y2, y3 = get_selection_edges(
+                self.name_y, upper_bound=self.upper_bound_y
             )
             s = hist.tag.Slicer()
             self.sel_y = (
@@ -1065,9 +981,7 @@ class FakeSelector1DExtendedABCD(FakeSelectorSimpleABCD):
 
     # set slices object for selection of sideband regions
     def set_selections_x(self, integrate_x=True):
-        x0, x1, x2, x3 = self.get_selection_edges(
-            self.name_x, hist_axis_edges=self.axis_x.edges
-        )
+        x0, x1, x2, x3 = get_selection_edges(self.name_x)
         s = hist.tag.Slicer()
         do = hist.sum if integrate_x else None
         self.sel_x = (
@@ -1306,7 +1220,7 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
                     axis_x_max = extend_edges(h.axes[self.name_x].traits, edges)[-1]
                 elif self.name_x in ["iso", "relIso", "relJetLeptonDiff", "dxy"]:
                     # iso and dxy have a finite lower and upper bound in the application region
-                    axis_x_max = self.abcd_thresholds[self.name_x][1]
+                    axis_x_max = abcd_thresholds[self.name_x][1]
                 else:
                     axis_x_max = self.axis_x.edges[-1]
                 mins_x.append(axis_x_min)
@@ -1336,10 +1250,8 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
 
     # set slices object for selection of sideband regions
     def set_selections_y(self):
-        y0, y1, y2, y3 = self.get_selection_edges(
-            self.name_y,
-            upper_bound=self.upper_bound_y,
-            hist_axis_edges=self.axis_y.edges,
+        y0, y1, y2, y3 = get_selection_edges(
+            self.name_y, upper_bound=self.upper_bound_y
         )
         s = hist.tag.Slicer()
         self.sel_y = (
@@ -1348,9 +1260,7 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
             else s[y1 : y0 : hist.sum]
         )
         self.sel_dy = (
-            s[y1 : y2 : hist.sum]
-            if y2 is None or y2.imag > y1.imag
-            else s[y2 : y1 : hist.sum]
+            s[y1 : y2 : hist.sum] if y2.imag > y1.imag else s[y2 : y1 : hist.sum]
         )
         self.sel_d2y = (
             s[y2 : y3 : hist.sum]

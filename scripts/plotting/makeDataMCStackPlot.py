@@ -593,6 +593,7 @@ for h in args.hists:
     outfile = "_".join(filter(lambda x: x, to_join))
     if args.cmsDecor == "Preliminary":
         outfile += "_preliminary"
+    print("OUT", outfile)
 
     plot_tools.save_pdf_and_png(outdir, outfile)
 

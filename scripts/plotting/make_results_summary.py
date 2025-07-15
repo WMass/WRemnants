@@ -2,10 +2,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-import rabbit.io_tools
 from utilities import parsing
-from wremnants import plot_tools
-from wums import output_tools
+from utilities.io_tools import rabbit_input
+from wums import output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -47,7 +46,7 @@ dfw = pd.DataFrame.from_dict(
 if not args.pdg:
     dfw = dfw[dfw["Name"] != "PDG Average"]
 
-cms_res = rabbit.io_tools.read_groupunc_df(
+cms_res = rabbit_input.read_groupunc_df(
     args.fitresult,
     [
         "stat",
@@ -56,6 +55,7 @@ cms_res = rabbit.io_tools.read_groupunc_df(
 )
 cms_res["color"] = "#E42536"
 cms_res["Reference"] = "This work"
+cms_res["value"] = 0.0
 dfw_cms = pd.concat((dfw, cms_res), ignore_index=True)
 
 eoscp = output_tools.is_eosuser_path(args.outpath)
@@ -120,6 +120,8 @@ for i, row in dfw_cms.iterrows():
         annotation_clip=False,
         color=row.loc["color"],
     )  # , weight=600)
+    if row.loc["Name"] in ["CMS"]:
+        continue
     if row.loc["Name"] in ["CMS", "CDF", "ATLAS", "PDG Average"]:
         label = rf"{row.loc['value']:.1f} $\pm$ {round(row.loc['err_total'], 1):.1f}"
     else:
@@ -163,6 +165,6 @@ if args.cmsDecor == "Preliminary":
     name += "_preliminary"
 
 plot_tools.save_pdf_and_png(outdir, name, fig)
-plot_tools.write_index_and_log(outdir, name)
+output_tools.write_index_and_log(outdir, name)
 if eoscp:
     output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

@@ -260,13 +260,12 @@ class Datagroups(object):
         simultaneousABCD=False,
         forceGlobalScaleFakes=None,
         mcCorr=["pt", "eta"],
-        abcdExplicitAxisEdges={},
         **kwargs,
     ):
         logger.info(f"Set histselector")
         if self.mode[0] != "w":
             return  # histselectors only implemented for single lepton (with fakes)
-        auxiliary_info = {"ABCDmode": mode}
+        auxiliary_info = {}
         signalselector = sel.SignalSelectorABCD
         scale = 1
         if mode == "extended1D":
@@ -318,7 +317,6 @@ class Datagroups(object):
                     smoothing_order_fakerate=smoothingOrderFakerate,
                     smoothing_order_spectrum=smoothingOrderSpectrum,
                     smoothing_polynomial_spectrum=smoothingPolynomialSpectrum,
-                    abcdExplicitAxisEdges=abcdExplicitAxisEdges,
                     **auxiliary_info,
                     **kwargs,
                 )
@@ -347,7 +345,7 @@ class Datagroups(object):
                     self.groups[g].histselector.set_correction(hQCD, axes_names=mcCorr)
             else:
                 self.groups[g].histselector = signalselector(
-                    h, fakerate_axes=self.fakerate_axes, **auxiliary_info, **kwargs
+                    h, fakerate_axes=self.fakerate_axes, **kwargs
                 )
 
     def setGlobalAction(self, action):
@@ -1042,11 +1040,7 @@ class Datagroups(object):
         self.rebinBeforeSelection = rebin_before_selection
 
         for a in hh.get_rebin_actions(
-            axes,
-            ax_lim=ax_lim,
-            ax_rebin=ax_rebin,
-            ax_absval=ax_absval,
-            rename=rename,
+            axes, ax_lim=ax_lim, ax_rebin=ax_rebin, ax_absval=ax_absval, rename=rename
         ):
             self.setRebinOp(a)
 
@@ -1326,6 +1320,12 @@ class Datagroups(object):
         ]
         procs_to_add = self.expandProcesses(procs_to_add)
 
+        if all(x not in self.groups.keys() for x in procs_to_add):
+            logger.warning(
+                f"Did not find processes {procs_to_add}! Skipping systematic {name}"
+            )
+            return
+
         if preOp:
             preOpMap = {
                 n: preOp
@@ -1423,7 +1423,6 @@ class Datagroups(object):
         systNameReplace=None,
         formatWithValue=None,
         outNames=[],
-        isPoiHistDecorr=False,
     ):
         if name == self.nominalName or len(systAxes) == 0:
             if hvar.axes.name != self.fit_axes:
@@ -1443,7 +1442,7 @@ class Datagroups(object):
                 f"Axes in hist are {str(hvar.axes.name)}"
             )
 
-        # Converting to a list because otherwise if you print it for debugging you loose it
+        # Converting to a list becasue otherwise if you print it for debugging you loose it
         def systIndexForAxis(axis, flow=False):
             if type(axis) == hist.axis.StrCategory:
                 bins = [x for x in axis]
@@ -1466,6 +1465,8 @@ class Datagroups(object):
 
         def skipEntryDictToArray(h, skipEntry, axes):
             naxes = len(axes)
+
+            logger.debug(f"SkipEntry is {skipEntry}")
 
             if type(skipEntry) == dict:
                 skipEntryArr = np.full(naxes, -1, dtype=object)
@@ -1640,44 +1641,24 @@ class Datagroups(object):
         }
 
         # pair all up/down histograms, otherwise single histogram for mirroring
-        # NB: with decorrelated axis, Up/Down might not be at the end, must search them within the string
         result = {}
         for key in var_map.keys():
             if not key:
                 continue
-            if isPoiHistDecorr:
-                # use Down for first search: less likely to be present on its own in the name
-                if "Down" in key:
-                    base_key, tail_key = key.split("Down", 1)
-                    key_up = base_key + "Up" + tail_key
-                    if key_up in outNames:
-                        result[base_key + tail_key] = (var_map[key_up], var_map[key])
-                    else:
-                        result[key] = var_map[key]
-                elif "Up" in key:
-                    base_key, tail_key = key.split("Up", 1)
-                    key_down = base_key + "Down" + tail_key
-                    if key_down in outNames:
-                        continue
-                    else:
-                        result[key] = var_map[key]
+            if key.endswith("Up"):
+                base_key = key[:-2]
+                key_down = base_key + "Down"
+                if key_down in outNames:
+                    result[base_key] = (var_map[key], var_map[key_down])
+                else:
+                    result[key] = var_map[key]
+            elif key.endswith("Down"):
+                if key[:-4] + "Up" in outNames:
+                    continue
                 else:
                     result[key] = var_map[key]
             else:
-                if key.endswith("Up"):
-                    base_key = key[:-2]
-                    key_down = base_key + "Down"
-                    if key_down in outNames:
-                        result[base_key] = (var_map[key], var_map[key_down])
-                    else:
-                        result[key] = var_map[key]
-                elif key.endswith("Down"):
-                    if key[:-4] + "Up" in outNames:
-                        continue
-                    else:
-                        result[key] = var_map[key]
-                else:
-                    result[key] = var_map[key]
+                result[key] = var_map[key]
         return result
 
     def addPseudodataHistogramFakes(

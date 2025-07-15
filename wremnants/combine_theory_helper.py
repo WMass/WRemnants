@@ -126,7 +126,7 @@ class TheoryHelper(object):
                 "Cannot add resummation uncertainties. No theory correction was applied!"
             )
 
-        if self.datagroups.args_from_metadata("theoryCorrAltOnly"):
+        if False and self.datagroups.args_from_metadata("theoryCorrAltOnly"):
             raise ValueError(
                 "The theory correction was only applied as an alternate hist. Using it for systs isn't well defined!"
             )
@@ -187,19 +187,20 @@ class TheoryHelper(object):
                             scale=self.minnlo_scale,
                             symmetrize=self.minnlo_symmetrize,
                         )
-        elif self.resumUnc == "scale":
-            # two sets of nuisances, one binned in ~10% quantiles, and one inclusive in pt
-            # to avoid underestimating the correlated part of the uncertainty
-            self.add_scetlib_dyturbo_scale_uncertainty(
-                extra_name="fine",
-                rebin_pt=common.ptV_binning[::2],
-                transition=self.transitionUnc,
-            )
+        elif "scale" in self.resumUnc:
             self.add_scetlib_dyturbo_scale_uncertainty(
                 extra_name="inclusive",
                 rebin_pt=[common.ptV_binning[0], common.ptV_binning[-1]],
                 transition=self.transitionUnc,
             )
+            if "binned" in self.resumUnc:
+                # Add unc binned in ~10% quantiles, but keep one inclusive in pt
+                # to avoid underestimating the correlated part of the uncertainty
+                self.add_scetlib_dyturbo_scale_uncertainty(
+                    extra_name="fine",
+                    rebin_pt=common.ptV_binning[::2],
+                    transition=self.transitionUnc,
+                )
 
         if self.minnlo_unc and self.minnlo_unc not in ["none", None]:
             # sigma_-1 uncertainty is covered by scetlib-dyturbo uncertainties if they are used
@@ -415,7 +416,7 @@ class TheoryHelper(object):
 
             # skip nominal
             skip_entries = []
-            skip_entries.append({"vars": "pdf0"})
+            skip_entries.append({"vars": ["pdf0", "central"]})
 
             # choose the correct variations depending on whether transition variations are included
             if transition:
@@ -433,7 +434,12 @@ class TheoryHelper(object):
             format_with_values = ["edges", "center"]
 
             def preop_func(h, *args, **kwargs):
-                hsel = h[{"vars": ["pdf0"] + sel_vars}]
+                hsel = h[
+                    {
+                        "vars": ["pdf0" if "pdf0" in h.axes["vars"] else "central"]
+                        + sel_vars
+                    }
+                ]
                 func = (
                     syst_tools.gen_hist_to_variations
                     if pt_ax == "ptVgenAlt"
@@ -484,8 +490,6 @@ class TheoryHelper(object):
             )
             self.mirror_tnp = True
 
-        central_var = syst_ax[0]
-
         tnp_magnitudes = ["2.5", "0.5", "1."]
         name_replace = [(f"-{x}", "Down") for x in tnp_magnitudes] + [
             (x, "Up") for x in tnp_magnitudes
@@ -507,12 +511,12 @@ class TheoryHelper(object):
             systAxes=["vars"],
             passToFakes=self.propagate_to_fakes,
             systNameReplace=name_replace,
-            preOp=lambda h: h[{self.syst_ax: [central_var, *self.tnp_nuisances]}],
+            preOp=lambda h: h[
+                {self.syst_ax: [h.axes[self.syst_ax][0], *self.tnp_nuisances]}
+            ],
             mirror=self.mirror_tnp,
             scale=scale,
-            skipEntries=[
-                {self.syst_ax: central_var},
-            ],
+            skipEntries=[{self.syst_ax: ["central", "pdf0"]}],
             name=f"resumTNP",
             baseName=f"resumTNP_",
         )
@@ -739,8 +743,6 @@ class TheoryHelper(object):
             for k in to_remove:
                 np_map.pop(k)
 
-        central_var = self.np_hist.axes[self.syst_ax][0]
-
         for label, vals in np_map.items():
             if not all(label + v in self.np_hist.axes[self.syst_ax] for v in vals):
                 tmpvals = [
@@ -767,7 +769,7 @@ class TheoryHelper(object):
             else ["chargeVgenNP", self.syst_ax]
         )
         operation = lambda h, entries: syst_tools.hist_to_variations(
-            h[{self.syst_ax: [central_var, *entries]}],
+            h[{self.syst_ax: [h.axes[self.syst_ax][0], *entries]}],
             gen_axes=gen_axes,
             sum_axes=sum_axes,
         )
@@ -791,7 +793,7 @@ class TheoryHelper(object):
                         (entries[1], f"{rename}Up"),
                         (entries[0], f"{rename}Down"),
                     ],
-                    skipEntries=[{self.syst_ax: central_var}],
+                    skipEntries=[{self.syst_ax: ["central", "pdf0"]}],
                     name=rename,
                 )
 
@@ -870,6 +872,8 @@ class TheoryHelper(object):
         pdf_hist = pdfName
         pdf_corr_hist = (
             f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
+            if self.corr_hist_name == "scetlib_dyturboCorr"
+            else self.corr_hist_name.replace("Corr", "VarsCorr")
         )
         symmetrize = "average" if noi else "quadratic"
         asRange = pdfInfo["alphasRange"]

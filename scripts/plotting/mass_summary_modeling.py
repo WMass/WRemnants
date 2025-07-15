@@ -2,10 +2,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-import rabbit.io_tools
 from utilities import parsing
-from utilities.io_tools import hepdata_tools, output_tools
-from wremnants import plot_tools
+from utilities.io_tools import hepdata_tools, rabbit_input
+from wums import output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -28,7 +27,7 @@ args = parser.parse_args()
 
 basename = args.reffile
 
-dfs = rabbit.io_tools.read_all_groupunc_df(
+dfs = rabbit_input.read_all_groupunc_df(
     [
         args.reffile.format(postfix=p)
         for p in [
@@ -53,7 +52,7 @@ dfs = rabbit.io_tools.read_all_groupunc_df(
 isW = "WMass" in args.reffile
 
 if isW:
-    combdf = rabbit.io_tools.read_all_groupunc_df(
+    combdf = rabbit_input.read_all_groupunc_df(
         [args.reffile.format(postfix="_CombinedPtll")],
         names=(
             [
@@ -120,7 +119,7 @@ if args.postfix:
     outname += f"_{args.postfix}"
 
 plot_tools.save_pdf_and_png(outdir, outname, fig)
-plot_tools.write_index_and_log(outdir, outname)
+output_tools.write_index_and_log(outdir, outname)
 
 if args.saveForHepdata:
     column_labels = [xlabel, "Total uncertainty", "Model uncertainty"]

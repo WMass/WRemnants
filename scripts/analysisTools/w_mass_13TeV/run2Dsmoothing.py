@@ -22,7 +22,6 @@ from scipy.interpolate import RegularGridInterpolator
 import narf
 import wums.fitutils
 import wums.ioutils
-import wums.output_tools
 from utilities import common
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -909,11 +908,7 @@ if __name__ == "__main__":
                 resultDict[ret.name] = ret
 
     resultDict.update(
-        {
-            "meta_info": wums.output_tools.make_meta_info_dict(
-                args=args, wd=common.base_dir
-            )
-        }
+        {"meta_info": wums.ioutils.make_meta_info_dict(args=args, wd=common.base_dir)}
     )
 
     outfile = outdir + args.outfilename

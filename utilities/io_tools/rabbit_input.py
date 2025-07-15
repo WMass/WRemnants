@@ -13,13 +13,29 @@ def read_groupunc_df(filename, uncs, rename_cols={}, name=None):
     ref_massw = 80379
     ref_massz = 91187.6
 
-    fitresult = rabbit.io_tools.get_fitresult(filename)
-    df = rabbit.io_tools.read_impacts_pois(
-        fitresult, poi_type="nois", group=True, uncertainties=uncs
+    fitresult, meta = rabbit.io_tools.get_fitresult(filename, meta=True)
+    poi = rabbit.io_tools.get_poi_names(meta)
+
+    impacts, labels = rabbit.io_tools.read_impacts_poi(
+        fitresult, grouped=True, poi=poi[0], pulls=False
+    )
+    pulls, pulls_prefit, constraints, constraints_prefit, _, labels_ung = (
+        rabbit.io_tools.read_impacts_poi(
+            fitresult, grouped=False, poi=poi[0], pulls=True
+        )
     )
 
+    info = {
+        "Nome": poi[0],
+        "value": pulls[labels_ung == poi[0]],
+        "err_total": impacts[labels == "Total"],
+    }
+    info.update({f"err_{unc}": impacts[labels == unc] for unc in uncs})
+
+    df = pd.DataFrame(info)
+
     df.iloc[0, 1:] = df.iloc[0, 1:] * 100
-    df.iloc[0, 1] += ref_massz if df.loc[0, "Name"] == "massShiftZ100MeV" else ref_massw
+    df.iloc[0, 1] += ref_massz if poi[0] == "massShiftZ100MeV" else ref_massw
 
     if rename_cols:
         df.rename(columns=rename_cols, inplace=True)
