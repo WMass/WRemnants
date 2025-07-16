@@ -311,7 +311,7 @@ if args.csVarsHist:
         overflow=False,
     )
 
-    quantile_file = f"{common.data_dir}/angularCoefficients/mz_dilepton_scetlib_dyturboCorr_maxFiles_m1_csQuantiles.hdf5"
+    quantile_file = f"{common.data_dir}/angularCoefficients/mz_dilepton_scetlib_dyturboCorr_maxFiles_m1_alphaSunfoldingBinning_csQuantiles.hdf5"
     quantile_helper_csVars = make_quantile_helper(
         quantile_file,
         ["cosThetaStarll", "phiStarll"],
@@ -358,7 +358,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
 
 if args.unfolding and add_helicity_axis:
     qcdScaleByHelicity_helpers = theory_corrections.make_qcd_uncertainty_helpers_by_helicity(
-        filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
+        filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
         rebin_ptVgen=False,
     )
 else:

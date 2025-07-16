@@ -352,7 +352,7 @@ class UnfolderZ:
             # helper to derive helicity xsec shape from event by event reweighting
             self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
                 is_z=True,
-                filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_scetlib_dyturboCorr_maxFiles_m1_unfoldingBinning.hdf5",
+                filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
                 rebi_ptVgen=True,
             )
 
@@ -377,10 +377,11 @@ class UnfolderZ:
                     if ax.name == "acceptance":
                         continue
                     # check if binning is consistent between correction helper and unfolding axes
+                    #   unfolding axes must a subset of corretion helper
                     wbh_axis = self.weightsByHelicity_helper_unfolding.hist.axes[
                         ax.name.replace("Gen", "gen")
                     ]
-                    if any(ax.edges != wbh_axis.edges):
+                    if not all(e in ax.edges for e in wbh_axis.edges):
                         raise RuntimeError(
                             f"""
                             Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
@@ -461,6 +462,20 @@ class UnfolderZ:
                     add_helicity_axis=self.add_helicity_axis,
                     base_name=level,
                 )
+
+            # add full phase space histograms for inclusive cross section
+            add_xnorm_histograms(
+                results,
+                df,
+                args,
+                dataset.name,
+                corr_helpers,
+                qcdScaleByHelicity_helper,
+                [],
+                [],
+                base_name="full",
+            )
+
         return df
 
     def add_poi_as_noi_histograms(self, df, results, nominal_axes, nominal_cols):

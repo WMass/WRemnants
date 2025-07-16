@@ -42,6 +42,11 @@ parser.add_argument(
     help="Use unfolding binning to produce the gen results",
 )
 parser.add_argument(
+    "--genPtBinningAsReco",
+    action="store_true",
+    help="Use unfolding binning to produce the gen results",
+)
+parser.add_argument(
     "--singleLeptonHists",
     action="store_true",
     help="Also store single lepton kinematics",
@@ -181,6 +186,7 @@ def build_graph(df, dataset):
                 },
                 "prefsr",
                 add_out_of_acceptance_axis=False,
+                rebin_pt=not args.genPtBinningAsReco,
             )
         )
         axis_absYVgen = hist.axis.Variable(

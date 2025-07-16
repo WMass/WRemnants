@@ -104,6 +104,7 @@ def get_dilepton_axes(
     gen_level,
     add_out_of_acceptance_axis=False,
     flow_y=False,
+    rebin_pt=False,
 ):
     """
     construct axes, columns, and selections for differential Z dilepton measurement from correponding reco edges. Currently supported: pT(Z), |yZ|
@@ -127,13 +128,14 @@ def get_dilepton_axes(
         cols.append(f"{gen_level}V_{var}")
 
         if v == "ptVGen":
-            # use 2 ptll bin for each ptVGen bin, last bin is overflow
             edges = reco_edges["ptll"]
-            if len(edges) % 2:
-                # in case it's an odd number of edges, last two bins are overflow
-                edges = edges[:-1]
-            # 1 gen bin for 2 reco bins
-            edges = edges[::2]
+            if rebin_pt:
+                # use 2 ptll bin for each ptVGen bin, last bin is overflow
+                if len(edges) % 2:
+                    # in case it's an odd number of edges, last two bins are overflow
+                    edges = edges[:-1]
+                # 1 gen bin for 2 reco bins
+                edges = edges[::2]
 
             axes.append(
                 hist.axis.Variable(
