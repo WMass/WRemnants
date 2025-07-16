@@ -8,10 +8,10 @@ import pandas as pd
 import narf
 import rabbit.io_tools
 from utilities import parsing
-from utilities.io_tools import input_tools, output_tools
-from wremnants import plot_tools, syst_tools
+from utilities.io_tools import input_tools
+from wremnants import syst_tools
 from wums import boostHistHelpers as hh
-from wums import logging
+from wums import logging, output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument("--unfolded", type=str, required=False)
@@ -70,13 +70,24 @@ def quadrature_sum_hist(hists, is_down):
 def load_hist(filename, fittype="postfit", helicity=False):
     fitresult = rabbit.io_tools.get_fitresult(filename)
     obs = {args.obs, "helicity", "chargeVgen"} if helicity else {args.obs}
-    if "projections" in fitresult.keys() and len(fitresult["projections"]):
+    if "physics_models" in fitresult.keys():
+        if any("Project" in k for k in fitresult["physics_models"].keys()):
+            model_key = [
+                k for k in fitresult["physics_models"].keys() if "Project" in k
+            ][0]
+            h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+                f"hist_{fittype}_inclusive"
+            ]
+        else:
+            model_key = "Basemodel"
+        h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+            f"hist_{fittype}_inclusive"
+        ]
+    else:
         fitresult = fitresult["projections"]
         idx = [i for (i, a) in enumerate(fitresult) if obs == set(a["axes"])][0]
         fitresult = fitresult[idx]
         h = fitresult[f"hist_{fittype}_inclusive"]
-    else:
-        h = fitresult[f"hist_{fittype}_inclusive"]["ch0"]
 
     return h.get() / 1000.0
 
@@ -415,10 +426,10 @@ if unfolded_data:
         100 * h / hintegrals[idx_unfolded] for h in hintegrals
     ]
 
-plot_tools.write_index_and_log(
+output_tools.write_index_and_log(
     outdir,
     name,
-    yield_tables={"Differential cross sections": df},
+    analysis_meta_info={"Differential cross sections": df},
 )
 
 if output_tools.is_eosuser_path(args.outpath) and eoscp:
