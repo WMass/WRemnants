@@ -39,6 +39,7 @@ from wremnants.helicity_utils_polvar import makehelicityWeightHelper_polvar
 from wremnants.histmaker_tools import (
     aggregate_groups,
     get_run_lumi_edges,
+    make_muon_phi_axis,
     scale_to_data,
     write_analysis_output,
 )
@@ -142,8 +143,6 @@ parser.add_argument(
     action="store_true",
     help="When not applying muon scale corrections (--muonCorrData none / --muonCorrMC none), require at list that the CVH corrected variables are valid",
 )
-
-#
 
 args = parser.parse_args()
 
@@ -680,6 +679,10 @@ def build_graph(df, dataset):
 
     axes = nominal_axes
     cols = nominal_cols
+
+    if args.addMuonPhiAxis is not None:
+        axes = [*axes, make_muon_phi_axis(args.addMuonPhiAxis)]
+        cols = [*cols, "goodMuons_phi0"]
 
     if args.addRunAxis:
         run_edges, lumi_edges = get_run_lumi_edges(args.nRunBins, era)

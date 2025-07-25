@@ -394,7 +394,12 @@ if __name__ == "__main__":
             central = 0
 
         plot_tools.add_cms_decor(
-            ax1, args.cmsDecor, data=True, lumi=lumi, loc=args.logoPos
+            ax1,
+            args.cmsDecor,
+            data=True,
+            lumi=lumi,
+            loc=args.logoPos,
+            text_size=args.cmsDecorSize,
         )
         plot_tools.addLegend(
             ax1,

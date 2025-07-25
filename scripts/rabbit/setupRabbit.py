@@ -335,12 +335,24 @@ def make_parser(parser=None):
         help="Restrict axis to this range (assumes pairs of values by axis, with trailing axes optional)",
     )
     parser.add_argument(
-        "--decorrSystByRun",
+        "--decorrSystByVar",
         type=str,
         nargs="*",
         default=[],
-        choices=["prefire", "effi", "lumi", "fakenorm", "effisyst"],
-        help="Customize what uncertainties to decorrelate by run, to facilitate tests (note: effi is for both effStat and effSyst, while effisyst is only for effSyst).",
+        choices=[
+            "run",
+            "phi",
+            "prefire",
+            "effi",
+            "lumi",
+            "fakenorm",
+            "effisyst",
+            "decornorm",
+            "ptscale",
+        ],
+        help="""
+        Customize what uncertainties to decorrelate by a specific variable (the first string passed to this option),
+        to facilitate tests (note: effi is for both effStat and effSyst, while effisyst is only for effSyst).""",
     )
     parser.add_argument(
         "--residualEffiSFasUncertainty",
@@ -813,6 +825,18 @@ def setup(
     ]
     isTheoryAgnosticPolVar = args.analysisMode == "theoryAgnosticPolVar"
     isPoiAsNoi = (isUnfolding or isTheoryAgnostic) and args.poiAsNoi
+
+    decorr_syst_var = None
+    if len(args.decorrSystByVar) >= 2:
+        decorr_syst_var = args.decorrSystByVar[0]
+        if decorr_syst_var not in fitvar:
+            raise ValueError(
+                f"Inconsistent variable {decorr_syst_var} passed to --decorrSystByVar: fit variables are {fitvar}"
+            )
+    elif len(args.decorrSystByVar) == 1:
+        raise ValueError(
+            "Option --decorrSystByVar requires at least two arguments, the first one is the name of the decorrelation variable"
+        )
 
     # NOTE: args.filterProcGroups and args.excludeProcGroups should in principle not be used together
     #       (because filtering is equivalent to exclude something), however the exclusion is also meant to skip
@@ -1556,18 +1580,21 @@ def setup(
 
     if wmass:
         # mirror hist in linear scale, this was done in the old definition of luminosity uncertainty from a histogram
-        if "lumi" in args.decorrSystByRun and "run" in fitvar:
+        if "lumi" in args.decorrSystByVar and decorr_syst_var in fitvar:
             datagroups.addSystematic(
                 name="lumi",
                 processes=["MCwithLumiNorm"],
                 groups=[f"luminosity", "experiment", "expNoCalib"],
                 passToFakes=passSystToFakes,
                 baseName="lumi_",
-                systAxes=["run_", "downUpVar"],
-                labelsByAxis=["run", "downUpVar"],
+                systAxes=[f"{decorr_syst_var}_", "downUpVar"],
+                labelsByAxis=[decorr_syst_var, "downUpVar"],
                 actionRequiresNomi=True,
                 action=syst_tools.decorrelateByAxes,
-                actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
+                actionArgs=dict(
+                    axesToDecorrNames=[decorr_syst_var],
+                    newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                ),
                 preOp=scale_hist_up_down,
                 preOpArgs={
                     "scale": (
@@ -1608,6 +1635,26 @@ def setup(
             ),
         )
 
+    # add norm variations for decorrelated variable bins on each process
+    if "decornorm" in args.decorrSystByVar and decorr_syst_var in fitvar:
+        datagroups.addSystematic(
+            name=f"{decorr_syst_var}DecorrNorm",
+            processes=["MCnoQCD"],
+            groups=[f"{decorr_syst_var}DecorrNorm", "experiment", "expNoCalib"],
+            passToFakes=passSystToFakes,
+            baseName=f"{decorr_syst_var}DecorrNorm_",
+            systAxes=[f"{decorr_syst_var}_", "downUpVar"],
+            labelsByAxis=[decorr_syst_var, "downUpVar"],
+            actionRequiresNomi=True,
+            action=syst_tools.decorrelateByAxes,
+            actionArgs=dict(
+                axesToDecorrNames=[decorr_syst_var],
+                newDecorrAxesNames=[f"{decorr_syst_var}_"],
+            ),
+            preOp=scale_hist_up_down,
+            preOpArgs={"scale": 1.05},
+        )
+
     if not lowPU:  # lowPU does not include PhotonInduced as a process. skip it:
         datagroups.addNormSystematic(
             name="CMS_PhotonInduced",
@@ -1645,19 +1692,20 @@ def setup(
             )
 
         if args.logNormalFake > 0.0:
-            if "fakenorm" in args.decorrSystByRun and "run" in fitvar:
+            if "fakenorm" in args.decorrSystByVar and decorr_syst_var in fitvar:
                 datagroups.addSystematic(
                     name=f"CMS_{datagroups.fakeName}",
                     processes=[datagroups.fakeName],
                     groups=["Fake", "experiment", "expNoCalib"],
                     passToFakes=False,
                     baseName=f"CMS_{datagroups.fakeName}_",
-                    systAxes=["run_", "downUpVar"],
-                    labelsByAxis=["run", "downUpVar"],
+                    systAxes=[f"{decorr_syst_var}_", "downUpVar"],
+                    labelsByAxis=[decorr_syst_var, "downUpVar"],
                     actionRequiresNomi=True,
                     action=syst_tools.decorrelateByAxes,
                     actionArgs=dict(
-                        axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                        axesToDecorrNames=[decorr_syst_var],
+                        newDecorrAxesNames=[f"{decorr_syst_var}_"],
                     ),
                     preOp=scale_hist_up_down,
                     preOpArgs={"scale": args.logNormalFake},
@@ -1880,18 +1928,19 @@ def setup(
                     actionSF = None
                     effActionArgs = {}
                     if (
-                        any(x in args.decorrSystByRun for x in ["effi", "effisyst"])
-                        and "run" in fitvar
+                        any(x in args.decorrSystByVar for x in ["effi", "effisyst"])
+                        and decorr_syst_var in fitvar
                     ):
                         axes = [
                             "reco-tracking-idip-trigger-iso",
                             "n_syst_variations",
-                            "run_",
+                            f"{decorr_syst_var}_",
                         ]
-                        axlabels = ["WPSYST", "_etaDecorr", "run"]
+                        axlabels = ["WPSYST", "_etaDecorr", decorr_syst_var]
                         actionSF = syst_tools.decorrelateByAxes
                         effActionArgs = dict(
-                            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                            axesToDecorrNames=[decorr_syst_var],
+                            newDecorrAxesNames=[f"{decorr_syst_var}_"],
                         )
                 else:
                     nameReplace = (
@@ -1913,12 +1962,18 @@ def setup(
                     }
                     actionSF = None
                     effActionArgs = {}
-                    if "effi" in args.decorrSystByRun and "run" in fitvar:
-                        axes = ["SF eta", "nPtEigenBins", "SF charge", "run_"]
-                        axlabels = ["eta", "pt", "q", "run"]
+                    if "effi" in args.decorrSystByVar and decorr_syst_var in fitvar:
+                        axes = [
+                            "SF eta",
+                            "nPtEigenBins",
+                            "SF charge",
+                            f"{decorr_syst_var}_",
+                        ]
+                        axlabels = ["eta", "pt", "q", decorr_syst_var]
                         actionSF = syst_tools.decorrelateByAxes
                         effActionArgs = dict(
-                            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+                            axesToDecorrNames=[decorr_syst_var],
+                            newDecorrAxesNames=[f"{decorr_syst_var}_"],
                         )
                 if args.effStatLumiScale and "Syst" not in name:
                     scale /= math.sqrt(args.effStatLumiScale)
@@ -2129,18 +2184,18 @@ def setup(
 
     # add dedicated uncertainties from residual corrections read from a file
     # implemented by modifying the nominal histogram
-    if "run" in fitvar and args.residualEffiSFasUncertainty > 0:
+    if decorr_syst_var in fitvar and args.residualEffiSFasUncertainty > 0:
         ## action to apply corrections and move from nominal to alternate histogram in input
         corr_era = "2016" if era == "2016PostVFP" else era
         corr_input_path = f"{common.data_dir}/muonSF/corrections/{corr_era}/"
         preOpCorrAction = scale_hist_up_down_corr_from_file
         preOpCorrActionArgs = dict(
-            corr_file=f"{corr_input_path}/dataMC_ZmumuEffCorr_eta_{args.residualEffiSFasUncertainty}runBins.pkl.lz4",
-            corr_hist="dataMC_ZmumuEffCorr_eta_runBin",
+            corr_file=f"{corr_input_path}/dataMC_ZmumuEffCorr_eta_{args.residualEffiSFasUncertainty}{decorr_syst_var}Bins.pkl.lz4",
+            corr_hist=f"dataMC_ZmumuEffCorr_eta_{decorr_syst_var}Bin",
         )
         #
         logger.warning(
-            "Adding uncertainty for residual efficiency corrections decorrelated by run and eta"
+            f"Adding uncertainty for residual efficiency corrections decorrelated by {decorr_syst_var} and eta"
         )
         #
         datagroups.addSystematic(
@@ -2148,20 +2203,21 @@ def setup(
             processes=["MCnoQCD"],
             groups=["residualEffiSF", "experiment", "expNoCalib"],
             baseName="residualEffiSF_",
-            systAxes=["eta_", "run_", "downUpVar"],
-            labelsByAxis=["eta", "run", "downUpVar"],
+            systAxes=["eta_", f"{decorr_syst_var}_", "downUpVar"],
+            labelsByAxis=["eta", decorr_syst_var, "downUpVar"],
             passToFakes=passSystToFakes,
             preOp=preOpCorrAction,
             preOpArgs=preOpCorrActionArgs,
             action=syst_tools.decorrelateByAxes,
             actionArgs=dict(
-                axesToDecorrNames=["eta", "run"], newDecorrAxesNames=["eta_", "run_"]
+                axesToDecorrNames=["eta", decorr_syst_var],
+                newDecorrAxesNames=["eta_", f"{decorr_syst_var}_"],
             ),
             actionRequiresNomi=True,
         )
         #
         logger.warning(
-            "Adding uncertainty for residual efficiency corrections decorrelated by run inclusive in eta"
+            f"Adding uncertainty for residual efficiency corrections decorrelated by {decorr_syst_var} inclusive in eta"
         )
         #
         datagroups.addSystematic(
@@ -2169,13 +2225,16 @@ def setup(
             processes=["MCnoQCD"],
             groups=["residualEffiSF", "experiment", "expNoCalib"],
             baseName="residualEffiSF_",
-            systAxes=["run_", "downUpVar"],
-            labelsByAxis=["run", "downUpVar"],
+            systAxes=[f"{decorr_syst_var}_", "downUpVar"],
+            labelsByAxis=[decorr_syst_var, "downUpVar"],
             passToFakes=passSystToFakes,
             preOp=preOpCorrAction,
             preOpArgs=preOpCorrActionArgs,
             action=syst_tools.decorrelateByAxes,
-            actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
+            actionArgs=dict(
+                axesToDecorrNames=[decorr_syst_var],
+                newDecorrAxesNames=[f"{decorr_syst_var}_"],
+            ),
             actionRequiresNomi=True,
         )
 
@@ -2214,12 +2273,13 @@ def setup(
     prefireSystLabels = ["downUpVar"]
     prefireSystAction = None
     prefireSystActionArgs = {}
-    if "prefire" in args.decorrSystByRun and "run" in fitvar:
-        prefireSystAxes = ["run_"] + prefireSystAxes
-        prefireSystLabels = ["run"] + prefireSystLabels
+    if "prefire" in args.decorrSystByVar and decorr_syst_var in fitvar:
+        prefireSystAxes = [f"{decorr_syst_var}_"] + prefireSystAxes
+        prefireSystLabels = [decorr_syst_var] + prefireSystLabels
         prefireSystAction = syst_tools.decorrelateByAxes
         prefireSystActionArgs = dict(
-            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+            axesToDecorrNames=[decorr_syst_var],
+            newDecorrAxesNames=[f"{decorr_syst_var}_"],
         )
     datagroups.addSystematic(
         "muonL1PrefireSyst",
@@ -2242,12 +2302,13 @@ def setup(
     )
     prefireStatAction = None
     prefireStatActionArgs = {}
-    if "prefire" in args.decorrSystByRun and "run" in fitvar:
-        prefireStatAxes = ["run_"] + prefireStatAxes
-        prefireStatLabels = ["run"] + prefireStatLabels
+    if "prefire" in args.decorrSystByVar and decorr_syst_var in fitvar:
+        prefireStatAxes = [f"{decorr_syst_var}_"] + prefireStatAxes
+        prefireStatLabels = [decorr_syst_var] + prefireStatLabels
         prefireStatAction = syst_tools.decorrelateByAxes
         prefireStatActionArgs = dict(
-            axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]
+            axesToDecorrNames=[decorr_syst_var],
+            newDecorrAxesNames=[f"{decorr_syst_var}_"],
         )
 
     datagroups.addSystematic(
@@ -2272,23 +2333,58 @@ def setup(
         passToFakes=passSystToFakes,
     )
 
-    datagroups.addSystematic(
-        "muonScaleSyst_responseWeights",
-        processes=["single_v_samples"],
-        groups=["scaleCrctn", "muonCalibration", "experiment"],
-        baseName="Scale_correction_",
-        systAxes=["unc", "downUpVar"],
-        passToFakes=passSystToFakes,
-        scale=args.calibrationStatScaling,
-    )
-    datagroups.addSystematic(
-        "muonScaleClosSyst_responseWeights",
-        processes=["single_v_samples"],
-        groups=["scaleClosCrctn", "muonCalibration", "experiment"],
-        baseName="ScaleClos_correction_",
-        systAxes=["unc", "downUpVar"],
-        passToFakes=passSystToFakes,
-    )
+    ## decorrelated momentum scale and resolution, when requested
+    if not dilepton and "ptscale" in args.decorrSystByVar and decorr_syst_var in fitvar:
+        datagroups.addSystematic(
+            "muonScaleSyst_responseWeights",
+            name="muonScaleSyst_responseWeightsDecorr",
+            processes=["single_v_samples"],
+            groups=["scaleCrctn", "muonCalibration", "experiment"],
+            baseName="Scale_correction_",
+            systAxes=["unc", f"{decorr_syst_var}_", "downUpVar"],
+            passToFakes=passSystToFakes,
+            scale=args.calibrationStatScaling,
+            actionRequiresNomi=True,
+            action=syst_tools.decorrelateByAxes,
+            actionArgs=dict(
+                axesToDecorrNames=[decorr_syst_var],
+                newDecorrAxesNames=[f"{decorr_syst_var}_"],
+            ),
+        )
+
+        datagroups.addSystematic(
+            "muonScaleClosSyst_responseWeights",
+            name="muonScaleClosSyst_responseWeightsDecorr",
+            processes=["single_v_samples"],
+            groups=["scaleClosCrctn", "muonCalibration", "experiment"],
+            baseName="ScaleClos_correction_",
+            systAxes=["unc", f"{decorr_syst_var}_", "downUpVar"],
+            passToFakes=passSystToFakes,
+            actionRequiresNomi=True,
+            action=syst_tools.decorrelateByAxes,
+            actionArgs=dict(
+                axesToDecorrNames=[decorr_syst_var],
+                newDecorrAxesNames=[f"{decorr_syst_var}_"],
+            ),
+        )
+    else:
+        datagroups.addSystematic(
+            "muonScaleSyst_responseWeights",
+            processes=["single_v_samples"],
+            groups=["scaleCrctn", "muonCalibration", "experiment"],
+            baseName="Scale_correction_",
+            systAxes=["unc", "downUpVar"],
+            passToFakes=passSystToFakes,
+            scale=args.calibrationStatScaling,
+        )
+        datagroups.addSystematic(
+            "muonScaleClosSyst_responseWeights",
+            processes=["single_v_samples"],
+            groups=["scaleClosCrctn", "muonCalibration", "experiment"],
+            baseName="ScaleClos_correction_",
+            systAxes=["unc", "downUpVar"],
+            passToFakes=passSystToFakes,
+        )
 
     mzerr = 2.1e-3
     mz0 = 91.18
@@ -2320,16 +2416,39 @@ def setup(
             scale=scaleM,
         )
     if not datagroups.args_from_metadata("noSmearing"):
-        datagroups.addSystematic(
-            "muonResolutionSyst_responseWeights",
-            mirror=True,
-            processes=["single_v_samples"],
-            groups=["resolutionCrctn", "muonCalibration", "experiment"],
-            baseName="Resolution_correction_",
-            systAxes=["smearing_variation"],
-            passToFakes=passSystToFakes,
-            scale=args.resolutionStatScaling,
-        )
+        if (
+            not dilepton
+            and "ptscale" in args.decorrSystByVar
+            and decorr_syst_var in fitvar
+        ):
+            datagroups.addSystematic(
+                "muonResolutionSyst_responseWeights",
+                name="muonResolutionSyst_responseWeightsDecorr",
+                mirror=True,
+                processes=["single_v_samples"],
+                groups=["resolutionCrctn", "muonCalibration", "experiment"],
+                baseName="Resolution_correction_",
+                systAxes=["smearing_variation", f"{decorr_syst_var}_"],
+                passToFakes=passSystToFakes,
+                scale=args.resolutionStatScaling,
+                actionRequiresNomi=True,
+                action=syst_tools.decorrelateByAxes,
+                actionArgs=dict(
+                    axesToDecorrNames=[decorr_syst_var],
+                    newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                ),
+            )
+        else:
+            datagroups.addSystematic(
+                "muonResolutionSyst_responseWeights",
+                mirror=True,
+                processes=["single_v_samples"],
+                groups=["resolutionCrctn", "muonCalibration", "experiment"],
+                baseName="Resolution_correction_",
+                systAxes=["smearing_variation"],
+                passToFakes=passSystToFakes,
+                scale=args.resolutionStatScaling,
+            )
 
     datagroups.addSystematic(
         "pixelMultiplicitySyst",

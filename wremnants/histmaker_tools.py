@@ -331,3 +331,20 @@ def make_quantile_helper(
         )
 
     return helpers
+
+
+def make_muon_phi_axis(phi_bins, ax_name="phi", flows=False):
+    # TODO: worth having different axis type (e.g. Regular with
+    # circular=True) depending on the list of edges?
+    if isinstance(phi_bins, int) or len(phi_bins) == 1:
+        nphi = phi_bins if isinstance(phi_bins, int) else int(phi_bins[0])
+        phi_width = 2.0 / nphi
+        phi_edges = [(-1.0 + i * phi_width) * np.pi for i in range(nphi + 1)]
+    else:
+        phi_edges = [x for x in phi_bins]
+
+    phi_axis = hist.axis.Variable(
+        np.array(phi_edges), name=ax_name, underflow=flows, overflow=flows
+    )
+
+    return phi_axis

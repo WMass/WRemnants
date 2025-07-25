@@ -237,7 +237,7 @@ def drawAndFitFRF(
             h1.Rebin(rebinFactorX)
         # case in which rebinFactorX is a list of bin edges
         else:
-            h1.Rebin(len(rebinFactorX) - 1, "", array("d", rebinFactorX))
+            h1.Rebin(len(rebinFactorX) - 1, "", array.array("d", rebinFactorX))
 
     xAxisName, setXAxisRangeFromUser, xmin, xmax = getAxisRangeFromUser(labelXtmp)
     yAxisName, setYAxisRangeFromUser, ymin, ymax = getAxisRangeFromUser(labelYtmp)
@@ -272,11 +272,20 @@ def drawAndFitFRF(
 
     if ymin == ymax == 0.0:
         ymin, ymax = getMinMaxHisto(h1, excludeEmpty=True, sumError=True)
+        # if ymax > 5:
+        #     # some points might have huge error bars, but reasonable central value
+        #     ymin_v2, ymax_v2 = getMinMaxHisto(h1, excludeEmpty=True, sumError=False)
+        #     if ymax > ymax_v2:
+        #         ymax = ymax_v2
+        #     else:
+        #         ymax = 5
         diff = ymax - ymin
         ymin -= diff * 0.25
         ymax += diff * 0.45
         if ymin < 0:
             ymin = 0
+        if ymax > 5.0:
+            ymax = 5.0
 
     h1.GetXaxis().SetTitle(xAxisName)
     h1.GetXaxis().SetTitleOffset(1.2)
@@ -312,7 +321,10 @@ def drawAndFitFRF(
     ]
     # print(fitBinEdges)
     h1fitRange = ROOT.TH1D(
-        f"{h1.GetName()}_fitRange", "", len(fitBinEdges) - 1, array("d", fitBinEdges)
+        f"{h1.GetName()}_fitRange",
+        "",
+        len(fitBinEdges) - 1,
+        array.array("d", fitBinEdges),
     )
     for ib in range(1, 1 + h1fitRange.GetNbinsX()):
         binOriginalHisto = ib + fitBinLow - 1
@@ -1555,7 +1567,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 round(etaLow, 1),
                 round(etaHigh, 1),
                 nMtBins,
-                array("d", mtEdges),
+                array.array("d", mtEdges),
             )
 
             outfolder1D = outfolder + "fakerateFactor_fits_pt%dto%d/" % (
@@ -1580,7 +1592,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                     "%.1f < %s < %.1f, p_{T} #in [%d, %d] GeV"
                     % (etaBinLow, etaLabel, etaBinHigh, ptBinLow, ptBinHigh),
                     nMtBins,
-                    array("d", mtEdges),
+                    array.array("d", mtEdges),
                 )
 
                 # to make easier computation of correction factor below
