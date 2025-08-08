@@ -1702,6 +1702,52 @@ def add_qcdScaleByHelicityUnc_hist(
     )
 
 
+def add_pdfUncertByHelicity_hist(
+    results, df, helper, pdf_name, axes, cols, base_name="nominal", **kwargs
+):
+    name = Datagroups.histName(base_name, syst=f"{pdf_name}UncertByHelicity")
+    tensorName = f"helicity{pdf_name}Weight_tensor"
+    if tensorName not in df.GetColumnNames():
+        # usually already defined when calculating central PDF weight
+        df = df.Define(
+            tensorName,
+            helper,
+            [
+                "massVgen",
+                "absYVgen",
+                "ptVgen",
+                "chargeVgen",
+                "csSineCosThetaPhigen",
+                "nominal_weight",
+            ],
+        )
+    add_syst_hist(
+        results, df, name, axes, cols, tensorName, helper.tensor_axes, **kwargs
+    )
+
+
+def add_pdfAlphaSByHelicity_hist(
+    results, df, helper, axes, cols, base_name="nominal", **kwargs
+):
+    name = Datagroups.histName(base_name, syst="pdfAlphaSByHelicity")
+    tensorName = "helicityAlphaSWeight_tensor"
+    df = df.Define(
+        tensorName,
+        helper,
+        [
+            "massVgen",
+            "absYVgen",
+            "ptVgen",
+            "chargeVgen",
+            "csSineCosThetaPhigen",
+            "nominal_weight",
+        ],
+    )
+    add_syst_hist(
+        results, df, name, axes, cols, tensorName, helper.tensor_axes, **kwargs
+    )
+
+
 def add_QCDbkg_jetPt_hist(
     results, df, axes, cols, base_name="nominal", jet_pt=30, **kwargs
 ):
@@ -2403,7 +2449,7 @@ def add_theory_hists(
     args,
     dataset_name,
     corr_helpers,
-    qcdScaleByHelicity_helper,
+    theory_helpers,
     axes,
     cols,
     base_name="nominal",
@@ -2470,13 +2516,40 @@ def add_theory_hists(
         )
 
     if for_wmass or isZ:
-        logger.debug(f"Make QCD scale histograms for {dataset_name}")
-        # there is no W backgrounds for the Wlike, make QCD scale histograms only for Z
-        # should probably remove the charge here, because the Z only has a single charge and the pt distribution does not depend on which charged lepton is selected
 
-        if qcdScaleByHelicity_helper is not None:
+        if theory_helpers.get("qcdScale") is not None:
+            logger.debug(f"Make QCD scale histograms for {dataset_name}")
+            # there is no W backgrounds for the Wlike, make QCD scale histograms only for Z
+            # should probably remove the charge here, because the Z only has a single charge and the pt distribution does not depend on which charged lepton is selected
             add_qcdScaleByHelicityUnc_hist(
-                results, df, qcdScaleByHelicity_helper, scale_axes, scale_cols, **info
+                results,
+                df,
+                theory_helpers.get("qcdScale"),
+                scale_axes,
+                scale_cols,
+                **info,
+            )
+        if theory_helpers.get("pdf") is not None:
+            pdf_helpers = theory_helpers.get("pdf")
+            for pdf in args.pdfs:
+                pdf_name = theory_tools.pdfMap[pdf]["name"]
+                if pdf_name not in pdf_helpers.keys():
+                    logger.warning(
+                        f"Did not find PDF uncertainty by helicity histograms for {dataset_name} and PDF set {pdf_name}"
+                    )
+                    continue
+                logger.debug(
+                    f"Make PDF uncertainty by helicity histograms for {dataset_name} and PDF set {pdf_name}"
+                )
+                add_pdfUncertByHelicity_hist(
+                    results, df, pdf_helpers[pdf_name], pdf_name, axes, cols, **info
+                )
+        if theory_helpers.get("alphaS") is not None:
+            logger.debug(
+                f"Make AlphaS uncertainty by helicity histograms for {dataset_name}"
+            )
+            add_pdfAlphaSByHelicity_hist(
+                results, df, theory_helpers.get("alphaS"), axes, cols, **info
             )
 
         if "MEParamWeight" not in df.GetColumnNames():

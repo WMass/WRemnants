@@ -79,6 +79,7 @@ class TheoryHelper(object):
         minnlo_unc="byHelicityPt",
         minnlo_scale=1.0,
         minnlo_symmetrize="quadratic",
+        from_hels=False,
     ):
 
         self.set_resum_unc_type(resumUnc)
@@ -99,6 +100,7 @@ class TheoryHelper(object):
         self.minnlo_symmetrize = (
             None if minnlo_symmetrize.lower() == "none" else minnlo_symmetrize
         )
+        self.from_hels = from_hels
 
     def add_all_theory_unc(self, helicity_fit_unc=False):
         self.helicity_fit_unc = helicity_fit_unc
@@ -107,7 +109,11 @@ class TheoryHelper(object):
         # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
         self.add_helicity_shower_kt_uncertainty()
 
-        self.add_pdf_uncertainty(operation=self.pdf_operation, scale=self.scale_pdf_unc)
+        self.add_pdf_uncertainty(
+            operation=self.pdf_operation,
+            scale=self.scale_pdf_unc,
+            from_hels=self.from_hels,
+        )
         try:
             self.add_quark_mass_vars()
         except ValueError as e:
@@ -813,15 +819,19 @@ class TheoryHelper(object):
                     name=rename,
                 )
 
-    def add_pdf_uncertainty(self, operation=None, scale=-1.0):
+    def add_pdf_uncertainty(self, operation=None, scale=-1.0, from_hels=False):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
         scale = scale if scale != -1.0 else pdfInfo["inflationFactor"]
-        pdf_hist = pdfName
-        pdf_corr_hist = (
-            f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
-        )
+        if from_hels:
+            pdf_hist = f"{pdfName}UncertByHelicity"
+            pdf_corr_hist = f"{pdfName}UncertByHelicity"
+        else:
+            pdf_hist = pdfName
+            pdf_corr_hist = (
+                f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
+            )
         symmetrize = "quadratic"
 
         if self.pdf_from_corr:
@@ -880,7 +890,7 @@ class TheoryHelper(object):
                     systAxes=[pdf_ax],
                 )
 
-    def add_pdf_alphas_variation(self, noi=False, scale=-1.0):
+    def add_pdf_alphas_variation(self, noi=False, scale=-1.0, from_hels=False):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
         pdfName = pdfInfo["name"]
@@ -891,16 +901,19 @@ class TheoryHelper(object):
         )
         symmetrize = "average" if noi else "quadratic"
         asRange = pdfInfo["alphasRange"]
-        asname = (
-            f"{pdfName}alphaS{asRange}"
-            if not self.as_from_corr
-            else pdf_corr_hist.replace("Vars", "_pdfas")
-        )
         as_replace = (
             [("as", "pdfAlphaS")] + [("0116", "Down"), ("0120", "Up")]
             if asRange == "002"
             else [("0117", "Down"), ("0119", "Up")]
         )
+        if from_hels:
+            asname = "pdfAlphaSByHelicity"
+        else:
+            asname = (
+                f"{pdfName}alphaS{asRange}"
+                if not self.as_from_corr
+                else pdf_corr_hist.replace("Vars", "_pdfas")
+            )
         as_args = dict(
             histname=asname,
             processes=["single_v_samples"],
@@ -973,7 +986,7 @@ class TheoryHelper(object):
                 name=f"resumTransitionFOScale{name_append}",
             )
 
-    def add_quark_mass_vars(self, from_minnlo=True):
+    def add_quark_mass_vars(self, from_minnlo=True, from_hels=False):
         pdfs = self.datagroups.args_from_metadata("pdfs")
         theory_corrs = self.datagroups.args_from_metadata("theoryCorr")
 
@@ -1007,9 +1020,13 @@ class TheoryHelper(object):
                 "In order to take the mb(c) mass unc. from SCETlib+DYTurbo, you need to include those corr files and use MSHT20 as central PDF"
             )
 
-        bhist = (
-            "pdfMSHT20mbrange" if from_minnlo else "scetlib_dyturboMSHT20mbrangeCorr"
-        )
+        if from_minnlo:
+            if from_hels:
+                bhist = "pdfMSHT20mbrangeUncertByHelicity"
+            else:
+                bhist = "pdfMSHT20mbrange"
+        else:
+            bhist = "scetlib_dyturboMSHT20mbrangeCorr"
         syst_ax = "pdfVar" if from_minnlo else "vars"
 
         self.datagroups.addSystematic(

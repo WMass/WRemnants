@@ -47,6 +47,12 @@ parser.add_argument(
     help="Use unfolding binning to produce the gen results",
 )
 parser.add_argument(
+    "--useCorrByHelicityBinning",
+    action="store_true",
+    help="Use finer absY binning to produce the gen results."
+    "Used in particular to produce the smooth PDF corrections.",
+)
+parser.add_argument(
     "--singleLeptonHists",
     action="store_true",
     help="Also store single lepton kinematics",
@@ -182,7 +188,7 @@ def build_graph(df, dataset):
                 ["ptVGen", "absYVGen"],
                 {
                     "ptll": common.get_dilepton_ptV_binning(fine=False),
-                    "yll": common.yll_10quantiles_binning,
+                    "yll": (common.yll_10quantiles_binning),
                 },
                 "prefsr",
                 add_out_of_acceptance_axis=False,
@@ -201,7 +207,18 @@ def build_graph(df, dataset):
         )
 
         axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
-
+    elif args.useCorrByHelicityBinning:
+        axis_absYVgen = hist.axis.Variable(
+            common.yll_10quantiles_binning_corr,
+            name="absYVgen",
+            underflow=False,
+        )
+        axis_ptVgen = hist.axis.Variable(
+            common.ptll_10quantiles_binning_corr,
+            name="ptVgen",
+            underflow=False,
+        )
+        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
     elif args.useTheoryAgnosticBinning:
         axis_absYVgen = hist.axis.Variable(
             axis_yV_thag.edges,  # same axis as theory agnostic norms
@@ -843,12 +860,12 @@ def build_graph(df, dataset):
         and "LHEPdfWeight" in df.GetColumnNames()
     ):
 
-        qcdScaleByHelicity_helper = (
-            theory_corrections.make_qcd_uncertainty_helper_by_helicity(
-                is_z=dataset.name[0] != "W"
+        theory_helpers = (
+            theory_corrections.make_theory_helpers(
+                args, procs=[dataset.name[0]], corrs=["qcdScale"]
             )
-            if args.helicity
-            else None
+            if args.helicity and args.propagatePDFstoHelicity
+            else {}
         )
 
         df = syst_tools.add_theory_hists(
@@ -857,7 +874,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            qcdScaleByHelicity_helper,
+            theory_helpers,
             nominal_axes,
             nominal_cols,
             base_name="nominal_gen",

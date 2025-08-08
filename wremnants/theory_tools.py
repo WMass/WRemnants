@@ -832,6 +832,39 @@ def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
     return df
 
 
+def define_central_smooth_pdf_weight(df, dataset_name, pdf, pdf_helper={}):
+
+    proc = dataset_name[0]
+    print(pdf_helper)
+    if type(pdf_helper) is not dict or proc not in pdf_helper.keys():
+        logger.warning(
+            f"Did not find sample {proc} in the given pdf_helper! Using nominal PDF in sample."
+        )
+        return df.DefinePerSample("central_smooth_pdf_weight", "1.0")
+    if pdf not in pdf_helper[proc].keys():
+        logger.warning(
+            f"Did not find PDF {pdf} for sample {proc}! Using nominal PDF in sample."
+        )
+        return df.DefinePerSample("central_smooth_pdf_weight", "1.0")
+
+    tensorName = f"helicity{pdf}Weight_tensor"
+    df = df.Define(
+        tensorName,
+        pdf_helper[proc][pdf],
+        [
+            "massVgen",
+            "absYVgen",
+            "ptVgen",
+            "chargeVgen",
+            "csSineCosThetaPhigen",
+        ],
+    )
+    return df.Define(
+        "central_smooth_pdf_weight",
+        f"std::clamp<float>(helicityPDFWeight_tensor[0], -theory_weight_truncate, theory_weight_truncate)",
+    )
+
+
 def define_central_pdf_weight(df, dataset_name, pdf):
     try:
         pdfInfo = pdf_info_map(dataset_name, pdf)
@@ -854,7 +887,7 @@ def define_central_pdf_weight(df, dataset_name, pdf):
     )
 
 
-def define_theory_weights_and_corrs(df, dataset_name, helpers, args):
+def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_helpers={}):
     if "LHEPart_status" in df.GetColumnNames():
         df = define_lhe_vars(df)
 

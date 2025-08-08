@@ -833,6 +833,11 @@ def make_parser(parser=None):
         "e.g. --select 'ptll 0 10"
         "e.g. --select 'ptll 0j 10j",
     )
+    parser.add_argument(
+        "--noTheoryCorrsViaHelicities",
+        action="store_true",
+        help="Don't use theory correction histograms produced via smoothing through helicites.",
+    )
     parser = make_subparsers(parser)
 
     return parser
@@ -1564,11 +1569,13 @@ def setup(
             minnlo_unc=args.minnloScaleUnc,
             minnlo_scale=args.scaleMinnloScale,
             minnlo_symmetrize=args.symmetrizeMinnloScale,
+            from_hels=not args.noTheoryCorrsViaHelicities,
         )
 
         theory_helper.add_pdf_alphas_variation(
             noi=args.fitAlphaS,
             scale=args.scalePdf if not args.fitAlphaS else 1.0,
+            from_hels=not args.noTheoryCorrsViaHelicities,
         )
 
         if not stat_only and not args.noTheoryUnc:

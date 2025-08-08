@@ -419,17 +419,10 @@ if args.unfolding:
         cutsmap=cutsmap,
     )
 
-    qcdScaleByHelicity_helpers = theory_corrections.make_qcd_uncertainty_helpers_by_helicity(
-        filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
-        rebin_ptZgen=False,
-    )
-
     if args.fitresult:
         unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
-else:
-    qcdScaleByHelicity_helpers = (
-        theory_corrections.make_qcd_uncertainty_helpers_by_helicity()
-    )
+
+theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=["Z", "W"])
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = differential.get_theoryAgnostic_axes(
@@ -678,8 +671,9 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
+    theory_helpers = {}
     if isWorZ:
-        qcdScaleByHelicity_helper = qcdScaleByHelicity_helpers[dataset.name[0]]
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -806,7 +800,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        qcdScaleByHelicity_helper,
+                        theory_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -827,7 +821,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        qcdScaleByHelicity_helper,
+                        theory_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -844,7 +838,7 @@ def build_graph(df, dataset):
         elif dataset.name == "ZmumuPostVFP":
             if args.unfolding and dataset.name == "ZmumuPostVFP":
                 df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, qcdScaleByHelicity_helper
+                    args, df, results, dataset, corr_helpers, theory_helpers
                 )
 
                 if not unfolder_z.poi_as_noi:
@@ -1990,7 +1984,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                qcdScaleByHelicity_helper,
+                theory_helpers,
                 axes,
                 cols,
                 for_wmass=True,

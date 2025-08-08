@@ -355,17 +355,7 @@ if args.unfolding:
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
-
-if args.unfolding and add_helicity_axis:
-    qcdScaleByHelicity_helpers = theory_corrections.make_qcd_uncertainty_helpers_by_helicity(
-        filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
-        # filename_z=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_nnpdf31_alphaSunfoldingBinning_helicity.hdf5",
-        rebin_ptZgen=False,
-    )
-else:
-    qcdScaleByHelicity_helpers = (
-        theory_corrections.make_qcd_uncertainty_helpers_by_helicity()
-    )
+theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=["Z", "W"])
 
 # extra axes which can be used to label tensor_axes
 if args.binnedScaleFactors:
@@ -515,8 +505,9 @@ def build_graph(df, dataset):
     isZ = dataset.name in common.zprocs
     isWorZ = isW or isZ
 
+    theory_helpers = {}
     if isWorZ:
-        qcdScaleByHelicity_helper = qcdScaleByHelicity_helpers[dataset.name[0]]
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     cvh_helper = data_calibration_helper if dataset.is_data else mc_calibration_helper
     jpsi_helper = data_jpsi_crctn_helper if dataset.is_data else mc_jpsi_crctn_helper
@@ -559,7 +550,7 @@ def build_graph(df, dataset):
 
     if args.unfolding and dataset.name == "ZmumuPostVFP":
         df = unfolder_z.add_gen_histograms(
-            args, df, results, dataset, corr_helpers, qcdScaleByHelicity_helper
+            args, df, results, dataset, corr_helpers, theory_helpers=theory_helpers
         )
 
         if not unfolder_z.poi_as_noi:
@@ -592,7 +583,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                qcdScaleByHelicity_helper,
+                theory_helpers,
                 [all_axes[obs]],
                 [obs],
                 base_name=f"gen_{obs}",
@@ -900,7 +891,7 @@ def build_graph(df, dataset):
         logger.debug(f"Experimental weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
 
         results.append(
@@ -1040,7 +1031,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        qcdScaleByHelicity_helper,
+                        theory_helpers,
                         [all_axes[obs]],
                         [obs],
                         base_name=f"nominal_{obs}",
@@ -1061,7 +1052,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                qcdScaleByHelicity_helper,
+                theory_helpers,
                 [all_axes[obs]],
                 [obs],
                 base_name=f"nominal_{obs}",
@@ -1243,7 +1234,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                qcdScaleByHelicity_helper,
+                theory_helpers,
                 axes,
                 cols,
                 for_wmass=False,
