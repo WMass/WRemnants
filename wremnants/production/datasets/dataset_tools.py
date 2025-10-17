@@ -23,6 +23,15 @@ default_nfiles = {
     "Ztautau_2016PostVFP": 1200,
 }
 
+new_mz_calibration_samples = [
+    "data2018Acharmonium",
+    "data2018Bcharmonium",
+    "data2018Ccharmonium",
+    "data2018Dcharmonium",
+    "BuToJpsiK",
+    "BuToJpsiPi",
+]
+
 
 def buildFileListPosix(path):
     outfiles = []
@@ -265,6 +274,9 @@ def getDatasets(
         is_data = info.get("group", "") == "Data"
 
         prod_tags = data_tags if is_data else mc_tags
+        if sample in new_mz_calibration_samples:
+            prod_tags = [""]
+
         nfiles = maxFiles
         if type(maxFiles) == dict:
             nfiles = maxFiles[sample] if sample in maxFiles else -1

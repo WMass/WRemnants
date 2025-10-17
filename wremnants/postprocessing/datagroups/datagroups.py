@@ -86,6 +86,10 @@ class Datagroups(object):
             from wremnants.postprocessing.datagroups.datagroupsLowPU import (
                 make_datagroups_lowPU as make_datagroups,
             )
+        elif self.era == "2018":
+            from wremnants.datasets.datagroups2018 import (
+                make_datagroups_2018 as make_datagroups,
+            )
         else:
             from wremnants.postprocessing.datagroups.datagroups2016 import (
                 make_datagroups_2016 as make_datagroups,
@@ -268,6 +272,9 @@ class Datagroups(object):
     ):
         logger.info(f"Set histselector")
         if self.mode[0] != "w":
+            logger.debug(
+                "histselectors only implemented for single lepton (with fakes)"
+            )
             return  # histselectors only implemented for single lepton (with fakes)
         auxiliary_info = {"ABCDmode": mode}
         signalselector = sel.SignalSelectorABCD
@@ -497,6 +504,9 @@ class Datagroups(object):
                 )
             group = self.groups[procName]
 
+            logger.debug(type(group))
+            logger.debug(group)
+
             group.hists[label] = None
 
             for i, member in enumerate(group.members):
@@ -716,6 +726,26 @@ class Datagroups(object):
         def get_sum(h):
             return h.sum() if not hasattr(h.sum(), "value") else h.sum().value
 
+        logger.debug(
+            f"Sorting groups by yields for histName: {histName}, nominalName: {nominalName}"
+        )
+        for k, v in self.groups.items():
+            available_hists = list(v.hists.keys())
+            logger.debug(f"Group: {k}, Available hists: {available_hists}")
+            if histName in v.hists:
+                yield_val = get_sum(v.hists[histName])
+                logger.debug(
+                    f"  Using histName '{histName}' for group '{k}', yield: {yield_val}"
+                )
+            elif nominalName in v.hists:
+                yield_val = get_sum(v.hists[nominalName])
+                logger.debug(
+                    f"  Using nominalName '{nominalName}' for group '{k}', yield: {yield_val}"
+                )
+            else:
+                logger.debug(
+                    f"  No valid histogram found for group '{k}', yield set to 0"
+                )
         self.groups = dict(
             sorted(
                 self.groups.items(),
@@ -729,6 +759,11 @@ class Datagroups(object):
                 reverse=True,
             )
         )
+        print("Groups sorted by yield:")
+        for k, v in self.groups.items():
+            used_hist = histName if histName in v.hists else nominalName
+            yield_val = get_sum(v.hists[used_hist]) if used_hist in v.hists else 0
+            print(f"  {k}: yield={yield_val}")
 
     def getDatagroupsForHist(self, histName):
         filled = {}

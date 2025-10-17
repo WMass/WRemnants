@@ -277,12 +277,14 @@ if addVariation and (args.selectAxis or args.selectEntries):
         )
 
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
-
+logger.debug(f"args.procFilters: {args.procFilters}")
 groups = Datagroups(
     args.infile,
     filterGroups=args.procFilters,
     excludeGroups=args.excludeProcs,
 )
+
+logger.debug(f"groups: {groups}")
 
 if not args.fineGroups:
     if groups.mode in styles.process_supergroups:
@@ -541,6 +543,7 @@ for h in args.hists:
         base_action = lambda x: hh.projectNoFlow(
             collapseSyst(x[select]), h, overflow_ax
         )
+        # base_action  = lambda x: collapseSyst(x[select])
         action = base_action
         href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
 
@@ -605,6 +608,12 @@ for h in args.hists:
                 else (var_arg + args.selectEntries[0])
             )
         to_join.append(var_arg)
+
+    filename_modifiers = output_tools.get_filename_modifiers()
+    to_join.extend(
+        [suffix for suffix, condition in filename_modifiers.items() if condition(args)]
+    )
+
     to_join.extend([args.postfix, args.channel.replace("all", "")])
     outfile = "_".join(filter(lambda x: x, to_join))
     if args.cmsDecor == "Preliminary":

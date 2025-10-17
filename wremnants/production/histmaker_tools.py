@@ -50,6 +50,10 @@ def scale_to_data(result_dict):
 
             histo *= scale
 
+        if "cutflow" in result:
+            for selection in result["cutflow"].keys():
+                result["cutflow"][selection] = result["cutflow"][selection] * scale
+
     logger.info(f"Scale to data: {time.time() - time0}")
 
 
