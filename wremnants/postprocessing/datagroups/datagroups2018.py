@@ -18,12 +18,18 @@ def make_datagroups_2018(
         members=dg.get_members_from_results(startswith=["BuToJpsiK"]),
     )
     dg.addGroup(
+        "signalBuToJpsiK",
+        members=dg.get_members_from_results(startswith=["signal"]),
+    )
+    dg.addGroup(
         "BuToJpsiPi",
         members=dg.get_members_from_results(startswith=["BuToJpsiPi"]),
     )
     dg.addGroup(
         "Other",
-        members=dg.get_members_from_results(not_startswith=["BuToJpsiK", "BuToJpsiPi"]),
+        members=dg.get_members_from_results(
+            not_startswith=["signal", "BuToJpsiK", "BuToJpsiPi"]
+        ),
     )
 
     dg.filterGroups(filterGroups)

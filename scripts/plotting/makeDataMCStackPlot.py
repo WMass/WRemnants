@@ -387,6 +387,8 @@ else:
     )
 
 exclude = ["Data"]
+if "signalBuToJpsiK" in args.procFilters:
+    exclude.append("signalBuToJpsiK")
 unstack = exclude[:]
 if args.noData:
     unstack.remove("Data")

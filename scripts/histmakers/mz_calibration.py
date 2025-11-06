@@ -1,18 +1,17 @@
 import os
 
-from utilities import common, parsing
+from utilities import parsing
 from wremnants.datasets.datagroups import Datagroups
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
-import math
 
-import hist
 import matplotlib.pyplot as plt
 
 import narf
 from wremnants import muon_calibration_pt2
+from wremnants.butojpsik_histograms import all_butojpsik_axes
 from wremnants.datasets.dataset_tools import getDatasets
 from wremnants.histmaker_tools import (
     aggregate_groups,
@@ -21,21 +20,28 @@ from wremnants.histmaker_tools import (
 )
 from wums import logging
 
+parser.add_argument("--allaxes", action="store_true", help="all histograms")
+parser.add_argument(
+    "--selectionHists", action="store_true", help="store hist after each selection"
+)
+parser.add_argument(
+    "--saveCutflow", type=str, default=None, help="output path for cutflow"
+)
+parser.add_argument(
+    "--cutflowName",
+    type=str,
+    default=None,
+    help="output filename for cutflow, default is postfix (-p)",
+)
 parser.add_argument(
     "--csVarsHist", action="store_true", help="Add CS variables to dilepton hist"
 )
-parser.add_argument("--axes", type=str, nargs="*", default=["mll", "ptll"], help="")
-parser.add_argument(
-    "--finePtBinning", action="store_true", help="Use fine binning for ptll"
-)
+parser.add_argument("--axes", type=str, nargs="*", default=[], help="")
 
 parser = parsing.set_parser_default(
     parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"]
 )
 parser = parsing.set_parser_default(parser, "excludeProcs", ["QCD"])
-parser = parsing.set_parser_default(
-    parser, "pt", common.get_default_ptbins(analysis_label)
-)
 
 args = parser.parse_args()
 
@@ -62,157 +68,6 @@ datasets = getDatasets(
 
 # dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
 
-axis_yll = hist.axis.Regular(20, -2.5, 2.5, name="yll")
-axis_absYll = hist.axis.Regular(10, 0.0, 2.5, name="absYll", underflow=False)
-
-# available axes for dilepton validation plots
-all_axes = {
-    "mll": hist.axis.Variable(
-        [
-            60,
-            70,
-            75,
-            78,
-            80,
-            82,
-            84,
-            85,
-            86,
-            87,
-            88,
-            89,
-            90,
-            91,
-            92,
-            93,
-            94,
-            95,
-            96,
-            97,
-            98,
-            100,
-            102,
-            105,
-            110,
-            120,
-        ],
-        name="mll",
-    ),
-    "yll": axis_yll,
-    "absYll": axis_absYll,
-    # "ptll": hist.axis.Variable(dilepton_ptV_binning, name="ptll", underflow=False),
-    "etaPlus": hist.axis.Variable([-2.4, -1.2, -0.3, 0.3, 1.2, 2.4], name="etaPlus"),
-    "etaMinus": hist.axis.Variable([-2.4, -1.2, -0.3, 0.3, 1.2, 2.4], name="etaMinus"),
-    "etaRegionSign": hist.axis.Regular(
-        3, 0, 3, name="etaRegionSign", underflow=False, overflow=False
-    ),
-    "etaRegionRange": hist.axis.Regular(
-        3, 0, 3, name="etaRegionRange", underflow=False, overflow=False
-    ),
-    "absEtaPlus": hist.axis.Regular(8, 0, 2.4, name="absEtaPlus"),
-    "absEtaMinus": hist.axis.Regular(8, 0, 2.4, name="absEtaMinus"),
-    "etaAbsEta": hist.axis.Variable(
-        [
-            -2.4,
-            -2.0,
-            -1.6,
-            -1.4,
-            -1.2,
-            -1.0,
-            -0.6,
-            0.0,
-            0.6,
-            1.0,
-            1.2,
-            1.4,
-            1.6,
-            2.0,
-            2.4,
-        ],
-        name="etaAbsEta",
-    ),
-    "etaSum": hist.axis.Regular(12, -4.8, 4.8, name="etaSum"),
-    "etaDiff": hist.axis.Variable(
-        [-4.8, -1.0, -0.6, -0.2, 0.2, 0.6, 1.0, 4.8], name="etaDiff"
-    ),
-    "ptPlus": hist.axis.Regular(int(args.pt[0]), args.pt[1], args.pt[2], name="ptPlus"),
-    "ptMinus": hist.axis.Regular(
-        int(args.pt[0]), args.pt[1], args.pt[2], name="ptMinus"
-    ),
-    # "cosThetaStarll": hist.axis.Regular(
-    #    200 if args.makeCSQuantileHists else 20,
-    #    -1.0,
-    #    1.0,
-    #    name="cosThetaStarll",
-    #    underflow=False,
-    #    overflow=False,
-    # ),
-    # "phiStarll": hist.axis.Regular(
-    #    200 if args.makeCSQuantileHists else 20,
-    #    -math.pi,
-    #    math.pi,
-    #    circular=True,
-    #    name="phiStarll",
-    # ),
-    "trigMuons_abseta0": hist.axis.Regular(
-        3, 0.0, 2.4, name="trigMuons_abseta0", underflow=False
-    ),
-    "nonTrigMuons_eta0": hist.axis.Regular(
-        int(args.eta[0]), args.eta[1], args.eta[2], name="nonTrigMuons_eta0"
-    ),
-    "nonTrigMuons_pt0": hist.axis.Regular(
-        int(args.pt[0]), args.pt[1], args.pt[2], name="nonTrigMuons_pt0"
-    ),
-    "nonTrigMuons_charge0": hist.axis.Regular(
-        2, -2.0, 2.0, underflow=False, overflow=False, name="nonTrigMuons_charge0"
-    ),
-}
-
-all_charmonium_axes = {
-    "Muon_eta": hist.axis.Regular(
-        50, -2.7, 2.7, name="Muon_eta", underflow=False, overflow=False
-    ),
-    "Muon_pt": hist.axis.Regular(
-        20, 0.0, 100.0, name="Muon_pt", underflow=False, overflow=False
-    ),
-    "Muon_phi": hist.axis.Regular(
-        50, -math.pi, math.pi, name="Muon_phi", underflow=False, overflow=False
-    ),
-    "bkmm_kaon_eta": hist.axis.Regular(
-        50, -2.7, 2.7, name="bkmm_kaon_eta", underflow=False, overflow=False
-    ),
-    "bkmm_kaon_pt": hist.axis.Regular(
-        100, 0.0, 20.0, name="bkmm_kaon_pt", underflow=False, overflow=False
-    ),
-    "bkmm_kaon_phi": hist.axis.Regular(
-        50, -math.pi, math.pi, name="bkmm_kaon_phi", underflow=False, overflow=False
-    ),
-    "bkmm_kaon_charge": hist.axis.Regular(
-        2, -2, 2, name="bkmm_kaon_charge", underflow=False, overflow=False
-    ),
-    "bkmm_jpsimc_eta": hist.axis.Regular(
-        50, -2.7, 2.7, name="bkmm_jpsimc_eta", underflow=False, overflow=False
-    ),
-    "bkmm_jpsimc_pt": hist.axis.Regular(
-        100, 0.0, 70.0, name="bkmm_jpsimc_pt", underflow=False, overflow=False
-    ),
-    "bkmm_jpsimc_phi": hist.axis.Regular(
-        50, -math.pi, math.pi, name="bkmm_jpsimc_phi", underflow=False, overflow=False
-    ),
-    "bkmm_nomc_mass": hist.axis.Regular(
-        50, 4.0, 6.5, name="bkmm_nomc_mass", underflow=False, overflow=False
-    ),
-    "bkmm_jpsimc_mass": hist.axis.Regular(
-        50, 4.0, 6.5, name="bkmm_jpsimc_mass", underflow=False, overflow=False
-    ),
-    "bkmm_nomc_massErr": hist.axis.Regular(
-        30, 0.0, 0.15, name="bkmm_nomc_massErr", underflow=False, overflow=False
-    ),
-    "bkmm_jpsimc_massErr": hist.axis.Regular(
-        30, 0.0, 0.15, name="bkmm_jpsimc_massErr", underflow=False, overflow=False
-    ),
-}
-
 # for a in args.axes:
 #   if a not in all_axes.keys():
 #        logger.error(
@@ -220,18 +75,21 @@ all_charmonium_axes = {
 #        )
 
 for a in args.axes:
-    if a not in all_charmonium_axes.keys():
+    if a not in all_butojpsik_axes.keys():
         logger.error(
-            f" {a} is not a known axes! Supported axes choices are {list(all_charmonium_axes.keys())}"
+            f" {a} is not a known axes! Supported axes choices are {list(all_butojpsik_axes.keys())}"
         )
 
 nominal_cols = args.axes
-
-nominal_axes = [all_charmonium_axes[a] for a in nominal_cols]
+nominal_axes = [all_butojpsik_axes[a] for a in nominal_cols]
+if args.allaxes:
+    nominal_cols = list(all_butojpsik_axes.keys())
+    nominal_axes = [all_butojpsik_axes[a] for a in all_butojpsik_axes]
 hist_names = set()
 
 # global so when event loop run the sumandcount pointers remain and get updated
 cutflows = {}
+signal_gen_filter_stats = {}
 
 
 def build_graph(df, dataset):
@@ -245,57 +103,152 @@ def build_graph(df, dataset):
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
     df = df.DefinePerSample("unity", "1.0")
-    # df = df.Define(
-    #    "isEvenEvent", f"event % 2 {'!=' if args.flipEventNumberSplitting else '=='} 0"
-    # )
 
-    weightsum = df.SumAndCount("weight")
+    if dataset.name == "signalBuToJpsiK":
+        total_evt_count = (
+            df.Count()
+        )  # matches evtcount in graph_builder otherwise complains
+        gen_weight_before = df.Sum("genWeight")
+        df = df.Filter("Any(bkmm_gen_pdgId != 0)", "require gen-matched candidate")
+        gen_weight_after = df.Sum("genWeight")
+        filtered_evt_count = df.Count()
+        weightsum_sum = df.Sum("weight")
+        weightsum = (weightsum_sum, total_evt_count)
+        signal_gen_filter_stats[dataset.name] = (
+            gen_weight_after,
+            gen_weight_before,
+            filtered_evt_count,
+        )
+    else:
+        weightsum = df.SumAndCount("weight")
 
     cutflow["Total"] = weightsum[0]
-    for var in nominal_cols:
-        hist_name = f"nominal_{var}_total"
-        results.append(df.HistoBoost(hist_name, [all_charmonium_axes[var]], [var]))
-        hist_names.add(hist_name)
+    if args.selectionHists:
+        for var in nominal_cols:
+            # if "gen" in str(var) and dataset.is_data:
+            #    results.append(df.HistoBoost(hist_name, ))
+            hist_name = f"nominal_{var}_total"
+            results.append(df.HistoBoost(hist_name, [all_butojpsik_axes[var]], [var]))
+            hist_names.add(hist_name)
 
     df, cutflow_trigger = muon_calibration_pt2.define_jpsi_triggers(
         df, trigger_name="DoubleMu4_3_Jpsi"
     )
     if cutflow_trigger:
         cutflow["HLT"] = cutflow_trigger[0]
-        for var in nominal_cols:
-            hist_name = f"nominal_{var}_hlt"
-            results.append(df.HistoBoost(hist_name, [all_charmonium_axes[var]], [var]))
-            hist_names.add(hist_name)
+        if args.selectionHists:
+            for var in nominal_cols:
+                # if "gen" in str(var) and dataset.is_data:
+                #    results.append(df.HistoBoost(hist_name, ))
+                hist_name = f"nominal_{var}_hlt"
+                results.append(
+                    df.HistoBoost(hist_name, [all_butojpsik_axes[var]], [var])
+                )
+                hist_names.add(hist_name)
 
-    df, cutflow_bkmm, dfs_per_cut = muon_calibration_pt2.bkmm_selections2(df)
+    # selectionssss (og was BPH-21-006)
+    bkmm_selections = [
+        (
+            "dimuon cand neutral",
+            "Require at least one opposite-sign dimuon candidate",
+            lambda d: muon_calibration_pt2.select_opposite_sign_dimuon(d),
+        ),
+        (
+            "muon |eta| < 1.4",
+            "Require |eta| < 1.4 for both muons",
+            lambda d: muon_calibration_pt2.select_muon_eta(d, 1.4),
+        ),
+        (
+            "muon pT > 4",
+            "Require pT > 4 GeV for both muons",
+            lambda d: muon_calibration_pt2.select_muon_pt(d, 4),
+        ),
+        (
+            "muon softMVA > 0.45",
+            "Require soft MVA > 0.45 for both muons",
+            lambda d: muon_calibration_pt2.select_muon_softmva(d, 0.45),
+        ),
+        (
+            "dimuon pT > 7",
+            "Require dimuon pT > 7 GeV",
+            lambda d: muon_calibration_pt2.select_dimuon_pt(d, 7.0),
+        ),
+        (
+            "dimuon alphaBS < 0.4",
+            "Require dimuon alphaBS < 0.4",
+            lambda d: muon_calibration_pt2.select_dimuon_alphabs(d, 0.4),
+        ),  # og 0.4
+        (
+            "dimuon vtx prob > 0.1",
+            "Require dimuon vertex prob > 0.1",
+            lambda d: muon_calibration_pt2.select_dimuon_vtx_prob(d, 0.1),
+        ),  # og 0.1
+        (
+            "dimuon sl3d > 4",
+            "Require dimuon 3D significance > 4",
+            lambda d: muon_calibration_pt2.select_dimuon_sl3d(d, 4),
+        ),  # og 4
+        (
+            "bkmm vtx prob > 0.3",
+            "Require bkmm J/psi+MC vertex prob > 0.3",
+            lambda d: muon_calibration_pt2.select_bkmm_vtx_prob(d, 0.3),
+        ),  # og 0.025
+        (
+            "bkmm mass window",
+            "Require |bkmm mass - 5.3| < 0.5 GeV",
+            lambda d: muon_calibration_pt2.select_bkmm_mass_window(d, 5.3, 0.5),
+        ),  # og 5.4, 0.5
+        # ("bkmm bmm bdt output > 0.10", "Require bkmm bmm bdt output variable > 0.10",
+        # lambda d: muon_calibration_pt2.select_bkmm_bmm_bdt(d, 0.10)) # NOTE: confirm this doesn't touch kaon
+    ]
+
+    df, cutflow_bkmm, dfs_per_cut = muon_calibration_pt2.bkmm_selections(
+        df, dataset.name, bkmm_selections
+    )
+
     for i, (selection, action) in enumerate(cutflow_bkmm.items()):
         cutflow[f"{selection}"] = action[0]
-        part_hist_name = (
-            selection.replace(" ", "_")
-            .replace(">", "gt")
-            .replace("<", "lt")
-            .replace("|", "")
-        )
-        for var in nominal_cols:
-            hist_name = f"nominal_{var}_{part_hist_name}"
-            results.append(
-                dfs_per_cut[i].HistoBoost(hist_name, [all_charmonium_axes[var]], [var])
+        if args.selectionHists:
+            part_hist_name = (
+                selection.replace(" ", "_")
+                .replace(">", "gt")
+                .replace("<", "lt")
+                .replace("|", "")
             )
+            for var in nominal_cols:
+                # if "gen" in str(var) and dataset.is_data:
+                #    results.append(df.HistoBoost(hist_name, ))
+                hist_name = f"nominal_{var}_{part_hist_name}"
+                results.append(
+                    dfs_per_cut[i].HistoBoost(
+                        hist_name, [all_butojpsik_axes[var]], [var]
+                    )
+                )
+                hist_names.add(hist_name)
+
+    df = muon_calibration_pt2.select_only_passing_bkmm_candidates(
+        df, signal=dataset.name == "signalBuToJpsiK", select_first=True
+    )
+    if args.selectionHists:
+        for var in nominal_cols:
+            # if "gen" in str(var) and dataset.is_data:
+            #    results.append(df.HistoBoost(hist_name, ))
+            hist_name = f"nominal_{var}_onecand"
+            results.append(df.HistoBoost(hist_name, [all_butojpsik_axes[var]], [var]))
             hist_names.add(hist_name)
 
-    df = muon_calibration_pt2.select_first_bkmm_candidate2(df)
-
-    # df = muon_calibration_pt2.analyze_candidate_multiplicity(df)
-
     for var in nominal_cols:
-        hist_name = f"nominal_{var}_onecand"
-        results.append(df.HistoBoost(hist_name, [all_charmonium_axes[var]], [var]))
+        # if "gen" in str(var) and dataset.is_data:
+        #    results.append(df.HistoBoost(hist_name, ))
+        hist_name = f"nominal_{var}"
+        results.append(df.HistoBoost(hist_name, [all_butojpsik_axes[var]], [var]))
         hist_names.add(hist_name)
+        final_var = var
 
-    # quick and dirty for now
-    for var in nominal_cols:
-        results.append(df.HistoBoost("nominal", [all_charmonium_axes[var]], [var]))
-        break
+    # hack to avoid some shit in makeDataMCstackratioplot or whatever
+    results.append(
+        df.HistoBoost(f"nominal", [all_butojpsik_axes[final_var]], [final_var])
+    )
 
     cutflows[dataset.name] = cutflow
 
@@ -306,15 +259,13 @@ logger.debug(f"Datasets are {[d.name for d in datasets]}")
 
 narf_obj = datasets[0]
 
-# logger.info("\n\n Narf object:\n")
-# logger.debug(f"narf_obj.name: {narf_obj.name}")
-# logger.debug(f"narf_obj.is_data: {narf_obj.is_data}")
-# logger.debug(f"narf_obj.xsec: {narf_obj.xsec}")
-# logger.debug(f"narf_obj.lumi_csv: {narf_obj.lumi_csv}")
-# logger.debug(f"narf_obj.lumi_json: {narf_obj.lumi_json}")
-# logger.debug(f"narf_obj.group: {narf_obj.group}")
-
 resultdict = narf.build_and_run(datasets[::-1], build_graph)
+
+for name, (after, before, filtered_count) in signal_gen_filter_stats.items():
+    resultdict[name]["gen_filter_eff"] = float(after.GetValue()) / float(
+        before.GetValue()
+    )
+    resultdict[name]["event_count"] = float(filtered_count.GetValue())
 
 for dataset, actions in cutflows.items():
     resultdict[dataset]["cutflow"] = {
@@ -329,38 +280,8 @@ write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
 
-"""eras = ['2018A', '2018B', '2018C', '2018D']
+##############   move shit below to utils somewhere
 
-aggregated_cutflows = {}
-for dataset_name, result in resultdict.items():
-    if "cutflow" not in result:
-        continue
-    
-    # Determine aggregate name
-    agg_name = dataset_name
-    for era in eras:
-        if f"data{era}charmonium" in dataset_name:
-            agg_name = "data2018charmonium"
-            break
-    
-    # Add to aggregated cutflows
-    if agg_name not in aggregated_cutflows:
-        aggregated_cutflows[agg_name] = result["cutflow"].copy()
-    else:
-        # Sum the cutflows
-        for cut_name, value in result["cutflow"].items():
-            aggregated_cutflows[agg_name][cut_name] += value
-
-print("\n" + "="*80)
-print("CUTFLOW TABLE")
-print("="*80)
-for dataset_name, cutflow in aggregated_cutflows.items():
-    if "cutflow" not in result:
-        continue
-    print(f"\n{dataset_name}:")
-    for cut_name, value in cutflow.items():
-        print(f"  {cut_name:30s}: {value:.2E}")
-print("="*80,"\n\n")"""
 
 # Aggregate cutflows by era
 eras = ["2018A", "2018B", "2018C", "2018D"]
@@ -387,7 +308,8 @@ for dataset_name, result in resultdict.items():
 
 # Get cutflow data
 data_cutflow = aggregated_cutflows.get("data2018charmonium", {})
-mc_cutflow = aggregated_cutflows.get("BuToJpsiK", {})
+signal_cutflow = aggregated_cutflows.get("signalBuToJpsiK", {})
+bjk_cutflow = aggregated_cutflows.get("BuToJpsiK", {})
 
 # Get all cut names (selections) in order
 cut_names = list(data_cutflow.keys())
@@ -396,27 +318,58 @@ cut_names = list(data_cutflow.keys())
 table_data = []
 for cut_name in cut_names:
     data_val = data_cutflow.get(cut_name, 0)
-    mc_val = mc_cutflow.get(cut_name, 0)
-    ratio = data_val / mc_val if mc_val != 0 else 0
-    table_data.append([cut_name, f"{data_val:.2e}", f"{mc_val:.2e}", f"{ratio:.3f}"])
+    signal_val = signal_cutflow.get(cut_name, 0)
+    bjk_val = bjk_cutflow.get(cut_name, 0)
+    ratio = data_val / signal_val if signal_val != 0 else 0
+    ratio2 = bjk_val / signal_val if signal_val != 0 else 0
+    table_data.append(
+        [
+            cut_name,
+            f"{data_val:.2e}",
+            f"{signal_val:.2e}",
+            f"{bjk_val:.2e}",
+            f"{ratio:.3f}",
+            f"{ratio2:.3f}",
+        ]
+    )
 
-# Create figure and axis
 fig, ax = plt.subplots(figsize=(8, len(cut_names) * 0.4))
 ax.axis("off")
 
-# Create table
 table = ax.table(
     cellText=table_data,
-    colLabels=["Selection", "Data", "B -> J/psi + K", "Ratio"],
+    colLabels=[
+        "Selection",
+        "Data",
+        "Signal",
+        "B->Jpsi+K",
+        "Data/Signal",
+        "B->Jpsi+K/Signal",
+    ],
     loc="center",
 )
 
-cutflow_output = "/home/submit/pmlugato/public_html/mz/btojpsik_selection_hists/cutflow_table_fullstats.png"
-plt.savefig(cutflow_output, bbox_inches="tight", dpi=300)
-logger.info(f"Table saved as {cutflow_output}")
+
+if args.saveCutflow:
+    os.makedirs(args.saveCutflow, exist_ok=True)
+    cutflow_postfix = args.cutflowName if args.cutflowName else args.postfix
+    cutflow_path = f"{args.saveCutflow}/cutflow_{cutflow_postfix}.png"
+    plt.savefig(cutflow_path, bbox_inches="tight", dpi=300)
+    logger.info(f"Table saved as {cutflow_path}")
+else:
+    print("\nCutflow Table:")
+    print(
+        f"{'Selection':<30} {'Data':>15} {'Signal':>15} {'B->Jpsi+K':>15} {'Data/Signal':>10} {'B->Jpsi+K/Signal':>10}"
+    )
+    print("-" * 75)
+    for row in table_data:
+        print(
+            f"{row[0]:<30} {row[1]:>15} {row[2]:>15} {row[3]:>15} {row[4]:>10} {row[5]:>10}"
+        )
+    print()
 plt.close()
 
 
-logger.info(
+print(
     f"hist variable names to copy paste for plotting:\n\n {' '.join([name.replace('nominal_', '') for name in hist_names])} \n\n"
 )

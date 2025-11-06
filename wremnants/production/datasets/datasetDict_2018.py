@@ -291,6 +291,16 @@ dataDict = {
         "group": "BuToJpsiK",
         "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
     },
+    "signalBuToJpsiK": {
+        "filepaths": [
+            "{BASE_PATH}/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
+        ],
+        "xsec": 1.219e7
+        * 1.02e-3
+        * 5.961e-2,  # B production xsec * BR(B --> Jpsi + K) * BR(Jpsi --> mumu)
+        "group": "signalBuToJpsiK",
+        "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
+    },
     "BuToJpsiPi": {
         "filepaths": [
             "{BASE_PATH}/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v1+MINIAODSIM"
