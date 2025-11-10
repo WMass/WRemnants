@@ -79,6 +79,7 @@ class Datagroups(object):
         self.gen_axes = {}
         self.fit_axes = []
         self.fakerate_axes = ["pt", "eta", "charge"]
+        self.decorrFakeAxis = "utAngleSign"
 
         self.setGenAxes()
 
@@ -314,6 +315,7 @@ class Datagroups(object):
                     h,
                     global_scalefactor=scale,
                     fakerate_axes=self.fakerate_axes,
+                    decorrFakeAxis=self.decorrFakeAxis,
                     smoothing_mode=smoothing_mode,
                     smoothing_order_fakerate=smoothingOrderFakerate,
                     smoothing_order_spectrum=smoothingOrderSpectrum,
@@ -646,7 +648,6 @@ class Datagroups(object):
             if self.rebinOp and self.rebinBeforeSelection:
                 logger.debug(f"Apply rebin operation for process {procName}")
                 group.hists[label] = self.rebinOp(group.hists[label])
-
             if group.histselector is not None:
                 if not applySelection:
                     logger.warning(
