@@ -66,6 +66,7 @@ def select_veto_muons(
     ptCut=15.0,
     staPtCut=15.0,
     etaCut=2.4,
+    dxybsCut=0.05,
     useGlobalOrTrackerVeto=False,
     tightGlobalOrTracker=True,
 ):
@@ -75,7 +76,7 @@ def select_veto_muons(
     # tightGlobalOrTracker relevant only when useGlobalOrTrackerVeto = True
     df = df.Define(
         "vetoMuonsPre",
-        "Muon_looseId && abs(Muon_dxybs) < 0.05 && Muon_correctedCharge != -99",
+        f"Muon_looseId && abs(Muon_dxybs) < {dxybsCut} && Muon_correctedCharge != -99",
     )
     df = df.Define(
         "Muon_isGoodGlobal",

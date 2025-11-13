@@ -71,7 +71,13 @@ parser.add_argument(
     "--procFilters",
     type=str,
     nargs="*",
-    help="Filter to plot (default no filter, only specify if you want a subset",
+    help="Filter to plot (default no filter, only specify if you want a subset)",
+)
+parser.add_argument(
+    "--procExcludes",
+    type=str,
+    nargs="*",
+    help="Exclude some processes",
 )
 parser.add_argument("--noData", action="store_true", help="Don't plot data")
 parser.add_argument("--noFill", action="store_true", help="Don't fill")
@@ -266,7 +272,11 @@ outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eos
 groups = Datagroups(
     args.infile,
     filterGroups=args.procFilters,
-    excludeGroups=None if args.procFilters else ["QCD"],
+    excludeGroups=(
+        args.procExcludes
+        if args.procExcludes
+        else None if args.procFilters else ["QCD"]
+    ),
 )
 
 if not args.fineGroups:

@@ -507,6 +507,12 @@ def common_parser(analysis_label=""):
             type=float,
             help="Upper threshold for muon absolute eta in the veto definition",
         )
+        parser.add_argument(
+            "--dxybs",
+            default=0.05,
+            type=float,
+            help="Upper threshold for muon absolute dxy with respect to beamspot",
+        )
         # Options to test splitting of data into subsets
         parser.add_argument(
             "--addRunAxis",

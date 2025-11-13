@@ -227,8 +227,6 @@ axis_isoCat = hist.axis.Variable(
     [0, 0.15, 0.3, 100], name="relIso", underflow=False, overflow=False
 )
 
-nominal_axes = [axis_eta, axis_pt, common.axis_charge]
-nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
 if args.addIsoMtAxes:
     nominal_axes.extend([axis_mtCat, axis_isoCat])
     nominal_cols.extend(["transverseMass", "trigMuons_relIso0"])

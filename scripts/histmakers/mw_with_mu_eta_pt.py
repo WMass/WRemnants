@@ -134,6 +134,11 @@ parser.add_argument(
     help="Add another fit axis with the sign of the uT recoil projection",
 )
 parser.add_argument(
+    "--addAxisMt",
+    action="store_true",
+    help="Add another fit axis with mT",
+)
+parser.add_argument(
     "--utAngleCosineCut",
     nargs=2,
     type=float,
@@ -279,6 +284,12 @@ axis_mt = hist.axis.Variable(
     overflow=True,
 )
 axis_met = hist.axis.Regular(25, 0.0, 100.0, name="met", underflow=False, overflow=True)
+axis_mt_testfit = hist.axis.Variable(
+    (*np.arange(0, mtw_min + 20, 20), *np.arange(mtw_min + 2, 122, 2)),
+    name="mt",
+    underflow=False,
+    overflow=True,
+)
 
 # for mt, met, ptW plots, to compute the fakes properly (but FR pretty stable vs pt and also vs eta)
 # may not exactly reproduce the same pt range as analysis, though
@@ -333,6 +344,24 @@ if args.addAxisSignUt:
     ]
 
     nominal_axes = [axis_eta, axis_pt, axis_charge, axis_ut_analysis, *axes_abcd]
+    nominal_cols = columns_fakerate
+elif args.addAxisMt:
+    axes_fakerate = [
+        axis_fakes_eta,
+        axis_fakes_pt,
+        axis_charge,
+        axis_mt_testfit,
+        axis_isoCat,
+    ]
+    columns_fakerate = [
+        "goodMuons_eta0",
+        "goodMuons_pt0",
+        "goodMuons_charge0",
+        "transverseMass",
+        "goodMuons_relIso0",
+    ]
+
+    nominal_axes = [axis_eta, axis_pt, axis_charge, axis_mt_testfit, axis_isoCat]
     nominal_cols = columns_fakerate
 else:
     axes_fakerate = [axis_fakes_eta, axis_fakes_pt, axis_charge, *axes_abcd]
@@ -431,6 +460,27 @@ axis_mt_fakes = hist.axis.Regular(
 axis_dphi_fakes = hist.axis.Regular(
     8, 0.0, np.pi, name="DphiMuonMet", underflow=False, overflow=False
 )
+# filled with 1 - cos, as in mT and such that W peaks at +2
+axis_oneMinusCosdphi = hist.axis.Regular(
+    20, 0.0, 2.0, name="oneMinusCosdphi", underflow=False, overflow=False
+)
+axis_metOverPt = hist.axis.Regular(
+    40, 0.0, 2.0, name="metOverPt", underflow=False, overflow=True
+)
+axis_mtOverPt = hist.axis.Regular(
+    80, 0.0, 4.0, name="mtOverPt", underflow=False, overflow=True
+)
+axis_altMt = hist.axis.Regular(
+    120, 0.0, 120.0, name="altMt", underflow=False, overflow=True
+)
+axis_dxybs = hist.axis.Regular(
+    int(args.dxybs / 0.002),
+    0.0,
+    args.dxybs,
+    name="dxybs",
+    underflow=False,
+    overflow=True,
+)
 axis_hasjet_fakes = hist.axis.Boolean(
     name="hasJets"
 )  # only need case with 0 jets or > 0 for now
@@ -442,6 +492,38 @@ mTStudyForFakes_axes = [
     axis_passIso,
     axis_hasjet_fakes,
     axis_dphi_fakes,
+]
+mTStudyForFakesAlt_axes = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_oneMinusCosdphi,
+    axis_passIso,
+    axis_passMT,
+]
+mTStudyForFakesAlt2_axes = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_mtOverPt,
+    axis_passIso,
+    axis_passMT,
+]
+mTStudyForFakesAlt3_axes = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_altMt,
+    axis_passIso,
+    axis_passMT,
+]
+mTStudyForFakesAlt4_axes = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_dxybs,
+    axis_passIso,
+    axis_passMT,
 ]
 
 axis_met = hist.axis.Regular(
@@ -863,6 +945,7 @@ def build_graph(df, dataset):
         nMuons=1,
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
+        dxybsCut=args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
     df = muon_selections.select_good_muons(
@@ -1272,8 +1355,10 @@ def build_graph(df, dataset):
 
     df = df.Define("hasCleanJet", "Sum(goodCleanJetsNoPt && Jet_pt > 30) >= 1")
     df = df.Define(
-        "deltaPhiMuonMet", "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))"
+        "goodMuons_dphiMuMet0",
+        "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))",
     )
+    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
         # would move the following in a function but there are too many dependencies on axes defined in the main loop
@@ -1354,7 +1439,7 @@ def build_graph(df, dataset):
                     "passIso",
                     "nJetsClean",
                     "leadjetPt",
-                    "deltaPhiMuonMet",
+                    "goodMuons_dphiMuMet0",
                     "nominal_weight",
                 ],
             )
@@ -1538,6 +1623,23 @@ def build_graph(df, dataset):
         # instead of passIso in mTStudyForFakes
         # df = df.Define("passIsoAlt", "(goodMuons_pfRelIso04_all0 * Muon_pt[goodMuons][0] / goodMuons_jetpt0) < 0.12")
         # df = df.Define("passIsoAlt", "(Muon_vtxAgnPfRelIso04_chg[goodMuons][0] * Muon_pt[goodMuons][0]) < 5.0")
+
+        df = df.Define(
+            # fill with 1 - cos so that W signal is at +1 instead of -1, for convenience
+            "goodMuons_oneMinusCosdphiMuMet0",
+            "1.0 - std::cos(goodMuons_dphiMuMet0)",
+        )
+        df = df.Define("goodMuons_metOverPt0", "MET_corr_rec_pt/goodMuons_pt0")
+        df = df.Define("goodMuons_mtOverPt0", "transverseMass/goodMuons_pt0")
+        df = df.Define(
+            "goodMuons_altMt0", "MET_corr_rec_pt*goodMuons_oneMinusCosdphiMuMet0"
+        )
+        # Defined as Threshold - |dxybs| so that for signal it peaks at Threshold instead of 0
+        # for convenience in the later study
+        df = df.Define(
+            "goodMuons_dxybs0", f"{args.dxybs} - abs(Muon_dxybs[goodMuons][0])"
+        )
+
         mTStudyForFakes = df.HistoBoost(
             "mTStudyForFakes",
             mTStudyForFakes_axes,
@@ -1548,20 +1650,78 @@ def build_graph(df, dataset):
                 "transverseMass",
                 "passIso",
                 "hasCleanJet",
-                "deltaPhiMuonMet",
+                "goodMuons_dphiMuMet0",
                 "nominal_weight",
             ],
         )
         results.append(mTStudyForFakes)
 
+        mTStudyForFakesAlt = df.HistoBoost(
+            "mTStudyForFakesAlt",
+            mTStudyForFakesAlt_axes,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_oneMinusCosdphiMuMet0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakesAlt)
+
+        mTStudyForFakesAlt2 = df.HistoBoost(
+            "mTStudyForFakesAlt2",
+            mTStudyForFakesAlt2_axes,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_mtOverPt0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakesAlt2)
+
+        mTStudyForFakesAlt3 = df.HistoBoost(
+            "mTStudyForFakesAlt3",
+            mTStudyForFakesAlt3_axes,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_altMt0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakesAlt3)
+
+        mTStudyForFakesAlt4 = df.HistoBoost(
+            "mTStudyForFakesAlt4",
+            mTStudyForFakesAlt4_axes,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_dxybs0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakesAlt4)
+
     # add filter of deltaPhi(muon,met) before other histograms (but after histogram mTStudyForFakes)
     if args.dphiMuonMetCut > 0.0 and not args.makeMCefficiency:
         dphiMuonMetCut = args.dphiMuonMetCut * np.pi
         df = df.Filter(
-            f"deltaPhiMuonMet > {dphiMuonMetCut}"
+            f"goodMuons_dphiMuMet0 > {dphiMuonMetCut}"
         )  # pi/4 was found to be a good threshold for signal with mT > 40 GeV
-
-    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
 
@@ -1591,7 +1751,14 @@ def build_graph(df, dataset):
             df.HistoBoost(
                 "deltaPhiMuonMet",
                 [axis_phi, *axes_fakerate],
-                ["deltaPhiMuonMet", *columns_fakerate, "nominal_weight"],
+                ["goodMuons_dphiMuMet0", *columns_fakerate, "nominal_weight"],
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                "metOverPt",
+                [axis_metOverPt, *axes_fakerate],
+                ["goodMuons_metOverPt0", *columns_fakerate, "nominal_weight"],
             )
         )
         results.append(
