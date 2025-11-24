@@ -512,7 +512,9 @@ def make_corr_by_helicity(
 
 
 def make_theory_helpers(
-    args, procs=["Z", "W"], corrs=["qcdScale", "pdf", "alphaS", "pdf_central"]
+    args,
+    procs=["Z", "W"],
+    corrs=["qcdScale", "pdf", "pdf_from_corr", "alphaS", "pdf_central"],
 ):
 
     theory_helpers_procs = {p: {} for p in procs}
@@ -543,6 +545,14 @@ def make_theory_helpers(
                 make_pdfs_uncertainties_helper_by_helicity(
                     proc=proc,
                     pdfs=args.pdfs,
+                )
+            )
+        if "pdf_from_corr" in corrs:
+            pdf_from_corrs = [x + "Corr" for x in args.theoryCorr if "Vars" in x]
+            theory_helpers_procs[proc]["pdf_from_corr"] = (
+                make_pdfs_from_corrs_uncertainties_helper_by_helicity(
+                    proc=proc,
+                    pdfs_from_corrs=pdf_from_corrs,
                 )
             )
         if "alphaS" in corrs:
@@ -725,6 +735,32 @@ def make_pdfs_uncertainties_helper_by_helicity(
     return pdf_helpers
 
 
+def make_pdfs_from_corrs_uncertainties_helper_by_helicity(
+    proc,
+    pdfs_from_corrs,
+    return_tensor=True,
+):
+    pdf_file_template = (
+        common.data_dir
+        + "/TheoryCorrectionsByHelicity/PDFsFromCorrs/w_z_gen_dists_{pdf}_maxFiles_m1_skimmed.hdf5"
+    )
+    pdf_helpers = {}
+    for pdf in pdfs_from_corrs:
+        logger.debug(f"Making PDF uncertainty helper by helicity for theory corr {pdf}")
+        pdf_helper = make_uncertainty_helper_by_helicity(
+            proc=proc,
+            nom=pdf,
+            den="pdf_uncorr",
+            central_weights=False,
+            var_ax_name="vars",
+            filename=pdf_file_template.format(pdf=pdf),
+            return_tensor=return_tensor,
+        )
+        if pdf_helper is not None:
+            pdf_helpers[pdf] = pdf_helper
+    return pdf_helpers
+
+
 def make_alphaS_uncertainties_helper_by_helicity(
     proc,
     as_vars,
@@ -739,11 +775,12 @@ def make_alphaS_uncertainties_helper_by_helicity(
         logger.debug(
             f"Making alphaS uncertainty helper by helicity for theory corr {as_var}"
         )
+        fname = alphas_file_template.format(as_var=as_var)
         as_helper = make_uncertainty_helper_by_helicity(
             proc=proc,
             nom=as_var,
             den="theory_uncorr",
-            filename=alphas_file_template.format(as_var=as_var),
+            filename=fname,
             var_ax_name="vars",
             return_tensor=return_tensor,
         )
@@ -779,12 +816,17 @@ def make_uncertainty_helper_by_helicity(
         hist_key = f"nominal_gen_{hist_name}"
         hists = []
         for process in proc_map.get(proc, ()):
+            if not os.path.exists(filename):
+                logger.warning(
+                    f"File {filename} does not exist. Not creating histogram of variations by helicities for process {proc} and variation {nom}."
+                )
+                return None
             with h5py.File(filename, "r") as h5file:
                 results = input_tools.load_results_h5py(h5file)
-                outputs = results[process]["output"]
+                outputs = results.get(process, {}).get("output", {})
                 if hist_key not in outputs:
                     logger.warning(
-                        f"Did not find {hist_key} in {filename}. Not creating histogram of PDF variations by helicities for this set."
+                        f"Did not find {hist_key} in {filename}. Not creating histogram of variations by helicities for process {proc} and variation {nom}."
                     )
                     return None
                 hists.append(outputs[hist_key].get())

@@ -912,14 +912,18 @@ class TheoryHelper(object):
             if scale != -1.0
             else theory_tools.pdf_inflation_factor(pdfInfo, self.args.noi)
         )
+        pdf_hist = pdfName
+        pdf_corr_hist = (
+            f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
+            if self.corr_hist_name == "scetlib_dyturboCorr"
+            else self.corr_hist_name.replace(
+                "Corr", "_CT18ZVarsCorr"
+            )  # TODO how do we get around this?
+        )
         if self.from_hels:
-            pdf_hist = f"{pdfName}UncertByHelicity"
-            pdf_corr_hist = f"{pdfName}UncertByHelicity"
-        else:
-            pdf_hist = pdfName
-            pdf_corr_hist = (
-                f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
-            )
+            pdf_hist += "UncertByHelicity"
+            pdf_corr_hist += "UncertByHelicity"
+        symmetrize = "quadratic"
 
         if self.pdf_from_corr:
             theory_unc = self.datagroups.args_from_metadata("theoryCorr")
@@ -998,7 +1002,13 @@ class TheoryHelper(object):
             asname = pdf_corr_hist.replace("Vars", "_pdfas")
             # alphaS from correction histograms only available for these sets,
             # so fall back to CT18Z for other sets
-            if not ("MSHT20" in asname or "CT18Z" in asname or "MSHT20an3lo" in asname):
+            if not (
+                "MSHT20" in asname
+                or "CT18Z" in asname
+                or "MSHT20an3lo" in asname
+                or "Lattice" in asname
+                or "nnlojet" in asname
+            ):  # TODO should fix the correction file name for Lattice?
                 asname = "scetlib_dyturboCT18Z_pdfasCorr"
                 as_range = theory_tools.pdfMap["ct18z"]["alphasRange"]
             if asname.replace("Corr", "") not in self.datagroups.args_from_metadata(

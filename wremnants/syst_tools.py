@@ -1747,7 +1747,7 @@ def add_pdfUncertByHelicity_hist(
             ],
         )
     safeTensorName = f"{tensorName}_clamped"
-    renorm = theory_tools.pdfMap[pdf].get("renorm", False)
+    renorm = theory_tools.pdfMap.get(pdf, {}).get("renorm", False)
     if renorm:
         central_event_weight = "nominal_weight"
     else:
@@ -2597,11 +2597,27 @@ def add_theory_hists(
                     cols,
                     **info,
                 )
+        if theory_helpers.get("pdf_from_corr") is not None:
+            pdf_from_corr_helpers = theory_helpers.get("pdf_from_corr")
+            for pdf in pdf_from_corr_helpers:
+                logger.debug(
+                    f"Make PDF (from correction file) uncertainty by helicity histograms for {dataset_name} and PDF from correction {pdf}"
+                )
+                add_pdfUncertByHelicity_hist(
+                    results,
+                    df,
+                    pdf_from_corr_helpers[pdf],
+                    pdf,
+                    pdf,
+                    axes,
+                    cols,
+                    **info,
+                )
         if theory_helpers.get("alphaS") is not None:
-            logger.debug(
-                f"Make AlphaS uncertainty by helicity histograms for {dataset_name}"
-            )
             for k, v in theory_helpers["alphaS"].items():
+                logger.debug(
+                    f"Make alphaS uncertainty by helicity histogram for {dataset_name} and alphaS from correction {k}"
+                )
                 add_pdfAlphaSByHelicity_hist(results, df, v, axes, cols, name=k, **info)
 
         add_breit_wigner_mass_weights_hist(

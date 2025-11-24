@@ -56,7 +56,7 @@ pdfMap = {
         "alphas": ["LHEPdfWeight[0]", "LHEPdfWeight[101]", "LHEPdfWeight[102]"],
         "alphasRange": "002",
         "inflation_factor_wmass": 3.0,
-        "inflation_factor_alphaS": 3.5,
+        "inflation_factor_alphaS": 3.0,
     },
     "ct18": {
         "name": "pdfCT18",
@@ -71,7 +71,7 @@ pdfMap = {
         "alphasRange": "002",
         "scale": 1 / 1.645,  # Convert from 90% CL to 68%
         "inflation_factor_wmass": 1.0,
-        "inflation_factor_alphaS": 1.0,
+        "inflation_factor_alphaS": 1.2,
     },
     "nnpdf30": {
         "name": "pdfNNPDF30",
@@ -113,7 +113,7 @@ pdfMap = {
         ],
         "alphasRange": "001",
         "inflation_factor_wmass": 1.0,
-        "inflation_factor_alphaS": 1.2,
+        "inflation_factor_alphaS": 1.5,
     },
     "msht20": {
         "name": "pdfMSHT20",
@@ -127,7 +127,7 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "inflation_factor_wmass": 1.5,
-        "inflation_factor_alphaS": 1.7,
+        "inflation_factor_alphaS": 2.0,
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
@@ -211,7 +211,7 @@ pdfMap = {
         ],  # alphas 116-120
         "alphasRange": "002",
         "inflation_factor_wmass": 4.0,
-        "inflation_factor_alphaS": 3.0,
+        "inflation_factor_alphaS": 3.5,
     },
     "herapdf20ext": {
         "name": "pdfHERAPDF20ext",
@@ -285,6 +285,7 @@ theory_corr_weight_map = {
     "scetlib_dyturboMSHT20_pdfas": expand_pdf_entries("msht20", alphas=True),
     "scetlib_dyturboMSHT20Vars": expand_pdf_entries("msht20"),
     "scetlib_dyturboCT18ZVars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturboN3p0LL_LatticeNP_CT18ZVars": expand_pdf_entries("ct18z"),
     "scetlib_dyturboCT18Z_pdfas": expand_pdf_entries("ct18z", alphas=True, renorm=True),
     "scetlib_dyturboN3p1LL_pdfas": expand_pdf_entries(
         "ct18z", alphas=True, renorm=True
