@@ -399,6 +399,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
         super().__init__(h, *args, **kwargs)
 
         # nominal histogram to be used to transfer variances for systematic variations
+        logger.debug("Setting h_nominal to None")
         self.h_nominal = None
         self.global_scalefactor = global_scalefactor
 
@@ -544,8 +545,12 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
     def transfer_variances(self, h, set_nominal=False):
         if set_nominal:
+            logger.debug("Setting h_nominal to h")
             self.h_nominal = h.copy()
         elif self.h_nominal is not None:
+            logger.debug("Setting variances in h from h_nominal")
+            logger.debug(f"Shape of h: {h.values().shape}")
+            logger.debug(f"Shape of h_nominal: {self.h_nominal.values().shape}")
             h = hh.transfer_variances(h, self.h_nominal)
         elif h.storage_type == hist.storage.Weight:
             logger.warning(
@@ -629,7 +634,11 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                 dvar = y_frf**2 * cvar
 
         elif self.smoothing_mode == "full":
-            h = self.transfer_variances(h, set_nominal=is_nominal)
+            if not (variations_frf or variations_smoothing):
+                logger.debug("Transferring variances for full smoothing without systematic variations")
+                h = self.transfer_variances(h, set_nominal=is_nominal)
+            else:
+                logger.warning("Not transferring variances before full smoothing, since systematic variations are requested")
             d, dvar = self.calculate_fullABCD_smoothed(
                 h, flow=flow, syst_variations=variations_smoothing, use_spline=False
             )
@@ -834,12 +843,12 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             )
 
             logger.debug("Doing syst_variations... something might be wrong here")
-            logger.error("Shapes of outvar and svar: " + str(outvar.shape) + " " + str(svar.shape))
+            logger.debug("Shapes of outvar and svar: " + str(outvar.shape) + " " + str(svar.shape))
 
             # leave the underflow and overflow unchanged if present
             outvar[*sel[:-1], :, :] = svar
 
-            logger.error("Shapes of outvar and svar: " + str(outvar.shape) + " " + str(svar.shape))
+            logger.debug("Shapes of outvar and svar: " + str(outvar.shape) + " " + str(svar.shape))
 
 
         else:
@@ -848,7 +857,6 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             outvar = np.zeros_like(out)
 
         return out, outvar
-
 
 
     def smoothen_spectrum(
@@ -954,7 +962,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                 )
 
         logger.debug("Smoothing completed. Getting output tensors.")
-
+        
         out, outvar = self.get_smoothed_tensor(h, sel, sval, svar, syst_variations, flow=flow)
 
         logger.debug("Smoothing completed.")
@@ -1094,33 +1102,33 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
         logger.debug(f"baseOutVarTensor shape: {baseOutVarTensor.shape}")
 
         if self.decorrFakeAxis!="" and self.decorrFakeAxis in hNew.axes.name:
-            decorrFake_idx = [n for n in hNew.axes.name].index(self.decorrFakeAxis)
+            decorrFakeAxis_idx = [n for n in hNew.axes.name].index(self.decorrFakeAxis)
             nbins_separateFakes = hNew.axes[self.decorrFakeAxis].size 
             logger.debug(
                 f"Found decorrelation axis {self.decorrFakeAxis} with {nbins_separateFakes} bins, applying smoothing independently in each bin."
             )
         else:
             nbins_separateFakes = 1
-            decorrFake_idx = -1
+            decorrFakeAxis_idx = -1
 
-        logger.debug(f"Decorrelation axis index: {decorrFake_idx}")
+        logger.debug(f"Decorrelation axis index: {decorrFakeAxis_idx}")
 
-        for i in range(nbins_separateFakes):
-            smoothing_slices = [slice(None)]*(sval.ndim)
+        for idx_fakeSep in range(nbins_separateFakes):
+            fakeSep_slices = [slice(None)]*(sval.ndim)
             outTensor_slices = [slice(None)]*(baseOutTensor.ndim)
             outVarTensor_slices = [slice(None)]*(baseOutVarTensor.ndim)
-            if decorrFake_idx >= 0:
-                smoothing_slices[decorrFake_idx] = i
-                outTensor_slices[decorrFake_idx] = i
-                outVarTensor_slices[decorrFake_idx] = i
+            if decorrFakeAxis_idx >= 0:
+                fakeSep_slices[decorrFakeAxis_idx] = idx_fakeSep
+                outTensor_slices[decorrFakeAxis_idx] = idx_fakeSep
+                outVarTensor_slices[decorrFakeAxis_idx] = idx_fakeSep
 
-            sval_sliced = sval[tuple(smoothing_slices)]
-            svar_sliced = svar[tuple(smoothing_slices)]
+            sval_sliced = sval[tuple(fakeSep_slices)]
+            svar_sliced = svar[tuple(fakeSep_slices)]
 
             logger.debug(f"Shape of sval_sliced: {sval_sliced.shape}")
             logger.debug(f"Shape of svar_sliced: {svar_sliced.shape}")
-
-            logger.debug(f"Starting smoothing for decorrelation bin {i}.")
+            logger.debug(f"Number of nonvalid bins in sval AFTER the first SELECTION: {np.sum(sval<=0.0)} out of {sval.size}")
+            logger.debug(f"Starting smoothing for decorrelation bin {idx_fakeSep}.")
 
             goodbin = (sval_sliced > 0.0) & (svar_sliced > 0.0)
             if goodbin.size - np.sum(goodbin) > 0:
@@ -1130,36 +1138,65 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
             logd = np.where(goodbin, np.log(sval_sliced), 0.0)
             if np.all(logd[..., :4]==0.0):
-                logger.debug(f"All ABCD values are zeros! Returning zero as Fake estimate.")
-                logger.debug(f"Syst variations: {syst_variations}")
-                sval_sliced = np.zeros_like(sval_sliced[..., 0])
-                svar_sliced = np.zeros_like(
-                    svar_sliced[..., 0] if not syst_variations 
-                    else svar_sliced[..., 0][..., None, None]
+
+                if decorrFakeAxis_idx <0:
+                    logger.debug(f"All ABCD values are zeros! Returning zero as Fake estimate.")
+                    logger.debug(f"Syst variations: {syst_variations}")
+                    sval_sliced = np.zeros_like(sval_sliced[..., 0])
+                    svar_sliced = np.zeros_like(
+                        svar_sliced[..., 0] if not syst_variations 
+                        else svar_sliced[..., 0][..., None, None]
                     )
-        
-                out, outvar = self.get_smoothed_tensor(
-                    h, (sval_sliced.ndim)*[slice(None)], sval_sliced, svar_sliced, 
-                    syst_variations=syst_variations, flow=flow
+
+                    out, outvar = self.get_smoothed_tensor(
+                        h, (sval_sliced.ndim)*[slice(None)], sval_sliced, svar_sliced, 
+                        syst_variations=syst_variations, flow=flow
                     )
+                
+                else:
+                    logger.debug(f"All ABCD values are zeros! Returning Fake estimate based on other bin, with an HARDCODED norm. factor")
+                    logger.debug(f"Syst variations: {syst_variations}")
+                    compl_mask = np.array([True if j!=idx_fakeSep else False for j in range(nbins_separateFakes)])
+
+                    logger.debug(f"Complement mask: {compl_mask}")
+                    logger.debug(f"APPLIED 'np.where'; {np.where(compl_mask)[0]}")
+
+                    sval_slicedCompl = sval.take(indices=np.where(compl_mask)[0], axis=decorrFakeAxis_idx).sum(axis=decorrFakeAxis_idx)
+                    svar_slicedCompl = svar.take(indices=np.where(compl_mask)[0], axis=decorrFakeAxis_idx).sum(axis=decorrFakeAxis_idx)
+
+                    logger.debug(f"Sval_slicedCompl shape: {sval_slicedCompl.shape}")
+                    count_nonvalid = np.sum(sval_slicedCompl<=0.0)
+                    logger.debug(f"Number of nonvalid bins in complement: {count_nonvalid} out of {sval_slicedCompl.size}")
+
+                    out_other, outvar_other = self.smoothen_spectrum(
+                        h, hNew.axes[self.smoothing_axis_name].edges, sval_slicedCompl, svar_slicedCompl, 
+                        syst_variations=syst_variations, use_spline=use_spline, 
+                        reduce=not signal_region, flow=flow
+                    )
+
+                    NORMFACTOR = 0.1196  # Ratio of nonprompt data in SV for uT<0 (num.) to ut>0 (den.)
+
+                    out = out_other * NORMFACTOR
+                    outvar = outvar_other * NORMFACTOR**2
 
             else:
                 out, outvar = self.smoothen_spectrum(
                     h, hNew.axes[self.smoothing_axis_name].edges, sval_sliced, svar_sliced, 
-                    syst_variations=syst_variations, use_spline=use_spline, reduce=not signal_region, flow=flow
-                    )
-                
-            if syst_variations and i==0:
-                logger.debug("Updatng baseOutVarTensor to correctly include syst variations")
+                    syst_variations=syst_variations, use_spline=use_spline, 
+                    reduce=not signal_region, flow=flow
+                )
+
+            if syst_variations and idx_fakeSep==0:
+                logger.debug("Updating baseOutVarTensor to correctly include syst variations")
                 logger.debug(f"Current outvar shape: {outvar.shape}")
                 logger.debug(f"Current baseOutVarTensor shape: {baseOutVarTensor.shape}")
                 baseOutVarTensor = np.zeros(
                     (*baseOutVarTensor.shape, *outvar.shape[-2:]), dtype=baseOutVarTensor.dtype
                 )
                 outVarTensor_slices += [slice(None), slice(None)]
-                
-                
-            logger.debug(f"Smoothing completed for decorrelation bin {i}.")
+
+
+            logger.debug(f"Smoothing completed for decorrelation bin {idx_fakeSep}.")
             logger.debug(f"Smoothing output shape: {out.shape}")
             logger.debug(f"Smoothing output var shape: {outvar.shape}")
             logger.debug(f"Smoothing baseOutTensor shape: {baseOutTensor.shape}")
