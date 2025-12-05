@@ -123,7 +123,7 @@ class HistselectorABCD(object):
         name_x=None,
         name_y=None,
         fakerate_axes=["eta", "pt", "charge"],
-        decorrFakeAxis="",
+        fakeTransferAxis="",
         smoothing_axis_name="pt",
         rebin_smoothing_axis="automatic",  # can be a list of bin edges, "automatic", or None
         upper_bound_y=None,  # using an upper bound on the abcd y-axis (e.g. isolation)
@@ -197,13 +197,13 @@ class HistselectorABCD(object):
         self.set_selections_x()
         self.set_selections_y()
 
-        self.decorrFakeAxis = decorrFakeAxis
+        self.fakeTransferAxis = fakeTransferAxis
         if fakerate_axes is not None:
             self.fakerate_axes = fakerate_axes
             self.fakerate_integration_axes = [
                 n
                 for n in h.axes.name
-                if n not in [self.name_x, self.name_y, *fakerate_axes, self.decorrFakeAxis]
+                if n not in [self.name_x, self.name_y, *fakerate_axes, self.fakeTransferAxis]
             ]
             logger.debug(
                 f"Setting fakerate integration axes to {self.fakerate_integration_axes}"
@@ -831,7 +831,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             else h
         )
         out = np.zeros(
-            [a.extent if flow else a.shape for a in hOut.axes if a.name not in [self.name_y, self.decorrFakeAxis]],
+            [a.extent if flow else a.shape for a in hOut.axes if a.name not in [self.name_y, self.fakeTransferAxis]],
             dtype=sval.dtype,
         )
         # leave the underflow and overflow unchanged if present
@@ -1101,26 +1101,26 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
         logger.debug(f"baseOutTensor shape: {baseOutTensor.shape}")
         logger.debug(f"baseOutVarTensor shape: {baseOutVarTensor.shape}")
 
-        if self.decorrFakeAxis!="" and self.decorrFakeAxis in hNew.axes.name:
-            decorrFakeAxis_idx = [n for n in hNew.axes.name].index(self.decorrFakeAxis)
-            nbins_separateFakes = hNew.axes[self.decorrFakeAxis].size 
+        if self.fakeTransferAxis!="" and self.fakeTransferAxis in hNew.axes.name:
+            fakeTransferAxis_idx = [n for n in hNew.axes.name].index(self.fakeTransferAxis)
+            nbins_separateFakes = hNew.axes[self.fakeTransferAxis].size 
             logger.debug(
-                f"Found decorrelation axis {self.decorrFakeAxis} with {nbins_separateFakes} bins, applying smoothing independently in each bin."
+                f"Found decorrelation axis {self.fakeTransferAxis} with {nbins_separateFakes} bins, applying smoothing independently in each bin."
             )
         else:
             nbins_separateFakes = 1
-            decorrFakeAxis_idx = -1
+            fakeTransferAxis_idx = -1
 
-        logger.debug(f"Decorrelation axis index: {decorrFakeAxis_idx}")
+        logger.debug(f"Decorrelation axis index: {fakeTransferAxis_idx}")
 
         for idx_fakeSep in range(nbins_separateFakes):
             fakeSep_slices = [slice(None)]*(sval.ndim)
             outTensor_slices = [slice(None)]*(baseOutTensor.ndim)
             outVarTensor_slices = [slice(None)]*(baseOutVarTensor.ndim)
-            if decorrFakeAxis_idx >= 0:
-                fakeSep_slices[decorrFakeAxis_idx] = idx_fakeSep
-                outTensor_slices[decorrFakeAxis_idx] = idx_fakeSep
-                outVarTensor_slices[decorrFakeAxis_idx] = idx_fakeSep
+            if fakeTransferAxis_idx >= 0:
+                fakeSep_slices[fakeTransferAxis_idx] = idx_fakeSep
+                outTensor_slices[fakeTransferAxis_idx] = idx_fakeSep
+                outVarTensor_slices[fakeTransferAxis_idx] = idx_fakeSep
 
             sval_sliced = sval[tuple(fakeSep_slices)]
             svar_sliced = svar[tuple(fakeSep_slices)]
@@ -1139,7 +1139,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             logd = np.where(goodbin, np.log(sval_sliced), 0.0)
             if np.all(logd[..., :4]==0.0):
 
-                if decorrFakeAxis_idx <0:
+                if fakeTransferAxis_idx <0:
                     logger.debug(f"All ABCD values are zeros! Returning zero as Fake estimate.")
                     logger.debug(f"Syst variations: {syst_variations}")
                     sval_sliced = np.zeros_like(sval_sliced[..., 0])
@@ -1161,8 +1161,8 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                     logger.debug(f"Complement mask: {compl_mask}")
                     logger.debug(f"APPLIED 'np.where'; {np.where(compl_mask)[0]}")
 
-                    sval_slicedCompl = sval.take(indices=np.where(compl_mask)[0], axis=decorrFakeAxis_idx).sum(axis=decorrFakeAxis_idx)
-                    svar_slicedCompl = svar.take(indices=np.where(compl_mask)[0], axis=decorrFakeAxis_idx).sum(axis=decorrFakeAxis_idx)
+                    sval_slicedCompl = sval.take(indices=np.where(compl_mask)[0], axis=fakeTransferAxis_idx).sum(axis=fakeTransferAxis_idx)
+                    svar_slicedCompl = svar.take(indices=np.where(compl_mask)[0], axis=fakeTransferAxis_idx).sum(axis=fakeTransferAxis_idx)
 
                     logger.debug(f"Sval_slicedCompl shape: {sval_slicedCompl.shape}")
                     count_nonvalid = np.sum(sval_slicedCompl<=0.0)

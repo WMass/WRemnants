@@ -79,7 +79,7 @@ class Datagroups(object):
         self.gen_axes = {}
         self.fit_axes = []
         self.fakerate_axes = ["pt", "eta", "charge"]
-        self.decorrFakeAxis = "utAngleSign"
+        self.fakeTransferAxis = "utAngleSign"
 
         self.setGenAxes()
 
@@ -315,7 +315,7 @@ class Datagroups(object):
                     h,
                     global_scalefactor=scale,
                     fakerate_axes=self.fakerate_axes,
-                    decorrFakeAxis=self.decorrFakeAxis,
+                    fakeTransferAxis=self.fakeTransferAxis,
                     smoothing_mode=smoothing_mode,
                     smoothing_order_fakerate=smoothingOrderFakerate,
                     smoothing_order_spectrum=smoothingOrderSpectrum,

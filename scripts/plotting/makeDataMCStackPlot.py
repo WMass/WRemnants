@@ -159,12 +159,12 @@ parser.add_argument(
     default=["eta", "pt", "charge"],
 )
 parser.add_argument(
-    "--decorrFakeAxis",
+    "--fakeTransferAxis",
     type=str,
     default="utAngleSign",
-    help="Axis on which to enforce a decorrelation the in the fake rate smoothing (e.g., utAngleSign)",
-    # Created to exclude the bin utAngleSign<0, in which any ABCD method cannot
-    # take place, since the four regions at low mt are empty
+    help="""
+    Axis where the fake prediction on non-valid bins (i.e. where the A-Ax-B-Bx regions are empty)
+    is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
 )
 parser.add_argument(
     "--fineGroups",
@@ -360,7 +360,7 @@ else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
-groups.decorrFakeAxis = args.decorrFakeAxis
+groups.fakeTransferAxis = args.fakeTransferAxis
 if applySelection:
     groups.set_histselectors(
         datasets,
