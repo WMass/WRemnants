@@ -159,6 +159,14 @@ parser.add_argument(
     default=["eta", "pt", "charge"],
 )
 parser.add_argument(
+    "--decorrFakeAxis",
+    type=str,
+    default="utAngleSign",
+    help="Axis on which to enforce a decorrelation the in the fake rate smoothing (e.g., utAngleSign)",
+    # Created to exclude the bin utAngleSign<0, in which any ABCD method cannot
+    # take place, since the four regions at low mt are empty
+)
+parser.add_argument(
     "--fineGroups",
     action="store_true",
     help="Plot each group as a separate process, otherwise combine groups based on predefined dictionary",
@@ -296,9 +304,19 @@ if len(args.presel):
     for ps in args.presel:
         if "=" in ps:
             axName, axRange = ps.split("=")
-            axMin, axMax = map(float, axRange.split(","))
-            logger.info(f"{axName} in [{axMin},{axMax}]")
-            presel[axName] = s[complex(0, axMin) : complex(0, axMax) : hist.sum]
+            if "," in ps:
+                #axMin, axMax = map(float, axRange.split(","))
+                axMin, axMax = [float(p) if p != str() else None for p in axRange.split(",")]
+                logger.info(f"{axName} in [{axMin},{axMax}]")
+                presel[axName] = s[complex(0, axMin) : complex(0, axMax) : hist.sum]
+            else:
+                logger.info(f"Selecting {axName} {axRange.split('.')[1]}")
+                if axRange == "hist.overflow":
+                    presel[axName] = hist.overflow
+                if axRange == "hist.underflow":
+                    presel[axName] = hist.underflow
+                if axRange == "hist.sum":
+                    presel[axName] = hist.sum
         else:
             logger.info(f"Integrating boolean {ps} axis")
             presel[ps] = s[:: hist.sum]
@@ -314,32 +332,35 @@ if args.axlim or args.rebin or args.absval:
         args.rebinBeforeSelection,
     )
 
-if args.selection:
-    applySelection = False
-    if args.selection != "none":
-        translate = {
+if args.selection and args.selection != "none":
+    translate = {
             "hist.overflow": hist.overflow,
             "hist.underflow": hist.underflow,
             "hist.sum": hist.sum,
         }
-        for selection in args.selection.split(","):
-            axis, value = selection.split("=")
-            if value.startswith("["):
-                parts = [
-                    translate[p] if p in translate else int(p) if p != str() else None
-                    for p in value[1:-1].split(":")
-                ]
-                select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
-            elif value == "hist.overflow":
-                select[axis] = hist.overflow
-            elif value == "hist.underflow":
-                select[axis] = hist.overflow
-            else:
-                select[axis] = int(value)
+    for selection in args.selection.split(","):
+        axis, value = selection.split("=")
+        if value.startswith("["):
+            parts = [
+                translate[p] if p in translate else int(p) if p != str() else None
+                for p in value[1:-1].split(":")
+            ]
+            select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
+        elif value == "hist.overflow":
+            select[axis] = hist.overflow
+        elif value == "hist.underflow":
+            select[axis] = hist.underflow
+        else:
+            select[axis] = int(value)
+    applySelection = False if any(  # does not trigger ABCD fake estimation if a cut is applied on the variables used to define ABCD regions
+        abcd_var in [cut_str.split("=")[0] for cut_str in args.selection.split(",")] 
+        for abcd_var in ["relIso", "mt"]
+        ) else True
 else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
+groups.decorrFakeAxis = args.decorrFakeAxis
 if applySelection:
     groups.set_histselectors(
         datasets,

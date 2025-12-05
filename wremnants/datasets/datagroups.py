@@ -1373,9 +1373,11 @@ class Datagroups(object):
         )
 
         for proc in procs_to_add:
-            logger.debug(f"Now at proc {proc}!")
+            logger.error(f"Now doing syst {name} for proc {proc}!")
 
             hvar = self.groups[proc].hists["syst"]
+            logger.debug(f"Actions: {action}, args: {actionArgs}")
+            logger.debug(f"hvar shape: {hvar.values().shape}")
 
             if action is not None:
                 if actionRequiresNomi:

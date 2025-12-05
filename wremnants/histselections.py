@@ -952,10 +952,8 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                     svar,
                     sval[..., None, None],
                 )
-                
 
         logger.debug("Smoothing completed. Getting output tensors.")
-        
 
         out, outvar = self.get_smoothed_tensor(h, sel, sval, svar, syst_variations, flow=flow)
 
@@ -1097,17 +1095,17 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
         if self.decorrFakeAxis!="" and self.decorrFakeAxis in hNew.axes.name:
             decorrFake_idx = [n for n in hNew.axes.name].index(self.decorrFakeAxis)
-            nbins_decorr = hNew.axes[self.decorrFakeAxis].size 
+            nbins_separateFakes = hNew.axes[self.decorrFakeAxis].size 
             logger.debug(
-                f"Found decorrelation axis {self.decorrFakeAxis} with {nbins_decorr} bins, applying smoothing independently in each bin."
+                f"Found decorrelation axis {self.decorrFakeAxis} with {nbins_separateFakes} bins, applying smoothing independently in each bin."
             )
         else:
-            nbins_decorr = 1
+            nbins_separateFakes = 1
             decorrFake_idx = -1
 
         logger.debug(f"Decorrelation axis index: {decorrFake_idx}")
 
-        for i in range(nbins_decorr):
+        for i in range(nbins_separateFakes):
             smoothing_slices = [slice(None)]*(sval.ndim)
             outTensor_slices = [slice(None)]*(baseOutTensor.ndim)
             outVarTensor_slices = [slice(None)]*(baseOutVarTensor.ndim)
@@ -1141,7 +1139,8 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                     )
         
                 out, outvar = self.get_smoothed_tensor(
-                    h, (sval_sliced.ndim)*[slice(None)], sval_sliced, svar_sliced, syst_variations=syst_variations, flow=flow
+                    h, (sval_sliced.ndim)*[slice(None)], sval_sliced, svar_sliced, 
+                    syst_variations=syst_variations, flow=flow
                     )
 
             else:
