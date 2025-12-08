@@ -293,8 +293,8 @@ def drawAndFitFRF(
         ymax += diff * 0.45
         if ymin < 0:
             ymin = 0
-        if ymax > 5.0:
-            ymax = 5.0
+        if ymax > 4.0:
+            ymax = 4.0
 
     h1.GetXaxis().SetTitle(xAxisName)
     h1.GetXaxis().SetTitleOffset(1.2)

@@ -164,6 +164,8 @@ axis_labels = {
     "run": r"Run range",
     "nRecoVtx": r"Number of reconstructed vertices",
     "PV_npvsGood": r"Number of reconstructed vertices",
+    "utmu": {"label": r"$\mathit{u}_{T}^{\mu}$", "unit": "GeV"},
+    "utAngleSign": r"sign($\mathit{u}_{T}^{\mu}$)",
     # "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
     # "ewMll": r"$\mathrm{Post\ FSR}\ m^{\mu\mu}$",
     # "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\mu\mu}$",
@@ -421,6 +423,7 @@ translate_selection = {
     "absYVGen": lambda l, h: rf"${round(l,3)} < |Y| < {round(h,3)}$",
     "helicitySig": lambda x: rf"$\sigma_{{{'UL' if x==-1 else int(x)}}}$",
     "ai": lambda x: rf"$A_{int(x)}$",
+    "utAngleSign": lambda x: rf"$\mathit{{sign}}(\mathit{{u}}_{{T}}^\mu) = {int(x)}$",
 }
 
 impact_labels = {
