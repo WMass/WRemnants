@@ -61,15 +61,14 @@ parser.add_argument(
     help="Keep only theory systematic variations, mainly for tests",
 )
 parser.add_argument(
-    "--oneMCfileEveryN",
-    type=int,
-    default=None,
-    help="Use 1 MC file every N, where N is given by this option. Mainly for tests",
-)
-parser.add_argument(
     "--noAuxiliaryHistograms",
     action="store_true",
     help="Remove auxiliary histograms to save memory (removed by default with --unfolding or --theoryAgnostic)",
+)
+parser.add_argument(
+    "--fineMtBinning",
+    action="store_true",
+    help="Use finer binning for the transverse mass axis of the nominal histogram",
 )
 parser.add_argument(
     "--mtCut",
@@ -310,7 +309,9 @@ axis_fakes_pt = hist.axis.Variable(
 )
 
 axis_mtCat = hist.axis.Variable(
-    common.get_binning_fakes_mt(mtw_min, high_mt_bins=False),
+    common.get_binning_fakes_mt(
+        mtw_min, high_mt_bins=False, fine_mt_binning=args.fineMtBinning
+    ),
     name="mt",
     underflow=False,
     overflow=True,
@@ -322,6 +323,7 @@ axis_isoCat = hist.axis.Variable(
     overflow=True,
 )
 axes_abcd = [axis_mtCat, axis_isoCat]
+
 axis_ut_analysis = hist.axis.Regular(
     2, -2, 2, underflow=False, overflow=False, name="utAngleSign"
 )  # used only to separate positive/negative uT for now
@@ -414,6 +416,7 @@ if args.unfolding:
     unfolding_axes = {}
     unfolding_cols = {}
     for level in args.unfoldingLevels:
+        # for poi as noi, need gen eta overflow bin and out of acceptance axes to keep all events and be able to reconstruct corresponding reco histogram
         a, c = differential.get_pt_eta_charge_axes(
             level,
             npt_unfolding,
@@ -435,8 +438,35 @@ if args.unfolding:
                 )
                 break
 
+    # for simultaneous W and Z unfolding, only implemented for ptll-yll
+    if args.unfoldingInclusive:
+        cutsmap = {"fiducial": "masswindow"}
+    else:
+        mass_min, mass_max = common.get_default_mz_window()
+        cutsmap = {
+            "pt_min": args.pt[1],
+            "pt_max": args.pt[2],
+            "abseta_max": args.eta[2],
+            "mass_min": mass_min,
+            "mass_max": mass_max,
+        }
+
+    unfolder_z = unfolding_tools.UnfolderZ(
+        reco_axes_edges={
+            "ptll": common.get_dilepton_ptV_binning(),
+            "yll": common.yll_10quantiles_binning,
+        },
+        unfolding_axes_names=["ptVGen", "absYVGen", "helicitySig"],
+        unfolding_levels=args.unfoldingLevels,
+        poi_as_noi=args.poiAsNoi,
+        fitresult=args.fitresult,
+        cutsmap=cutsmap,
+    )
+
     if args.fitresult:
         unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
+
+theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=["Z", "W"])
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = differential.get_theoryAgnostic_axes(
@@ -451,6 +481,7 @@ if args.theoryAgnostic:
         args.theoryAgnosticPolVar and args.theoryAgnosticSplitOOA
     ):  # this splitting is not needed for the normVar version of the theory agnostic
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Wmunu")
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
         groups_to_aggregate.append("WmunuOOA")
 
 # axes for study of fakes
@@ -537,8 +568,6 @@ axis_recoWpt = hist.axis.Regular(
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
-
-qcdScaleByHelicity_helper = theory_corrections.make_qcd_uncertainty_helper_by_helicity()
 
 if args.noScaleFactors:
     logger.info("Running with no scale factors")
@@ -728,7 +757,16 @@ def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
     isW = dataset.name in common.wprocs
-    isWmunu = dataset.name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]
+    isBSM = dataset.name in [
+        "WtoNMu_MN-5-V-0p001",
+        "WtoNMu_MN-10-V-0p001",
+        "WtoNMu_MN-50-V-0p001",
+    ]
+    isWmunu = isBSM or dataset.name in [
+        "WplusmunuPostVFP",
+        "WminusmunuPostVFP",
+    ]
+
     isZ = dataset.name in common.zprocs
     isZveto = isZ or dataset.name in ["DYJetsToMuMuMass10to50PostVFP"]
     isWorZ = isW or isZ
@@ -738,6 +776,10 @@ def build_graph(df, dataset):
     storage_type = (
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
+
+    theory_helpers = {}
+    if isWorZ:
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -825,69 +867,121 @@ def build_graph(df, dataset):
             )
         cols = [*cols, "run4axis"]
 
-    if args.unfolding and isWmunu:
-        df = unfolding_tools.define_gen_level(
-            df, dataset.name, args.unfoldingLevels, mode=analysis_label
+    if isBSM:
+        # to compute inclusive cross section
+        unfolding_tools.add_xnorm_histograms(
+            results,
+            df,
+            args,
+            dataset.name,
+            corr_helpers,
+            theory_helpers,
+            [],
+            [],
+            base_name="gen",
         )
 
-        cutsmap = {
-            "pt_min": template_minpt,
-            "pt_max": template_maxpt,
-            "abseta_max": template_maxeta,
-            "mtw_min": None,
-        }
-        if hasattr(dataset, "out_of_acceptance"):
-            df = unfolding_tools.select_fiducial_space(
-                df,
-                args.unfoldingLevels[0],
-                mode=analysis_label,
-                accept=False,
-                **cutsmap,
+    if args.unfolding:
+        if isWmunu:
+            df = unfolding_tools.define_gen_level(
+                df, dataset.name, args.unfoldingLevels, mode=analysis_label
             )
-        else:
-            for level in args.unfoldingLevels:
+
+            cutsmap = {
+                "pt_min": template_minpt,
+                "pt_max": template_maxpt,
+                "abseta_max": template_maxeta,
+                "mtw_min": None,
+            }
+            if hasattr(dataset, "out_of_acceptance"):
                 df = unfolding_tools.select_fiducial_space(
                     df,
-                    level,
+                    args.unfoldingLevels[0],
                     mode=analysis_label,
-                    accept=True,
-                    select=not args.poiAsNoi,
+                    accept=False,
                     **cutsmap,
                 )
+            else:
+                for level in args.unfoldingLevels:
+                    df = unfolding_tools.select_fiducial_space(
+                        df,
+                        level,
+                        mode=analysis_label,
+                        accept=True,
+                        select=not args.poiAsNoi,
+                        **cutsmap,
+                    )
 
-            if args.fitresult:
-                logger.debug("Apply reweighting based on unfolded result")
-                df = df.Define(
-                    "unfoldingWeight_tensor",
-                    unfolding_corr_helper,
-                    [*unfolding_corr_helper.hist.axes.name[:-1], "unity"],
-                )
-                df = df.Define(
-                    "central_weight",
-                    f"{unfolding_corr_helper.level}_acceptance ? unfoldingWeight_tensor(0) : unity",
+                if args.fitresult:
+                    logger.debug("Apply reweighting based on unfolded result")
+                    df = df.Define(
+                        "unfoldingWeight_tensor",
+                        unfolding_corr_helper,
+                        [*unfolding_corr_helper.hist.axes.name[:-1], "unity"],
+                    )
+                    df = df.Define(
+                        "central_weight",
+                        f"{unfolding_corr_helper.level}_acceptance ? unfoldingWeight_tensor(0) : unity",
+                    )
+
+                for level in args.unfoldingLevels:
+                    # add full phase space histograms for inclusive cross section
+                    unfolding_tools.add_xnorm_histograms(
+                        results,
+                        df,
+                        args,
+                        dataset.name,
+                        corr_helpers,
+                        theory_helpers,
+                        [a for a in unfolding_axes[level] if a.name != "acceptance"],
+                        [
+                            c
+                            for c in unfolding_cols[level]
+                            if c != f"{level}_acceptance"
+                        ],
+                        base_name=f"{level}_full",
+                    )
+
+                    if args.poiAsNoi:
+                        df_xnorm = df.Filter(f"{level}_acceptance")
+                    else:
+                        df_xnorm = df
+
+                    unfolding_tools.add_xnorm_histograms(
+                        results,
+                        df_xnorm,
+                        args,
+                        dataset.name,
+                        corr_helpers,
+                        theory_helpers,
+                        [a for a in unfolding_axes[level] if a.name != "acceptance"],
+                        [
+                            c
+                            for c in unfolding_cols[level]
+                            if c != f"{level}_acceptance"
+                        ],
+                        base_name=level,
+                    )
+                    if not args.poiAsNoi:
+                        axes = [*nominal_axes, *unfolding_axes[level]]
+                        cols = [*nominal_cols, *unfolding_cols[level]]
+                        break
+
+        elif dataset.name == "ZmumuPostVFP":
+            if args.unfolding and dataset.name == "ZmumuPostVFP":
+                df = unfolder_z.add_gen_histograms(
+                    args, df, results, dataset, corr_helpers, theory_helpers
                 )
 
-            for level in args.unfoldingLevels:
-                if args.poiAsNoi:
-                    df_xnorm = df.Filter(f"{level}_acceptance")
-                else:
-                    df_xnorm = df
-
-                unfolding_tools.add_xnorm_histograms(
-                    results,
-                    df_xnorm,
-                    args,
-                    dataset.name,
-                    corr_helpers,
-                    qcdScaleByHelicity_helper,
-                    [a for a in unfolding_axes[level] if a.name != "acceptance"],
-                    [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
-                    base_name=level,
-                )
-                if not args.poiAsNoi:
-                    axes = [*nominal_axes, *unfolding_axes[level]]
-                    cols = [*nominal_cols, *unfolding_cols[level]]
-                    break
+                if not unfolder_z.poi_as_noi:
+                    axes = [
+                        *nominal_axes,
+                        *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+                    ]
+                    cols = [
+                        *nominal_cols,
+                        *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+                    ]
 
     if isWorZ:
         df = theory_tools.define_prefsr_vars(df)
@@ -1285,7 +1379,7 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
 
         if (
@@ -1800,7 +1894,7 @@ def build_graph(df, dataset):
             )
         )
 
-    if args.poiAsNoi and isW:
+    if args.poiAsNoi:
         if (
             args.theoryAgnostic
             and isWmunu
@@ -1861,20 +1955,50 @@ def build_graph(df, dataset):
                             )
                         )
 
-        if args.unfolding and isWmunu:
-            for level in args.unfoldingLevels:
-                noiAsPoiHistName = Datagroups.histName(
-                    "nominal", syst=f"{level}_yieldsUnfolding"
-                )
-                logger.debug(
-                    f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
-                )
-                results.append(
-                    df.HistoBoost(
-                        noiAsPoiHistName,
-                        [*nominal_axes, *unfolding_axes[level]],
-                        [*nominal_cols, *unfolding_cols[level], "nominal_weight"],
+        if args.unfolding:
+            if isWmunu:
+                for level in args.unfoldingLevels:
+                    noiAsPoiHistName = Datagroups.histName(
+                        "nominal", syst=f"{level}_yieldsUnfolding"
                     )
+                    logger.debug(
+                        f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
+                    )
+                    results.append(
+                        df.HistoBoost(
+                            noiAsPoiHistName,
+                            [*nominal_axes, *unfolding_axes[level]],
+                            [*nominal_cols, *unfolding_cols[level], "nominal_weight"],
+                        )
+                    )
+                    # create corresponding histogram without experimental weights, to correlate stat between gen and reco
+                    weight_expr = theory_tools.build_weight_expr(
+                        df,
+                        exclude_weights=[
+                            "exp_weight",
+                        ],
+                    )  # May want to exclude "ew_theory_corr_weight" in case of QCD only gen definition
+                    logger.info(f"Theory weight is {weight_expr}")
+                    df = df.Define(f"theory_weight_{level}", weight_expr)
+
+                    results.append(
+                        df.HistoBoost(
+                            f"{noiAsPoiHistName}_theory_weight",
+                            [*nominal_axes, *unfolding_axes[level]],
+                            [
+                                *nominal_cols,
+                                *unfolding_cols[level],
+                                f"theory_weight_{level}",
+                            ],
+                        )
+                    )
+
+            elif dataset.name == "ZmumuPostVFP":
+                unfolder_z.add_poi_as_noi_histograms(
+                    df,
+                    results,
+                    nominal_axes,
+                    nominal_cols,
                 )
 
     if isWorZ and not hasattr(dataset, "out_of_acceptance"):
@@ -1886,17 +2010,18 @@ def build_graph(df, dataset):
             "nominal_weight",
         ]
         # assume to have same coeffs for plus and minus (no reason for it not to be the case)
-        if dataset.name == "WplusmunuPostVFP" or dataset.name == "WplustaunuPostVFP":
+        if dataset.name in ["WplusmunuPostVFP", "WplustaunuPostVFP"]:
             helpers_class = muRmuFPolVar_helpers_plus
             process_name = "W"
-        elif (
-            dataset.name == "WminusmunuPostVFP" or dataset.name == "WminustaunuPostVFP"
-        ):
+        elif dataset.name in ["WminusmunuPostVFP", "WminustaunuPostVFP"]:
             helpers_class = muRmuFPolVar_helpers_minus
             process_name = "W"
-        elif dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
+        elif dataset.name in ["ZmumuPostVFP", "ZtautauPostVFP"]:
             helpers_class = muRmuFPolVar_helpers_Z
             process_name = "Z"
+        else:
+            helpers_class = {}
+
         for coeffKey in helpers_class.keys():
             logger.debug(
                 f"Creating muR/muF histograms with polynomial variations for {coeffKey}"
@@ -2105,7 +2230,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                qcdScaleByHelicity_helper,
+                theory_helpers,
                 axes,
                 cols,
                 for_wmass=True,
@@ -2113,7 +2238,11 @@ def build_graph(df, dataset):
             )
 
             # Don't think it makes sense to apply the mass weights to scale leptons from tau decays
-            if not args.onlyTheorySyst and not "tau" in dataset.name:
+            if (
+                "massWeight_tensor" in df.GetColumnNames()
+                and not args.onlyTheorySyst
+                and not "tau" in dataset.name
+            ):
                 df = syst_tools.add_muonscale_hist(
                     results,
                     df,

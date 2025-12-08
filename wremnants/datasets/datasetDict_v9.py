@@ -217,6 +217,27 @@ dataDictV9 = {
         "xsec_dn": 3.588e01,
         "group": "PhotonInduced",
     },
+    "WtoNMu_MN-5-V-0p001": {
+        "filepaths": [
+            "{BASE_PATH}/WtoNMu_MN-5-V-0p001_TuneCP5_13TeV_madgraph-pythia8/"
+        ],
+        "xsec": common.xsec_WtoNMu,
+        "group": "WtoNMu_5",
+    },
+    "WtoNMu_MN-10-V-0p001": {
+        "filepaths": [
+            "{BASE_PATH}/WtoNMu_MN-10-V-0p001_TuneCP5_13TeV_madgraph-pythia8/"
+        ],
+        "xsec": common.xsec_WtoNMu,
+        "group": "WtoNMu_10",
+    },
+    "WtoNMu_MN-50-V-0p001": {
+        "filepaths": [
+            "{BASE_PATH}/WtoNMu_MN-50-V-0p001_TuneCP5_13TeV_madgraph-pythia8/"
+        ],
+        "xsec": common.xsec_WtoNMu,
+        "group": "WtoNMu_50",
+    },
 }
 
 # extended version with additional samples (but missing some pdf sets)

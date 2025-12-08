@@ -74,10 +74,16 @@ parser.add_argument(
     help="Filter to plot (default no filter, only specify if you want a subset)",
 )
 parser.add_argument(
-    "--procExcludes",
+    "--excludeProcs",
     type=str,
     nargs="*",
-    help="Exclude some processes",
+    help="Exclude processes matched by group name or (subset) of name",
+    default=[
+        "QCD",
+        "WtoNMu_5",
+        "WtoNMu_10",
+        "WtoNMu_50",
+    ],
 )
 parser.add_argument("--noData", action="store_true", help="Don't plot data")
 parser.add_argument("--noFill", action="store_true", help="Don't fill")
@@ -122,7 +128,7 @@ parser.add_argument(
     type=str,
     help="Set the mode for the fake estimation",
     default="extended1D",
-    choices=["simple", "extrapolate", "extended1D", "extended2D"],
+    choices=["mc", "simple", "extrapolate", "extended1D", "extended2D"],
 )
 parser.add_argument(
     "--fakeMCCorr",
@@ -272,11 +278,7 @@ outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eos
 groups = Datagroups(
     args.infile,
     filterGroups=args.procFilters,
-    excludeGroups=(
-        args.procExcludes
-        if args.procExcludes
-        else None if args.procFilters else ["QCD"]
-    ),
+    excludeGroups=args.excludeProcs,
 )
 
 if not args.fineGroups:
@@ -432,7 +434,7 @@ if addVariation:
         else:
             varname = name
 
-        reload = name != args.baseName
+        reload = name != args.baseName or do_transform
         # The action map will only work if reloading, otherwise need to apply some transform
         # to the already loaded hist
         if load_op and reload:

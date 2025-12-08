@@ -1,9 +1,11 @@
 from copy import deepcopy
 
 import hist
+import numpy as np
 
-from utilities import common
-from wremnants import syst_tools, theory_tools
+from utilities import common, differential
+from wremnants import helicity_utils, syst_tools, theory_tools
+from wremnants.datasets.datagroups import Datagroups
 from wums import logging
 
 logger = logging.child_logger(__name__)
@@ -178,7 +180,7 @@ def add_xnorm_histograms(
     args,
     dataset_name,
     corr_helpers,
-    qcdScaleByHelicity_helper,
+    theory_helpers,
     unfolding_axes,
     unfolding_cols,
     base_name="xnorm",
@@ -189,7 +191,7 @@ def add_xnorm_histograms(
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
 
     df_xnorm = theory_tools.define_theory_weights_and_corrs(
-        df_xnorm, dataset_name, corr_helpers, args
+        df_xnorm, dataset_name, corr_helpers, args, theory_helpers=theory_helpers
     )
 
     df_xnorm = df_xnorm.Define("xnorm", "0.5")
@@ -229,7 +231,7 @@ def add_xnorm_histograms(
         args,
         dataset_name,
         corr_helpers,
-        qcdScaleByHelicity_helper,
+        theory_helpers,
         xnorm_axes,
         xnorm_cols,
         base_name=base_name,
@@ -240,37 +242,68 @@ def add_xnorm_histograms(
     return df_xnorm
 
 
-def reweight_to_fitresult(filename, result=None, channel="ch0", flow=True):
+def reweight_to_fitresult(
+    filename, result=None, physics_model="", channel="ch0_masked"
+):
     import wums.boostHistHelpers as hh
     from rabbit.io_tools import get_fitresult
 
-    fitresult, meta = get_fitresult(filename, result, meta=True)
+    fitresult, meta = get_fitresult(filename[0], result, meta=True)
+    results = fitresult["physics_models"][physics_model]["channels"][channel]
 
-    hPrefit = fitresult["channels"][channel][f"hist_prefit_inclusive"].get()
-    hPostfit = fitresult["channels"][channel][f"hist_postfit_inclusive"].get()
+    hPostfit = results[f"hist_postfit_inclusive"].get()
+
+    if len(filename) == 2:
+        fitresult_den, meta_den = get_fitresult(filename[1], result, meta=True)
+        results_den = fitresult_den["physics_models"][physics_model]["channels"][
+            channel
+        ]
+        hPrefit = results_den[f"hist_prefit_inclusive"].get()
+    else:
+        hPrefit = results[f"hist_prefit_inclusive"].get()
 
     hRatio = hh.divideHists(hPostfit, hPrefit)
 
     # get the gen level the unfolding was performed for
     level = meta["meta_info_input"]["meta_info"]["args"]["unfoldingLevel"]
 
+    values = hRatio.values(flow=True)
+
     axes = []
-    for ax in hRatio.axes:
+    for i, ax in enumerate(hRatio.axes):
         name = ax.name
-        if "VGen" in ax.name:
+        if "VGen" in name:
             suffix = "V"
-            var = ax.name.replace("VGen", "")
+            var = name.replace("VGen", "")
         else:
             suffix = "Lep"
-            var = ax.name.replace("Gen", "")
+            var = name.replace("Gen", "")
         if var == "q":
             var = "charge"
 
         ax._ax.metadata["name"] = f"{level}{suffix}_{var}"
+
+        # enable flow everywhere to allow generic indexing, add slices of 1 where flow was False
+        if ax.traits.underflow == False:
+            new_shape = list(values.shape)
+            new_shape[i] = 1
+            ones_slice = np.ones(new_shape, dtype=values.dtype)
+            values = np.concatenate([ones_slice, values], axis=i)
+        if ax.traits.overflow == False:
+            new_shape = list(values.shape)
+            new_shape[i] = 1
+            ones_slice = np.ones(new_shape, dtype=values.dtype)
+            values = np.concatenate([values, ones_slice], axis=i)
+
+        ax = hh.enableAxisFlow(ax)
+
         axes.append(ax)
 
-    hCorr = hist.Hist(*axes, hist.axis.Regular(1, 0, 1, name="vars", flow=False))
-    hCorr.values(flow=flow)[...] = hRatio.values(flow=flow)[..., None]
+    hCorr = hist.Hist(
+        *axes,
+        hist.axis.Regular(1, 0, 1, name="vars", flow=False),
+    )
+    hCorr.values(flow=True)[...] = values[..., None]
 
     from wremnants.correctionsTensor_helper import makeCorrectionsTensor
 
@@ -278,3 +311,231 @@ def reweight_to_fitresult(filename, result=None, channel="ch0", flow=True):
     corr_helper.level = level
 
     return corr_helper
+
+
+class UnfolderZ:
+    """
+    To be used in histmakers to define columns and add histograms for unfolding of Z dilepton kinematics
+    """
+
+    def __init__(
+        self,
+        cutsmap,
+        reco_axes_edges,
+        unfolding_axes_names=None,
+        unfolding_levels=None,
+        poi_as_noi=True,
+        fitresult=None,
+        fitresult_physics_model=f"Select",
+        fitresult_channel="ch0_masked",
+        low_pu=False,
+    ):
+        self.analysis_label = "z_lowpu" if low_pu else "z_dilepton"
+        self.cutsmap = cutsmap
+        self.add_helicity_axis = "helicitySig" in unfolding_axes_names
+
+        if not poi_as_noi and len(unfolding_levels) > 1:
+            raise RuntimeError(
+                "More than 1 unfolding levels at a time is only supported in poi as noi mode"
+            )
+        elif fitresult is not None and len(unfolding_levels) > 1:
+            raise RuntimeError(
+                "More than 1 unfolding levels at a time is not supported when reweighting from a fitresult"
+            )
+
+        self.poi_as_noi = poi_as_noi
+        self.unfolding_levels = unfolding_levels
+
+        # self.qcdScaleByHelicity_helper =
+
+        if self.add_helicity_axis:
+            # helper to derive helicity xsec shape from event by event reweighting
+            self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
+                is_z=True,
+                filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
+                # filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_nnpdf31_alphaSunfoldingBinning_helicity.hdf5",
+                rebi_ptVgen=True,
+            )
+
+        self.unfolding_axes = {}
+        self.unfolding_cols = {}
+        self.unfolding_selections = {}
+        for level in self.unfolding_levels:
+            # for poi as noi, need gen rapidity overflow bin and out of acceptance axes to keep all events and be able to reconstruct corresponding reco histogram
+            a, c, s = differential.get_dilepton_axes(
+                unfolding_axes_names,
+                reco_axes_edges,
+                level,
+                flow_y=self.poi_as_noi,
+                add_out_of_acceptance_axis=self.poi_as_noi,
+                rebin_pt=True,
+            )
+            self.unfolding_axes[level] = a
+            self.unfolding_cols[level] = c
+            self.unfolding_selections[level] = s
+
+            if self.add_helicity_axis:
+                for ax in a:
+                    if ax.name == "acceptance":
+                        continue
+                    # check if binning is consistent between correction helper and unfolding axes
+                    #   unfolding axes must a subset of corretion helper
+                    wbh_axis = self.weightsByHelicity_helper_unfolding.hist.axes[
+                        ax.name.replace("Gen", "gen")
+                    ]
+                    if any(ax.edges != wbh_axis.edges):
+                        raise RuntimeError(
+                            f"""
+                            Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
+                            Found unfolding axis {ax}\n
+                            And weightsByHelicity_helper axis {wbh_axis}
+                            """
+                        )
+
+        self.unfolding_corr_helper = (
+            reweight_to_fitresult(
+                fitresult,
+                physics_model=fitresult_physics_model,
+                channel=fitresult_channel,
+            )
+            if fitresult is not None
+            else None
+        )
+
+    def add_gen_histograms(
+        self, args, df, results, dataset, corr_helpers, theory_helpers={}
+    ):
+        df = define_gen_level(
+            df, dataset.name, self.unfolding_levels, mode=self.analysis_label
+        )
+
+        if hasattr(dataset, "out_of_acceptance"):
+            # only for exact unfolding
+            df = select_fiducial_space(
+                df,
+                self.unfolding_levels[0],
+                mode=self.analysis_label,
+                selections=self.unfolding_selections[self.unfolding_levels[0]],
+                accept=False,
+                **self.cutsmap,
+            )
+        else:
+            for level in self.unfolding_levels:
+                # add full phase space histograms for inclusive cross section
+                df_full = df.Filter(f"{level}V_mass > 60")
+                df_full = df_full.Filter(f"{level}V_mass < 120")
+                add_xnorm_histograms(
+                    results,
+                    df_full,
+                    args,
+                    dataset.name,
+                    corr_helpers,
+                    theory_helpers,
+                    [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
+                    [
+                        c
+                        for c in self.unfolding_cols[level]
+                        if c != f"{level}_acceptance"
+                    ],
+                    base_name=f"{level}_full",
+                )
+
+                df = select_fiducial_space(
+                    df,
+                    level,
+                    mode=self.analysis_label,
+                    selections=self.unfolding_selections[level],
+                    select=not self.poi_as_noi,
+                    accept=True,
+                    **self.cutsmap,
+                )
+
+                if self.unfolding_corr_helper:
+                    logger.debug("Apply reweighting based on unfolded result")
+                    df = df.Define(
+                        "unfoldingWeight_tensor",
+                        self.unfolding_corr_helper,
+                        [*self.unfolding_corr_helper.hist.axes.name[:-1], "unity"],
+                    )
+                    df = df.Define(
+                        "central_weight",
+                        f"{level}_acceptance ? unfoldingWeight_tensor(0) : unity",
+                    )
+
+                if self.poi_as_noi:
+                    df_xnorm = df.Filter(f"{level}_acceptance")
+                else:
+                    df_xnorm = df
+
+                add_xnorm_histograms(
+                    results,
+                    df_xnorm,
+                    args,
+                    dataset.name,
+                    corr_helpers,
+                    theory_helpers,
+                    [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
+                    [
+                        c
+                        for c in self.unfolding_cols[level]
+                        if c != f"{level}_acceptance"
+                    ],
+                    add_helicity_axis=self.add_helicity_axis,
+                    base_name=level,
+                )
+
+        return df
+
+    def add_poi_as_noi_histograms(self, df, results, nominal_axes, nominal_cols):
+
+        if self.add_helicity_axis:
+            df = helicity_utils.define_helicity_weights(
+                df, self.weightsByHelicity_helper_unfolding
+            )
+
+        for level in self.unfolding_levels:
+            noiAsPoiHistName = Datagroups.histName(
+                "nominal", syst=f"{level}_yieldsUnfolding"
+            )
+            logger.debug(
+                f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
+            )
+            yield_axes = [*nominal_axes, *self.unfolding_axes[level]]
+            yield_cols = [*nominal_cols, *self.unfolding_cols[level]]
+            if self.add_helicity_axis:
+                from wremnants.helicity_utils import axis_helicity_multidim
+
+                results.append(
+                    df.HistoBoost(
+                        noiAsPoiHistName,
+                        yield_axes,
+                        [*yield_cols, "nominal_weight_helicity"],
+                        tensor_axes=[axis_helicity_multidim],
+                    )
+                )
+            else:
+                results.append(
+                    df.HistoBoost(
+                        noiAsPoiHistName,
+                        yield_axes,
+                        [*yield_cols, "nominal_weight"],
+                    )
+                )
+
+                # create corresponding histogram without experimental weights, to correlate stat between gen and reco
+                weight_expr = theory_tools.build_weight_expr(
+                    df,
+                    exclude_weights=[
+                        "exp_weight",
+                    ],
+                )  # May want to exclude "ew_theory_corr_weight" in case of QCD only gen definition
+                logger.info(f"Theory weight is {weight_expr}")
+                df = df.Define(f"theory_weight_{level}", weight_expr)
+
+                results.append(
+                    df.HistoBoost(
+                        f"{noiAsPoiHistName}_theory_weight",
+                        yield_axes,
+                        [*yield_cols, f"theory_weight_{level}"],
+                    )
+                )

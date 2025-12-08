@@ -40,6 +40,10 @@ def make_helicity_weight_helper(
 
     hist_helicity_xsec_scales = out["Z"] if is_z else out["W"]
 
+    # rebinning must happen *before* calculating Ai's
+    if rebi_ptVgen:
+        hist_helicity_xsec_scales = hist_helicity_xsec_scales[{"ptVgen": hist.rebin(2)}]
+
     corrh = helicity_xsec_to_angular_coeffs(hist_helicity_xsec_scales)
 
     if "muRfact" in corrh.axes.name:
@@ -68,8 +72,6 @@ def make_helicity_weight_helper(
     # histogram has to be without errors to load the tensor directly
     corrh_noerrs = hist.Hist(*corrh.axes, storage=hist.storage.Double())
     corrh_noerrs.values(flow=True)[...] = corrh.values(flow=True)
-    if rebi_ptVgen:
-        corrh_noerrs = corrh_noerrs[{"ptVgen": hist.rebin(2)}]
 
     return makeCorrectionsTensor(
         corrh_noerrs, ROOT.wrem.WeightByHelicityHelper, tensor_rank=1

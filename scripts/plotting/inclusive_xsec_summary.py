@@ -2,158 +2,244 @@
 # make a summary plot with different theory predictions
 # make a latex summary table with the breakdown of uncertainties
 
-import json
 import math
 
-import matplotlib.patches as mpatches
+import hist
 import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Ellipse, Polygon
 
 import rabbit.io_tools
 from utilities import parsing
-from utilities.io_tools import conversion_tools, output_tools, tex_tools
-from utilities.styles.styles import nuisance_groupings
-from wremnants import plot_tools
-from wums import ioutils, logging
+from utilities.io_tools import tex_tools
+
+from wums import logging, output_tools, plot_tools  # isort: skip
+
 
 parser = parsing.plot_parser()
-parser.add_argument("infile", type=str, help="Combine fitresult file")
+parser.add_argument("infile", type=str, help="Rabbit fitresult file")
 parser.add_argument(
-    "-t",
-    "--translate",
+    "--pdfFiles",
+    type=str,
+    nargs="*",
+    default=[],
+    help="Rabbit fitresult files with alternative pdf predictions",
+)
+parser.add_argument(
+    "--config",
     type=str,
     default=None,
-    help="Specify .json file to translate labels",
+    help="Path to config file for style formatting",
 )
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-if args.infile.endswith(".root"):
-    args.infile = args.infile.replace(".root", ".hdf5")
+config = plot_tools.load_config(args.config)
 
-grouping = nuisance_groupings["max"]
+grouping = getattr(config, "nuisance_grouping", {}).get("xsecs", None)
+translate_label = getattr(config, "systematics_labels", {})
 
-fitresult = rabbit.io_tools.get_fitresult(args.infile)
-meta = ioutils.pickle_load_h5py(fitresult["meta"])
+fitresult, meta = rabbit.io_tools.get_fitresult(args.infile, meta=True)
+result = fitresult["physics_models"]
 
-translate_label = {}
-if args.translate:
-    with open(args.translate) as f:
-        translate_label = json.load(f)
+pdf_results = {}
+comp_result = {}
+pdf_lumis = {}
+for pdf_file in args.pdfFiles:
+    pdf_name = pdf_file.split("/")[-2].split("_")[-1]
 
-pois = [
-    "W_qGen0_sumxsec",
-    "W_qGen1_sumxsec",
-    "W_sumxsec",
-    "Z_sumxsec",
-    "r_qGen_W__ratiometaratio",
-    "r_WZ_ratiometaratio",
-]
-poi_names = [
-    r"$\mathrm{W}^{-}$",
-    r"$\mathrm{W}^{+}$",
-    r"$\mathrm{W}$",
-    r"$\mathrm{Z}$",
-    r"$\mathrm{W}^{+}/\mathrm{W}^{-}$",
-    r"$\mathrm{W/Z}$",
-]
+    pdf_result, pdf_meta = rabbit.io_tools.get_fitresult(pdf_file, meta=True)
 
-pois = [
-    "W_qGen0_sumxsec",
-    "W_qGen1_sumxsec",
-    "W_sumxsec",
-    "r_qGen_W_ratiometaratio",
-]
-poi_names = [
-    r"$\mathrm{W}^{-}$",
-    r"$\mathrm{W}^{+}$",
-    r"$\mathrm{W}$",
-    r"$\mathrm{W}^{+}/\mathrm{W}^{-}$",
-]
+    pdf_lumis[pdf_name] = pdf_meta["meta_info_input"]["channel_info"]["ch0"]["lumi"]
 
+    pdf_model = pdf_result["physics_models"]
 
-combine = {
-    "binByBinStat": "binByBinStat",
-    "statMC": "binByBinStat",
-    "ZmassAndWidth": "massAndWidth",
-    "massShift": "massAndWidth",
-    "QCDscale": "QCDscale",
-    "bcQuarkMass": "QCDscale",
+    if "CompositeModel" in pdf_model.keys():
+        comp_result[pdf_name] = pdf_model["CompositeModel"]
+    else:
+        pdf_results[pdf_name] = pdf_model
+
+nPDFs = len(args.pdfFiles)
+pdf_colors = {
+    "CT18": "#2ca02c",
+    "CT18Z": "#E42536",
+    "PDF4LHC21": "#9467bd",
+    "MSHT20": "#7f7f7f",
+    "MSHT20aN3LO": "#8c564b",
+    "NNPDF31": "#e377c2",
+    "NNPDF40": "#17becf",
 }
-combine = {}
+
+# model, channel, bin
+xsec_keys = [
+    (r"$\mathrm{W}^{-}$", "Project ch1_masked qGen", "ch1_masked", {"qGen": 0}),
+    (r"$\mathrm{W}^{+}$", "Project ch1_masked qGen", "ch1_masked", {"qGen": 1}),
+    (r"$\mathrm{W}$", "Project ch1_masked", "ch1_masked", None),
+    (r"$\mathrm{Z}$", "Project ch0_masked", "ch0_masked", None),
+    (
+        r"$\mathrm{W}^{+}/\mathrm{W}^{-}$",
+        "Ratio ch1_masked ch1_masked qGen:0,ptGen:sum,absEtaGen:sum qGen:1,ptGen:sum,absEtaGen:sum",
+        "ch1_masked",
+        None,
+    ),
+    (
+        r"$\mathrm{W/Z}$",
+        "Ratio ch1_masked ch0_masked qGen:sum,ptGen:sum,absEtaGen:sum ptVGen:sum,absYVGen:sum",
+        "ch1_masked_ch0_masked",
+        None,
+    ),
+]
+
+lumi = meta["meta_info_input"]["channel_info"]["ch0"]["lumi"]
+
+custom_order = [
+    "Total",
+    "stat",
+    "binByBinStat",
+    "luminosity",
+    "Fake",
+    "CMS_background",
+    "muon_eff_syst",
+    "muon_eff_stat",
+    "prefire",
+    "muonCalibration",
+    "recoil",
+    "pdfCT18Z",
+    "angularCoeffs",
+    "pTModeling",
+    "theory_ew",
+    "massAndWidths",
+]
 
 dfs = []
-for poi, poi_name in zip(pois, poi_names):
+for name, model, channel, selection in xsec_keys:
+    hp = result[model]["channels"][channel]["hist_prefit_inclusive"].get()
+    h1 = result[model]["channels"][channel]["hist_postfit_inclusive"].get()
+    hi = result[model]["channels"][channel][
+        "hist_postfit_inclusive_global_impacts_grouped"
+    ].get()
+    if selection is not None:
+        hp = hp[selection]
+        h1 = h1[selection]
+        hi = hi[selection]
+    if getattr(h1, "axes", False) and "yield" in h1.axes.name:
+        hp = hp[{"yield": hist.sum}]
+        h1 = h1[{"yield": hist.sum}]
+        hi = hi[{"yield": hist.sum}]
 
-    if poi.endswith("sumxsec"):
-        channel_info = conversion_tools.combine_channels(meta, True)
-        if len(channel_info.keys()) == 1:
-            lumi = channel_info["chan_13TeV"]["lumi"]
-        else:
-            raise NotImplementedError(
-                f"Found channels {[k for k in channel_info.keys()]} but only one channel is supported."
-            )
-        scale = 1.0 / (lumi * 1000)
-    elif poi.endswith("ratio"):
-        scale = 1.0
+    if model.startswith("Ratio"):
+        scale = 1
+    else:
+        scale = 1 / (lumi * 1000)
 
-    impacts, labels, norm = rabbit.io_tools.read_impacts_poi(
-        fitresult, True, add_total=True, stat=0.0, poi=poi, normalize=False
-    )
+    prefit = hp.value * scale
+    prefit_error = hp.variance**0.5 * scale
 
-    filtimpacts = []
-    filtlabels = []
-    for impact, label in zip(impacts, labels):
-        if label not in grouping:
-            continue
-        if label in combine:
-            label = combine[label]
-            if label in filtlabels:
-                idx = filtlabels.index(label)
-                filtimpacts[idx] = (filtimpacts[idx] ** 2 + impact**2) ** 0.5
-                continue
+    value = h1.value * scale
+    error = h1.variance**0.5 * scale
 
-        filtimpacts.append(impact)
-        filtlabels.append(label)
+    impacts = hi.values() * scale
 
-    impacts = filtimpacts
-    labels = filtlabels
+    labels = np.array(hi.axes["impacts"])
+    mask = np.isin(labels, grouping)
 
-    df = pd.DataFrame(np.array(impacts, dtype=np.float64).T * scale, columns=["impact"])
+    labels = labels[mask]
+    impacts = impacts[mask]
+
+    if np.sum(impacts**2) ** 0.5 / error - 1 > 10e-10:
+        raise RuntimeError(
+            f"Sources don't add up to total error, got a difference of {np.sum(impacts**2)**0.5/error - 1}"
+        )
+
+    labels = np.append(labels, "Total")
+    impacts = np.append(impacts, error)
+
+    df = pd.DataFrame(np.array(impacts, dtype=np.float64).T, columns=["impact"])
 
     df["label"] = labels
-    df["systematic"] = df["label"].apply(lambda l: translate_label.get(l, l))
-    df["poi_name"] = poi_name
-    df["norm"] = norm * scale
+
+    for label, combine_labels in {
+        "binByBinStat": ["binByBinStatW", "binByBinStatZ", "binByBinStat"],
+        "theory_ew": ["theory_ew", "massShift", "sin2thetaZ", "widthW", "widthZ"],
+    }.items():
+
+        subset = df[df["label"].isin(combine_labels)]
+        subset = subset.fillna(0)
+        combined = np.sqrt((subset[["impact"]] ** 2).sum())
+
+        # df = df.drop(columns=["binByBinStatW", "binByBinStatZ", "massShift", "sin2thetaZ", "widthW", "widthZ"])
+
+        new_row = pd.DataFrame(
+            {
+                "label": [label],
+                "impact": [combined["impact"]],
+            }
+        )
+
+        # Remove old rows and append the new one
+        df = df[~df["label"].isin(combine_labels)]
+        df = pd.concat([df, new_row], ignore_index=True)
+
+    df["name"] = name
+    df["value"] = value
+
+    df["prefit"] = prefit
+    df["prefit_error"] = prefit_error
+
+    for pdf_name, pdf_res in pdf_results.items():
+        hr = pdf_res[model.replace("_masked", "")]["channels"][
+            channel.replace("_masked", "")
+        ]["hist_prefit_inclusive"].get()
+
+        if selection is not None:
+            hr = hr[selection]
+        if getattr(hr, "axes", False) and "yield" in hr.axes.name:
+            hr = hr[{"yield": hist.sum}]
+
+        if model.startswith("Ratio"):
+            scale = 1
+        else:
+            scale = 1 / (pdf_lumis[pdf_name] * 1000)
+
+        df[pdf_name] = hr.value * scale
+        df[f"{pdf_name}_error"] = hr.variance**0.5 * scale
+
+    # Convert 'labels' column to categorical with the custom order
+    df["label"] = pd.Categorical(df["label"], categories=custom_order, ordered=True)
+
+    df["source"] = df["label"].apply(lambda l: translate_label.get(l, l))
+
+    df = df.sort_values("label", ascending=False)
 
     dfs.append(df)
 
 df = pd.concat(dfs)
 
-outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
+names = [k[0] for k in xsec_keys]
+
+outdir = output_tools.make_plot_dir(args.outpath, eoscp=args.eoscp)
 
 # make latex table
+outname = "summary_table"
+if args.postfix:
+    outname += f"_{args.postfix}"
+
+df_t = df.copy()
 relative = True  # compute relative uncertainty
 percentage = True  # numbers in percentage
 
-df_t = df.copy()
 if relative:
-    df_t["impact"] /= df_t["norm"]
+    df_t["impact"] /= df_t["value"]
 if percentage:
     df_t["impact"] *= 100
 
 # sorting
-cat_dtype = pd.CategoricalDtype(categories=poi_names, ordered=True)
-df_t["poi_name"] = df_t["poi_name"].astype(cat_dtype)
+cat_dtype = pd.CategoricalDtype(categories=names, ordered=True)
+df_t["name"] = df_t["name"].astype(cat_dtype)
 
-
-outname = "summary_table"
-if args.postfix:
-    outname += f"_{args.postfix}"
 tex_tools.make_latex_table(
     df_t,
     output_dir=outdir,
@@ -162,16 +248,15 @@ tex_tools.make_latex_table(
     caption="Uncertainties in percentage.",
     label="",
     sublabel="",
-    column_name="poi_name",
-    row_name="systematic",
+    column_name="name",
+    row_name="source",
     cell_columns=["impact"],
     cell_format=lambda x: f"${round(x,2)}$",
     sort="impact",
 )
 
-# make plot
+# make plot 1D
 hep.style.use(hep.style.ROOT)
-
 
 plt.clf()
 fig = plt.figure()
@@ -179,28 +264,47 @@ fig.subplots_adjust(left=0.15, right=0.99, top=0.99, bottom=0.125)
 ax = fig.add_subplot(111)
 
 # x axis range
-lo, hi = 0.94, 1.09
+lo, hi = 0.925, 1.085
 
 # totals = []
 # stats = []
 norms = []
-for i, poi_name in enumerate(poi_names[::-1]):
-    df_g = df.loc[df["poi_name"] == poi_name]
+for i, name in enumerate(names[::-1]):
+    df_g = df.loc[df["name"] == name]
 
-    norm = df_g["norm"].values[0]
+    norm = df_g["value"].values[0]
     total = df_g.loc[df_g["label"] == "Total"]["impact"].values[0]
     stat = df_g.loc[df_g["label"] == "stat"]["impact"].values[0]
     total_rel = total / norm
     stat_rel = stat / norm
+
+    prefit = df_g["prefit"].values[0] / norm
+    prefit_err = df_g["prefit_error"].values[0] / norm
 
     norms.append(norm)
     # totals.append(total)
     # stats.append(stat)
 
     x1 = ax.bar(
-        1.0, height=1, bottom=i, width=2 * total_rel, color="silver", label="Total"
+        1.0, height=1, bottom=i, width=2 * total_rel, color="silver"  # , label="Total"
     )
-    x2 = ax.bar(1.0, height=1, bottom=i, width=2 * stat_rel, color="gold", label="Stat")
+    x2 = ax.bar(
+        1.0, height=1, bottom=i, width=2 * stat_rel, color="gold"  # , label="Stat"
+    )
+
+    # ax.errorbar([prefit], [i+0.5], xerr=prefit_err, color="red", marker="o", label="Prefit" if i ==0 else None)
+
+    for j, pdf_name in enumerate(pdf_results.keys()):
+        pdf_value = df_g[pdf_name].values[0] / norm
+        pdf_error = df_g[f"{pdf_name}_error"].values[0] / norm
+        ax.errorbar(
+            [pdf_value],
+            [i + 1 - (j + 1) / (nPDFs + 1)],
+            xerr=pdf_error,
+            color=pdf_colors[pdf_name],
+            marker="o",
+            label=pdf_name if i == 0 else None,
+        )
 
     # round to two significant digits in total uncertainty
     sig_digi = 2 - int(math.floor(math.log10(abs(total)))) - 1
@@ -213,20 +317,20 @@ for i, poi_name in enumerate(poi_names[::-1]):
         total = round(total, sig_digi)
 
     ax.text(
-        lo + 0.01,
+        lo + 0.005,
         i + 0.5,
-        poi_name,
+        name,
         fontsize=20,
         verticalalignment="bottom",
         horizontalalignment="left",
     )
     title = rf"${norm} \pm {total}"
-    if "/" in poi_name:
+    if "/" in name:
         title += "$"
     else:
         title += r"\,\mathrm{pb}$"
     ax.text(
-        hi - 0.05,
+        hi - 0.04,
         i + 0.5,
         title,
         fontsize=20,
@@ -234,39 +338,54 @@ for i, poi_name in enumerate(poi_names[::-1]):
         horizontalalignment="left",
     )
 
-ax.text(
-    hi - 0.05,
-    len(poi_names) + 0.5,
-    r"$\mathrm{Measured} \pm {unc}$",
-    fontsize=20,
-    verticalalignment="bottom",
-    horizontalalignment="left",
-)
+# ax.text(
+#     hi - 0.04,
+#     len(names) + 0.5,
+#     r"$\mathrm{Measured} \pm {unc}$",
+#     fontsize=20,
+#     verticalalignment="bottom",
+#     horizontalalignment="left",
+# )
 
 x0 = ax.plot([1.0, 1.0], [0, len(norms)], color="black")
 ax.plot([lo, hi], [len(norms), len(norms)], color="black")
 
-
-# make legend
-
-# Custom legend handles
-p2 = (
-    mpatches.Rectangle((0, 0), 1, 1, facecolor="gold", edgecolor="gold", linewidth=3),
-)
-p1 = (
-    mpatches.Rectangle(
-        (0, 0), 2, 1, facecolor="silver", edgecolor="silver", linewidth=3
-    ),
+p = Polygon(
+    [[0, 0], [0, 0], [0, 0], [0, 0]],
+    facecolor="silver",
+    linestyle="solid",
+    edgecolor="black",
+    linewidth=2,
+    alpha=0.6,
 )
 
-leg_styles = [(x2[0], x1[0], x0[0])]
-leg_labels = ["Measurement"]
-leg = ax.legend(
-    leg_styles, leg_labels, loc="upper left", ncol=len(leg_labels), fontsize=20
+p.outer_color = "grey"
+p.outer_alpha = 0.5
+p.inner_color = "gold"
+p.inner_alpha = 1
+
+extra_handles = [(p,)]
+
+extra_labels = ["Measurement"]
+
+plot_tools.addLegend(
+    ax,
+    ncols=args.legCols,
+    text_size="small",
+    bbox_to_anchor=None,
+    loc="upper left",
+    reverse=False,
+    markerfirst=True,
+    labelcolor="black",
+    extra_handles=extra_handles,
+    extra_labels=extra_labels,
+    extra_entries_first=False,
+    custom_handlers=(["doubleband"]),
+    padding_loc="auto",
 )
 
 ax.set_xlim([lo, hi])
-ax.set_ylim([0, len(norms) + 1])
+ax.set_ylim([0, len(norms) + 2])
 
 ax.set_xlabel("1./Measurement", fontsize=20)
 
@@ -284,12 +403,167 @@ if args.postfix:
     outname += f"_{args.postfix}"
 plot_tools.save_pdf_and_png(outdir, outname)
 
-plot_tools.write_index_and_log(
+output_tools.write_index_and_log(
     outdir,
     outname,
     analysis_meta_info={"CombinetfOutput": meta["meta_info"]},
     args=args,
 )
+
+
+# make plot 2D ellipses
+
+
+def plot_cov_ellipse(cov, pos, nstd=2, **kwargs):
+    """
+    Plots an `nstd` sigma ellipse based on the covariance matrix (`cov`)
+    centered at position `pos`.
+    """
+    # Eigenvalue decomposition
+    eigvals, eigvecs = np.linalg.eigh(cov)
+
+    # Sort eigenvalues and eigenvectors
+    order = eigvals.argsort()[::-1]
+    eigvals, eigvecs = eigvals[order], eigvecs[:, order]
+
+    # Compute angle in degrees
+    theta = np.degrees(np.arctan2(*eigvecs[:, 0][::-1]))
+
+    # Width and height are "2*nstd" standard deviations
+    width, height = 2 * nstd * np.sqrt(eigvals)
+
+    # Create ellipse
+    ellipse = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
+    return ellipse
+
+
+for name, channel0, channel1, unit in (
+    ("WpWm", xsec_keys[0], xsec_keys[1], "pb"),
+    ("WZ", xsec_keys[2], xsec_keys[3], "pb"),
+    ("R", xsec_keys[4], xsec_keys[5], None),
+):
+    ckey1 = (
+        channel0[1].replace("_masked", "") + " " + channel0[2].replace("_masked", "")
+    )
+    ckey2 = (
+        channel1[1].replace("_masked", "") + " " + channel1[2].replace("_masked", "")
+    )
+
+    plt.clf()
+    fig = plt.figure()
+    fig.subplots_adjust(left=0.15, right=0.99, top=0.99, bottom=0.125)
+    ax = fig.add_subplot(111)
+
+    for pdf_name, result in comp_result.items():
+        ibin = 0
+        if name == "R":
+            scale = 1
+        else:
+            scale = 1 / (1000 * pdf_lumis[pdf_name])
+        for k, r in result["channels"].items():
+            fittype = "postfit" if f"hist_postfit_inclusive" in r.keys() else "prefit"
+
+            hi = r[f"hist_{fittype}_inclusive"].get()
+            if getattr(hi, "axes", False) and "yield" in hi.axes.name:
+                hi = hi[{"yield": hist.sum}]
+
+            if k == ckey1:
+                sel = channel0[-1]
+
+                if sel is not None:
+                    x = hi[sel].value * scale
+                    ix = ibin + [i for i in sel.values()][0]
+                else:
+                    x = hi.value * scale
+                    ix = ibin
+
+            if k == ckey2:
+                sel = channel1[-1]
+                if sel is not None:
+                    y = hi[channel0[-1]].value * scale
+                    iy = ibin + [i for i in sel.values()][0]
+                else:
+                    y = hi.value * scale
+                    iy = ibin
+
+            ibin += hi.size if hasattr(hi, "size") else 1
+
+        cov = result[f"hist_{fittype}_inclusive_cov"].get().values()
+        cov = cov[np.ix_([ix, iy], [ix, iy])] * scale**2
+
+        # for pos, cov in zip(points, covs):
+        if fittype == "postfit":
+            icol = "grey"
+            ell = plot_cov_ellipse(
+                cov,
+                np.array([x, y]),
+                nstd=2,
+                edgecolor="none",
+                facecolor=icol,
+                label="Measurement",
+            )
+        else:
+            icol = pdf_colors[pdf_name]
+            ell = plot_cov_ellipse(
+                cov,
+                np.array([x, y]),
+                nstd=2,
+                edgecolor=icol,
+                facecolor="none",
+                linewidth=2,
+                label=pdf_name,
+            )
+        ax.add_patch(ell)
+        ax.plot(x, y, color=icol, marker="o", alpha=0)  # measurement center
+
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    yrange = ylim[1] - ylim[0]
+
+    ax.set_xlim(*xlim)
+    ax.set_ylim(ylim[0], ylim[1] + yrange * 0.25)
+    if unit is not None:
+        plt.xlabel(rf"$\sigma({channel0[0].replace("$","")})$ [pb]")
+        plt.ylabel(rf"$\sigma({channel1[0].replace("$","")})$ [pb]")
+    else:
+        plt.xlabel(channel0[0])
+        plt.ylabel(channel1[0])
+    # plt.title("2D Covariance Ellipses")
+    # plt.grid(True)
+    # plt.show()
+
+    plot_tools.addLegend(
+        ax,
+        ncols=args.legCols,
+        text_size="small",
+        bbox_to_anchor=None,
+        loc="upper left",
+        reverse=False,
+        # markerfirst=True,
+        labelcolor="black",
+        # extra_handles=extra_handles,
+        # extra_labels=extra_labels,
+        # extra_entries_first=False,
+        # custom_handlers=(
+        #     ["doubleband"]
+        # ),
+        padding_loc="auto",
+    )
+
+    plot_tools.add_cms_decor(ax, args.cmsDecor, data=True, lumi=lumi, loc=args.logoPos)
+
+    outname = f"summary_2D_{name}"
+    if args.postfix:
+        outname += f"_{args.postfix}"
+    plot_tools.save_pdf_and_png(outdir, outname)
+
+    output_tools.write_index_and_log(
+        outdir,
+        outname,
+        analysis_meta_info={"CombinetfOutput": meta["meta_info"]},
+        args=args,
+    )
+
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
     output_tools.copy_to_eos(args.outpath, args.outfolder)

@@ -253,23 +253,17 @@ genDataDict.update(
 genDataDict.update(
     {
         "Zmumu_powheg-weak-low": {
-            "filepaths": [
-                "root://eoscms.cern.ch//store/group/phys_smp/ec/wmass/fvazzole/powheg_nanoGEN/svn4049/46mll80"
-            ],
+            "filepaths": ["{BASE_PATH}/svn4049/46mll80"],
             "xsec": 1,
             "group": "Zmumu",
         },
         "Zmumu_powheg-weak-peak": {
-            "filepaths": [
-                "root://eoscms.cern.ch//store/group/phys_smp/ec/wmass/fvazzole/powheg_nanoGEN/svn4049/80mll100"
-            ],
+            "filepaths": ["{BASE_PATH}/svn4049/80mll100"],
             "xsec": 1,
             "group": "Zmumu",
         },
         "Zmumu_powheg-weak-high": {
-            "filepaths": [
-                "root://eoscms.cern.ch//store/group/phys_smp/ec/wmass/fvazzole/powheg_nanoGEN/svn4049/100mll150"
-            ],
+            "filepaths": ["{BASE_PATH}/svn4049/100mll150"],
             "xsec": 1,
             "group": "Zmumu",
         },

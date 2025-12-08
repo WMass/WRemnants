@@ -31,12 +31,6 @@ from wremnants.histmaker_tools import (
 )
 
 parser.add_argument(
-    "--oneMCfileEveryN",
-    type=int,
-    default=None,
-    help="Use 1 MC file every N, where N is given by this option. Mainly for tests",
-)
-parser.add_argument(
     "--vetoGenPartPt",
     type=float,
     default=0.0,

@@ -26,7 +26,6 @@ import math
 import hist
 
 import narf
-import wremnants
 import wremnants.lowpu as lowpu
 from wremnants import (
     muon_selections,
@@ -141,12 +140,9 @@ columns_fakerate = [
     "transverseMass",
 ]  ## was transverseMass
 
-
-qcdScaleByHelicity_helper = (
-    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity()
-)
-axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
-axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
+theory_helpers_procs = theory_corrections.make_theory_helpers(args)
+axis_ptVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["ptVgen"]
+axis_chargeVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["chargeVgen"]
 
 groups_to_aggregate = args.aggregateGroups
 
@@ -193,6 +189,10 @@ def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
     isQCDMC = dataset.group == "QCD"
+
+    theory_helpers = None
+    if dataset.name in common.vprocs_lowpu:
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -246,7 +246,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    qcdScaleByHelicity_helper,
+                    theory_helpers,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
                     base_name=level,
@@ -416,7 +416,7 @@ def build_graph(df, dataset):
 
         df = df.Define("exp_weight", "SFMC")
         df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
     else:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -524,7 +524,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    qcdScaleByHelicity_helper,
+                    theory_helpers,
                     a,
                     c,
                     base_name=n,

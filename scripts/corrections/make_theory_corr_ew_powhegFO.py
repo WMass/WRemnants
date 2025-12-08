@@ -4,8 +4,10 @@ import os
 import hist
 import numpy as np
 
-from utilities.io_tools import input_tools, output_tools
-from wums import logging
+from utilities import common
+from utilities.io_tools import input_tools
+from wums import boostHistHelpers as hh
+from wums import logging, output_tools
 
 parser = argparse.ArgumentParser()
 
@@ -79,6 +81,7 @@ if args.debug:
 
 # integrate over pt and phistar
 h = h[{"ptVlhe": hist.sum, "phiStarlhe": hist.sum}]
+h = hh.rebinHist(h, "absYVlhe", common.absYV_binning)
 
 hcorr = hist.Hist(*h.axes)
 # safe default
@@ -120,4 +123,6 @@ for f in [args.input]:
     except ValueError as e:
         logger.warning(f"No meta data found for file {f}")
 
-output_tools.write_theory_corr_hist(correction_name, "Z", res, args, meta_dict)
+output_tools.write_lz4_pkl_output(
+    correction_name, "Z", res, basedir="./", args=args, file_meta_data=meta_dict
+)

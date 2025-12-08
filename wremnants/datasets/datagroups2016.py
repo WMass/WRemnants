@@ -65,6 +65,18 @@ def make_datagroups_2016(
             "QCD",
             members=dg.get_members_from_results(startswith=["QCD"]),
         )
+        dg.addGroup(
+            "WtoNMu_5",
+            members=dg.get_members_from_results(startswith=["WtoNMu_MN-5-"]),
+        )
+        dg.addGroup(
+            "WtoNMu_10",
+            members=dg.get_members_from_results(startswith=["WtoNMu_MN-10-"]),
+        )
+        dg.addGroup(
+            "WtoNMu_50",
+            members=dg.get_members_from_results(startswith=["WtoNMu_MN-50-"]),
+        )
     else:
         dg.addGroup(
             "Other",

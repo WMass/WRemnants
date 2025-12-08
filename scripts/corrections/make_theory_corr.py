@@ -59,6 +59,7 @@ def parse_args():
         choices=[
             "z",
             "w",
+            "bsm",
         ],
         help="Process",
     )
@@ -108,7 +109,11 @@ def parse_args():
         choices=["ratio", "numerator", "fo_sing"],
         help="Apply spline-based smoothing to correction",
     )
-
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize the corrections",
+    )
     args = parser.parse_args()
 
     return args
@@ -207,8 +212,9 @@ def main():
     }
 
     if args.proc == "z":
+        eventgen_procs = ["ZmumuPostVFP"]
         filesByProc = {"ZmumuPostVFP": args.corrFiles}
-    elif args.proc == "w":
+    else:
         wpfiles = list(
             filter(
                 lambda x: "wp" in os.path.basename(x).lower() or "Wp" in x,
@@ -230,6 +236,7 @@ def main():
                     "WplusmunuPostVFP": wmfiles,
                     "WminusmunuPostVFP": wmfiles,
                 }
+
             else:
                 raise ValueError(
                     f"Expected equal number of files for W+ and W-, found {len(wpfiles)} (Wp) and {len(wmfiles)} (Wm)"
@@ -237,10 +244,21 @@ def main():
         else:
             filesByProc = {"WplusmunuPostVFP": wpfiles, "WminusmunuPostVFP": wmfiles}
 
+        if args.proc == "w":
+            eventgen_procs = ["WplusmunuPostVFP", "WminusmunuPostVFP"]
+        elif args.proc == "bsm":
+            eventgen_procs = [
+                "WtoNMu_MN-5-V-0p001",
+                "WtoNMu_MN-10-V-0p001",
+                "WtoNMu_MN-50-V-0p001",
+            ]
+
     minnloh = hh.sumHists(
         [
-            input_tools.read_mu_hist_combine_tau(args.minnloFile, proc, args.minnloh)
-            for proc in filesByProc.keys()
+            input_tools.read_mu_hist_combine_tau(
+                args.minnloFile, proc, args.minnloh, combine_with_tau=args.proc != "bsm"
+            )
+            for proc in eventgen_procs
         ]
     )
 
@@ -258,6 +276,7 @@ def main():
             for procName, corr_file in filesByProc.items()
         ]
     )
+
     if args.selectVars:
         numh = numh[{"vars": args.selectVars}]
 
@@ -314,7 +333,7 @@ def main():
         )
 
     corrh_unc, minnloh, numh = theory_corrections.make_corr_from_ratio(
-        minnloh, numh, smooth=args.smooth
+        minnloh, numh, smooth=args.smooth, normalize=args.normalize
     )
 
     if args.duplicateWminus:
@@ -393,15 +412,15 @@ def main():
             if args.duplicateWminus and charge == 1:
                 continue
             charge = complex(0, charge)
-            proc = "Z" if args.proc == "z" else ("Wp" if charge.imag > 0 else "Wm")
+            if args.proc == "z":
+                proc = "Z"
+                final_state = "\\ell\\ell"
+            else:
+                proc = "Wp" if charge.imag > 0 else "Wm"
+                final_state = "\\ell^{+}\\nu" if charge.imag > 0 else "\\ell^{-}\\nu"
 
             fig, ax = plt.subplots(figsize=(6, 6))
             corrh[{"vars": 0, "charge": charge, "Q": 0}].plot(ax=ax, cmin=0.5, cmax=1.5)
-            final_state = (
-                "\\ell\\ell"
-                if args.proc == "z"
-                else ("\\ell^{+}\\nu" if charge.imag > 0 else "\\ell^{-}\\nu")
-            )
 
             outdir = output_tools.make_plot_dir(
                 *args.plotdir.rsplit("/", 1), eoscp=args.eoscp

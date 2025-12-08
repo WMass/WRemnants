@@ -654,50 +654,139 @@ auto scalar_select(const ArgTypeIf &cond, const ArgTypeThen &arg0,
 }
 
 // Breit-Wigner mass weights
-const double MZ_GEN_ = 91153.509740726733;
-const double GAMMAZ_GEN_ = 2493.2018986110700;
-const double MW_GEN_ = 80351.812293789408;
-const double GAMMAW_GEN_ = 2090.4310808144846;
+// values in running width scheme
+const double MZ_GEN_ = 911876;
+const double GAMMAZ_GEN_ = 24941;
+const double MW_GEN_ = 80379;
+const double GAMMAW_GEN_ = 2091.1;
 
-double computeBreitWignerWeight(double massVgen, double offset, int type) {
+double convertRunningToFixedWidth(const double param, const double mass,
+                                  const double width) {
+  // converts mass or width from running width scheme to fixed width scheme
+  //
+  // parameters:
+  // param = mass or width in running width scheme
+  // mass = reference mass in running width scheme
+  // width = reference width in running width scheme
+
+  return param / std::sqrt(1 + std::pow(width / mass, 2));
+}
+
+double computeBreitWigner(const double massVgen, const double ref_mass,
+                          const double ref_Gamma) {
+  // Calculates the Breit-Wigner function at a given mass point
+  //
+  // formula:
+  // BW(m,mGen,Gamma) = k / ( s^2 + Gamma^2 M^2 )
+  // where
+  // s = m^2 - mGen^2
+  // k = 2*sqrt(2)/pi * M*Gamma*gamma / sqrt(M^2 + gamma)
+  // gamma = sqrt(mGen^2(mGen^2 + Gamma^2))
+  // m = mass of the V boson in GeV (can be offshell)
+  // mGen = true mass parameters of the V boson in GeV
+
+  const double gamma =
+      ref_mass * std::sqrt(ref_mass * ref_mass + ref_Gamma * ref_Gamma);
+  const double k = (2 * std::sqrt(2) / M_PI) * ref_mass * ref_Gamma * gamma /
+                   std::sqrt(ref_mass * ref_mass + gamma);
+  const double s_hat = massVgen * massVgen * 1000 * 1000;
+  const double offshell = s_hat - ref_mass * ref_mass;
+  const double bw =
+      k / (offshell * offshell + ref_Gamma * ref_Gamma * ref_mass * ref_mass);
+
+  return bw;
+}
+
+template <int Type>
+double computeBreitWignerWeight(const double massVgen, const double offset_mass,
+                                const double offset_width) {
+  // applies offset to the reference mass and width of the V boson in the
+  // running width scheme converts offset and reference mass and width to fixed
+  // width scheme and calculates ratio of BW(offset)/BW(reference)
+  //
+  // parameters:
+  // massVgen = generated mass of the V boson in GeV
+  // offset = mass shift in GeV
+  // type = 0 for Z, 1 for W
+  //
+  // returns:
+  // weight = BW(offset mass)/BW(reference mass)
+  //
+  // Notes:
+  // Gamma = width of V boson, which scales like mGen^3 at LO
+  // so Gamma(offset mass) = Gamma(reference mass)*(offset mass/reference
+  // mass)^3
 
   double MV_GEN_ = 0;
   double GAMMAV_GEN_ = 0;
-  if (type == 0) {
+  if constexpr (Type == 0) {
     MV_GEN_ = MZ_GEN_;
     GAMMAV_GEN_ = GAMMAZ_GEN_;
-  } else {
+  } else if constexpr (Type == 1) {
     MV_GEN_ = MW_GEN_;
     GAMMAV_GEN_ = GAMMAW_GEN_;
   }
 
-  double targetMass = MV_GEN_ + offset;
-  // double gamma_cen =
-  // std::sqrt(MV_GEN_*MV_GEN_*(MV_GEN_*MV_GEN_+GAMMAV_GEN_*GAMMAV_GEN_));
-  // double gamma =
-  // std::sqrt(targetMass*targetMass*(targetMass*targetMass+GAMMAV_GEN_*GAMMAV_GEN_));
-  double s_hat = massVgen * massVgen * 1000 * 1000;
-  double offshell = s_hat - MV_GEN_ * MV_GEN_;
-  double offshellOffset = s_hat - targetMass * targetMass;
-  double weight =
-      (offshell * offshell + GAMMAV_GEN_ * GAMMAV_GEN_ * MV_GEN_ * MV_GEN_) /
-      (offshellOffset * offshellOffset +
-       GAMMAV_GEN_ * GAMMAV_GEN_ * targetMass * targetMass);
+  // convert reference mass and width to fixed width scheme and compute BW
+  // weight
+  const double ref_fixed_mass =
+      convertRunningToFixedWidth(MV_GEN_, MV_GEN_, GAMMAV_GEN_);
+  const double ref_fixed_Gamma =
+      convertRunningToFixedWidth(GAMMAV_GEN_, MV_GEN_, GAMMAV_GEN_);
+  const double bw =
+      computeBreitWigner(massVgen, ref_fixed_mass, ref_fixed_Gamma);
+
+  // shift the mass and compute the corresponding width in the running width
+  // scheme
+  const double target_mass = MV_GEN_ + offset_mass;
+  const double target_Gamma =
+      (GAMMAW_GEN_ + offset_width) * std::pow(target_mass / MW_GEN_, 3);
+  // convert shifted mass and width to fixed width scheme
+  const double target_fixed_mass =
+      convertRunningToFixedWidth(target_mass, target_mass, target_Gamma);
+  const double target_fixed_Gamma =
+      convertRunningToFixedWidth(target_Gamma, target_mass, target_Gamma);
+  // compute BW weight for shifted mass and width
+  const double bw_offset =
+      computeBreitWigner(massVgen, target_fixed_mass, target_fixed_Gamma);
+
+  const double weight = bw_offset / bw;
   return weight;
 }
 
-Vec_f breitWignerWeights(double massVgen, int type = 0) {
+template <int Type> Vec_f breitWignerMassWeights(const double massVgen) {
 
   // Z -> type=0
   // W -> type=1
 
-  Vec_f res(21, 1);
+  constexpr int N = (Type == 0) ? 23 : 21;
+  Vec_f res(N, 1);
   double offset = -100;
   for (int i = 0; i <= 21; i++) {
-
     offset = -100 + i * 10;
-    res[i] = computeBreitWignerWeight(massVgen, offset, type);
-    // cout << i << " " << offset << " " << res[i] << endl;
+    res[i] = computeBreitWignerWeight<Type>(massVgen, offset, 0.0);
+  }
+
+  if constexpr (Type == 0) {
+    res[21] = computeBreitWignerWeight<Type>(massVgen, -2.1, 0.0);
+    res[22] = computeBreitWignerWeight<Type>(massVgen, 2.1, 0.0);
+  }
+
+  return res;
+}
+
+template <int Type> Vec_f breitWignerWidthWeights(const double massVgen) {
+
+  // Z -> type=0
+  // W -> type=1
+
+  constexpr std::array<float, 5> offsets =
+      (Type == 0) ? std::array<float, 5>{-0.77f, 0.83f, -1.2f, 1.1f, 3.4f}
+                  : std::array<float, 5>{-0.57f, 0.63f, -48.1f, -6.1f, 35.9f};
+
+  Vec_f res(5, 1);
+  for (int i = 0; i <= 5; i++) {
+    res[i] = computeBreitWignerWeight<Type>(massVgen, 0.0, offsets[i]);
   }
 
   return res;
@@ -856,6 +945,73 @@ private:
   std::vector<std::mt19937> rng_;
 };
 
+class RandomUniformHelper {
+
+public:
+  RandomUniformHelper(const std::size_t nsplits, const std::size_t seed = 0,
+                      const unsigned int nslots = 1)
+      : nsplits_(nsplits) {
+    const unsigned int nslotsactual = std::max(nslots, 1U);
+    rng_.reserve(nslotsactual);
+    auto const hash = std::hash<std::string>()("RandomUniformHelper");
+    for (std::size_t islot = 0; islot < nslotsactual; ++islot) {
+      std::seed_seq seq{hash, seed, islot};
+      rng_.emplace_back(seq);
+    }
+  }
+
+  int operator()(const unsigned int slot) {
+    std::uniform_int_distribution<int> dist(0, nsplits_ - 1);
+    int res;
+    auto &rngslot = rng_[slot];
+    res = dist(rngslot);
+    return res;
+  }
+
+private:
+  std::size_t nsplits_;
+  std::vector<std::mt19937> rng_;
+};
+
+class JackknifeHelper {
+
+public:
+  JackknifeHelper(const std::size_t nsplits, const float eff = 0.5,
+                  const std::size_t seed = 0, const unsigned int nslots = 1)
+      : nsplits_(nsplits), eff_(eff) {
+    const unsigned int nslotsactual = std::max(nslots, 1U);
+    rng_.reserve(nslotsactual);
+    auto const hash = std::hash<std::string>()("JackknifeHelper");
+    for (std::size_t islot = 0; islot < nslotsactual; ++islot) {
+      std::seed_seq seq{hash, seed, islot};
+      rng_.emplace_back(seq);
+    }
+  }
+
+  std::vector<int> operator()(const unsigned int slot) {
+    std::uniform_real_distribution<float> dist(0, 1);
+    std::vector<int> res;
+    res.reserve(2 * nsplits_);
+    auto &rngslot = rng_[slot];
+
+    // index 0 is the nominal, so just one entry, not randomized)
+    res.emplace_back(0);
+
+    for (std::size_t itoy = 1; itoy < nsplits_; ++itoy) {
+      const float p = dist(rngslot);
+      if (p < eff_) {
+        res.emplace_back(itoy);
+      }
+    }
+
+    return res;
+  }
+
+private:
+  std::size_t nsplits_;
+  const float eff_;
+  std::vector<std::mt19937> rng_;
+};
 // function to do stuff with run splitting in MC should define a helper
 // to have flexibility to set the internal arrays once at run-time
 unsigned int get_dummy_run_by_lumi_quantile(const unsigned int run,
@@ -881,6 +1037,47 @@ unsigned int get_dummy_run_by_lumi_quantile(const unsigned int run,
   }
   // std::cout << "rn, bin = " << rn << ", " << ret << std::endl;
   return run_vals[bin];
+}
+
+template <typename TensorType>
+TensorType clamp_tensor_safe(const TensorType &tensor, double min_val,
+                             double max_val) {
+  static_assert(std::is_same_v<typename TensorType::Scalar, double>,
+                "Tensor must have double scalar type");
+
+  // Create result tensor with same dimensions
+  TensorType result = tensor;
+
+  // Apply element-wise operation: only clamp, preserve NaN
+  result = result.unaryExpr([min_val, max_val](double x) {
+    if (std::isnan(x)) {
+      return x; // Keep NaN as is
+    }
+    return std::max(min_val, std::min(max_val, x));
+  });
+
+  return result;
+}
+
+// Overload with NaN replacement
+template <typename TensorType>
+TensorType clamp_tensor_safe(const TensorType &tensor, double min_val,
+                             double max_val, double nan_replacement) {
+  static_assert(std::is_same_v<typename TensorType::Scalar, double>,
+                "Tensor must have double scalar type");
+
+  // Create result tensor with same dimensions
+  TensorType result = tensor;
+
+  // Apply element-wise operation: replace NaN, then clamp
+  result = result.unaryExpr([min_val, max_val, nan_replacement](double x) {
+    if (std::isnan(x)) {
+      return nan_replacement;
+    }
+    return std::max(min_val, std::min(max_val, x));
+  });
+
+  return result;
 }
 
 double get_differential_norm_weight(const double var_value,

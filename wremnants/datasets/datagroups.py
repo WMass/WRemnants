@@ -40,7 +40,7 @@ class Datagroups(object):
         "2018": 1.025,
     }
 
-    def __init__(self, infile, mode=None, **kwargs):
+    def __init__(self, infile, mode=None, xnorm=False, **kwargs):
         if infile.endswith(".pkl.lz4"):
             with lz4.frame.open(infile) as f:
                 self.results = pickle.load(f)
@@ -112,6 +112,9 @@ class Datagroups(object):
         self.absorbSyst = None
         self.explicitSyst = None
         self.customSystMapping = {}
+
+        # if the histograms should be normalized to cross section (otherwise expected events)
+        self.xnorm = xnorm
 
         self.writer = None
 
@@ -299,6 +302,8 @@ class Datagroups(object):
                 fakeselector = sel.FakeSelectorSimultaneousABCD
             else:
                 fakeselector = sel.FakeSelectorSimpleABCD
+        elif mode == "mc":
+            pass
         else:
             raise RuntimeError(f"Unknown mode {mode} for fakerate estimation")
         if forceGlobalScaleFakes is not None:
@@ -310,7 +315,7 @@ class Datagroups(object):
                 raise RuntimeError(f"No member found for group {g}")
             base_member = members[0].name
             h = self.results[base_member]["output"][histToRead].get()
-            if g in fake_processes:
+            if g in fake_processes and mode.lower() != "mc":
                 self.groups[g].histselector = fakeselector(
                     h,
                     global_scalefactor=scale,
@@ -386,7 +391,10 @@ class Datagroups(object):
     def processScaleFactor(self, proc):
         if proc.is_data or proc.xsec is None:
             return 1
-        return self.lumi * 1000 * proc.xsec / proc.weight_sum
+        scale = proc.xsec / proc.weight_sum
+        if not self.xnorm:
+            scale *= self.lumi * 1000
+        return scale
 
     def getMetaInfo(self):
         if "meta_info" not in self.results and "meta_data" not in self.results:
@@ -513,14 +521,14 @@ class Datagroups(object):
                         f"Forcing group member {member.name} to read the nominal hist for syst {syst}"
                     )
                 try:
-                    h = self.readHist(baseName, member, procName, read_syst)
+                    h = self.readHist(baseName, member, read_syst)
                     foundExact = True
                 except ValueError as e:
                     if nominalIfMissing:
                         logger.info(
                             f"{str(e)}. Using nominal hist {self.nominalName} instead"
                         )
-                        h = self.readHist(self.nominalName, member, procName, "")
+                        h = self.readHist(self.nominalName, member, "")
                     else:
                         logger.warning(str(e))
                         continue
@@ -541,7 +549,7 @@ class Datagroups(object):
 
                 if preOpMap and member.name in preOpMap:
                     logger.debug(
-                        f"Applying action to {member.name}/{procName} after loading"
+                        f"Applying preOp to {member.name}/{procName} after loading"
                     )
                     h = preOpMap[member.name](h, **preOpArgs)
 
@@ -757,6 +765,7 @@ class Datagroups(object):
             self.loadHistsForDatagroups(
                 refname,
                 syst=name,
+                label=rename,
                 excludeProcs=exclude,
                 procsToRead=procsToRead,
                 **kwargs,
@@ -764,6 +773,7 @@ class Datagroups(object):
 
         if not rename:
             rename = name
+
         self.addGroup(
             rename,
             label=label,
@@ -773,7 +783,7 @@ class Datagroups(object):
         tosum = []
         procs = procsToRead if procsToRead else self.groups.keys()
         for proc in filter(lambda x: x not in exclude + [rename], procs):
-            h = self.groups[proc].hists[name]
+            h = self.groups[proc].hists[rename if reload else name]
             if not h:
                 raise ValueError(
                     f"Failed to find hist for proc {proc}, histname {name}"
@@ -917,6 +927,7 @@ class Datagroups(object):
         histToReadAxes="xnorm",
         axesNamesToRead=None,
         fitvar=[],
+        disable_flow_fit_axes=True,
     ):
         nominal_hist = self.getHistForUnfolding(
             group_name, member_filter, histToReadAxes
@@ -937,11 +948,12 @@ class Datagroups(object):
         else:
             expand_vars_rename = axesNamesToRead
 
-        # turn off flow for axes that are fit and used to define new groups, otherwise groups with empty histogram for the flow bins would be added
-        for a in expand_vars:
-            idx = axesNamesToRead.index(a)
-            ax = axesToRead[idx]
-            axesToRead[idx] = hh.disableAxisFlow(ax)
+        if disable_flow_fit_axes:
+            # turn off flow for axes that are fit and used to define new groups, otherwise groups with empty histogram for the flow bins would be added
+            for a in expand_vars:
+                idx = axesNamesToRead.index(a)
+                ax = axesToRead[idx]
+                axesToRead[idx] = hh.disableAxisFlow(ax)
 
         self.gen_axes[new_name] = axesToRead
         logger.debug(f"New gen axes are: {self.gen_axes}")
@@ -1051,11 +1063,11 @@ class Datagroups(object):
         ):
             self.setRebinOp(a)
 
-    def readHist(self, baseName, proc, group, syst):
+    def readHist(self, baseName, proc, syst):
         output = self.results[proc.name]["output"]
         histname = self.histName(baseName, proc.name, syst)
         logger.debug(
-            f"Reading hist {histname} for proc/group {proc.name}/{group} and syst '{syst}'"
+            f"Reading hist {histname} for proc/group {proc.name} and syst '{syst}'"
         )
         if histname not in output:
             raise ValueError(f"Histogram {histname} not found for process {proc.name}")
@@ -1160,14 +1172,11 @@ class Datagroups(object):
             return False
 
     # Read a specific hist, useful if you need to check info about the file
-    def getHistsForProcAndSyst(self, proc, syst, nominal_name=None):
+    def getHistsForProcAndSyst(self, proc, syst, nominal_name=None, **kwargs):
         if nominal_name is None:
             nominal_name = self.nominalName
         self.loadHistsForDatagroups(
-            baseName=nominal_name,
-            syst=syst,
-            label="syst",
-            procsToRead=[proc],
+            baseName=nominal_name, syst=syst, label="syst", procsToRead=[proc], **kwargs
         )
         return self.groups[proc].hists["syst"]
 
@@ -1179,6 +1188,7 @@ class Datagroups(object):
         bin_by_bin_stat_scale=1.0,
         fitresult_data=None,
         masked=False,
+        masked_flow_axes=[],
     ):
         if self.writer is None:
             raise RuntimeError("Writer must be defined to add nominal histograms")
@@ -1211,9 +1221,20 @@ class Datagroups(object):
                     norm_proc_hist.variances(flow=True) * bin_by_bin_stat_scale**2
                 )
 
+            if len(masked_flow_axes) > 0:
+                self.axes_disable_flow = [
+                    n
+                    for n in norm_proc_hist.axes.name
+                    if n not in masked_flow_axes and n != "helicitySig"
+                ]
+                norm_proc_hist = hh.disableFlow(norm_proc_hist, self.axes_disable_flow)
+
             if self.channel not in self.writer.channels:
                 self.writer.add_channel(
-                    axes=norm_proc_hist.axes, name=self.channel, masked=masked
+                    axes=norm_proc_hist.axes,
+                    name=self.channel,
+                    masked=masked,
+                    flow=len(masked_flow_axes) > 0,
                 )
 
             self.writer.add_process(
@@ -1397,6 +1418,14 @@ class Datagroups(object):
                         ]
                     )
 
+                if hasattr(self, "axes_disable_flow") and len(self.axes_disable_flow):
+                    if isinstance(hists, hist.Hist):
+                        hists = hh.disableFlow(hists, self.axes_disable_flow)
+                    else:
+                        hists = [
+                            hh.disableFlow(h, self.axes_disable_flow) for h in hists
+                        ]
+
                 logger.debug(f"Add systematic {var_name}")
                 self.writer.add_systematic(
                     hists,
@@ -1533,6 +1562,10 @@ class Datagroups(object):
             # Check if the entry in the hist matches one of the entries in entries_to_skip, across all axes
             # Can use -1 to exclude all values of an axis
             def match_entry(curr_entry, to_skip):
+                if isinstance(to_skip, list) and all(
+                    isinstance(x, str) for x in to_skip
+                ):
+                    return any(match_entry(curr_entry, m) for m in to_skip)
                 return (
                     to_skip == -1
                     or curr_entry == to_skip
@@ -1941,7 +1974,7 @@ class Datagroups(object):
                 forceNonzero=forceNonzero,
             )
             hists = [
-                self.groups[proc].hists[p]
+                pseudodataGroups.groups[proc].hists[p]
                 for proc in processes
                 if proc not in processesFromNomi
             ]
@@ -2003,22 +2036,23 @@ class Datagroups(object):
                     pseudoDataIdxs[idx] = pseudo_axis
 
                 for syst_idx in pseudoDataIdxs[idx]:
-                    idx = 0 if syst_idx is None else syst_idx
+                    _idx = 0 if syst_idx is None else syst_idx
 
                     if type(pseudo_axis) == hist.axis.StrCategory:
                         syst_bin = (
-                            pseudo_axis.bin(idx) if type(idx) == int else str(idx)
+                            pseudo_axis.bin(_idx) if type(_idx) == int else str(_idx)
                         )
                     else:
                         syst_bin = (
-                            str(pseudo_axis.index(idx))
-                            if type(idx) == int
-                            else str(idx)
+                            str(pseudo_axis.index(_idx))
+                            if type(_idx) == int
+                            else str(_idx)
                         )
                     name = f"{p}_{pseudoDataAxes[idx]}{f'_{syst_bin}' if syst_idx not in [None, 0] else ''}"
+
                     logger.info(f"Write pseudodata {name}")
 
-                    h = hdata[{pseudoDataAxes[idx]: idx}]
+                    h = hdata[{pseudoDataAxes[idx]: _idx}]
                     if h.axes.name != self.fit_axes:
                         h = h.project(*self.fit_axes)
 

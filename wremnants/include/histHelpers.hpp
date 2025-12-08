@@ -18,6 +18,17 @@
 
 namespace wrem {
 
+template <typename T> class HistHelper1D {
+public:
+  HistHelper1D(T &&resource)
+      : resourceHist_(std::make_shared<const T>(std::move(resource))) {}
+
+  double operator()(double x1) { return narf::get_value(*resourceHist_, x1); }
+
+private:
+  std::shared_ptr<const T> resourceHist_;
+};
+
 template <typename T> class HistHelper3D {
 public:
   HistHelper3D(T &&resource)

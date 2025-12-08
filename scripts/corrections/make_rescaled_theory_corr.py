@@ -5,8 +5,6 @@ import re
 import lz4.frame
 
 from utilities import common, parsing
-from wremnants import theory_corrections
-from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
 
@@ -67,26 +65,33 @@ def main():
 
     refcorr = ref[proc][corr_name(args.refCorr) + "_minnlo_ratio"]
 
-    ref_hist = ref[proc][corr_name(args.refCorr) + "_hist"]
-    rescale_hist = rescale[proc][corr_name(args.rescaleCorr) + "_hist"]
+    rescale_corr_name = (
+        f"{corr_name(args.rescaleCorr)}_minnlo_ratio"
+        if "dataPtll" not in args.rescaleCorr
+        else "MC_data_ratio"
+    )
+    rescale_corr = rescale[proc][rescale_corr_name]
 
-    if ref_hist.shape[:-1] != rescale_hist.shape[:-1]:
+    if refcorr.shape[:-1] != rescale_corr.shape[:-1]:
         raise ValueError(
-            f"Histograms {ref_hist.shape} and {rescale_hist.shape} have different shapes"
+            f"Histograms {refcorr.shape} and {rescale_corr.shape} have different shapes"
         )
 
-    ratio = hh.divideHists(rescale_hist[{"vars": 0}], ref_hist[{"vars": 0}], flow=False)
+    new_corr = refcorr.copy()
+    central_val_corr = rescale_corr[..., 0:1].view() / refcorr[..., 0:1].view()
+    # Broadcast syst axis
+    new_corr[...] = (refcorr.view().T * central_val_corr.T).T
 
-    new_corr = hh.multiplyHists(refcorr, ratio, flow=False)
-    if args.smooth:
-        new_corr = theory_corrections.smooth_theory_corr(
-            new_corr, ref[proc]["minnlo_ref_hist"], rescale_hist
-        )
+    new_name = args.newCorrName + "_minnlo_ratio"
+    if "dataPtll" in args.newCorrName:
+        new_name = "MC_data_ratio"
+        # Avoid overwriting
+        rescale[proc]["MC_data_ratio_old"] = rescale[proc]["MC_data_ratio"]
 
     output_dict = {
-        args.newCorrName + "_minnlo_ratio": new_corr,
         **ref[proc],
         **rescale[proc],
+        new_name: new_corr,
     }
     meta_dict = {
         "ref_file": ref["file_meta_data"],

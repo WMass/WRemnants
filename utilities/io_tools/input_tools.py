@@ -846,12 +846,13 @@ def read_dyturbo_angular_coeffs(
     return h
 
 
-def read_mu_hist_combine_tau(minnlof, mu_sample, hist_name):
+def read_mu_hist_combine_tau(minnlof, mu_sample, hist_name, combine_with_tau=True):
     hmu = read_and_scale(minnlof, mu_sample, hist_name, apply_xsec=False)
     sumw = read_sumw(minnlof, mu_sample)
     xsec = read_xsec(minnlof, mu_sample)
 
-    tau_sample = mu_sample.replace("mu", "tau")
-    htau = read_and_scale(minnlof, tau_sample, hist_name, apply_xsec=False)
-    sumw += read_sumw(minnlof, tau_sample)
-    return (hmu + htau) * xsec / sumw
+    if combine_with_tau:
+        tau_sample = mu_sample.replace("mu", "tau")
+        hmu += read_and_scale(minnlof, tau_sample, hist_name, apply_xsec=False)
+        sumw += read_sumw(minnlof, tau_sample)
+    return hmu * xsec / sumw

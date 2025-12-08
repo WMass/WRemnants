@@ -513,6 +513,12 @@ def common_parser(analysis_label=""):
             type=float,
             help="Upper threshold for muon absolute dxy with respect to beamspot",
         )
+        parser.add_argument(
+            "--oneMCfileEveryN",
+            type=int,
+            default=None,
+            help="Use 1 MC file every N, where N is given by this option. Mainly for tests",
+        )
         # Options to test splitting of data into subsets
         parser.add_argument(
             "--addRunAxis",
@@ -627,8 +633,9 @@ def common_parser(analysis_label=""):
         )
         parser.add_argument(
             "--fitresult",
+            nargs="+",
             type=str,
-            help="Fitresult to be used to reweight the gen distribution (e.g. for iterative POI as NOI fit)",
+            help="Fitresult to be used to reweight the gen distribution (e.g. for iterative POI as NOI fit) if two are given use first for numerator and second for denominator",
         )
         parser.add_argument(
             "--poiAsNoi",

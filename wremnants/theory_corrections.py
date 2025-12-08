@@ -44,25 +44,37 @@ def load_corr_helpers(
     generators,
     make_tensor=True,
     base_dir=f"{common.data_dir}/TheoryCorrections/",
+    minnlo_ratio=True,
 ):
     corr_helpers = {}
     for proc in procs:
         corr_helpers[proc] = {}
-        for generator in generators:
-            fname = f"{base_dir}/{generator}Corr{proc[0]}.pkl.lz4"
+        for i, generator in enumerate(generators):
+            if proc.startswith("WtoNMu") and i == 0:
+                label = "BSM"
+            else:
+                label = proc[0]
+
+            fname = f"{base_dir}/{generator}Corr{label}.pkl.lz4"
             if not os.path.isfile(fname):
                 logger.warning(
                     f"Did not find correction file for process {proc}, generator {generator}. No correction will be applied for this process!"
                 )
                 continue
             logger.debug(f"Make theory correction helper for file: {fname}")
-            corrh = load_corr_hist(fname, proc[0], get_corr_name(generator))
+            corrh = load_corr_hist(
+                fname, label, get_corr_name(generator, minnlo_ratio=minnlo_ratio)
+            )
             numh = None
-            if generator == generators[0] and "nnlojet" in generator:
+            if (
+                (generator == generators[0])
+                and ("nnlojet" in generator.lower())
+                and ("pdfas" not in generator.lower())
+            ):
                 logger.info(
                     f"Adding statistical uncertainties for correction {generator}"
                 )
-                numh = load_corr_hist(fname, proc[0], f"{generator}_hist")
+                numh = load_corr_hist(fname, label, f"{generator}_hist")
 
             corrh = postprocess_corr_hist(corrh, numh)
             if not make_tensor:
@@ -74,7 +86,7 @@ def load_corr_helpers(
             else:
                 corr_helpers[proc][generator] = makeCorrectionsTensor(
                     corrh,
-                    weighted_corr=generator in theory_tools.theory_corr_weight_map,
+                    tensor_weight=generator in theory_tools.theory_corr_weight_map,
                 )
     for generator in generators:
         if not any([generator in corr_helpers[proc] for proc in procs]):
@@ -321,16 +333,25 @@ def postprocess_corr_hist(corrh, numh=None):
     return corrh
 
 
-def get_corr_name(generator):
+def get_corr_name(generator, minnlo_ratio=True):
     # Hack for now
     label = generator.replace("1D", "")
-    if "dataPtll" in generator or "dataRecoPtll" in generator:
+    if (
+        "dataPtll" in generator or "dataRecoPtll" in generator
+    ) and "scetlib" not in generator:
         return "MC_data_ratio"
-    return (
-        f"{label}_minnlo_ratio"
-        if "Helicity" not in generator
-        else f"{label.replace('Helicity', '')}_minnlo_coeffs"
-    )
+    if minnlo_ratio:
+        return (
+            f"{label}_minnlo_ratio"
+            if "Helicity" not in generator
+            else f"{label.replace('Helicity', '')}_minnlo_coeffs"
+        )
+    else:
+        return (
+            f"{label}_hist"
+            if "Helicity" not in generator
+            else f"{label.replace('Helicity', '')}_coeffs"
+        )
 
 
 def rebin_corr_hists(hists, ndim=-1, binning=None):
@@ -404,7 +425,9 @@ def set_corr_ratio_flow(corrh):
     return corrh
 
 
-def make_corr_from_ratio(denom_hist, num_hist, rebin=None, smooth="numerator"):
+def make_corr_from_ratio(
+    denom_hist, num_hist, rebin=None, smooth="numerator", normalize=False
+):
     denom_hist, num_hist = rebin_corr_hists([denom_hist, num_hist], binning=rebin)
 
     if smooth == "numerator":
@@ -414,6 +437,10 @@ def make_corr_from_ratio(denom_hist, num_hist, rebin=None, smooth="numerator"):
         num_hist = hh.smooth_hist(
             hh.smooth_hist(num_hist, "absY", exclude_axes=["qT"]), "qT", start_bin=4
         )
+
+    if normalize:
+        num_hist = hh.divideHists(num_hist, num_hist.project("vars"))
+        denom_hist = hh.normalize(denom_hist, scale=1)
 
     corrh = hh.divideHists(num_hist, denom_hist, flow=False, by_ax_name=False)
 
@@ -484,31 +511,113 @@ def make_corr_by_helicity(
     return corr_coeffs
 
 
-def make_qcd_uncertainty_helper_by_helicity(
-    is_z=False, filename=None, rebi_ptVgen=True
+def make_theory_helpers(
+    args, procs=["Z", "W"], corrs=["qcdScale", "pdf", "alphaS", "pdf_central"]
 ):
-    if filename is None:
-        filename = f"{common.data_dir}/angularCoefficients/w_z_moments.hdf5"
+
+    theory_helpers_procs = {p: {} for p in procs}
+
+    if "Z" in procs and "qcdScale" in corrs:
+        theory_helpers_procs["Z"]["qcdScale"] = make_qcd_uncertainty_helper_by_helicity(
+            is_z=True,
+            filename=(
+                f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5"
+                if args.unfolding
+                else f"{common.data_dir}/angularCoefficients/w_z_moments.hdf5"
+            ),
+            rebin_ptVgen=False,
+            return_tensor=True,
+        )
+    if "W" in procs and "qcdScale" in corrs:
+        theory_helpers_procs["W"]["qcdScale"] = make_qcd_uncertainty_helper_by_helicity(
+            is_z=False,
+            filename=(f"{common.data_dir}/angularCoefficients/w_z_moments.hdf5"),
+            rebin_ptVgen=False,
+            return_tensor=True,
+        )
+
+    for proc in theory_helpers_procs.keys():
+
+        if "pdf" in corrs:
+            theory_helpers_procs[proc]["pdf"] = (
+                make_pdfs_uncertainties_helper_by_helicity(
+                    proc=proc,
+                    pdfs=args.pdfs,
+                )
+            )
+        if "alphaS" in corrs:
+            as_vars = [x + "Corr" for x in args.theoryCorr if "pdfas" in x]
+            theory_helpers_procs[proc]["alphaS"] = (
+                make_alphaS_uncertainties_helper_by_helicity(
+                    proc=proc,
+                    as_vars=as_vars,
+                )
+            )
+        if "pdf_central" in corrs:
+            theory_helpers_procs[proc]["pdf_central"] = (
+                make_uncertainty_helper_by_helicity(
+                    proc=proc,
+                    nom=theory_tools.pdfMap[args.pdfs[0]]["name"],
+                    den="pdf_uncorr",
+                    central_weights=True,
+                    filename=common.data_dir
+                    + f"/TheoryCorrectionsByHelicity/PDFs/w_z_gen_dists_maxFiles_m1_{args.pdfs[0]}_pdfByHelicity_skimmed.hdf5",
+                )
+            )
+
+    return theory_helpers_procs
+
+
+def make_qcd_uncertainty_helper_by_helicity(
+    is_z=False,
+    filename=f"{common.data_dir}/angularCoefficients/w_z_moments.hdf5",
+    rebin_ptVgen=common.ptV_binning,
+    rebin_absYVgen=False,
+    rebin_massVgen=True,
+    return_tensor=True,
+):
 
     # load helicity cross sections from file
     with h5py.File(filename, "r") as h5file:
         results = input_tools.load_results_h5py(h5file)
 
-    def get_helicity_xsecs(suffix="", rebin=True):
+    def get_helicity_xsecs(
+        suffix="",
+        rebin_ptVgen=common.ptV_binning,
+        rebin_absYVgen=False,
+        rebin_massVgen=2,
+    ):
         h = results[f"Z{suffix}"] if is_z else results[f"W{suffix}"]
-        if not rebin:
-            return h
 
-        # Common.ptV_binning is the approximate 5% quantiles, rounded to integers
-        h = hh.rebinHist(h, "ptVgen", common.ptV_binning)
+        if rebin_ptVgen:
+            if type(rebin_ptVgen) is bool:
+                h = hh.rebinHist(h, "ptVgen", common.ptV_binning)
+            else:
+                h = hh.rebinHist(h, "ptVgen", rebin_ptVgen)
+        if rebin_massVgen:
+            if type(rebin_massVgen) is bool:
+                if is_z:
+                    axis_massVgen = h.axes["massVgen"]
+                    if len(axis_massVgen.edges) > 2:
+                        h = hh.rebinHist(h, "massVgen", axis_massVgen.edges[::2])
+            else:
+                h = hh.rebinHist(h, "massVgen", rebin_massVgen)
+        if rebin_absYVgen:
+            h = hh.rebinHist(h, "absYVgen", rebin_absYVgen)
 
-        if is_z:
-            axis_massVgen = h.axes["massVgen"]
-            h = hh.rebinHist(h, "massVgen", axis_massVgen.edges[::2])
         return h
 
-    helicity_xsecs = get_helicity_xsecs(rebin=rebi_ptVgen)
-    helicity_xsecs_lhe = get_helicity_xsecs("_lhe", rebin=rebi_ptVgen)
+    helicity_xsecs = get_helicity_xsecs(
+        rebin_ptVgen=rebin_ptVgen,
+        rebin_absYVgen=rebin_absYVgen,
+        rebin_massVgen=rebin_massVgen,
+    )
+    helicity_xsecs_lhe = get_helicity_xsecs(
+        "_lhe",
+        rebin_ptVgen=rebin_ptVgen,
+        rebin_absYVgen=rebin_absYVgen,
+        rebin_massVgen=rebin_massVgen,
+    )
 
     helicity_xsecs_nom = helicity_xsecs[{"muRfact": 1.0j, "muFfact": 1.0j}].values()
 
@@ -572,14 +681,167 @@ def make_qcd_uncertainty_helper_by_helicity(
         ].values()[..., None]
     )
 
-    helper = makeCorrectionsTensor(
-        corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3
+    if return_tensor:
+        helper = makeCorrectionsTensor(
+            corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3
+        )
+
+        # override tensor_axes since the output is different here
+        helper.tensor_axes = [vars_ax]
+
+        return helper
+    else:
+        return corr_coeffs
+
+
+def make_pdfs_uncertainties_helper_by_helicity(
+    proc,
+    pdfs,
+    return_tensor=True,
+):
+    pdf_file_template = (
+        common.data_dir
+        + "/TheoryCorrectionsByHelicity/PDFs/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity_skimmed.hdf5"
     )
+    pdf_helpers = {}
+    for pdf in pdfs:
+        pdf_name = theory_tools.pdfMap[pdf]["name"]
+        logger.debug(
+            f"Making PDF uncertainty helper by helicity for PDF set {pdf_name}"
+        )
+        pdf_renorm_name = (
+            pdf_name if theory_tools.pdfMap[pdf].get("renorm", False) else "pdf_uncorr"
+        )
+        pdf_helper = make_uncertainty_helper_by_helicity(
+            proc=proc,
+            nom=pdf_name,
+            den=pdf_renorm_name,
+            filename=pdf_file_template.format(pdf=pdf),
+            var_ax_name="pdfVar",
+            return_tensor=return_tensor,
+        )
+        if pdf_helper is not None:
+            pdf_helpers[pdf_name] = pdf_helper
+    return pdf_helpers
 
-    # override tensor_axes since the output is different here
-    helper.tensor_axes = [vars_ax]
 
-    return helper
+def make_alphaS_uncertainties_helper_by_helicity(
+    proc,
+    as_vars,
+    return_tensor=True,
+):
+    alphas_file_template = (
+        common.data_dir
+        + "/TheoryCorrectionsByHelicity/AlphaS/w_z_gen_dists_{as_var}_maxFiles_m1_skimmed.hdf5"
+    )
+    as_helpers = {}
+    for as_var in as_vars:
+        logger.debug(
+            f"Making alphaS uncertainty helper by helicity for theory corr {as_var}"
+        )
+        as_helper = make_uncertainty_helper_by_helicity(
+            proc=proc,
+            nom=as_var,
+            den="theory_uncorr",
+            filename=alphas_file_template.format(as_var=as_var),
+            var_ax_name="vars",
+            return_tensor=return_tensor,
+        )
+        if as_helper is not None:
+            as_helpers[as_var] = as_helper
+    return as_helpers
+
+
+def make_uncertainty_helper_by_helicity(
+    proc,
+    nom,
+    den,
+    filename=f"{common.data_dir}/angularCoefficients/w_z_gen_dists_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
+    filename_den=None,
+    central_weights=False,
+    var_ax_name="pdfVar",
+    return_tensor=True,
+):
+    """
+    Construct a CentralCorrByHelicityHelper from helicity cross sections stored in an hdf5 file.
+    """
+
+    if filename_den is None:
+        filename_den = filename
+
+    # load helicity cross sections from file
+    proc_map = {
+        "Z": ("ZmumuPostVFP",),
+        "W": ("WplusmunuPostVFP", "WminusmunuPostVFP"),
+    }
+
+    def _collect_hist(hist_name, filename):
+        hist_key = f"nominal_gen_{hist_name}"
+        hists = []
+        for process in proc_map.get(proc, ()):
+            with h5py.File(filename, "r") as h5file:
+                results = input_tools.load_results_h5py(h5file)
+                outputs = results[process]["output"]
+                if hist_key not in outputs:
+                    logger.warning(
+                        f"Did not find {hist_key} in {filename}. Not creating histogram of PDF variations by helicities for this set."
+                    )
+                    return None
+                hists.append(outputs[hist_key].get())
+        if not hists:
+            logger.warning(
+                f"Process {proc} is not supported when building PDF variations."
+            )
+            return None
+        combined = hh.sumHists(hists)
+        return combined
+
+    h_nom = _collect_hist(nom, filename)
+    if h_nom is None:
+        return None
+
+    if den == nom:
+        h_den = h_nom
+    else:
+        h_den = _collect_hist(den, filename_den)
+        if h_den is None:
+            return None
+
+    # construct the correction tensor
+    corr_ax = hist.axis.Boolean(name="corr")
+    vars_ax = h_nom.axes[var_ax_name]
+    axes_no_scale = h_nom.axes[:-1]
+    if central_weights:
+        # in the case we are computing a helper for the central weights, we don't need to fill all variations
+        new_vars_ax = hist.axis.StrCategory(["nominal"], name="vars")
+        corr_coeffs = hist.Hist(*axes_no_scale, corr_ax, new_vars_ax)
+    else:
+        corr_coeffs = hist.Hist(*axes_no_scale, corr_ax, vars_ax)
+
+    # set all helicity_xsecs equal to nominal
+    if var_ax_name in h_den.axes.name:
+        h_den = h_den[{var_ax_name: 0}]
+    corr_coeffs.values(flow=True)[...] = h_den.values(flow=True)[..., None, None]
+
+    # set the variations
+    if central_weights:
+        # in the case we are computing a helper for the central weights, we don't need to fill all variations
+        h_nom = h_nom[{var_ax_name: 0}]
+        corr_coeffs.values(flow=True)[..., 1, :] = h_nom.values(flow=True)[..., None]
+    else:
+        corr_coeffs.values(flow=True)[..., 1, :] = h_nom.values(flow=True)
+
+    if return_tensor:
+        helper = makeCorrectionsTensor(
+            corr_coeffs, ROOT.wrem.CentralCorrByHelicityHelper, tensor_rank=3
+        )
+
+        # override tensor_axes since the output is different here
+        helper.tensor_axes = [vars_ax]
+
+        return helper
+    else:
+        return corr_coeffs
 
 
 def make_helicity_test_corrector(is_z=False, filename=None):

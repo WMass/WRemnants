@@ -6,11 +6,10 @@ import numpy as np
 from scipy.stats import chi2
 
 from utilities import parsing
-from utilities.io_tools import input_tools, output_tools
-from utilities.styles import styles
-from wremnants import plot_tools, theory_tools
+from utilities.io_tools import input_tools
+from wremnants import theory_tools
 from wums import boostHistHelpers as hh
-from wums import logging
+from wums import logging, output_tools, plot_tools
 
 if __name__ == "__main__":
     parser = parsing.plot_parser()
@@ -43,10 +42,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Plot sum of histograms from different input files",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config file for style formatting",
+    )
 
     args = parser.parse_args()
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
+    config = plot_tools.load_config(args.config)
     outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
     linestyles = ["solid", "dashed"]
@@ -57,6 +63,7 @@ if __name__ == "__main__":
     for helicity_file in args.helicities:
         with h5py.File(helicity_file, "r") as ff:
             out = input_tools.load_results_h5py(ff)
+
         for key in out.keys():
             if not key.startswith(args.process) or key in ["meta_info"]:
                 continue
@@ -70,7 +77,7 @@ if __name__ == "__main__":
             hhelicity = hhelicity[
                 {"muRfact": 1j, "muFfact": 1j, "chargeVgen": 0, "massVgen": 0}
             ]
-            hhelicity = hh.disableFlow(hhelicity, "absYVGen")
+            hhelicity = hh.disableFlow(hhelicity, "absYVgen")
 
             if len(args.helicities) > 1 and args.plotSum:
                 if helicity_sum[key] is None:
@@ -123,7 +130,7 @@ if __name__ == "__main__":
 
     colors = mpl.colormaps["tab10"]
 
-    for var in ("absYVGen", "ptVGen"):
+    for var in ("absYVgen", "ptVgen"):
 
         hists1d = {
             k: [h.project(var, "helicity") for h in v] for k, v in helicities.items()
@@ -158,9 +165,11 @@ if __name__ == "__main__":
                 + (r"\mathrm{UL}" if i == -1 else str(i))
                 + r"}\,[\mathrm{pb}]$"
             )
+
+            xlabel = plot_tools.get_axis_label(config, var)
             fig, ax1 = plot_tools.figure(
                 next(iter(h1ds.values()))[0],
-                xlabel=styles.xlabels.get(var, var),
+                xlabel=xlabel,
                 ylabel=ylabel,
                 grid=False,
                 automatic_scale=False,
@@ -193,6 +202,7 @@ if __name__ == "__main__":
             else:
                 for m, (k, hs) in enumerate(h1ds.items()):
                     suffix = suffixes[k.replace(args.process, "").replace("_", "")]
+
                     for j, h in enumerate(hs):
                         hep.histplot(
                             h,
@@ -216,7 +226,12 @@ if __name__ == "__main__":
             x_min, x_max = ax1.get_xlim()
             plt.plot([x_min, x_max], [0, 0], color="black", linestyle="--")
 
-            ax1.set_ylim([y_min - yrange * 0.1, y_max + yrange * 0.2])
+            if (y_min > 0) and (y_max > 0):
+                ax1.set_ylim([min(0, y_min) - yrange * 0.1, y_max + yrange * 0.2])
+            elif (y_min < 0) and (y_max < 0):
+                ax1.set_ylim([y_min - yrange * 0.1, max(y_max, 0) + yrange * 0.2])
+            else:
+                ax1.set_ylim([y_min - yrange * 0.1, y_max + yrange * 0.2])
 
             plot_tools.add_cms_decor(
                 ax1, args.cmsDecor, data=False, lumi=None, loc=args.logoPos
@@ -234,7 +249,7 @@ if __name__ == "__main__":
             if args.postfix:
                 outfile += f"_{args.postfix}"
             plot_tools.save_pdf_and_png(outdir, outfile)
-            plot_tools.write_index_and_log(outdir, outfile, args=args)
+            output_tools.write_index_and_log(outdir, outfile, args=args)
 
     if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
         output_tools.copy_to_eos(outdir, args.outpath, args.outfolder)

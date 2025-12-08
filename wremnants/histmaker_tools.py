@@ -192,7 +192,7 @@ def write_analysis_output(results, outfile, args):
     with h5py.File(outfile, open_as) as f:
         for k, v in results.items():
             logger.debug(f"Pickle and dump {k}")
-            ioutils.pickle_dump_h5py(k, v, f)
+            ioutils.pickle_dump_h5py(k, v, f, override=open_as != "w")
 
         if "meta_info" not in f.keys():
             ioutils.pickle_dump_h5py(
