@@ -481,7 +481,6 @@ if args.theoryAgnostic:
         args.theoryAgnosticPolVar and args.theoryAgnosticSplitOOA
     ):  # this splitting is not needed for the normVar version of the theory agnostic
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Wmunu")
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
         groups_to_aggregate.append("WmunuOOA")
 
 # axes for study of fakes
