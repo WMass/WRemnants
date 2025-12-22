@@ -65,7 +65,7 @@ def make_subparsers(parser):
         "--priorNormXsec",
         type=float,
         default=1,
-        help=r"Prior for shape uncertainties on cross sections for theory agnostic or unfolding analysis with POIs as NOIs (1 means 100%). If negative, it will use shapeNoConstraint in the fit",
+        help=r"Prior for shape uncertainties on cross sections for theory agnostic or unfolding analysis with POIs as NOIs (1 means 100%%). If negative, it will use shapeNoConstraint in the fit",
     )
     parser.add_argument(
         "--scaleNormXsecHistYields",
@@ -236,7 +236,7 @@ def make_parser(parser=None):
     parser.add_argument(
         "--lumiUncertainty",
         type=float,
-        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%); automatic by default",
+        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default",
         default=None,
     )
     parser.add_argument(
@@ -647,7 +647,7 @@ def make_parser(parser=None):
         default=0,
         type=float,
         help=r"""Add normalization uncertainty for W signal. 
-            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1% of the nominal is varied). 
+            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1%% of the nominal is varied). 
             If 0 nothing is added""",
     )
     parser.add_argument(
@@ -655,7 +655,7 @@ def make_parser(parser=None):
         default=0,
         type=float,
         help=r"""Add normalization uncertainty for W->tau,nu process. 
-            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1% of the nominal is varied). 
+            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1%% of the nominal is varied). 
             If 0 nothing is added""",
     )
     parser.add_argument(
@@ -1856,7 +1856,7 @@ def setup(
                 return hvar
 
             for axesToDecorrNames in [
-                [],
+                [datagroups.fakeTransferAxis] if True else [],
             ]:
                 for idx, mag in [
                     (1, 0.1),
