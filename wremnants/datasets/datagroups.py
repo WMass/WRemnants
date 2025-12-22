@@ -1373,7 +1373,7 @@ class Datagroups(object):
         )
 
         for proc in procs_to_add:
-            logger.error(f"Now doing syst {name} for proc {proc}!")
+            logger.debug(f"Now doing syst {name} for proc {proc}!")
 
             hvar = self.groups[proc].hists["syst"]
             logger.debug(f"Actions: {action}, args: {actionArgs}")

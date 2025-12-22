@@ -1,4 +1,6 @@
 import hist
+import os
+import pickle
 import numpy as np
 from scipy import interpolate
 
@@ -199,11 +201,11 @@ class HistselectorABCD(object):
 
         self.fakeTransferAxis = fakeTransferAxis
         if fakerate_axes is not None:
-            self.fakerate_axes = fakerate_axes
+            self.fakerate_axes = fakerate_axes  # list of axes names where to perform independent fakerate computation
             self.fakerate_integration_axes = [
                 n
                 for n in h.axes.name
-                if n not in [self.name_x, self.name_y, *fakerate_axes, self.fakeTransferAxis]
+                if n not in [self.name_x, self.name_y, *fakerate_axes]
             ]
             logger.debug(
                 f"Setting fakerate integration axes to {self.fakerate_integration_axes}"
@@ -435,6 +437,16 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             )
         else:
             self.spectrum_regressor = None
+        
+        if self.fakeTransferAxis in h.axes.name:
+            logger.debug("Loaded transfer tensor for fakes")
+            trTensorPath = os.path.join(
+                os.environ["WREM_BASE"],
+                "wremnants-data/data/fakesWmass/fakeTransferTemplates.pkl"
+            )
+            with open(trTensorPath, "rb") as fTens:
+                self.fakeTransferTensor = pickle.load(fTens)
+
 
         if self.smoothing_mode in ["binned"]:
             # rebinning doesn't make sense for binned estimation
@@ -1169,15 +1181,14 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                     logger.debug(f"Number of nonvalid bins in complement: {count_nonvalid} out of {sval_slicedCompl.size}")
 
                     out_other, outvar_other = self.smoothen_spectrum(
-                        h, hNew.axes[self.smoothing_axis_name].edges, sval_slicedCompl, svar_slicedCompl, 
+                        h, hNew.axes[self.smoothing_axis_name].edges, 
+                        sval_slicedCompl, svar_slicedCompl, 
                         syst_variations=syst_variations, use_spline=use_spline, 
                         reduce=not signal_region, flow=flow
                     )
 
-                    NORMFACTOR = 0.1196  # Ratio of nonprompt data in SV for uT<0 (num.) to ut>0 (den.)
-
-                    out = out_other * NORMFACTOR
-                    outvar = outvar_other * NORMFACTOR**2
+                    out = out_other * self.fakeTransferTensor.values()[..., *[None]*(out_other.ndim-3)]
+                    outvar = outvar_other * (self.fakeTransferTensor.values()[..., *[None]*(outvar_other.ndim-3)]**2)
 
             else:
                 out, outvar = self.smoothen_spectrum(
@@ -1195,26 +1206,14 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                 )
                 outVarTensor_slices += [slice(None), slice(None)]
 
-
             logger.debug(f"Smoothing completed for decorrelation bin {idx_fakeSep}.")
             logger.debug(f"Smoothing output shape: {out.shape}")
             logger.debug(f"Smoothing output var shape: {outvar.shape}")
             logger.debug(f"Smoothing baseOutTensor shape: {baseOutTensor.shape}")
             logger.debug(f"Smoothing baseOutVarTensor shape: {baseOutVarTensor.shape}")
 
-
-            if syst_variations and outvar.shape[-2:]!=baseOutVarTensor.shape[-2:]:
-                logger.warning(
-                    f"Shape mismatch in syst variations: existing is {baseOutVarTensor.shape[-2:]}, new is {outvar.shape[-2:]}. Overwriting baseOutVarTensor."
-                )
-                baseOutVarTensor = baseOutVarTensor[..., 0, 0]
-                baseOutVarTensor = np.broadcast_to(baseOutVarTensor[..., None, None], baseOutVarTensor.shape + outvar.shape[-2:]).copy()
-
-                logger.debug(f"New baseOutVarTensor shape: {baseOutVarTensor.shape}")
-
             baseOutTensor[tuple(outTensor_slices)] = out                                                             
             baseOutVarTensor[tuple(outVarTensor_slices)] = outvar
-
 
         out = baseOutTensor
         outvar = baseOutVarTensor
