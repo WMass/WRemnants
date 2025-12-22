@@ -1891,6 +1891,41 @@ def setup(
                         ),
                     )
 
+            def fake_nonclosure_utMinus(
+                h,
+                axesToDecorrNames=["eta"],
+                variation_size=0.1,
+                *args,
+                **kwargs,
+            ):
+                logger.error("Doing decorr nonclosure for utMinus")
+                hnom = fakeselector.get_hist(h, *args, **kwargs)
+                hvar = (1+variation_size)*hnom
+                # applying the variations only on the utAngleSign<0 bin
+                hvar.values()[..., -1] = hnom.values()[..., -1]
+
+                hvar = syst_tools.decorrelateByAxes(hvar, hnom, axesToDecorrNames)
+
+                return hvar
+
+            datagroups.addSystematic(
+                inputBaseName,
+                groups=[subgroup, "Fake", "experiment", "expNoCalib"],
+                name=f"{datagroups.fakeName}EtaClos_eta",
+                baseName=f"{datagroups.fakeName}EtaClos",
+                processes=datagroups.fakeName,
+                noConstraint=False,
+                mirror=True,
+                scale=1,
+                applySelection=False,  # don't apply selection, external parameters need to be added
+                action=fake_nonclosure_utMinus,
+                actionArgs=dict(
+                    axesToDecorrNames=["eta"],
+                    variation_size=0.1,
+                ),
+                systAxes=["eta_decorr"]
+            )
+
     if not args.noEfficiencyUnc:
 
         if not lowPU:
