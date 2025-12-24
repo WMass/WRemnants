@@ -60,7 +60,8 @@ class TheoryAgnosticHelper(object):
                     noConstraint=True,
                     systAxes=["nPolVarSyst", "downUpVar"],
                     labelsByAxis=["v", "downUpVar"],
-                    # splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"}
+                    # splitGroup={f"{groupName}_{coeffKey}" : f"{groupName}_{coeffKey}"},
+                    noi=True,
                 )
 
     def add_muRmuF_polVar_uncertainty(self):

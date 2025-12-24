@@ -79,7 +79,7 @@ class Datagroups(object):
         self.gen_axes = {}
         self.fit_axes = []
         self.fakerate_axes = ["pt", "eta", "charge"]
-        self.decorrFakeAxis = "utAngleSign"
+        self.fakeTransferAxis = "utAngleSign"
 
         self.setGenAxes()
 
@@ -320,7 +320,7 @@ class Datagroups(object):
                     h,
                     global_scalefactor=scale,
                     fakerate_axes=self.fakerate_axes,
-                    decorrFakeAxis=self.decorrFakeAxis,
+                    fakeTransferAxis=self.fakeTransferAxis,
                     smoothing_mode=smoothing_mode,
                     smoothing_order_fakerate=smoothingOrderFakerate,
                     smoothing_order_spectrum=smoothingOrderSpectrum,
@@ -1394,9 +1394,11 @@ class Datagroups(object):
         )
 
         for proc in procs_to_add:
-            logger.debug(f"Now at proc {proc}!")
+            logger.debug(f"Now doing syst {name} for proc {proc}!")
 
             hvar = self.groups[proc].hists["syst"]
+            logger.debug(f"Actions: {action}, args: {actionArgs}")
+            logger.debug(f"hvar shape: {hvar.values().shape}")
 
             if action is not None:
                 if actionRequiresNomi:
