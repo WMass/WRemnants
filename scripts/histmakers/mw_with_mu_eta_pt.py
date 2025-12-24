@@ -1038,6 +1038,7 @@ def build_graph(df, dataset):
         nMuons=1,
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
+        staPtCut=args.vetoRecoStaPt,
         dxybsCut=args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
@@ -1158,7 +1159,7 @@ def build_graph(df, dataset):
         if args.selectVetoEventsMC:
             # in principle a gen muon with eta = 2.401 might still be matched to a reco muon with eta < 2.4, same for pt, so this condition is potentially fragile, but it is just for test plots
             df = df.Filter("Sum(postfsrMuons_inAcc) >= 2")
-        if not args.noVetoSF:
+        if not args.noVetoSF or args.scaleDYvetoFraction > 0.0:
             df = df.Define(
                 "hasMatchDR2idx",
                 "wrem::hasMatchDR2idx_closest(goodMuons_eta0,goodMuons_phi0,GenPart_eta[postfsrMuons_inAcc],GenPart_phi[postfsrMuons_inAcc],0.09)",

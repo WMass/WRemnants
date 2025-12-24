@@ -502,6 +502,12 @@ def common_parser(analysis_label=""):
             help="Lower threshold for muon pt in the veto definition",
         )
         parser.add_argument(
+            "--vetoRecoStaPt",
+            default=15,
+            type=float,
+            help="Lower threshold for muon standalone pt in the veto definition (should typically match vetoRecoPt, but not necessary)",
+        )
+        parser.add_argument(
             "--vetoRecoEta",
             default=2.4,
             type=float,
