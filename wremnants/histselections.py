@@ -207,7 +207,7 @@ class HistselectorABCD(object):
                 n
                 for n in h.axes.name
                 if n
-                not in [self.name_x, self.name_y, *fakerate_axes, self.decorrFakeAxis]
+                not in [self.name_x, self.name_y, *fakerate_axes, self.fakeTransferAxis]
             ]
             logger.debug(
                 f"Setting fakerate integration axes to {self.fakerate_integration_axes}"
@@ -873,55 +873,6 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             outvar[*sel[:-1], :, :] = svar
 
             logger.debug(
-                "Shapes of outvar and svar: "
-                + str(outvar.shape)
-                + " "
-                + str(svar.shape)
-            )
-
-        else:
-            # with full smoothing all of the statistical uncertainty is included in the
-            # explicit variations, so the remaining binned uncertainty is zero
-            outvar = np.zeros_like(out)
-
-        return out, outvar
-
-    def get_smoothed_tensor(self, h, sel, sval, svar, syst_variations=False, flow=True):
-        # get output shape from original hist axes, but as for result histogram
-
-        hOut = (
-            h[{self.name_x: self.sel_x if not self.integrate_x else hist.sum}]
-            if self.name_x in h.axes.name
-            else h
-        )
-        out = np.zeros(
-            [
-                a.extent if flow else a.shape
-                for a in hOut.axes
-                if a.name not in [self.name_y, self.decorrFakeAxis]
-            ],
-            dtype=sval.dtype,
-        )
-        # leave the underflow and overflow unchanged if present
-        out[*sel[:-1]] = sval
-        if syst_variations:
-            outvar = np.zeros_like(out)
-            outvar = outvar[..., None, None] * np.ones(
-                (*outvar.shape, *svar.shape[-2:]), dtype=outvar.dtype
-            )
-
-            logger.debug("Doing syst_variations... something might be wrong here")
-            logger.error(
-                "Shapes of outvar and svar: "
-                + str(outvar.shape)
-                + " "
-                + str(svar.shape)
-            )
-
-            # leave the underflow and overflow unchanged if present
-            outvar[*sel[:-1], :, :] = svar
-
-            logger.error(
                 "Shapes of outvar and svar: "
                 + str(outvar.shape)
                 + " "

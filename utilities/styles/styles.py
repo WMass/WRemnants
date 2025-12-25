@@ -192,7 +192,7 @@ axis_labels = {
     "nRecoVtx": r"Number of reconstructed vertices",
     "PV_npvsGood": r"Number of reconstructed vertices",
     "utmu": {"label": r"$\mathit{u}_{T}^{\mu}$", "unit": "GeV"},
-    "utAngleSign": r"$\mathrm{sign}(\mathit{u}_{T}{\mu})$",
+    "utAngleSign": r"$\mathrm{sign}(\mathit{u}_{T}^{\mu})$",
     # "ewPTll": r"$\mathrm{Post\ FSR}\ p_\mathrm{T}^{\mu\mu}$",
     # "ewMll": r"$\mathrm{Post\ FSR}\ m^{\mu\mu}$",
     # "ewYll": r"$\mathrm{Post\ FSR}\ Y^{\mu\mu}$",

@@ -204,6 +204,14 @@ parser.add_argument(
     default=(0.05, 0.8),
     help="Location in (x,y) for additional text, aligned to upper left",
 )
+parser.add_argument(
+    "--vertLineEdges",
+    type=float,
+    nargs="*",
+    default=[],
+    help="Horizontal axis edges where to plot vertical lines",
+)
+
 subparsers = parser.add_subparsers(dest="variation")
 variation = subparsers.add_parser(
     "variation", help="Arguments for adding variation hists"
@@ -617,6 +625,7 @@ for h in args.hists:
         lowerLegPos=args.lowerLegPos,
         lower_leg_padding=args.lowerLegPadding,
         subplotsizes=args.subplotSizes,
+        x_vertLines_edges=args.vertLineEdges,
     )
 
     to_join = [f"{h.replace('-','_')}"]
