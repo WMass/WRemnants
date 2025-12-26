@@ -179,6 +179,16 @@ parser.add_argument(
     is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
 )
 parser.add_argument(
+    "--fakeTransferCorrFileName",
+    type=str,
+    default="fakeTransferTemplates",
+    help="""                                                                                                                  
+    Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.                         
+    Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape                         
+    at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.                           
+    """,
+)
+parser.add_argument(
     "--fineGroups",
     action="store_true",
     help="Plot each group as a separate process, otherwise combine groups based on predefined dictionary",
@@ -386,7 +396,10 @@ else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
-groups.fakeTransferAxis = args.fakeTransferAxis
+groups.fakeTransferAxis = (
+    args.fakeTransferAxis if "utAngleSign" in args.fakerateAxes else ""
+)
+groups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
 if applySelection:
     groups.set_histselectors(
         datasets,

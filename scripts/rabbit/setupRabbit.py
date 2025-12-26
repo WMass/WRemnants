@@ -367,7 +367,9 @@ def make_parser(parser=None):
         choices=[
             "run",
             "phi",
+            "utAngleSign",
             "nRecoVtx",
+            # variables above, systematics below
             "prefire",
             "effi",
             "lumi",
