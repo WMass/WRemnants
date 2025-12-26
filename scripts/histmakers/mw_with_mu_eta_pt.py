@@ -284,7 +284,7 @@ axis_mt = hist.axis.Variable(
 )
 axis_met = hist.axis.Regular(25, 0.0, 100.0, name="met", underflow=False, overflow=True)
 axis_mt_testfit = hist.axis.Variable(
-    (*np.arange(0, mtw_min + 20, 20), *np.arange(mtw_min + 2, 122, 2)),
+    (*np.arange(0, 40, 20), *np.arange(40, 122, 2)),
     name="mt",
     underflow=False,
     overflow=True,

@@ -450,6 +450,16 @@ def make_parser(parser=None):
         help="Type of polynomial for the smoothing of the application region or full prediction, depending on the smoothing mode",
     )
     parser.add_argument(
+        "--fakeTransferCorrFileName",
+        type=str,
+        default="fakeTransferTemplates",
+        help="""
+        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
+        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
+        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
+        """,
+    )
+    parser.add_argument(
         "--ABCDedgesByAxis",
         type=str,
         nargs="+",
@@ -1150,6 +1160,8 @@ def setup(
 
     if wmass and not datagroups.xnorm:
         datagroups.fakerate_axes = args.fakerateAxes
+        # datagroups.fakeTransferAxis = "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+        # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
         histselector_kwargs = dict(
             mode=args.fakeEstimation,
             smoothing_mode=args.fakeSmoothingMode,
@@ -1159,6 +1171,10 @@ def setup(
             integrate_x="mt" not in fitvar,
             forceGlobalScaleFakes=args.forceGlobalScaleFakes,
             abcdExplicitAxisEdges=abcdExplicitAxisEdges,
+            fakeTransferAxis=(
+                "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+            ),
+            fakeTransferCorrFileName=args.fakeTransferCorrFileName,
         )
         datagroups.set_histselectors(
             datagroups.getNames(), inputBaseName, **histselector_kwargs

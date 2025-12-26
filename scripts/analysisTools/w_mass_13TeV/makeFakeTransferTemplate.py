@@ -1,16 +1,33 @@
+#!/usr/bin/env python3
 import argparse
+import os
 import pickle
+import sys
 from array import array
 
 import hist
+import lz4.frame
 import ROOT
 import tensorflow as tf
 
-from narf import histutils
+# from narf import histutils
+import narf
+import wums.output_tools
+from utilities import common
 from wremnants.datasets.datagroups import Datagroups
 from wums import boostHistHelpers as hh
+from wums import logging
+
+args = sys.argv[:]
+sys.argv = ["-b"]
+sys.argv = args
 
 ROOT.gROOT.SetBatch(True)
+ROOT.PyConfig.IgnoreCommandLineOptions = True
+
+from scripts.analysisTools.plotUtils.utility import (
+    safeOpenFile,
+)
 
 
 def pol4_root(xvals, parms, xLowVal=0.0, xFitRange=1.0):
@@ -68,6 +85,13 @@ parser.add_argument(
 )
 parser.add_argument("-o", "--outdir", type=str, default="./", help="Output directory")
 parser.add_argument(
+    "-p",
+    "--postfix",
+    type=str,
+    default=None,
+    help="Postfix appended to output file name",
+)
+parser.add_argument(
     "--nEtaBins",
     type=int,
     default=1,
@@ -88,6 +112,9 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+
+logger = logging.setup_logger(os.path.basename(__file__), 4)
+ROOT.TH1.SetDefaultSumw2()
 
 groupsToConsider = (
     [
@@ -126,8 +153,8 @@ decorrBins_ch = [
     for i in range(args.nChargeBins)
 ]
 
-print("Decorrelating in the eta bins: ", decorrBins_eta)
-print("Decorrelating in the charge bins: ", decorrBins_ch)
+logger.info(f"Decorrelating in the eta bins: {decorrBins_eta}")
+logger.info(f"Decorrelating in the charge bins: {decorrBins_ch}")
 
 groups = Datagroups(
     args.infile,
@@ -137,7 +164,7 @@ groups = Datagroups(
 
 # There is probably a better way to do this but I don't want to deal with it
 datasets = groups.getNames()
-print(f"Will work on datasets {datasets}")
+logger.info(f"Will work on datasets {datasets}")
 
 exclude = ["Data"] if not args.doQCD else []
 prednames = list(
@@ -146,8 +173,8 @@ prednames = list(
     )
 )
 
-print(f"Unstacked processes are {exclude}")
-print(f"Stacked processes are {prednames}")
+logger.info(f"Unstacked processes are {exclude}")
+logger.info(f"Stacked processes are {prednames}")
 
 histInfo = groups.groups
 
@@ -188,8 +215,8 @@ for ch_edges in decorrBins_ch:
         ch_low_idx, ch_high_idx = convert_binEdges_idx(ch_edges, charge_genBinning)
         eta_low_idx, eta_high_idx = convert_binEdges_idx(eta_edges, eta_genBinning)
 
-        print(ch_low_idx, ch_high_idx)
-        print(eta_low_idx, eta_high_idx)
+        logger.info(f"{ch_low_idx}, {ch_high_idx}")
+        logger.info(f"{eta_low_idx}, {eta_high_idx}")
 
         select_utMinus["charge"] = hist.tag.Slicer()[
             ch_low_idx : ch_high_idx : hist.sum
@@ -199,28 +226,25 @@ for ch_edges in decorrBins_ch:
         select_utPlus["charge"] = hist.tag.Slicer()[ch_low_idx : ch_high_idx : hist.sum]
         select_utPlus["eta"] = hist.tag.Slicer()[eta_low_idx : eta_high_idx : hist.sum]
 
-        print(f"Processing charge bin [{ch_edges}] and eta bin [{eta_edges}]")
+        logger.info(f"Processing charge bin [{ch_edges}] and eta bin [{eta_edges}]")
 
         boost_h_utMinus = histInfo["Data"].copy("Data_utMinus").hists["nominal"]
         boost_h_utMinus = boost_h_utMinus[select_utMinus]
         boost_h_utMinus = hh.projectNoFlow(boost_h_utMinus, ["pt"], ["relIso", "mt"])
-        root_h_utMinus = histutils.hist_to_root(boost_h_utMinus)
+        root_h_utMinus = narf.hist_to_root(boost_h_utMinus)
 
         boost_h_utPlus = histInfo["Data"].copy("Data_utPlus").hists["nominal"]
         boost_h_utPlus = boost_h_utPlus[select_utPlus]
         boost_h_utPlus = hh.projectNoFlow(boost_h_utPlus, ["pt"], ["relIso", "mt"])
-        root_h_utPlus = histutils.hist_to_root(boost_h_utPlus)
+        root_h_utPlus = narf.hist_to_root(boost_h_utPlus)
 
-        print(
-            "Integrals BEFORE prompt subraction",
-            root_h_utMinus.Integral(),
-            root_h_utPlus.Integral(),
-        )
+        logger.info(f"Integrals BEFORE prompt subraction (uT < 0, uT > 0)")
+        logger.info(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
         for mcName in prednames:
             if args.doQCD:
                 continue
-            print(f"Subtracting {mcName} from data")
+            logger.info(f"Subtracting {mcName} from data")
             boost_h_mc_utMinus = (
                 histInfo[mcName].copy(f"{mcName}_utMinus").hists["nominal"]
             )
@@ -228,7 +252,7 @@ for ch_edges in decorrBins_ch:
             boost_h_mc_utMinus = hh.projectNoFlow(
                 boost_h_mc_utMinus, ["pt"], ["relIso", "mt"]
             )
-            root_h_mc_utMinus = histutils.hist_to_root(boost_h_mc_utMinus)
+            root_h_mc_utMinus = narf.hist_to_root(boost_h_mc_utMinus)
             root_h_utMinus.Add(root_h_mc_utMinus, -1)
 
             boost_h_mc_utPlus = (
@@ -238,14 +262,11 @@ for ch_edges in decorrBins_ch:
             boost_h_mc_utPlus = hh.projectNoFlow(
                 boost_h_mc_utPlus, ["pt"], ["relIso", "mt"]
             )
-            root_h_mc_utPlus = histutils.hist_to_root(boost_h_mc_utPlus)
+            root_h_mc_utPlus = narf.hist_to_root(boost_h_mc_utPlus)
             root_h_utPlus.Add(root_h_mc_utPlus, -1)
 
-        print(
-            "Integrals AFTER prompt subraction",
-            root_h_utMinus.Integral(),
-            root_h_utPlus.Integral(),
-        )
+        logger.info(f"Integrals AFTER prompt subraction (uT < 0, uT > 0)")
+        logger.info(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
         ratio_h = root_h_utMinus.Clone(f"fakeRatio_utAngleSign")
         ratio_h.Sumw2()
@@ -253,7 +274,7 @@ for ch_edges in decorrBins_ch:
 
         for idx_ch in range(ch_low_idx + 1, ch_high_idx + 1):
             for idx_eta in range(eta_low_idx + 1, eta_high_idx + 1):
-                print(f"Setting weights for chBin={idx_ch}, etaBin={idx_eta}")
+                # logger.debug(f"Setting weights for chBin={idx_ch}, etaBin={idx_eta}")
                 for idx_pt in range(1, 31):
                     out_hist.SetBinContent(
                         idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt)
@@ -262,25 +283,35 @@ for ch_edges in decorrBins_ch:
                         idx_eta, idx_pt, idx_ch, ratio_h.GetBinError(idx_pt)
                     )
                     if ratio_h.GetBinContent(idx_pt) <= 0.0:
-                        print(
-                            "WARNING - found negative value in bin:  ",
-                            idx_eta,
-                            idx_pt,
-                            idx_ch,
+                        logger.info(
+                            "WARNING - found negative value in bin: ({idx_eta}, {idx_pt}, {idx_ch})"
                         )
 
 
-boost_out_hist = histutils.root_to_hist(out_hist)
-
-with open(f"{args.outdir}/fakeTransferTemplates.pkl", "wb") as fout:
-    pickle.dump(boost_out_hist, fout)
-
-fout = ROOT.TFile(
-    f"{args.outdir}/fakeTransferTemplates{'' if not args.doQCD else '_QCD'}.root",
-    "RECREATE",
+boost_out_hist = narf.root_to_hist(out_hist)
+resultDict = {"fakeCorr": boost_out_hist}
+base_dir = common.base_dir
+resultDict.update(
+    {"meta_info": wums.output_tools.make_meta_info_dict(args=args, wd=base_dir)}
 )
-fout.cd()
+
+outfileName = "fakeTransferTemplates"
+if args.postfix:
+    outfileName += f"_{args.postfix}"
+if args.doQCD:
+    outfileName += "_QCD"
+
+pklfileName = f"{args.outdir}/{outfileName}.pkl.lz4"
+with lz4.frame.open(pklfileName, "wb") as fout:
+    pickle.dump(resultDict, fout, protocol=pickle.HIGHEST_PROTOCOL)
+logger.warning(f"Created file {pklfileName}")
+
+rootfileName = f"{args.outdir}/{outfileName}.root"
+fout = safeOpenFile(rootfileName, mode="RECREATE")
 out_hist.Write()
+fout.Close()
+logger.warning(f"Created file {rootfileName}")
+
 
 """
 x_axis = hist.axis.Regular(30, 26, 56, name="pt", flow=False)
@@ -309,14 +340,14 @@ for i in range(len(bincenters)):
                 xLowVal=26.0,
                 xFitRange=30.0,
     )))
-print(tr_func)
-print("Params:", res["x"])
+logger.info(tr_func)
+logger.info("Params:", res["x"])
 
 chi2 = res["loss_val"]
 ndof = len(bincenters) - len(res["x"])
 chi2Prob = ROOT.TMath.Prob(chi2, ndof)
 
-print(chi2, ndof, chi2Prob)
+logger.info(chi2, ndof, chi2Prob)
 
 """
 

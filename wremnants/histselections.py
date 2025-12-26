@@ -1,7 +1,7 @@
-import os
 import pickle
 
 import hist
+import lz4.frame
 import numpy as np
 from scipy import interpolate
 
@@ -127,6 +127,7 @@ class HistselectorABCD(object):
         name_y=None,
         fakerate_axes=["eta", "pt", "charge"],
         fakeTransferAxis="",
+        fakeTransferCorrFileName="fakeTransferTemplates",  # only with fakeTransferAxis
         smoothing_axis_name="pt",
         rebin_smoothing_axis="automatic",  # can be a list of bin edges, "automatic", or None
         upper_bound_y=None,  # using an upper bound on the abcd y-axis (e.g. isolation)
@@ -200,6 +201,7 @@ class HistselectorABCD(object):
         self.set_selections_x()
         self.set_selections_y()
         self.fakeTransferAxis = fakeTransferAxis
+        self.fakeTransferCorrFileName = fakeTransferCorrFileName
 
         if fakerate_axes is not None:
             self.fakerate_axes = fakerate_axes  # list of axes names where to perform independent fakerate computation
@@ -441,13 +443,14 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             self.spectrum_regressor = None
 
         if self.fakeTransferAxis in h.axes.name:
-            logger.debug("Loaded transfer tensor for fakes")
-            trTensorPath = os.path.join(
-                os.environ["WREM_BASE"],
-                "wremnants-data/data/fakesWmass/fakeTransferTemplates.pkl",
+            data_dir = common.data_dir
+            trTensorPath = (
+                f"{data_dir}/fakesWmass/{self.fakeTransferCorrFileName}.pkl.lz4"
             )
-            with open(trTensorPath, "rb") as fTens:
-                self.fakeTransferTensor = pickle.load(fTens)
+            logger.warning(f"Loaded transfer tensor for fakes: {trTensorPath}")
+            with lz4.frame.open(trTensorPath) as fTens:
+                resultDict = pickle.load(fTens)
+            self.fakeTransferTensor = resultDict["fakeCorr"]
 
         if self.smoothing_mode in ["binned"]:
             # rebinning doesn't make sense for binned estimation
