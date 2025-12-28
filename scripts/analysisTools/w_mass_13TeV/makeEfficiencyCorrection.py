@@ -180,7 +180,7 @@ if __name__ == "__main__":
         sign = "minus" if args.charge < 0 else "plus"
         chargePostfix = f"_{sign}"
 
-    # create a TH2 and convrt into boost again to save it
+    # create a TH2 and convert into boost again to save it
     nx = heffiroot["Data"][0].GetNbinsX()
     xmin = heffiroot["Data"][0].GetXaxis().GetBinLowEdge(1)
     xmax = heffiroot["Data"][0].GetXaxis().GetBinLowEdge(1 + nx)
