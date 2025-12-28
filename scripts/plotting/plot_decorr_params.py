@@ -370,6 +370,14 @@ if __name__ == "__main__":
             df_p["yticks"] = (
                 df_p["phi"].apply(lambda x: str(axis_ranges[x])).astype(str)
             )
+        elif "utAngleSign" in axes:
+            axis_ranges = {
+                0: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ < 0",
+                1: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ > 0",
+            }
+            df_p["yticks"] = (
+                df_p["utAngleSign"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
         elif "nRecoVtx" in axes:
             nRecoVtxBins = df.shape[0]
             if nRecoVtxBins == 5:

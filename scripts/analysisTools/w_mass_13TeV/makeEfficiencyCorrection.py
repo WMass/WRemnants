@@ -58,7 +58,7 @@ if __name__ == "__main__":
         "--corrvar",
         type=str,
         default="run",
-        choices=["run", "phi"],
+        choices=["run", "phi", "utAngleSign"],
         help="Variable to be used for the correction",
     )
     parser.add_argument(
@@ -162,6 +162,11 @@ if __name__ == "__main__":
             f"{round(corrEdges[i], 2)} < #phi^{{#mu}} < {round(corrEdges[i+1], 2)}"
             for i in range(nCorrBins)
         ]
+    elif args.corrvar == "utAngleSign":
+        legEntries = [
+            "#it{u}_{T}^{#mu} < 0",
+            "#it{u}_{T}^{#mu} > 0",
+        ]
     else:
         legEntries = [f"{corrvar} bin {i}" for i in range(nCorrBins)]
 
@@ -209,9 +214,20 @@ if __name__ == "__main__":
                 f"{corrvar}-eta ID = {i} {j}: {round(corr,3)} +/- {round(corr_unc,3)}"
             )
 
-    title_var = "Run" if corrvar == "run" else "#phi" if corrvar == "phi" else "CorrVar"
+    titles = {
+        "run": "Run",
+        "phi": "#phi^{#mu}",
+        "utAngleSign": "sign(#it{u}_{T}^{#mu})",
+    }
+    title_var = "CorrVar"
+    if corrvar in titles.keys():
+        title_var = titles[corrvar]
 
-    effRange = "0.85,1.05" if corrvar == "run" else "0.80,1.1"
+    effrange = "0.80,1.1"
+    if corrvar == "run":
+        effRange = "0.85,1.05"
+    elif corrvar == "utAngleSign":
+        effRange = "0.8,1.2"
 
     for d in datasets:
         drawNTH1(
