@@ -81,6 +81,13 @@ class Datagroups(object):
         self.fakerate_axes = ["pt", "eta", "charge"]
         self.fakeTransferAxis = "utAngleSign"
         self.fakeTransferCorrFileName = "fakeTransferTemplates"
+        # in case some fit axes are integrated out, to make full smoothing work,
+        # we need to warn the class that these don't belong to fit axes nor fakerate axes,
+        # but are also not "integration axes" because they are removed before entering
+        # the fake estimate, this can happen for example
+        # with option --select in setupRabbit.py or --presel in makeDataMCStackPlot.py,
+        # which slice and remove the axis
+        self.histAxesRemovedBeforeFakes = []
 
         self.setGenAxes()
 

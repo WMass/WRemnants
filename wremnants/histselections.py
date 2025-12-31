@@ -128,6 +128,11 @@ class HistselectorABCD(object):
         fakerate_axes=["eta", "pt", "charge"],
         fakeTransferAxis="",
         fakeTransferCorrFileName="fakeTransferTemplates",  # only with fakeTransferAxis
+        # histAxesRemovedBeforeFakes is needed when some axes are in the histograms,
+        # but are not supposed to be fit or used as fakerate axes, and are sliced/integrated and removed
+        # before computing the fakes, so they are technically not "fake integration axes", which is
+        # needed to make the full smoothing work (integration axes within the method are not implemented)
+        histAxesRemovedBeforeFakes=[],
         smoothing_axis_name="pt",
         rebin_smoothing_axis="automatic",  # can be a list of bin edges, "automatic", or None
         upper_bound_y=None,  # using an upper bound on the abcd y-axis (e.g. isolation)
@@ -202,6 +207,7 @@ class HistselectorABCD(object):
         self.set_selections_y()
         self.fakeTransferAxis = fakeTransferAxis
         self.fakeTransferCorrFileName = fakeTransferCorrFileName
+        self.histAxesRemovedBeforeFakes = histAxesRemovedBeforeFakes
 
         if fakerate_axes is not None:
             self.fakerate_axes = fakerate_axes  # list of axes names where to perform independent fakerate computation
@@ -209,11 +215,19 @@ class HistselectorABCD(object):
                 n
                 for n in h.axes.name
                 if n
-                not in [self.name_x, self.name_y, *fakerate_axes, self.fakeTransferAxis]
+                not in [
+                    self.name_x,
+                    self.name_y,
+                    *fakerate_axes,
+                    *histAxesRemovedBeforeFakes,
+                ]
             ]
             logger.debug(
                 f"Setting fakerate integration axes to {self.fakerate_integration_axes}"
             )
+        logger.debug(f"histAxesRemovedBeforeFakes = {histAxesRemovedBeforeFakes}")
+        logger.debug(f"fakerate_integration_axes = {self.fakerate_integration_axes}")
+
         self.smoothing_axis_name = smoothing_axis_name
         edges = h.axes[smoothing_axis_name].edges
         if rebin_smoothing_axis == "automatic":

@@ -994,7 +994,10 @@ def setup(
 
     if massConstraintMode == "automatic":
         constrainMass = (
-            "xsec" in args.noi or (dilepton and not "mll" in fitvar) or genfit
+            "xsec" in args.noi
+            or (dilepton and not "mll" in fitvar)
+            or genfit
+            or (wmass and "wmass" not in args.noi)
         )
     else:
         constrainMass = True if massConstraintMode == "constrained" else False
@@ -1177,6 +1180,9 @@ def setup(
                 "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
             ),
             fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+            histAxesRemovedBeforeFakes=(
+                [str(x.split()[0]) for x in args.selection] if args.selection else []
+            ),
         )
         datagroups.set_histselectors(
             datagroups.getNames(), inputBaseName, **histselector_kwargs
@@ -1613,15 +1619,20 @@ def setup(
 
     if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
         width_info = dict(
-            name="WidthW0p6MeV",
+            # 42, 'widthW2p043GeV', 'widthW2p127GeV'
+            # 0p6, 'widthW2p09053GeV', 'widthW2p09173GeV'
+            # name="WidthW0p6MeV",
+            name="WidthW42MeV",
             processes=signal_samples_forMass,
             groups=["widthW", "theory"],
             mirror=False,
             noi="wwidth" in args.noi,
             noConstraint="wwidth" in args.noi,
-            skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
+            # skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
+            skipEntries=widthWeightNames(proc="W", exclude=(2.043, 2.127)),
             systAxes=["width"],
-            systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+            # systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+            systNameReplace=[["2p043GeV", "Down"], ["2p127GeV", "Up"]],
             passToFakes=passSystToFakes,
         )
         widthWeightName = f"widthWeight{label}"

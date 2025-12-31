@@ -386,9 +386,10 @@ if args.selection and args.selection != "none":
             select[axis] = int(value)
     applySelection = (
         False
-        if any(  # does not trigger ABCD fake estimation if a cut is applied on the variables used to define ABCD regions
+        # do not trigger ABCD method if a cut is applied on the variables defining the ABCD regions
+        if any(
             abcd_var in [cut_str.split("=")[0] for cut_str in args.selection.split(",")]
-            for abcd_var in ["relIso", "mt"]
+            for abcd_var in ["relIso", "mt", "passMT", "passIso"]
         )
         else True
     )
@@ -400,6 +401,7 @@ groups.fakeTransferAxis = (
     args.fakeTransferAxis if "utAngleSign" in args.fakerateAxes else ""
 )
 groups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
+groups.histAxesRemovedBeforeFakes = [str(x.split("=")[0]) for x in args.presel]
 if applySelection:
     groups.set_histselectors(
         datasets,
