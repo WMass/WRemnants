@@ -16,6 +16,18 @@ xsec_WplusJetsToMuNu = 11765.9
 xsec_WminusJetsToMuNu = 8703.87
 xsec_DYJetsToMuMuMass10to50 = 6997.0
 Z_TAU_TO_LEP_RATIO = 1.0 - (1.0 - BR_TAUToMU - BR_TAUToE) ** 2
+
+# ------------------------------------
+# GenXsecAnalyzer:
+# ------------------------------------
+# Before Filter: total cross section = 3.653e+02 +- 1.572e-02 pb
+# Filter efficiency (taking into account weights)= (1.98515e+06) / (1.29071e+08) = 1.538e-02 +- 1.083e-05
+# Filter efficiency (event-level)= (1.98515e+06) / (1.29071e+08) = 1.538e-02 +- 1.083e-05    [TO BE USED IN MCM]
+# After filter: final cross section = 5.619e+00 +- 3.965e-03 pb
+# After filter: final fraction of events with negative weights = 0.000e+00 +- 0.000e+00
+# After filter: final equivalent lumi for 1M events (1/fb) = 1.780e+02 +- 2.178e-01
+xsec_GGtoMuMu = 5.619
+
 # BSM heavy neutrino samples
 xsec_WtoNMu = 100
 

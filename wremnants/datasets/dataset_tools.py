@@ -6,6 +6,7 @@ import XRootD.client
 
 import narf
 from wremnants.datasets.datasetDict2017_v9 import dataDictV9_2017
+from wremnants.datasets.datasetDict2017G_v9 import dataDictV9_2017G
 from wremnants.datasets.datasetDict2018_v9 import dataDictV9_2018
 from wremnants.datasets.datasetDict_gen import genDataDict
 from wremnants.datasets.datasetDict_lowPU import dataDictLowPU
@@ -252,6 +253,9 @@ def getDatasets(
         elif era == "2017":
             dataDict = dataDictV9_2017
             logger.info("Using NanoAOD V9 for 2017")
+        elif era == "2017G":
+            dataDict = dataDictV9_2017G
+            logger.info("Using NanoAOD V9 for 2017G")
         elif era == "2018":
             dataDict = dataDictV9_2018
             logger.info("Using NanoAOD V9 for 2018")

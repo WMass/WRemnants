@@ -261,6 +261,7 @@ def common_parser(analysis_label=""):
             "2016PreVFP",
             "2016PostVFP",
             "2017",
+            "2017G",
             "2017H",
             "2018",
             "2023_PUAVE1",
@@ -612,7 +613,7 @@ def common_parser(analysis_label=""):
                     )
                 sfFile = "muonSF/2017/allSmooth_2017_vtxAgnIso.root"
             else:
-                raise NotImplementedError(f"Era {commonargs.era} is not yet supported")
+                sfFile = ""
 
         sfFile = f"{common.data_dir}/{sfFile}"
     else:
