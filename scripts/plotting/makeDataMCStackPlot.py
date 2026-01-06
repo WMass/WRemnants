@@ -335,12 +335,12 @@ if len(args.presel):
         if "=" in ps:
             axName, axRange = ps.split("=")
             if "," in ps:
-                # axMin, axMax = map(float, axRange.split(","))
                 axMin, axMax = [
-                    float(p) if p != str() else None for p in axRange.split(",")
+                    complex(0, float(p)) if p != str() else None
+                    for p in axRange.split(",")
                 ]
                 logger.info(f"{axName} in [{axMin},{axMax}]")
-                presel[axName] = s[complex(0, axMin) : complex(0, axMax) : hist.sum]
+                presel[axName] = s[axMin : axMax : hist.sum]
             else:
                 logger.info(f"Selecting {axName} {axRange.split('.')[1]}")
                 if axRange == "hist.overflow":
@@ -397,11 +397,13 @@ else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
-groups.fakeTransferAxis = (
-    args.fakeTransferAxis if "utAngleSign" in args.fakerateAxes else ""
+histselector_kwargs = dict(
+    fakeTransferAxis=(
+        args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
+    ),
+    fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+    histAxesRemovedBeforeFakes=[str(x.split("=")[0]) for x in args.presel],
 )
-groups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
-groups.histAxesRemovedBeforeFakes = [str(x.split("=")[0]) for x in args.presel]
 if applySelection:
     groups.set_histselectors(
         datasets,
@@ -413,6 +415,7 @@ if applySelection:
         mode=args.fakeEstimation,
         forceGlobalScaleFakes=args.forceGlobalScaleFakes,
         mcCorr=args.fakeMCCorr,
+        **histselector_kwargs,
     )
 
 if not args.nominalRef:
@@ -568,6 +571,9 @@ for h in args.hists:
     else:
         binwnorm = None
         ylabel = r"$Events\,/\,bin$"
+    if args.noBinWidthNorm:
+        binwnorm = None
+        ylabel = r"$Events\,/\,bin$"
 
     if args.rlabel is None:
         if args.noData:
@@ -632,7 +638,11 @@ for h in args.hists:
         normalize_to_data=args.normToData,
         noSci=args.noSciy,
         logoPos=args.logoPos,
-        width_scale=1.25 if len(h.split("-")) == 1 else 1,
+        width_scale=(
+            args.customFigureWidth
+            if args.customFigureWidth
+            else 1.25 if len(h.split("-")) == 1 else 1
+        ),
         legPos=args.legPos,
         leg_padding=args.legPadding,
         lowerLeg=not args.noLowerLeg,

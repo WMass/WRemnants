@@ -916,5 +916,10 @@ def plot_parser():
         default=None,
         help="Use a custom figure width, otherwise chosen automatic",
     )
+    parser.add_argument(
+        "--noBinWidthNorm",
+        action="store_true",
+        help="Do not normalize bin yields by bin width",
+    )
 
     return parser
