@@ -30,8 +30,11 @@ datasets = getDatasets(
 # define histogram axes, see: https://hist.readthedocs.io/en/latest/index.html
 axis_nLepton = hist.axis.Integer(0, 5, name="nLepton", underflow=False)
 axis_mll  = hist.axis.Regular(60, 76, 106, name="mll")
-axis_ptll = hist.axis.Regular(60, 0, 120, name="ptll")
-axis_yll  = hist.axis.Regular(48, -2.4, 2.4, name="yll")
+dilepton_ptV_binning = [0, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 33, 37, 44, 100]
+axis_ptll = hist.axis.Variable(dilepton_ptV_binning, name="ptll", underflow=False, overflow=True)
+# axis_ptll = hist.axis.Regular(60, 0, 120, name="ptll")
+yll_10quantiles_binning = [-2.5, -1.5, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 1.5, 2.5]
+axis_yll = hist.axis.Variable(yll_10quantiles_binning, name="yll", underflow=True, overflow=True)
 
 axis_mu_pt  = hist.axis.Regular(60, 25, 150, name="mu_pt")
 axis_mu_eta = hist.axis.Regular(48, -2.4, 2.4, name="mu_eta")
@@ -141,11 +144,15 @@ def build_graph(df, dataset):
     hist_cosThetaStarll = df.HistoBoost("cosThetaStarll", [axis_cosThetaStarll], ["cosThetaStarll", "weight"])
     hist_phiStarll = df.HistoBoost("phiStarll", [axis_phiStarll], ["phiStarll", "weight"])
 
+    # 2D histograms
+    hist_ptll_vs_yll = df.HistoBoost("ptll_vs_yll", [axis_ptll, axis_yll], ["ptll", "yll", "weight"])
+
     results += [
         hist_mll, hist_ptll, hist_yll, hist_phill, hist_nLepton,
         hist_mu_lead_pt, hist_mu_trail_pt, hist_mu_lead_eta, hist_mu_trail_eta,
         hist_mu_pos_pt, hist_mu_neg_pt, hist_mu_pos_eta, hist_mu_neg_eta,
         hist_cosThetaStarll, hist_phiStarll,
+        hist_ptll_vs_yll,
     ]
 
     return results , weightsum
