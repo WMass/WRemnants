@@ -365,7 +365,7 @@ float zqtproj0(const float &goodMuons_pt0, const float &goodMuons_eta0,
                                        GenPart_eta[postFSRnusIdx[0]],
                                        GenPart_phi[postFSRnusIdx[0]], 0.);
   TVector2 Muon(muon.X(), muon.Y()), Neutrino(neutrino.X(), neutrino.Y());
-  return (Muon * ((Muon + Neutrino))) / sqrt(Muon * Muon);
+  return (Muon * ((Muon + Neutrino))) / std::sqrt(Muon * Muon);
 }
 
 float zqtproj0(float pt, float phi, float ptOther, float phiOther) {

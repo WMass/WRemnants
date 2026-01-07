@@ -47,6 +47,7 @@ def plotDistribution1D(
     ratioPadYaxisTitle="Data/pred::0.9,1.1",
     scaleToUnitArea=False,
     noRatioPanel=False,
+    scaleProcs={},
 ):
 
     createPlotDirAndCopyPhp(outfolder_dataMC)
@@ -71,13 +72,17 @@ def plotDistribution1D(
             hmc[d].SetLineColor(ROOT.kBlack)
             hmc[d].SetMarkerSize(0)
             hmc[d].SetMarkerStyle(0)
+            if d in scaleProcs.keys():
+                hmc[d].Scale(scaleProcs[d])
             stackIntegral += hmc[d].Integral()
 
     if scaleToUnitArea:
         hdata.Scale(1.0 / hdata.Integral())
 
     stack_1D = ROOT.THStack("stack_1D", "signal and backgrounds")
-    hmcSortedKeys = sorted(hmc.keys(), key=lambda x: hmc[x].Integral())
+    hmcSortedKeys = sorted(
+        [x for x in hmc.keys() if x in datasets], key=lambda x: hmc[x].Integral()
+    )
     for i in hmcSortedKeys:
         if scaleToUnitArea:
             hmc[i].Scale(1.0 / stackIntegral)

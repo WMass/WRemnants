@@ -85,6 +85,11 @@ parser.add_argument(
     help="Flip even with odd event numbers to consider the positive or negative muon as the W-like muon",
 )
 parser.add_argument(
+    "--addAxisSignUt",
+    action="store_true",
+    help="Add another fit axis with the sign of the uT recoil projection",
+)
+parser.add_argument(
     "--useTnpMuonVarForSF",
     action="store_true",
     help="To read efficiency scale factors, use the same muon variables as used to measure them with tag-and-probe (by default the final corrected ones are used)",
@@ -214,9 +219,21 @@ else:
     nominal_axes = [axis_eta, axis_pt, common.axis_charge]
     nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
 
+axis_ut_analysis = hist.axis.Regular(
+    2, -2, 2, underflow=False, overflow=False, name="utAngleSign"
+)  # used only to separate positive/negative uT for now
+if args.addAxisSignUt:
+    nominal_axes.append(axis_ut_analysis)
+    nominal_cols.append(
+        "nonTrigMuons_angleSignUt0"
+        if args.fillHistNonTrig
+        else "trigMuons_angleSignUt0"
+    )
+
 # for isoMt region validation and related tests
 # use very high upper edge as a proxy for infinity (cannot exploit overflow bins in the fit)
 # can probably use numpy infinity, but this is compatible with the root conversion
+# FIXME: now we can probably use overflow bins in the fit
 axis_mtCat = hist.axis.Variable(
     [0, int(args.mtCut / 2.0), args.mtCut, 1000],
     name="mt",
@@ -227,8 +244,6 @@ axis_isoCat = hist.axis.Variable(
     [0, 0.15, 0.3, 100], name="relIso", underflow=False, overflow=False
 )
 
-nominal_axes = [axis_eta, axis_pt, common.axis_charge]
-nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
 if args.addIsoMtAxes:
     nominal_axes.extend([axis_mtCat, axis_isoCat])
     nominal_cols.extend(["transverseMass", "trigMuons_relIso0"])
@@ -284,7 +299,6 @@ if args.theoryAgnostic:
 
 # axes for mT measurement
 axis_mt = hist.axis.Regular(200, 0.0, 200.0, name="mt", underflow=False, overflow=True)
-axis_eta_mT = hist.axis.Variable([-2.4, 2.4], name="eta")
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
@@ -949,10 +963,12 @@ def build_graph(df, dataset):
     ###########
     # utility plots of transverse mass, with or without recoil corrections
     ###########
+    muonKey = "nonTrigMuons" if args.fillHistNonTrig else "trigMuons"
+    muonAntiKey = "trigMuons" if args.fillHistNonTrig else "nonTrigMuons"
     met_vars = ("MET_pt", "MET_phi")
     df = df.Define(
         "transverseMass_uncorr",
-        f"wrem::get_mt_wlike(trigMuons_pt0, trigMuons_phi0, nonTrigMuons_pt0, nonTrigMuons_phi0, {', '.join(met_vars)})",
+        f"wrem::get_mt_wlike({muonKey}_pt0, {muonKey}_phi0, {muonAntiKey}_pt0, {muonAntiKey}_phi0, {', '.join(met_vars)})",
     )
     results.append(
         df.HistoBoost(
@@ -965,11 +981,11 @@ def build_graph(df, dataset):
     met_vars = ("MET_corr_rec_pt", "MET_corr_rec_phi")
     df = df.Define(
         "met_wlike_TV2",
-        f"wrem::get_met_wlike(nonTrigMuons_pt0, nonTrigMuons_phi0, {', '.join(met_vars)})",
+        f"wrem::get_met_wlike({muonAntiKey}_pt0, {muonAntiKey}_phi0, {', '.join(met_vars)})",
     )
     df = df.Define(
         "transverseMass",
-        "wrem::get_mt_wlike(trigMuons_pt0, trigMuons_phi0, met_wlike_TV2)",
+        f"wrem::get_mt_wlike({muonKey}_pt0, {muonKey}_phi0, met_wlike_TV2)",
     )
     results.append(
         df.HistoBoost("transverseMass", [axis_mt], ["transverseMass", "nominal_weight"])
@@ -989,6 +1005,13 @@ def build_graph(df, dataset):
             ["met_wlike_TV2_pt", "nominal_weight"],
         )
     )
+    if args.addAxisSignUt:
+        # use Wlike met instead of only the second lepton, for consistency with the W,
+        # also because the relevant quantity should be the recoil rather than the boson
+        df = df.Define(
+            f"{muonKey}_angleSignUt0",
+            f"wrem::zqtproj0_angleSign({muonKey}_pt0, {muonKey}_phi0, met_wlike_TV2_pt, met_wlike_TV2.Phi())",
+        )
     ###########
 
     df = df.Define("passWlikeMT", f"transverseMass >= {mtw_min}")
@@ -1119,7 +1142,7 @@ def build_graph(df, dataset):
             6, 0, 2.4, name="abseta", overflow=False, underflow=False
         )
         cols_vertexZstudy = [
-            "trigMuons_eta0",
+            "trigMuons_abseta0",
             "trigMuons_passIso0",
             "passWlikeMT",
             "absDiffGenRecoVtx_z",

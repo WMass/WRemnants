@@ -473,9 +473,7 @@ parser.add_argument(
     help="Input unfolded fit result for the Z distributions.",
 )
 parser.add_argument(
-    "--fitresultModel",
-    type=str,
-    default="Select helicitySig:slice(0,1)"
+    "--fitresultModel", type=str, default="Select helicitySig:slice(0,1)"
 )
 parser.add_argument(
     "--fitresultChannelSigmaUL",
@@ -564,25 +562,33 @@ writer = AlphaSTheoryFitTW(
 if args.pseudodataGenerator:
     # generate pseudo-data from a generator prediction
 
-    logger.debug(f"Reading from {common.data_dir}/TheoryCorrections/{args.pseudodataGenerator}CorrZ.pkl.lz4")
+    logger.debug(
+        f"Reading from {common.data_dir}/TheoryCorrections/{args.pseudodataGenerator}CorrZ.pkl.lz4"
+    )
     h_data_sigmaUL = theory_corrections.load_corr_hist(
         f"{common.data_dir}/TheoryCorrections/{args.pseudodataGenerator}CorrZ.pkl.lz4",
         "Z",
         # f"{args.pseudodataGenerator}_hist".replace("_pdfas", ""),
-        "scetlib_nnlojet_N4p0LLN3LOUnsmoothed_N3pLLFixed_hist"
+        "scetlib_nnlojet_N4p0LLN3LOUnsmoothed_N3pLLFixed_hist",
     )
-    if 'vars' in h_data_sigmaUL.axes.name:
-        h_data_sigmaUL = h_data_sigmaUL[{"vars": 0}]  # select baseline variation # TODO bit of a hardcode
-    h_data_sigmaUL = h_data_sigmaUL.project('qT', 'absY')
+    if "vars" in h_data_sigmaUL.axes.name:
+        h_data_sigmaUL = h_data_sigmaUL[
+            {"vars": 0}
+        ]  # select baseline variation # TODO bit of a hardcode
+    h_data_sigmaUL = h_data_sigmaUL.project("qT", "absY")
     h_data_sigmaUL *= 16800  # lumi
-    print(h_data_sigmaUL.variances(flow=False) ** 0.5 / h_data_sigmaUL.values(flow=False))
+    print(
+        h_data_sigmaUL.variances(flow=False) ** 0.5 / h_data_sigmaUL.values(flow=False)
+    )
     writer.add_channel(h_data_sigmaUL.axes, "chSigmaUL")
     writer.add_data(h_data_sigmaUL, "chSigmaUL")
     writer.set_reference("chSigmaUL", h_data_sigmaUL)
 
 else:
 
-    fitresult, meta = rabbit.io_tools.get_fitresult(args.infile, result="asimov", meta=True)
+    fitresult, meta = rabbit.io_tools.get_fitresult(
+        args.infile, result="asimov", meta=True
+    )
 
     # covariance across any number of physics models
     h_data_cov = fitresult["physics_models"][args.fitresultModel][
@@ -607,8 +613,9 @@ else:
         ]["hist_postfit_inclusive"].get()
         writer.add_channel(h_data_ai.axes, "chAis")
         writer.add_data(h_data_ai, "chAis")
-        writer.set_reference("chAis", h_data_ai, postOp=calculate_ais_from_helicities_hist)
-
+        writer.set_reference(
+            "chAis", h_data_ai, postOp=calculate_ais_from_helicities_hist
+        )
 
     # read and initialize sigmaUL channel
     if not args.noFitSigmaUL:
