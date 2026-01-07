@@ -251,9 +251,6 @@ def reweight_to_fitresult(filename, result=None, mapping=None, channel=None):
     from rabbit.io_tools import get_fitresult
 
     fitresult, meta = get_fitresult(filename[0], result, meta=True)
-=======
-    results = fitresult["mappings"][mapping]["channels"][channel]
->>>>>>> a4038b34 (Further adapt to new rabbit version):wremnants/unfolding_tools.py
 
     def get_result(fres):
         mappings = fres["mappings"]
