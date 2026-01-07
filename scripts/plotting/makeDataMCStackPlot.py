@@ -618,6 +618,24 @@ for h in args.hists:
 
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")
+        
+    # --- DEBUG: min of stacked prediction (same object the plot uses) ---
+    hstack = None
+    for p in prednames:  # stacked MC processes
+        hp = action(histInfo[p].hists[args.baseName])
+        hstack = hp.copy() if hstack is None else (hstack + hp)
+
+    vals = hstack.values(flow=False).ravel()
+    overall_min = vals.min()
+    nonzero_vals = vals[vals > 0]
+    nonzero_min = nonzero_vals.min() if len(nonzero_vals) > 0 else 0
+    print(f"[{h}] overall min (including zeros) = {overall_min}  min(nonzero) = {nonzero_min}")
+
+    # if you want the "as-plotted" min after their protection against tiny bins:
+    vals_clip = vals.copy()
+    vals_clip[vals_clip < 1e-6] = 1.0
+    print(f"[{h}] stacked min after clip(<1e-6->1) = {vals_clip.min()}")
+    # --- end DEBUG ---
 
     if args.customXlabel is not None:
         xlabel = rf"{args.customXlabel}"

@@ -121,31 +121,38 @@ def build_graph(df, dataset):
     df = df.Define("cosThetaStarll", "csSineCosThetaPhill.costheta")
     df = df.Define("phiStarll", "csSineCosThetaPhill.phi()")
 
+    # prefiring
+    if dataset.is_data:
+        df = df.Define("nominal_weight", "1.0")
+    else:
+        df = df.Define("nominal_weight", "weight*L1PreFiringWeight_Nom")
+
     # ---- Fill histograms ----
-    hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton", "weight"])
-    hist_mll  = df.HistoBoost("mll",  [axis_mll],  ["mll", "weight"])
-    hist_ptll = df.HistoBoost("ptll", [axis_ptll], ["ptll", "weight"])
-    hist_yll  = df.HistoBoost("yll",  [axis_yll],  ["yll", "weight"])
-    hist_phill = df.HistoBoost("phill", [axis_phill], ["phill", "weight"])
+    hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton", "nominal_weight"])
+    hist_mll  = df.HistoBoost("mll",  [axis_mll],  ["mll", "nominal_weight"])
+    hist_ptll = df.HistoBoost("ptll", [axis_ptll], ["ptll", "nominal_weight"])
+    hist_yll  = df.HistoBoost("yll",  [axis_yll],  ["yll", "nominal_weight"])
+    hist_phill = df.HistoBoost("phill", [axis_phill], ["phill", "nominal_weight"])
 
     # Leading/trailing
-    hist_mu_lead_pt   = df.HistoBoost("muleadpt",   [axis_mu_pt],  ["muleadpt", "weight"])
-    hist_mu_trail_pt  = df.HistoBoost("mutrailpt",  [axis_mu_pt],  ["mutrailpt", "weight"])
-    hist_mu_lead_eta  = df.HistoBoost("muleadeta",  [axis_mu_eta], ["muleadeta", "weight"])
-    hist_mu_trail_eta = df.HistoBoost("mutraileta", [axis_mu_eta], ["mutraileta", "weight"])
+    hist_mu_lead_pt   = df.HistoBoost("muleadpt",   [axis_mu_pt],  ["muleadpt", "nominal_weight"])
+    hist_mu_trail_pt  = df.HistoBoost("mutrailpt",  [axis_mu_pt],  ["mutrailpt", "nominal_weight"])
+    hist_mu_lead_eta  = df.HistoBoost("muleadeta",  [axis_mu_eta], ["muleadeta", "nominal_weight"])
+    hist_mu_trail_eta = df.HistoBoost("mutraileta", [axis_mu_eta], ["mutraileta", "nominal_weight"])
 
     # Positive/negative
-    hist_mu_pos_pt  = df.HistoBoost("mupospt",  [axis_mu_pt],  ["mupospt", "weight"])
-    hist_mu_neg_pt  = df.HistoBoost("munegpt",  [axis_mu_pt],  ["munegpt", "weight"])
-    hist_mu_pos_eta = df.HistoBoost("muposeta", [axis_mu_eta], ["muposeta", "weight"])
-    hist_mu_neg_eta = df.HistoBoost("munegeta", [axis_mu_eta], ["munegeta", "weight"])
+    hist_mu_pos_pt  = df.HistoBoost("mupospt",  [axis_mu_pt],  ["mupospt", "nominal_weight"])
+    hist_mu_neg_pt  = df.HistoBoost("munegpt",  [axis_mu_pt],  ["munegpt", "nominal_weight"])
+    hist_mu_pos_eta = df.HistoBoost("muposeta", [axis_mu_eta], ["muposeta", "nominal_weight"])
+    hist_mu_neg_eta = df.HistoBoost("munegeta", [axis_mu_eta], ["munegeta", "nominal_weight"])
 
     # CS angles
-    hist_cosThetaStarll = df.HistoBoost("cosThetaStarll", [axis_cosThetaStarll], ["cosThetaStarll", "weight"])
-    hist_phiStarll = df.HistoBoost("phiStarll", [axis_phiStarll], ["phiStarll", "weight"])
+    hist_cosThetaStarll = df.HistoBoost("cosThetaStarll", [axis_cosThetaStarll], ["cosThetaStarll", "nominal_weight"])
+    hist_phiStarll = df.HistoBoost("phiStarll", [axis_phiStarll], ["phiStarll", "nominal_weight"])
 
     # 2D histograms
-    hist_ptll_vs_yll = df.HistoBoost("ptll_vs_yll", [axis_ptll, axis_yll], ["ptll", "yll", "weight"])
+    hist_ptll_vs_yll = df.HistoBoost("ptll_vs_yll", [axis_ptll, axis_yll], ["ptll", "yll", "nominal_weight"])
+    # MINIMUM BIN CONTENT: 8.978664972427405 --> 8.885989246716564
 
     results += [
         hist_mll, hist_ptll, hist_yll, hist_phill, hist_nLepton,
@@ -162,4 +169,3 @@ resultdict = narf.build_and_run(datasets, build_graph)
 
 fout = f"{os.path.basename(__file__).replace('py', 'hdf5')}"
 write_analysis_output(resultdict, fout, args)
-
