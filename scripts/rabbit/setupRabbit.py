@@ -1621,20 +1621,20 @@ def setup(
         width_info = dict(
             # 42, 'widthW2p043GeV', 'widthW2p127GeV'
             # 0p6, 'widthW2p09053GeV', 'widthW2p09173GeV'
-            # name="WidthW0p6MeV",
-            name="WidthW42MeV",
+            name="WidthW0p6MeV",
+            # name="WidthW42MeV",
             # name="WidthWm6p36MeV",
             processes=signal_samples_forMass,
             groups=["widthW", "theory"],
             mirror=False,
             noi="wwidth" in args.noi,
             noConstraint="wwidth" in args.noi,
-            # skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
-            skipEntries=widthWeightNames(proc="W", exclude=(2.043, 2.127)),
+            skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
+            # skipEntries=widthWeightNames(proc="W", exclude=(2.043, 2.127)),
             # skipEntries=widthWeightNames(proc="W", exclude=(2.085, 2.127)),
             systAxes=["width"],
-            # systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
-            systNameReplace=[["2p043GeV", "Down"], ["2p127GeV", "Up"]],
+            systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+            # systNameReplace=[["2p043GeV", "Down"], ["2p127GeV", "Up"]],
             # systNameReplace=[["2p085GeV", "Down"], ["2p127GeV", "Up"]],
             passToFakes=passSystToFakes,
         )
