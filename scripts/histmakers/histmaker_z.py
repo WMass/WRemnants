@@ -1,8 +1,9 @@
 import os
 import math
 
-from utilities import parsing
+from utilities import common, parsing
 from wremnants.datasets.datagroups import Datagroups
+from wremnants.histmaker_tools import make_quantile_helper
 from wums import logging
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
@@ -27,22 +28,50 @@ datasets = getDatasets(
     era=args.era,
 )
 
+quantile_file = "histmaker_test_scetlib_dyturboCorr.hdf5"
+
+quantile_helper_cosThetaStarll = None
+if quantile_file and os.path.exists(quantile_file):
+    try:
+        process_name = None
+        for d in datasets:
+            if not d.is_data and d.name:
+                process_name = d.name
+                break
+        if process_name:
+            quantile_helper_cosThetaStarll = make_quantile_helper(
+                quantile_file,
+                ["cosThetaStarll"],  # 1D quantiles for cosThetaStarll
+                ["ptll", "absYll"],  # Dependent axes
+                name="nominal_csQuantiles",
+                processes=[process_name],
+                n_quantiles=[8],  # 8 quantiles for cosThetaStarll
+            )[0]  # Returns a list, take first element for 1D
+            logger.info(f"Loaded quantile helper from {quantile_file}")
+        else:
+            logger.warning("No MC process found, skipping quantile helper")
+    except Exception as e:
+        logger.warning(f"Failed to load quantile helper: {e}")
+        quantile_helper_cosThetaStarll = None
+else:
+    logger.info("Quantile file not specified or not found, quantile binning disabled")
+
 # define histogram axes, see: https://hist.readthedocs.io/en/latest/index.html
 axis_nLepton = hist.axis.Integer(0, 5, name="nLepton", underflow=False)
 axis_mll  = hist.axis.Regular(60, 76, 106, name="mll")
 dilepton_ptV_binning = [0, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 26, 28, 30, 33, 37, 44, 100]
 axis_ptll = hist.axis.Variable(dilepton_ptV_binning, name="ptll", underflow=False, overflow=True)
-# axis_ptll = hist.axis.Regular(60, 0, 120, name="ptll")
 yll_10quantiles_binning = [-2.5, -1.5, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 1.5, 2.5]
 axis_yll = hist.axis.Variable(yll_10quantiles_binning, name="yll", underflow=True, overflow=True)
-
+absYll_binning = [0.0, 0.25, 0.5, 1.0, 1.5, 2.5]
+axis_absYll = hist.axis.Variable(absYll_binning, name="absYll", underflow=False, overflow=True)
 axis_mu_pt  = hist.axis.Regular(60, 25, 150, name="mu_pt")
 axis_mu_eta = hist.axis.Regular(48, -2.4, 2.4, name="mu_eta")
-
-axis_cosThetaStarll = hist.axis.Regular(20, -1.0, 1.0, name="cosThetaStarll", underflow=False, overflow=False)
+axis_cosThetaStarll = hist.axis.Regular(200, -1.0, 1.0, name="cosThetaStarll", underflow=False, overflow=False)
 axis_phiStarll = hist.axis.Regular(20, -math.pi, math.pi, circular=True, name="phiStarll")
 axis_phill = hist.axis.Regular(50, -math.pi, math.pi, circular=True, name="phill")
 
+axis_cosThetaStarll_quantile = hist.axis.Integer(0, 8, name="cosThetaStarll_qbin", underflow=False, overflow=False)
 
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
@@ -89,6 +118,7 @@ def build_graph(df, dataset):
           .Define("mll", "dimu_p4.M()")
           .Define("ptll", "dimu_p4.Pt()")
           .Define("yll", "dimu_p4.Rapidity()")
+          .Define("absYll", "std::fabs(yll)")
           .Define("phill", "dimu_p4.Phi()")
     )
     df = df.Filter("mll > 76 && mll < 106", "Z mass window")
@@ -97,7 +127,6 @@ def build_graph(df, dataset):
     df = (
         df.Define("i_lead",  "Muon_pt[i0] >= Muon_pt[i1] ? i0 : i1")
           .Define("i_trail", "Muon_pt[i0] >= Muon_pt[i1] ? i1 : i0")
-          # assumes OS, so exactly one is positive and one is negative
           .Define("i_pos", "Muon_charge[i0] > 0 ? i0 : i1")
           .Define("i_neg", "Muon_charge[i0] > 0 ? i1 : i0")
 
@@ -120,6 +149,15 @@ def build_graph(df, dataset):
     )
     df = df.Define("cosThetaStarll", "csSineCosThetaPhill.costheta")
     df = df.Define("phiStarll", "csSineCosThetaPhill.phi()")
+
+    # Compute quantile for cosThetaStarll (if helper is available)
+    if quantile_helper_cosThetaStarll is not None:
+        df = df.Define("cosThetaStarll_q", quantile_helper_cosThetaStarll,
+               ["cosThetaStarll", "ptll", "absYll"])
+
+        df = df.Define("cosThetaStarll_qbin", "int(std::floor(8.0*cosThetaStarll_q))")
+        df = df.Redefine("cosThetaStarll_qbin", "std::min(7, std::max(0, cosThetaStarll_qbin))")
+
 
     # prefiring
     if dataset.is_data:
@@ -150,16 +188,38 @@ def build_graph(df, dataset):
     hist_cosThetaStarll = df.HistoBoost("cosThetaStarll", [axis_cosThetaStarll], ["cosThetaStarll", "nominal_weight"])
     hist_phiStarll = df.HistoBoost("phiStarll", [axis_phiStarll], ["phiStarll", "nominal_weight"])
 
+    hist_ptll_absYll_byQ = []
+    if quantile_helper_cosThetaStarll is not None:
+        for q in range(8):
+            dfq = df.Filter(f"cosThetaStarll_qbin == {q}")
+            hist_ptll_absYll_byQ.append(
+                dfq.HistoBoost(
+                    f"ptll_vs_absYll_csQ{q}",
+                    [axis_ptll, axis_absYll],
+                    ["ptll", "absYll", "nominal_weight"],
+                )
+            )
+        results += hist_ptll_absYll_byQ
+
     # 2D histograms
     hist_ptll_vs_yll = df.HistoBoost("ptll_vs_yll", [axis_ptll, axis_yll], ["ptll", "yll", "nominal_weight"])
-    # MINIMUM BIN CONTENT: 8.978664972427405 --> 8.885989246716564
+    # MINIMUM BIN CONTENT: 95.79483724339086 at bin (ptll index 35, yll index 6) → ptll ∈ [28, 30) GeV, yll ∈ [0.25, 0.5)
+    # DATA MINIMUM BIN CONTENT: 88.0 at bin (ptll index 35, yll index 3) → ptll ∈ [28, 30) GeV, yll ∈ [-0.5, -0.25)
 
+    # Create histogram for quantile computation (needed to create quantile file)
+    hist_csQuantiles = df.HistoBoost(
+        "nominal_csQuantiles",
+        [axis_ptll, axis_absYll, axis_cosThetaStarll],
+        ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
+    )
+
+    results += hist_ptll_absYll_byQ
     results += [
         hist_mll, hist_ptll, hist_yll, hist_phill, hist_nLepton,
         hist_mu_lead_pt, hist_mu_trail_pt, hist_mu_lead_eta, hist_mu_trail_eta,
         hist_mu_pos_pt, hist_mu_neg_pt, hist_mu_pos_eta, hist_mu_neg_eta,
         hist_cosThetaStarll, hist_phiStarll,
-        hist_ptll_vs_yll,
+        hist_ptll_vs_yll, hist_csQuantiles,
     ]
 
     return results , weightsum
