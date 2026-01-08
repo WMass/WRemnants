@@ -149,6 +149,9 @@ class Datagroups(object):
 
     def addGroup(self, name, **kwargs):
         group = Datagroup(name, **kwargs)
+        if len(group.members) == 0:
+            logger.warning(f"Not adding group '{name}' without members.")
+            return
         self.groups[name] = group
 
     def deleteGroups(self, names):
