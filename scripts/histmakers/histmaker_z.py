@@ -72,6 +72,7 @@ axis_phiStarll = hist.axis.Regular(20, -math.pi, math.pi, circular=True, name="p
 axis_phill = hist.axis.Regular(50, -math.pi, math.pi, circular=True, name="phill")
 
 axis_cosThetaStarll_quantile = hist.axis.Integer(0, 8, name="cosThetaStarll_qbin", underflow=False, overflow=False)
+axis_prefire_tensor = hist.axis.Integer(0, 2, name="prefire_variation", underflow=False, overflow=False)
 
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
@@ -208,11 +209,31 @@ def build_graph(df, dataset):
 
     # Create histogram for quantile computation (needed to create quantile file)
     hist_csQuantiles = df.HistoBoost(
-        "nominal_csQuantiles",
+        "nominal",
         [axis_ptll, axis_absYll, axis_cosThetaStarll],
         ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
     )
 
+    if not dataset.is_data:
+        df = df.Define("prefire_vector", """
+        auto res = std::vector<double>{L1PreFiringWeight_Muon_StatUp/L1PreFiringWeight_Muon_Nom, L1PreFiringWeight_Muon_StatDn/L1PreFiringWeight_Muon_Nom}; 
+        res[0] = nominal_weight * res[0];
+        res[1] = nominal_weight * res[1];
+        return res;
+        """)
+
+        df = df.Define(
+            "prefire_vector_weight", "wrem::vec_to_tensor<2>(prefire_vector)"
+            )
+
+        hist_prefire_tensor = df.HistoBoost(
+            "nominal_prefiring",
+            [axis_ptll, axis_absYll, axis_cosThetaStarll],
+            ["ptll", "absYll", "cosThetaStarll", "prefire_vector_weight"],
+            tensor_axes=[axis_prefire_tensor],
+        )
+        results.append(hist_prefire_tensor)
+    
     results += hist_ptll_absYll_byQ
     results += [
         hist_mll, hist_ptll, hist_yll, hist_phill, hist_nLepton,
