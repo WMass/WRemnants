@@ -166,7 +166,7 @@ def make_parser(parser=None):
         type=str,
         nargs="*",
         help="Don't run over processes belonging to these groups (only accepts exact group names)",
-        default=["QCD", "WtoNMu_5", "WtoNMu_10", "WtoNMu_50"],
+        default=["QCD"],
     )
     parser.add_argument(
         "--filterProcGroups",
@@ -174,6 +174,22 @@ def make_parser(parser=None):
         nargs="*",
         help="Only run over processes belonging to these groups",
         default=[],
+    )
+    parser.add_argument(
+        "--addBSMProcess",
+        type=str,
+        default=None,
+        help="Add BSM as independent process, not propagating the effect into the fakes",
+        choices=["WtoNMu_0", "WtoNMu_5", "WtoNMu_10", "WtoNMu_30", "WtoNMu_50"],
+    )
+    parser.add_argument(
+        "--addBSMMixing",
+        nargs=2,
+        default=None,
+        help="""
+        Add BSM as systematic variation on SM signal by mixing (i.e. reduce SM with by amount of BSM), the effect is also propagated into the fakes. 
+        First argument is the BSM sample name, second is the mixing (number from 0 to 1).
+        """,
     )
     parser.add_argument(
         "-x",
@@ -933,6 +949,11 @@ def setup(
         ),
     )
 
+    bsm_signals = []
+    if args.addBSMProcess:
+        combine_helpers.add_bsm_process(datagroups, args.addBSMProcess)
+        bsm_signals.append(args.addBSMProcess)
+
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
 
@@ -1042,13 +1063,6 @@ def setup(
                 )
             )
         )
-
-    bsm_signals = []
-    for bsm_signal in filter(
-        lambda x: x.startswith("WtoNMu"), datagroups.allMCProcesses()
-    ):
-        datagroups.unconstrainedProcesses.append(bsm_signal)
-        bsm_signals.append(bsm_signal)
 
     if datagroups.xnorm:
         datagroups.select_xnorm_groups([base_group, *bsm_signals], inputBaseName)
@@ -1575,6 +1589,16 @@ def setup(
             wmass=wmass,
             source=source,
             label=label,
+        )
+
+    if args.addBSMMixing is not None and wmass:
+        # add BSM sample as variation on top of SM W
+        combine_helpers.add_bsm_mixing(
+            datagroups,
+            inputBaseName,
+            args.addBSMMixing[0],
+            mixing=float(args.addBSMMixing[1]),
+            passSystToFakes=passSystToFakes,
         )
 
     if ("wwidth" in args.noi and not wmass) or (
@@ -2916,6 +2940,37 @@ if __name__ == "__main__":
             fitresult_data=fitresult_data,
             unfolding_scalemap=unfolding_scalemap,
         )
+
+        if args.addBSMMixing is not None:
+            # add masked channel for SM inclusive cross section with BSM variation
+            datagroups_xnorm = setup(
+                writer,
+                args,
+                ifile,
+                "gen",
+                iLumiScale,
+                ["count"],
+                genvar=["count"],
+                stat_only=args.doStatOnly or args.doStatOnlyMasked,
+                channel=f"Wmunu_BSM_masked",
+                base_group="Wmunu",
+            )
+            # and without BSM contribution
+            tmp_mixing = args.addBSMMixing[1]
+            args.addBSMMixing[1] = 0
+            datagroups_xnorm = setup(
+                writer,
+                args,
+                ifile,
+                "gen",
+                iLumiScale,
+                ["count"],
+                genvar=["count"],
+                stat_only=args.doStatOnly or args.doStatOnlyMasked,
+                channel=f"Wmunu_masked",
+                base_group="Wmunu",
+            )
+            args.addBSMMixing[1] = tmp_mixing
 
         for bsm_signal in filter(
             lambda x: x.startswith("WtoNMu"), datagroups.allMCProcesses()

@@ -12,12 +12,14 @@ def translate_html_to_latex(n):
     # transform html style formatting into latex style
     if "</" in n:
         n = (
-            f"${n}$".replace("<i>", r"\mathit{")
+            n.replace("<i>", r"\mathit{")
+            .replace("</i>", "}")
             .replace("<sub>", "_{")
             .replace("<sup>", "^{")
-            .replace("</i>", "}")
             .replace("</sub>", "}")
             .replace("</sup>", "}")
+            .replace(r"μ", r"\mu")
+            .replace(r"ε", r"\epsilon")
             .replace(" ", r"\ ")
         )
     return n
@@ -52,9 +54,10 @@ process_colors = {
     "Fake_e": "#964A8B",
     "Fake_mu": "#964A8B",
     "Prompt": "#E42536",
-    "WtoNMu_5": "#409C3D",
-    "WtoNMu_10": "#2BC74D",
-    "WtoNMu_50": "#00FF80",
+    "WtoNMu_5": "#006400",
+    "WtoNMu_10": "#009933",
+    "WtoNMu_30": "#00CC99",
+    "WtoNMu_50": "#00FFFF",
     "BSM": "#409C3D",
 }
 
@@ -116,9 +119,10 @@ process_labels = {
     "Fake_e": "Nonprompt (e)",
     "Fake_mu": r"Nonprompt ($\mu$)",
     "Prompt": "Prompt",
-    "WtoNMu_5": r"W$^{\pm}\to\mathrm{N}\mu (5GeV)$",
-    "WtoNMu_10": r"W$^{\pm}\to\mathrm{N}\mu (10GeV)$",
-    "WtoNMu_50": r"W$^{\pm}\to\mathrm{N}\mu (50GeV)$",
+    "WtoNMu_5": r"W$^{\pm}\to\mu\mathrm{N} (5GeV)$",
+    "WtoNMu_10": r"W$^{\pm}\to\mu\mathrm{N} (10GeV)$",
+    "WtoNMu_30": r"W$^{\pm}\to\mu\mathrm{N} (30GeV)$",
+    "WtoNMu_50": r"W$^{\pm}\to\mu\mathrm{N} (50GeV)$",
 }
 
 axis_labels = {
@@ -132,7 +136,7 @@ axis_labels = {
     "muonJetPt": {"label": r"$\mathit{p}_{T}^\mathrm{jet[\mu]}$", "unit": "GeV"},
     "recoil_perp": {"label": r"$\it{u}_{\mathrm{T}}^{\perp}$", "unit": "GeV"},
     "recoil_para": {"label": r"$\it{u}_{\mathrm{T}}^{\parallel}$", "unit": "GeV"},
-    "qGen": r"$|\mathit{q}^{\mu}|$",
+    "qGen": r"$\mathit{q}^{\mu}$",
     "eta": r"$\mathit{\eta}^{\mu}$",
     "etaGen": r"$\mathit{\eta}^{\mu}$",
     "abseta": r"$|\mathit{\eta}^{\mu}|$",
@@ -376,6 +380,7 @@ nuisance_grouping = {
         "binByBinStatZtautau",
         "binByBinStatWtoNMu_5",
         "binByBinStatWtoNMu_10",
+        "binByBinStatWtoNMu_30",
         "binByBinStatWtoNMu_50",
     ],
     "unfolding": [
@@ -406,6 +411,10 @@ nuisance_grouping = {
         "pdfCT18Z",
         "pTModeling",
         "theory_ew",
+        "massShift",
+        "widthW",
+        "widthZ",
+        "sin2thetaZ",
     ],
     "unfolding_min": [
         "Total",
@@ -432,6 +441,30 @@ nuisance_grouping = {
         "resumScale",
         "bcQuarkMass",
         "theory_ew",
+    ],
+    "xsecs": [
+        "Total",
+        "stat",
+        "binByBinStat",
+        "binByBinStatW",
+        "binByBinStatZ",
+        # "expNoLumi",
+        "luminosity",
+        "angularCoeffs",
+        "pdfCT18Z",
+        "pTModeling",
+        "theory_ew",
+        "massShift",
+        "widthW",
+        "widthZ",
+        "sin2thetaZ",
+        "muon_eff_syst",
+        "muon_eff_stat",
+        "prefire",
+        "muonCalibration",
+        "Fake",
+        "recoil",
+        "CMS_background",
     ],
 }
 
@@ -465,9 +498,10 @@ translate_selection = {
 }
 
 impact_labels = {
-    "WtoNMu_5": "<i>μ</i><sub>W→μN(5GeV)</sub>",
-    "WtoNMu_10": "<i>μ</i><sub>W→μN(10GeV)</sub>",
-    "WtoNMu_50": "<i>μ</i><sub>W→μN(50GeV)</sub>",
+    "WtoNMu_5": "<i>μ</i><sub>W→Nμ(5GeV)</sub>",
+    "WtoNMu_10": "<i>μ</i><sub>W→Nμ(10GeV)</sub>",
+    "WtoNMu_30": "<i>μ</i><sub>W→Nμ(30GeV)</sub>",
+    "WtoNMu_50": "<i>μ</i><sub>W→Nμ(50GeV)</sub>",
     "massShiftZ100MeV": "<i>m</i><sub>Z</sub>",
     "massShiftW100MeV": "<i>m</i><sub>W</sub>",
     "widthZ": "Γ<i>m</i><sub>Z</sub>",
@@ -483,7 +517,7 @@ impact_labels = {
     "QCDscaleWPtHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
     "QCDscaleZPtChargeHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (Z)",
     "QCDscaleWPtChargeHelicityMiNNLO": "<i>μ</i><sub>R </sub> <i>μ</i><sub>F </sub> scale (W)",
-    "binByBinStat": "Bin-by-bin stat.",
+    "binByBinStat": "Simulation stat.",
     "binByBinStatW": "Bin-by-bin stat. (W)",
     "binByBinStatZ": "Bin-by-bin stat. (Z)",
     "binByBinStatWmunu": "Bin-by-bin stat. (W→μν)",
@@ -496,9 +530,10 @@ impact_labels = {
     "binByBinStatTop": "Bin-by-bin stat. (top)",
     "binByBinStatWtoNMu_5": "Bin-by-bin stat. (BSM)",
     "binByBinStatWtoNMu_10": "Bin-by-bin stat. (BSM)",
+    "binByBinStatWtoNMu_30": "Bin-by-bin stat. (BSM)",
     "binByBinStatWtoNMu_50": "Bin-by-bin stat. (BSM)",
     "recoil": "recoil",
-    "CMS_background": "Bkg.",
+    "CMS_background": "Other bkg.",
     "FakeHighMT": "FakeHighMT",
     "FakeLowMT": "FakeLowMT",
     "rFake": "fakerate",

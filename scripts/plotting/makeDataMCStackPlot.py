@@ -82,6 +82,7 @@ parser.add_argument(
         "QCD",
         "WtoNMu_5",
         "WtoNMu_10",
+        "WtoNMu_30",
         "WtoNMu_50",
     ],
 )

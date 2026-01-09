@@ -680,11 +680,7 @@ def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
     isW = dataset.name in common.wprocs
-    isBSM = dataset.name in [
-        "WtoNMu_MN-5-V-0p001",
-        "WtoNMu_MN-10-V-0p001",
-        "WtoNMu_MN-50-V-0p001",
-    ]
+    isBSM = dataset.name.startswith("WtoNMu")
     isWmunu = isBSM or dataset.name in [
         "WplusmunuPostVFP",
         "WminusmunuPostVFP",
@@ -790,7 +786,7 @@ def build_graph(df, dataset):
             )
         cols = [*cols, "run4axis"]
 
-    if isBSM:
+    if isBSM or isWmunu:
         # to compute inclusive cross section
         unfolding_tools.add_xnorm_histograms(
             results,
