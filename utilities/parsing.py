@@ -190,7 +190,7 @@ def common_parser(analysis_label=""):
         help="Skip the qcdScaleByHelicity histogram (it can be huge)",
     )
     parser.add_argument(
-        "--noRecoil", action="store_true", help="Don't apply recoild correction"
+        "--noRecoil", action="store_true", help="Don't apply recoil correction"
     )
     parser.add_argument(
         "--recoilHists",
