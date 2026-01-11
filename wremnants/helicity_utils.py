@@ -11,6 +11,7 @@ from utilities import common
 from utilities.io_tools import input_tools
 from wremnants.correctionsTensor_helper import makeCorrectionsTensor
 from wremnants.theory_tools import helicity_xsec_to_angular_coeffs
+from wums import boostHistHelpers as hh
 from wums import logging
 
 logger = logging.child_logger(__name__)
@@ -32,7 +33,7 @@ axis_helicity_multidim = hist.axis.Integer(
 def make_helicity_weight_helper(
     is_z=False,
     filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_theoryAgnosticBinning_scetlib_dyturboCorr_maxFiles_m1.hdf5",
-    rebi_ptVgen=False,
+    rebin_ptVgen_edges=None,
 ):
 
     with h5py.File(filename, "r") as ff:
@@ -41,8 +42,10 @@ def make_helicity_weight_helper(
     hist_helicity_xsec_scales = out["Z"] if is_z else out["W"]
 
     # rebinning must happen *before* calculating Ai's
-    if rebi_ptVgen:
-        hist_helicity_xsec_scales = hist_helicity_xsec_scales[{"ptVgen": hist.rebin(2)}]
+    if rebin_ptVgen_edges is not None:
+        hist_helicity_xsec_scales = hh.rebinHist(
+            hist_helicity_xsec_scales, "ptVgen", rebin_ptVgen_edges
+        )
 
     corrh = helicity_xsec_to_angular_coeffs(hist_helicity_xsec_scales)
 

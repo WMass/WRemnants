@@ -473,7 +473,7 @@ parser.add_argument(
     help="Input unfolded fit result for the Z distributions.",
 )
 parser.add_argument(
-    "--fitresultModel", type=str, default="Select helicitySig:slice(0,1)"
+    "--fitresultMapping", type=str, default="Select helicitySig:slice(0,1)"
 )
 parser.add_argument(
     "--fitresultChannelSigmaUL",
@@ -591,7 +591,7 @@ else:
     )
 
     # covariance across any number of physics models
-    h_data_cov = fitresult["physics_models"][args.fitresultModel][
+    h_data_cov = fitresult["mappings"][args.fitresultMapping][
         "hist_postfit_inclusive_cov"
     ].get()
     writer.add_data_covariance(h_data_cov)  # N.B: run fit with --externalCovariance
@@ -600,7 +600,7 @@ else:
 
     # if set, read and initialize the W lepton channel
     if args.fitW:
-        h_data_prefsrLep = fitresult["physics_models"][args.fitresultModel]["channels"][
+        h_data_prefsrLep = fitresult["mappings"][args.fitresultMapping]["channels"][
             args.fitresultChannelW
         ]["hist_postfit_inclusive"].get()
         writer.add_channel(h_data_prefsrLep.axes, "chW")
@@ -608,7 +608,7 @@ else:
 
     # if set, read and initialize Ai's channel
     if args.fitAngularCoeffs:
-        h_data_ai = fitresult["physics_models"][args.fitresultModel]["channels"][
+        h_data_ai = fitresult["mappings"][args.fitresultMapping]["channels"][
             args.fitresultChannelAis
         ]["hist_postfit_inclusive"].get()
         writer.add_channel(h_data_ai.axes, "chAis")
@@ -619,7 +619,7 @@ else:
 
     # read and initialize sigmaUL channel
     if not args.noFitSigmaUL:
-        h_data = fitresult["physics_models"][args.fitresultModel]["channels"][
+        h_data = fitresult["mappings"][args.fitresultMapping]["channels"][
             args.fitresultChannelSigmaUL
         ]["hist_postfit_inclusive"].get()[:, :, 0]
         writer.add_channel(h_data.axes, "chSigmaUL")

@@ -353,6 +353,7 @@ def get_dilepton_ptV_binning(fine=False):
         [
             0,
             1,
+            1.5,
             2,
             2.5,
             3,

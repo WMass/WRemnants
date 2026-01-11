@@ -657,7 +657,7 @@ def define_postfsr_vars(df, mode=None):
             )
             df = df.Define(
                 "postfsrOtherLep_mass",
-                "isEvenEvent ? wrem::get_pdgid_mass(GenPart_pdgId[postfsrLep][postfsrAntiLep_idx]) : wrem::get_pdgid_mass(GenPart_pdgId[postfsrAntiLep][postfsrLep_idx])",
+                "isEvenEvent ? wrem::get_pdgid_mass(GenPart_pdgId[postfsrAntiLep][postfsrAntiLep_idx]) : wrem::get_pdgid_mass(GenPart_pdgId[postfsrLep][postfsrLep_idx])",
             )
 
             df = df.Define(

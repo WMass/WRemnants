@@ -224,10 +224,14 @@ def make_parser(parser=None):
     )
     parser.add_argument(
         "--rebin",
-        type=int,
+        type=parsing.str_to_list_or_int,
         nargs="*",
         default=[],
-        help="Rebin axis by this value (default, 1, does nothing)",
+        help="""
+        Rebin axis by this value (default, 1, does nothing); 
+        use integer 'n' for merging 'n' bins;
+        use comma separated list with new edges, use a leading space in case the bin edge is negative (e.g. " -2.4")
+        """,
     )
     parser.add_argument(
         "--absval",
@@ -3046,9 +3050,9 @@ if __name__ == "__main__":
         )
 
         if len(args.fitresult) > 1:
-            physics_model = args.fitresult[1]
+            mapping = args.fitresult[1]
         else:
-            physics_model = "Basemodel"
+            mapping = "BaseMapping"
 
         if len(args.fitresult) > 2:
             channels = args.fitresult[2:]
@@ -3057,7 +3061,7 @@ if __name__ == "__main__":
 
         fitresult_hist, fitresult_cov, fitresult_channels = (
             rabbit.io_tools.get_postfit_hist_cov(
-                fitresult, physics_model=physics_model, channels=channels
+                fitresult, mapping=mapping, channels=channels
             )
         )
 

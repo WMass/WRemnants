@@ -243,21 +243,19 @@ def add_xnorm_histograms(
 
 
 def reweight_to_fitresult(
-    filename, result=None, physics_model="", channel="ch0_masked"
+    filename, result=None, mapping="Select", channel="ch0_masked"
 ):
     import wums.boostHistHelpers as hh
     from rabbit.io_tools import get_fitresult
 
     fitresult, meta = get_fitresult(filename[0], result, meta=True)
-    results = fitresult["physics_models"][physics_model]["channels"][channel]
+    results = fitresult["mappings"][mapping]["channels"][channel]
 
     hPostfit = results[f"hist_postfit_inclusive"].get()
 
     if len(filename) == 2:
         fitresult_den, meta_den = get_fitresult(filename[1], result, meta=True)
-        results_den = fitresult_den["physics_models"][physics_model]["channels"][
-            channel
-        ]
+        results_den = fitresult_den["mappings"][mapping]["channels"][channel]
         hPrefit = results_den[f"hist_prefit_inclusive"].get()
     else:
         hPrefit = results[f"hist_prefit_inclusive"].get()
@@ -326,7 +324,7 @@ class UnfolderZ:
         unfolding_levels=None,
         poi_as_noi=True,
         fitresult=None,
-        fitresult_physics_model=f"Select",
+        fitresult_mapping=f"Select",
         fitresult_channel="ch0_masked",
         low_pu=False,
     ):
@@ -346,16 +344,16 @@ class UnfolderZ:
         self.poi_as_noi = poi_as_noi
         self.unfolding_levels = unfolding_levels
 
-        # self.qcdScaleByHelicity_helper =
+        def rebin_pt(edges):
+            # use 2 ptll bin for each ptVGen bin, except first and last
+            # first gen bin same size as reco bin, then 1 gen bin for 2 reco bins
+            new_edges = np.array([*edges[:2], *edges[3::2]])
+            if len(new_edges) % 2:
+                # in case it's an odd number of edges, last two bins are overflow
+                edges = edges[:-1]
+            return new_edges
 
-        if self.add_helicity_axis:
-            # helper to derive helicity xsec shape from event by event reweighting
-            self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
-                is_z=True,
-                filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
-                # filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_nnpdf31_alphaSunfoldingBinning_helicity.hdf5",
-                rebi_ptVgen=True,
-            )
+        self.weightsByHelicity_helper_unfolding = None
 
         self.unfolding_axes = {}
         self.unfolding_cols = {}
@@ -368,13 +366,22 @@ class UnfolderZ:
                 level,
                 flow_y=self.poi_as_noi,
                 add_out_of_acceptance_axis=self.poi_as_noi,
-                rebin_pt=True,
+                rebin_pt=rebin_pt,
             )
             self.unfolding_axes[level] = a
             self.unfolding_cols[level] = c
             self.unfolding_selections[level] = s
 
             if self.add_helicity_axis:
+                if self.weightsByHelicity_helper_unfolding is None:
+                    edges = [ax for ax in a if ax.name == "ptVGen"][0].edges
+                    # helper to derive helicity xsec shape from event by event reweighting
+                    self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
+                        is_z=True,
+                        filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
+                        rebin_ptVgen_edges=edges,
+                    )
+
                 for ax in a:
                     if ax.name == "acceptance":
                         continue
@@ -383,6 +390,7 @@ class UnfolderZ:
                     wbh_axis = self.weightsByHelicity_helper_unfolding.hist.axes[
                         ax.name.replace("Gen", "gen")
                     ]
+
                     if any(ax.edges != wbh_axis.edges):
                         raise RuntimeError(
                             f"""
@@ -395,7 +403,7 @@ class UnfolderZ:
         self.unfolding_corr_helper = (
             reweight_to_fitresult(
                 fitresult,
-                physics_model=fitresult_physics_model,
+                mapping=fitresult_mapping,
                 channel=fitresult_channel,
             )
             if fitresult is not None

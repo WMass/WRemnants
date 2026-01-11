@@ -29,6 +29,17 @@ def str_to_complex_or_int(value):
             raise argparse.ArgumentTypeError(f"Invalid integer: '{value}'")
 
 
+def str_to_list_or_int(value):
+    # .strip() handles the "leading space" trick if you use it
+    value = value.strip()
+    if "," in value:
+        return [float(x) for x in value.split(",")]
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid integer: '{value}'")
+
+
 def set_parser_attribute(parser, argument, attribute, newValue):
     # change an argument of the parser, must be called before parse_arguments
     logger = logging.child_logger(__name__)

@@ -454,10 +454,10 @@ def add_noi_unfolding_variations(
 
         from rabbit.io_tools import get_fitresult
 
-        physics_model = "Select"
+        mapping = "Select"
 
         fitresult, meta = get_fitresult(fitresult, meta=True)
-        results = fitresult["physics_models"][physics_model]["channels"]["ch0_masked"]
+        results = fitresult["mappings"][mapping]["channels"]["ch0_masked"]
 
         scalemap = results[f"hist_postfit_inclusive"].get()
 
