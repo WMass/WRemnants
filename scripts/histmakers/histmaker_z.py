@@ -233,6 +233,23 @@ def build_graph(df, dataset):
             tensor_axes=[axis_prefire_tensor],
         )
         results.append(hist_prefire_tensor)
+
+        hist_muleadeta_prefire = df.HistoBoost(
+            "muleadeta_prefiring",
+            [axis_mu_eta],
+            ["muleadeta", "prefire_vector_weight"],
+            tensor_axes=[axis_prefire_tensor],
+        )
+        results.append(hist_muleadeta_prefire)
+
+        hist_mutraileta_prefire = df.HistoBoost(
+            "mutraileta_prefiring",
+            [axis_mu_eta],
+            ["mutraileta", "prefire_vector_weight"],
+            tensor_axes=[axis_prefire_tensor],
+        )
+        results.append(hist_mutraileta_prefire)
+
     
     results += hist_ptll_absYll_byQ
     results += [

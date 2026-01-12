@@ -1,8 +1,6 @@
 hayden notes
 
-Plot with variation? Can do with respect to ptll and yll, may need to zoom, go through plotting script
-
-
+other data, other variations
 
 cd /work/submit/hayden17
 
@@ -18,25 +16,45 @@ Singularity> python scripts/histmakers/histmaker_test.py --dataPath /scratch/sub
 
 IN=histmaker_test_scetlib_dyturboCorr.hdf5
 OUT=~/public_html/
-TAG=zmumu_test2
-PROCS="Data Zmumu"
+TAG=zmumu_test{date}
+PROCS="Data Zmumu" Wmunu and Ztautau
 
 python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
-  -n nominal_prefiring \
+  -n nominal \
   --hists ptll \
   --rrange 0.995 1.005 \
   --procFilters Zmumu --noData --flow none \
-  variation --varName nominal_prefiring --varLabel "up" "down"\
+  variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
   
-  python scripts/plotting/makeDataMCStackPlot.py $IN \
+python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
-  -n nominal_prefiring \
+  -n nominal \
   --hists absYll \
   --rrange 0.995 1.005 \
   --procFilters Zmumu --noData --flow none \
-  variation --varName nominal_prefiring \
+  variation --varName prefiring --varLabel "up" "down"\
+  --selectAxis prefire_variation --selectEntries 0 1
+  
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG \
+  -n muleadeta \
+  --hists mu_eta \
+  --rrange 0.995 1.005 \
+  --postfix leading \
+  --procFilters Zmumu --noData --flow none \
+  variation --varName prefiring --varLabel "up" "down"\
+  --selectAxis prefire_variation --selectEntries 0 1
+  
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG \
+  -n mutraileta \
+  --hists mu_eta \
+  --rrange 0.995 1.005 \
+  --postfix trailing \
+  --procFilters Zmumu --noData --flow none \
+  variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
 
 for q in 0 1 2 3 4 5 6 7; do
@@ -69,7 +87,43 @@ python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters
 python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName muposeta --hists mu_eta --postfix positive
 python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName munegeta --hists mu_eta --postfix negative
 
-https://submit.mit.edu/~hayden17/zmumu_test2/
+https://submit.mit.edu/~hayden17/zmumu_test{date}/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Imports / setup
 * import os Used for file/path utilities (here: getting the script name, building output filename).
@@ -218,6 +272,227 @@ Write output
 * write_analysis_output(resultdict, fout, args) Writes the results (hists + metadata) to that HDF5 file, using CLI args for bookkeeping.
 
 If you want the one most important high-level summary: this script selects triggered events with exactly two tight isolated muons of opposite charge in the Z mass window, then saves histograms of the Z candidate and the two muons.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
