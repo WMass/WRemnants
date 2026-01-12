@@ -1,0 +1,35 @@
+name: EOS Cleanup
+on:
+  schedule:
+    - cron: '0 3 * * 0' # Run on Sunday morning at 3h00 UTC
+  workflow_dispatch:
+
+env: 
+  EOS_DIR: /eos/user/c/cmsmwbot/
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, linux, x64]
+
+    # delete old folders, keep the 5 newest ones
+    steps:
+      - name: delete old kerberos credentials
+        run: |
+          FILE_PATH="/tmp/krb5cc_158524"
+          if [ -f "$FILE_PATH" ]; then
+            echo "Delete $FILE_PATH and create new one"
+            rm "$FILE_PATH"
+          else
+            echo "File $FILE_PATH does not yet exist, create it."
+          fi
+
+      - name: setup kerberos
+        run: |
+          kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
+          klist -k -t -e ~/private/.keytab
+          klist
+          echo "xrdfs root://eosuser.cern.ch// ls $EOS_DIR"
+          xrdfs root://eosuser.cern.ch// ls $EOS_DIR
+
+      - name: cleanup main
+        run: scripts/ci/cleanup_directory.sh $EOS_DIR/ScheduledBuilds/ 5

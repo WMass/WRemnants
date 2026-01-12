@@ -1,0 +1,12 @@
+[submodule "narf"]
+	path = narf
+	url = https://github.com/bendavid/narf.git
+[submodule "wremnants-data"]
+	path = wremnants-data
+	url = https://gitlab.cern.ch/cms-wmass/wremnants-data.git
+[submodule "wums"]
+	path = wums
+	url = https://github.com/WMass/wums.git
+[submodule "rabbit"]
+	path = rabbit
+	url = https://github.com/WMass/rabbit

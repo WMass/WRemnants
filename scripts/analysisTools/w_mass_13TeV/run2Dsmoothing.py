@@ -1,0 +1,926 @@
+#!/usr/bin/env python3
+
+import copy
+import itertools
+import os
+import pickle
+
+## safe batch mode
+import sys
+import time
+from array import array
+from functools import partial
+
+import boost_histogram as bh
+import hist
+import lz4.frame
+import numpy as np
+import ROOT
+import tensorflow as tf
+from scipy.interpolate import RegularGridInterpolator
+
+import narf
+import wums.fitutils
+import wums.ioutils
+import wums.output_tools
+from wremnants.utilities import common
+from wums import boostHistHelpers as hh
+from wums import logging
+
+args = sys.argv[:]
+sys.argv = ["-b"]
+sys.argv = args
+
+ROOT.gROOT.SetBatch(True)
+ROOT.PyConfig.IgnoreCommandLineOptions = True
+
+data_dir = common.data_dir
+
+from scripts.analysisTools.plotUtils.utility import (
+    addStringToEnd,
+    adjustSettings_CMS_lumi,
+    common_plot_parser,
+    copyOutputToEos,
+    createPlotDirAndCopyPhp,
+    drawCorrelationPlot,
+    drawSingleTH1,
+    drawTH1,
+    safeGetObject,
+    safeOpenFile,
+)
+
+logger = logging.setup_logger(__file__, 3, False)
+
+
+# TODO: might move this function to a common efficiency_util.py script
+def makeAntiSFfromSFandEffi(hsf, heffi, stepName):
+    num = hsf.copy()
+    den = hsf.copy()
+    heff = heffi.copy()
+    num.values()[...] = np.ones_like(hsf.values())  # num = 1
+    den = num.copy()  # now den is filled with all 1
+    num = hh.addHists(
+        num, hh.multiplyHists(hsf, heff, createNew=True), createNew=False, scale2=-1.0
+    )  # 1 - SF*effMC
+    den = hh.addHists(den, heff, scale2=-1.0, createNew=False)  # 1 - effMC
+    antiSF = hh.divideHists(num, den, createNew=True)
+    antiSF.name = f"smoothSF3D_anti{stepName}"
+    # make sure the numerator is not negative, i.e. SF*effMC < 1 or equivalently 1 - SF*effMC > 0
+    denVals = den.values()
+    numVals = num.values()
+    # note, efficiencies are already capped to be in [0,1], but could also be exactly 0 or exactly 1
+    # set antiSF=1 if eff == 1 (i.e. den=0, or num < 0, or (num < 0.5% and eff > 99.5% (i.e. den < 0.5%))
+    antiSF_values = antiSF.values()
+    cellsToChange = (
+        (denVals <= 0.0) | (numVals < 0) | ((numVals < 0.005) & (denVals < 0.005))
+    )
+    nChangedCells = np.count_nonzero(cellsToChange)
+    if nChangedCells > 0:
+        frac = nChangedCells / np.product(cellsToChange.shape)
+        logger.warning(
+            f"Setting antiSF = 1.0 in {nChangedCells}/{np.product(cellsToChange.shape)} cells for step {stepName} ({frac:.1%})"
+        )
+        antiSF_values[cellsToChange] = 1.0
+        antiSF.values()[...] = antiSF_values
+    return antiSF
+
+
+def polN_2d(
+    xvals,
+    parms,
+    xLowVal=0.0,
+    xFitRange=1.0,
+    degreeX=2,
+    yLowVal=0.0,
+    yFitRange=1.0,
+    degreeY=3,
+):
+
+    parms2d = tf.reshape(parms, [degreeY + 1, degreeX + 1])
+
+    xscaled = (xvals[0] - xLowVal) / xFitRange
+    yscaled = (xvals[1] - yLowVal) / yFitRange
+    ret = 0.0
+    for dx in range(1 + degreeX):
+        powx = xscaled**dx if dx else 1.0
+        for dy in range(1 + degreeY):
+            powy = yscaled**dy if dy else 1.0
+            ret += parms2d[dy][dx] * powx * powy
+    return ret
+
+
+def runSmoothing(
+    inputfile, histname, outdir, step, args, effHist=None, era="2016PostVFP"
+):
+
+    outdirNew = outdir
+    addStringToEnd(outdirNew, "/", notAddIfEndswithMatch=True)
+    outdirNew += os.path.basename(inputfile).replace(".root", "")
+    outdirNew += "/"
+    createPlotDirAndCopyPhp(outdirNew)
+    if args.debugPlots:
+        outdir_debug = outdirNew + f"/debugPlots/"
+        createPlotDirAndCopyPhp(outdir_debug)
+
+    logger.info(inputfile)
+    logger.info(histname)
+    logger.info(step)
+
+    adjustSettings_CMS_lumi()
+
+    leftMargin = 0.15
+    rightMargin = 0.04
+    bottomMargin = 0.12
+    canvas = ROOT.TCanvas(f"canvas", "", 800, 700)
+    canvas.SetTickx(1)
+    canvas.SetTicky(1)
+    canvas.cd()
+    canvas.SetLeftMargin(leftMargin)
+    canvas.SetBottomMargin(bottomMargin)
+    canvas.SetRightMargin(rightMargin)
+    canvas.cd()
+
+    sfhistname = histname  # "SF3D_nominal_isolation" # uT - eta - pt
+    tfile = safeOpenFile(inputfile)
+    hsf = safeGetObject(tfile, sfhistname)
+
+    if era != "2016PostVFP":
+        hsf_narf = narf.root_to_hist(hsf, axis_names=["eta", "pt", "uT"])
+        print(type(hsf_narf))
+        hsf_narf = hsf_narf.project("uT", "eta", "pt")
+        print(hsf_narf.axes)
+        hsf = narf.hist_to_root(hsf_narf)
+        hsf.SetName(sfhistname)
+
+    uT_binOffset = 1  # 1 to exclude first bin, use 0 to use all
+    uT_binOffset_high = uT_binOffset
+    if args.utHigh is not None:
+        lastUtBinToFit = (
+            hsf.GetXaxis().FindFixBin(args.utHigh + 0.001) - 1
+        )  # -1 because if we choose uT = 70 then the last bin is the one with 70 as upper edge
+        uT_binOffset_high = hsf.GetNbinsX() - lastUtBinToFit
+    utEdges = [
+        round(hsf.GetXaxis().GetBinLowEdge(i), 1)
+        for i in range(1 + uT_binOffset, 2 + hsf.GetNbinsX() - uT_binOffset_high)
+    ]  # remove extreme bins for now
+    etaEdges = [
+        round(hsf.GetYaxis().GetBinLowEdge(i), 1) for i in range(1, 2 + hsf.GetNbinsY())
+    ]
+    ptEdges = [
+        round(hsf.GetZaxis().GetBinLowEdge(i), 1) for i in range(1, 2 + hsf.GetNbinsZ())
+    ]
+    if uT_binOffset == 0:
+        # redefine last uT bins with a sensible range (twice the width of the second to last bin)
+        stretch = 2.0
+        utEdges[0] = utEdges[1] - stretch * (utEdges[2] - utEdges[1])
+        utEdges[-1] = utEdges[-2] - stretch * (utEdges[-3] - utEdges[-2])
+        name = hsf.GetName()
+        hsf.SetName(f"{name}_AAA")
+        hsfTmp = ROOT.TH3D(
+            name,
+            hsf.GetTitle(),
+            len(utEdges) - 1,
+            array("d", utEdges),
+            len(etaEdges) - 1,
+            array("d", etaEdges),
+            len(ptEdges) - 1,
+            array("d", ptEdges),
+        )
+        ROOT.wrem.fillTH3fromTH3part(
+            hsfTmp, hsf
+        )  # fill new histogram with original values, they have same number of bins
+        hsf = hsfTmp  # replace the input histogram, to use it later
+        logger.warning(
+            f"Setting first and last uT edges to {utEdges[0]} and {utEdges[-1]}"
+        )
+
+    hsf.GetXaxis().SetRange(
+        1 + uT_binOffset, hsf.GetNbinsX() - uT_binOffset_high
+    )  # remove extreme bins for now, they extend up to infinity
+
+    #
+    polnx = args.polDegree[0]
+    polny = args.polDegree[1]
+
+    # for consistency with how tensorflow reads the histogram to fit, it is better to use bin centers to define the range.
+    # It is then fine even if the fit function extends outside this range
+    ptLow = hsf.GetZaxis().GetBinCenter(1)
+    ptHigh = hsf.GetZaxis().GetBinCenter(hsf.GetNbinsZ())
+    ptRange = ptHigh - ptLow
+    utLow = hsf.GetXaxis().GetBinCenter(
+        1 + uT_binOffset
+    )  # remove first bin, whose range is too extreme
+    utHigh = hsf.GetXaxis().GetBinCenter(
+        hsf.GetNbinsX() - uT_binOffset_high
+    )  # remove last bin, whose range is too extreme
+    utRange = utHigh - utLow
+    polN_2d_scaled = partial(
+        polN_2d,
+        xLowVal=utLow,
+        xFitRange=utRange,
+        degreeX=polnx,
+        yLowVal=ptLow,
+        yFitRange=ptRange,
+        degreeY=polny,
+    )
+    ## save actual histogram edges
+    ptEdgeLow = hsf.GetZaxis().GetBinLowEdge(1)
+    ptEdgeHigh = hsf.GetZaxis().GetBinLowEdge(1 + hsf.GetNbinsZ())
+    utEdgeLow = hsf.GetXaxis().GetBinLowEdge(
+        1 + uT_binOffset
+    )  # remove first bin, whose range is too extreme
+    utEdgeHigh = hsf.GetXaxis().GetBinLowEdge(
+        hsf.GetNbinsX() + 1 - uT_binOffset_high
+    )  # remove last bin, whose range is too extreme
+    # set number of bins for ut and pt after smoothing
+    utBinWidth = 2
+    utNbins = int(
+        (utEdgeHigh - utEdgeLow + 0.001) / utBinWidth
+    )  # multiple of 1 GeV width
+    ptNbins = 5 * int(ptEdgeHigh - ptEdgeLow + 0.001)  # 0.2 GeV width
+
+    nEtaBins = hsf.GetNbinsY()
+    etaBinsToRun = args.eta if len(args.eta) else range(1, 1 + nEtaBins)
+
+    iptFitLow = 1
+    iptFitHigh = hsf.GetNbinsZ()
+    ptFitRangeLow = args.ptFitRange[0]
+    ptFitRangeHigh = args.ptFitRange[1]
+    ## TODO: be less hardcoded here
+    if step == "isoantitrig":
+        ptFitRangeLow = 26.0
+
+    if ptFitRangeLow > 0:
+        iptFitLow = sorted(
+            (1, hsf.GetZaxis().FindFixBin(ptFitRangeLow + 0.0001), hsf.GetNbinsZ())
+        )[
+            1
+        ]  # must ensure to pick the bin above the given edge
+    if ptFitRangeHigh > 0:
+        iptFitHigh = sorted(
+            (1, hsf.GetZaxis().FindFixBin(ptFitRangeHigh - 0.0001), hsf.GetNbinsZ())
+        )[
+            1
+        ]  # must ensure to pick the bin below the given edge
+    ptFitEdges = [
+        x
+        for x in ptEdges
+        if x >= hsf.GetZaxis().GetBinLowEdge(iptFitLow)
+        and x <= hsf.GetZaxis().GetBinLowEdge(1 + iptFitHigh)
+    ]
+    if ptFitRangeLow > 0 or ptFitRangeHigh > 0:
+        logger.warning(f"Step {step}F: fitting this pT range {ptFitEdges}")
+
+    # to store the pull versus eta-pt for bins of uT, for some plots
+    # if the fit range is restricted, use the narrower pt range here, consistently with the actually fitted histogram define later on
+    hpull_utEtaPt = ROOT.TH3D(
+        "hpull_utEtaPt",
+        "",
+        len(utEdges) - 1,
+        array("d", utEdges),
+        len(etaEdges) - 1,
+        array("d", etaEdges),
+        len(ptFitEdges) - 1,
+        array("d", ptFitEdges),
+    )
+
+    # logger.warning(f"uT binning: {utNbins} bins from {utEdgeLow} to {utEdgeHigh}")
+    # extend uT range for plotting purpose, even if eventually the final histogram will be stored in a narrower range
+    extendedRange_ut = [min(-50.0, utEdgeLow), max(50.0, utEdgeHigh)]
+    extendedRange_ut_nBins = int(
+        (extendedRange_ut[1] - extendedRange_ut[0] + 0.001) / utBinWidth
+    )
+    # create final boost histogram with smooth SF, eta-pt-ut-ivar
+    axis_eta = hist.axis.Regular(
+        nEtaBins, etaEdges[0], etaEdges[-1], name="eta", overflow=False, underflow=False
+    )
+    axis_pt = hist.axis.Regular(
+        ptNbins, ptEdgeLow, ptEdgeHigh, name="pt", overflow=False, underflow=False
+    )
+    axis_ut = hist.axis.Regular(
+        utNbins, utEdgeLow, utEdgeHigh, name="ut", overflow=False, underflow=False
+    )
+    axis_ut_eff = hist.axis.Regular(
+        extendedRange_ut_nBins,
+        extendedRange_ut[0],
+        extendedRange_ut[1],
+        name="ut",
+        overflow=False,
+        underflow=False,
+    )
+    axis_var = hist.axis.Integer(
+        0,
+        1 + (1 + polnx) * (1 + polny),
+        underflow=False,
+        overflow=False,
+        name="nomi-eigenVars",
+    )
+
+    histSF3D_withStatVars = hist.Hist(
+        axis_eta,
+        axis_pt,
+        axis_ut,
+        axis_var,
+        name=f"smoothSF3D_{step}",
+        storage=hist.storage.Weight(),
+    )
+    histEffi3D = hist.Hist(
+        axis_eta,
+        axis_pt,
+        axis_ut_eff,
+        name=f"smoothEffi3D_{step}",
+        storage=hist.storage.Weight(),
+    )
+    histEffi2D_ptut = hist.Hist(
+        axis_ut_eff,
+        axis_pt,
+        name=f"smoothEffi2D_{step}_ptut",
+        storage=hist.storage.Weight(),
+    )
+
+    if effHist != None:
+        logger.info("Preparing efficiencies")
+        eff_boost = effHist
+        effHistRoot = narf.hist_to_root(eff_boost)
+        effHistRoot.SetName(f"Wmunu_MC_effi_{step}")
+        # make some plots of efficiencies versus eta-ut to see how they behave
+        outdirEff = outdirNew + "efficiencies/"
+        for ieta in etaBinsToRun:
+            etaLow = round(effHistRoot.GetXaxis().GetBinLowEdge(ieta), 1)
+            etaHigh = round(effHistRoot.GetXaxis().GetBinLowEdge(ieta + 1), 1)
+            etaRange = f"{etaLow} < #eta < {etaHigh}"
+            etaCenter = effHistRoot.GetXaxis().GetBinCenter(ieta)
+            eta_index = eff_boost.axes[0].index(etaCenter)
+            # print(f"eta_index = {eta_index}")
+            eff_boost_ptut = eff_boost[
+                {0: eta_index}
+            ]  # from 3D (eta-pt-ut) to 2D (pt-ut)
+            # print(f"eff_boost_ptut.shape = {eff_boost_ptut.shape}")
+            eff_boost_ptut = eff_boost_ptut.project(
+                1, 0
+            )  # project second axis (uT) as x and first axis (pT) as y
+            # logger.warning(eff_boost_ptut.axes)
+            # logger.warning("")
+            xvals = [
+                tf.constant(center, dtype=tf.float64)
+                for center in eff_boost_ptut.axes.centers
+            ]
+            utvals = np.reshape(xvals[0], [-1])
+            ptvals = np.reshape(xvals[1], [-1])
+            yvals = eff_boost_ptut.values()
+            yvals[np.isnan(yvals)] = (
+                0  # protection against bins where no events were selected (extreme ut for instance), set efficiency to 0 instead of 1
+            )
+            eff_boost_ptut.values()[...] = yvals
+            # plot with root
+            if len(args.eta):
+                heff = narf.hist_to_root(eff_boost_ptut)
+                heff.SetName(f"{effHistRoot.GetName()}_eta{ieta}")
+                heff.SetTitle(etaRange)
+                drawCorrelationPlot(
+                    heff,
+                    "Projected recoil u_{T} (GeV)",
+                    "Muon p_{T} (GeV)",
+                    f"W MC {step} efficiency::0.5,1",
+                    heff.GetName(),
+                    "ForceTitle",
+                    outdirEff,
+                    palette=87,
+                    passCanvas=canvas,
+                )
+            # the grid interpolator will be created up to the extreme bin centers, so need bounds_error=False to allow the extrapolation to extend outside until the bin edges
+            # and then we can set its extrapolation value to fill_value ('None' uses the extrapolation from the curve inside accpetance)
+            interp = RegularGridInterpolator(
+                (utvals, ptvals),
+                yvals,
+                method="cubic",
+                bounds_error=False,
+                fill_value=None,
+            )
+            xvalsFine = [
+                tf.constant(center, dtype=tf.float64)
+                for center in histEffi2D_ptut.axes.centers
+            ]
+            utvalsFine = np.reshape(xvalsFine[0], [-1])
+            ptvalsFine = np.reshape(xvalsFine[1], [-1])
+            points = list(itertools.product(*[utvalsFine, ptvalsFine]))
+            # print(f"Have to interpolate {len(points)} points ({len(utvalsFine)}*{len(ptvalsFine)} uT-pT fine bins)")
+            pts = np.array(points)
+            # print(pts)
+            smoothVals = interp(pts)
+            # print(smoothVals)
+            histEffi2D_ptut.values()[:] = np.reshape(
+                smoothVals, (axis_ut_eff.size, ptNbins)
+            )
+            histEffi3D.values()[eta_index, ...] = histEffi2D_ptut.values().T
+            # set errors to 0 explicitly, although they should already be 0, we don't use them
+            histEffi3D.variances()[...] = np.zeros_like(histEffi3D.variances())
+            if len(args.eta):
+                heffSmooth = narf.hist_to_root(histEffi2D_ptut)
+                heffSmooth.SetName(f"{effHistRoot.GetName()}_eta{ieta}_smooth")
+                heffSmooth.SetTitle(etaRange)
+                drawCorrelationPlot(
+                    heffSmooth,
+                    "Projected recoil u_{T} (GeV)",
+                    "Muon p_{T} (GeV)",
+                    f"Smooth W MC {step} efficiency::0.5,1",
+                    heffSmooth.GetName(),
+                    "ForceTitle",
+                    outdirEff,
+                    palette=87,
+                    passCanvas=canvas,
+                )
+        logger.info("Done with efficiencies")
+
+    # set initial parameters, starting with constant at unit
+    arr = [1.0] + [0.0 for x in range((polnx + 1) * (polny + 1) - 1)]
+    ##
+    postfix = f"_{args.postfix}" if len(args.postfix) else ""
+
+    hpull1D_uTpT = ROOT.TH1D("hpull1D", "", 20, -5, 5)
+    hpullSummary_eta_mean = ROOT.TH1D(
+        f"hpullSummary_{step}_eta_mean",
+        f"Pull distribution mean {step}",
+        nEtaBins,
+        etaEdges[0],
+        etaEdges[-1],
+    )
+    hpullSummary_eta_sigma = ROOT.TH1D(
+        f"hpullSummary_{step}_eta_sigma",
+        f"Pull distribution width {step}",
+        nEtaBins,
+        etaEdges[0],
+        etaEdges[-1],
+    )
+
+    for ieta in etaBinsToRun:
+        # for ieta in range(1, 2):
+        hsf.GetYaxis().SetRange(ieta, ieta)
+        hsf.GetZaxis().SetRange(iptFitLow, iptFitHigh)
+        h = hsf.Project3D("zxe")
+        h.SetName(f"{hsf.GetName()}_eta{ieta}")
+        etaLow = round(hsf.GetYaxis().GetBinLowEdge(ieta), 1)
+        etaCenter = hsf.GetYaxis().GetBinCenter(ieta)
+        etaHigh = round(hsf.GetYaxis().GetBinLowEdge(ieta + 1), 1)
+        etaRange = f"{etaLow} < #eta < {etaHigh}"
+        eta_index = axis_eta.index(etaCenter)
+        logger.warning(f"Going to fit eta bin {ieta}, {etaRange}")
+        h.SetTitle(etaRange)
+        hpull = copy.deepcopy(h.Clone(f"{h.GetName()}_pull2Dfit"))
+        hpull.Reset("ICESM")
+        hpull1D_uTpT.Reset("ICESM")
+        drawCorrelationPlot(
+            h,
+            "Projected recoil u_{T} (GeV)",
+            "Muon p_{T} (GeV)",
+            f"{step} scale factor",
+            h.GetName(),
+            "ForceTitle",
+            outdirNew,
+            palette=87,
+            passCanvas=canvas,
+        )
+
+        boost_hist = narf.root_to_hist(h)
+        params = np.array(arr)
+        res_polN_2d = wums.fitutils.fit_hist(boost_hist, polN_2d_scaled, params)
+        status = res_polN_2d["status"]
+        covstatus = res_polN_2d["covstatus"]
+        postfit_params = res_polN_2d["x"]
+        npar = len(postfit_params)
+        fitChi2 = round(res_polN_2d["loss_val"], 1)
+        ndof = h.GetNbinsX() * h.GetNbinsY() - npar
+        logger.info(f"postfit_params = {postfit_params}")
+        logger.info(f"status/covstatus = {status}/{covstatus}")
+        if status != 0 or covstatus != 0:
+            logger.error("BAD FIT!!!")
+            quit()
+
+        # get chi2
+        chi2text = f"#chi^{{2}} = {fitChi2} / {ndof}"
+        chi2prob = ROOT.TMath.Prob(fitChi2, ndof)
+        if chi2prob < 0.05:
+            perc_chi2prob = 100.0 * chi2prob
+            sign = "="
+            if perc_chi2prob < 0.1:
+                perc_chi2prob = 0.1
+                sign = "<"
+            chi2text += " (prob {} {}%)".format(sign, round(perc_chi2prob, 1))
+
+        # do it with boost histograms
+        for ix in range(1, 1 + h.GetNbinsX()):
+            bincx = h.GetXaxis().GetBinCenter(ix)
+            for iy in range(1, 1 + h.GetNbinsY()):
+                bincy = h.GetYaxis().GetBinCenter(iy)
+                fitval = polN_2d_scaled([bincx, bincy], postfit_params)
+                pull = (fitval - h.GetBinContent(ix, iy)) / h.GetBinError(ix, iy)
+                hpull.SetBinContent(ix, iy, pull)
+                hpull_utEtaPt.SetBinContent(ix, ieta, iy, pull)
+                hpull1D_uTpT.Fill(pull)
+
+        #
+        if args.debugPlots:
+            drawTH1(
+                hpull1D_uTpT,
+                "Pulls in u_{T}-p_{T} plane",
+                "Number of events",
+                f"hpull_utpt_ieta{ieta}_1D",
+                outdir_debug,
+                passCanvas=canvas,
+                fitString="gaus;LEMSQ+;;-5;5",
+                plotTitleLatex=etaRange,
+            )
+
+        hpullSummary_eta_mean.SetBinContent(ieta, hpull1D_uTpT.GetMean())
+        hpullSummary_eta_mean.SetBinError(ieta, hpull1D_uTpT.GetMeanError())
+        hpullSummary_eta_sigma.SetBinContent(ieta, hpull1D_uTpT.GetStdDev())
+        hpullSummary_eta_sigma.SetBinError(ieta, hpull1D_uTpT.GetStdDevError())
+
+        drawCorrelationPlot(
+            hpull,
+            "Projected recoil u_{T} (GeV)",
+            "Muon p_{T} (GeV)",
+            "Pull: (fit - meas)/meas_unc::-5,5",
+            hpull.GetName(),
+            "ForceTitle",
+            outdirNew,
+            palette=87,
+            nContours=20,
+            passCanvas=canvas,
+        )
+
+        hfit_alt = []
+        # diagonalize and get eigenvalues and eigenvectors
+        logger.info("Diagonalizing covariance matrix ...")
+        e, v = np.linalg.eigh(res_polN_2d["cov"])
+        postfit_params_alt = np.array(
+            [np.zeros(npar, dtype=np.float64)] * (npar * 2), dtype=np.float64
+        )
+        for ivar in range(npar):
+            shift = np.sqrt(e[ivar]) * v[:, ivar]
+            postfit_params_alt[ivar] = postfit_params + shift
+            postfit_params_alt[ivar + npar] = postfit_params - shift
+
+        logger.info(f"Creating smooth histogram ...")
+        boost_hist_smooth = hist.Hist(
+            axis_ut,
+            axis_pt,
+            name=f"htmp_fit2D_ieta{ieta}",
+            storage=hist.storage.Weight(),
+        )
+
+        xvals = [
+            tf.constant(center, dtype=tf.float64)
+            for center in boost_hist_smooth.axes.centers
+        ]
+        boost_hist_smooth.values()[...] = polN_2d_scaled(xvals, postfit_params)
+        # copy into final histograms with 3D smoothed SF
+        # first swap pt and ut axes from uT-pT to pT-uT by projecting onto itself with reshuffled axes
+        # axes = [axis_pt.name, axis_ut.name]
+        # hswap = boost_hist_smooth.project(*axes)
+        histSF3D_withStatVars.values()[
+            eta_index, :, :, 0
+        ] = boost_hist_smooth.values().T  # hswap.values()[:,:]
+        # convert to root for plotting
+        hfit = narf.hist_to_root(boost_hist_smooth)
+        hfit.SetName(f"smoothSF2D_{step}_ieta{ieta}{postfix}")
+        hfit.SetTitle(f"{etaRange}   {chi2text}")
+        drawCorrelationPlot(
+            hfit,
+            "Projected recoil u_{T} (GeV)",
+            "Muon p_{T} (GeV)",
+            f"Smooth {step} scale factor",
+            hfit.GetName(),
+            "ForceTitle",
+            outdirNew,
+            palette=87,
+            passCanvas=canvas,
+        )
+
+        for ivar in range(npar):
+            boost_hist_smooth.values()[...] = polN_2d_scaled(
+                xvals, postfit_params_alt[ivar]
+            )
+            histSF3D_withStatVars.values()[
+                eta_index, :, :, ivar + 1
+            ] = boost_hist_smooth.values().T
+            hfit_alt.append(narf.hist_to_root(boost_hist_smooth))
+            hfit_alt[ivar].SetName(f"smoothSF2D_{step}_ieta{ieta}_eigen{ivar}{postfix}")
+            hfit_alt[ivar].SetTitle(f"{etaRange}: eigen {ivar}")
+
+        if args.plotEigenVar:
+            outdir_eigen = outdirNew + f"eigenDecomposition/eta_{ieta}/"
+            createPlotDirAndCopyPhp(outdir_eigen)
+            for ivar in range(npar):
+                hratio = copy.deepcopy(
+                    hfit_alt[ivar].Clone(f"ratioSF_{hfit_alt[ivar].GetName()}")
+                )
+                hratio.Divide(hfit)
+                drawCorrelationPlot(
+                    hratio,
+                    "Projected recoil u_{T} (GeV)",
+                    "Muon p_{T} (GeV)",
+                    f"Alternate / nominal {step} SF ratio",
+                    hratio.GetName(),
+                    "ForceTitle",
+                    outdir_eigen,
+                    palette=87,
+                    passCanvas=canvas,
+                )
+
+        logger.info("-" * 30)
+
+    if not len(args.eta):
+        outdir_pull = outdirNew + "/pulls_etapt_utBins/"
+        createPlotDirAndCopyPhp(outdir_pull)
+        for iut in range(1, 1 + hpull_utEtaPt.GetNbinsX()):
+            hpull_utEtaPt.GetXaxis().SetRange(iut, iut)
+            hpulletapt = hpull_utEtaPt.Project3D("zye")
+            hpulletapt.SetName(f"hpull_etapt_ut{iut}")
+            utBinLow = hpull_utEtaPt.GetXaxis().GetBinLowEdge(iut)
+            utBinHigh = hpull_utEtaPt.GetXaxis().GetBinLowEdge(iut + 1)
+            hpulletapt.SetTitle(f"{utBinLow} < u_{{T}} < {utBinHigh}")
+            drawCorrelationPlot(
+                hpulletapt,
+                "Muon #eta",
+                "Muon p_{T} (GeV)",
+                "Pull: (fit - meas)/meas_unc::-5,5",
+                hpulletapt.GetName(),
+                "ForceTitle",
+                outdir_pull,
+                palette=87,
+                nContours=20,
+                passCanvas=canvas,
+            )
+        drawSingleTH1(
+            hpullSummary_eta_mean,
+            "Muon #eta",
+            "Mean of pulls in u_{T}-p_{T} plane::-1, 1",
+            hpullSummary_eta_mean.GetName(),
+            outdir_pull,
+            legendCoords=None,
+            lowerPanelHeight=0.0,
+            drawLineTopPanel=0.0,
+            passCanvas=canvas,
+            skipLumi=True,
+        )
+        drawSingleTH1(
+            hpullSummary_eta_sigma,
+            "Muon #eta",
+            "Width of pulls in u_{T}-p_{T} plane::0, 2",
+            hpullSummary_eta_sigma.GetName(),
+            outdir_pull,
+            legendCoords=None,
+            lowerPanelHeight=0.0,
+            drawLineTopPanel=1.0,
+            passCanvas=canvas,
+            skipLumi=True,
+        )
+
+    if effHist is not None and step in ["iso", "triggerplus", "triggerminus"]:
+        # compute antiiso_SF = (1-SF*effMC)/ (1-effMC)
+        # first make uT axis consistent
+        s = bh.tag.Slicer()
+        histEffi3D_asSF = histEffi3D[
+            {
+                "ut": s[
+                    complex(0, axis_ut.edges[0]) : complex(0, 0.001 + axis_ut.edges[-1])
+                ]
+            }
+        ]
+        # logger.warning(f"{axis_ut.edges[-1]}    {histEffi3D_asSF.axes[2]}")
+        # logger.warning("Resizing ut axis for efficiency to match SF histogram")
+        # logger.warning(f"{histEffi3D_asSF.axes}")
+        # remember that histSF3D_withStatVars has 4 axes, 4th is the stat variation
+        antiSF = makeAntiSFfromSFandEffi(histSF3D_withStatVars, histEffi3D_asSF, step)
+        return [histSF3D_withStatVars, histEffi3D_asSF, antiSF]
+    else:
+        return [histSF3D_withStatVars, None, None]
+
+
+if __name__ == "__main__":
+
+    # efficiencies made with scripts/analysisTools/w_mass_13TeV/makeWMCefficiency3D.py
+    #
+    # sfFolder = data_dir + "/muonSF/"
+
+    default_inputRootFiles = {}
+    default_inputRootFiles["2016PostVFP"] = {
+        "iso": data_dir
+        + "/muonSF/intermediate_vtxAgnosticIso/iso3DSFVQTsingularity.root",
+        "isonotrig": data_dir
+        + "/muonSF/intermediate_vtxAgnosticIso/isonotrig3DSFVQTsingularity.root",
+        "isoantitrig": data_dir
+        + "/muonSF/intermediate_vtxAgnosticIso/isofailtrig3DSFVQTsingularity.root",
+        "triggerplus": data_dir + "/muonSF/triggerplus3DSFVQTextended.root",
+        "triggerminus": data_dir + "/muonSF/triggerminus3DSFVQTextended.root",
+    }
+
+    for yr in ["2017", "2018"]:
+        default_inputRootFiles[yr] = {
+            "iso": data_dir + f"/muonSF/{yr}/3dSF/3dsfisolation.root",
+            "isonotrig": data_dir + f"/muonSF/{yr}/3dSF/3dsfisonotrig.root",
+            "triggerplus": data_dir + f"/muonSF/{yr}/3dSF/3dsftriggerplus.root",
+            "triggerminus": data_dir + f"/muonSF/{yr}/3dSF//3dsftriggerminus.root",
+        }
+
+    histNames_newEras = {
+        "iso": "Isolation",
+        "isonotrig": "IsolationNoTrigger",
+        "isoantitrig": "IsolationAntiTrigger",
+        "triggerplus": "TriggerPlus",
+        "triggerminus": "TriggerMinus",
+    }
+
+    parser = common_plot_parser()
+    parser.add_argument(
+        "-i",
+        "--indir",
+        default=None,
+        help="Input directory where the 3d efficiencies measured on data are stored",
+    )
+    parser.add_argument(
+        "outdir", type=str, nargs=1, help="output directory to save things"
+    )
+    parser.add_argument(
+        "--era",
+        type=str,
+        default="2016PostVFP",
+        choices=["2016PostVFP", "2017", "2018"],
+    )
+    parser.add_argument(
+        "--eff_filename",
+        type=str,
+        default=None,
+        help="File containing the 3D W MC efficiencies. Extension must be pkl.lz4, which is automatically added if no extension is given",
+    )
+    parser.add_argument(
+        "-n",
+        "--outfilename",
+        type=str,
+        default="smoothSF3D.pkl.lz4",
+        help="Output file name, extension must be pkl.lz4, which is automatically added if no extension is given",
+    )
+    parser.add_argument(
+        "--eta",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Select some eta bins (ID goes from 1 to Neta",
+    )
+    parser.add_argument(
+        "--polDegree",
+        type=int,
+        nargs=2,
+        default=[2, 3],
+        help="Select degree of polynomial for 2D smoothing (uT-pT)",
+    )
+    parser.add_argument(
+        "--plotEigenVar",
+        action="store_true",
+        help="Plot eigen variations (it actually produces histogram ratios alt/nomi)",
+    )
+    parser.add_argument(
+        "-p",
+        "--postfix",
+        type=str,
+        default="",
+        help="Postfix for plot names (can be the step name)",
+    )
+    parser.add_argument(
+        "-s",
+        "--steps",
+        type=str,
+        nargs="*",
+        default=[],
+        choices=list(default_inputRootFiles["2016PostVFP"].keys()),
+        help="Do only these steps (default uses all)",
+    )
+    parser.add_argument(
+        "--utHigh",
+        type=float,
+        default=None,
+        help="Choose maximum uT at which the fit must be run (default uses full range except very last bin which is up to infinity)",
+    )
+    parser.add_argument(
+        "--ptFitRange",
+        type=float,
+        nargs=2,
+        default=[-1, -1],
+        help="Choose pt range for the fit (fit result will be extrapolated to the nominal histogram range for consistency). Specify min and max value, if an edge is -1 (default) the corresponding histogram boundary is used",
+    )
+    parser.add_argument(
+        "--debugPlots",
+        action="store_true",
+        help="Run additional plots for debugging (might become default eventually)",
+    )
+    parser.add_argument(
+        "--isolationDefinition",
+        choices=["iso04vtxAgn", "iso04"],
+        default="iso04vtxAgn",
+        help="Isolation type (and corresponding scale factors)",
+    )
+    args = parser.parse_args()
+
+    sfFolder = (
+        data_dir + "/muonSF/"
+        if args.era == "2016PostVFP"
+        else data_dir + "/muonSF/{args.era}/"
+    )
+
+    if args.eff_filename is not None:
+        effSmoothFile = sfFolder + args.eff_filename
+    else:
+        if args.era != "2016PostVFP" and args.isolationDefinition != "iso04vtxAgn":
+            logger.error(
+                "Only 'iso04vtxAgn' is available for eras which are not 2016PostVFP"
+            )
+            quit()
+        elif args.era == "2016PostVFP":
+            if args.isolationDefinition == "iso04vtxAgn":
+                effSmoothFile = (
+                    sfFolder
+                    + "intermediate_vtxAgnosticIso/efficiencies3D_rebinUt2_vtxAgnPfRelIso04.pkl.lz4"
+                )
+            else:
+                effSmoothFile = sfFolder + "effiencies3D_rebinUt2.pkl.lz4"
+        else:
+            effSmoothFile = sfFolder + "efficiencies3D.pkl.lz4"
+
+    if args.indir is None:
+        inputRootFile = {
+            k: v for k, v in default_inputRootFiles[args.era].items() if k in args.steps
+        }
+    else:
+        inputRootFile = {}
+        for eff in args.steps:
+            eff_tag = eff if eff != "iso" else "isolation"
+            inputRootFile[eff] = args.indir + f"3dsf{eff_tag}.root"
+
+    ROOT.TH1.SetDefaultSumw2()
+
+    if not args.outfilename.endswith(".pkl.lz4"):
+        if "." in args.outfilename:
+            logger.error(
+                f"Invalid extension for output file name {args.outfilename}. It must be 'pkl.lz4'"
+            )
+            quit()
+        else:
+            logger.info(
+                f"Adding pkl.lz4 extension for output file name {args.outfilename}"
+            )
+            args.outfilename += ".pkl.lz4"
+
+    with lz4.frame.open(effSmoothFile) as fileEff:
+        allMCeff = pickle.load(fileEff)
+
+    effHist = {}
+    for step in ["iso", "triggerplus", "triggerminus"]:
+        effHist[step] = allMCeff[f"Wmunu_MC_eff_{step}_etaptut"]
+
+    work = []
+    steps_noEffHist = ["isonotrig", "isoantitrig"]
+
+    for st in args.steps:
+        histname = f"SF3D_nominal_{st}".replace("antitrig", "failtrig")
+        histname = histname.replace("plus", "_plus").replace("minus", "_minus")
+        work.append(
+            [
+                inputRootFile[st],
+                histname if args.era == "2016PostVFP" else histNames_newEras[st],
+                st,
+                effHist[st] if st not in steps_noEffHist else None,
+            ]
+        )
+
+    outdir_original = args.outdir[0]
+    outdir = createPlotDirAndCopyPhp(outdir_original, eoscp=args.eoscp)
+
+    resultDict = {}
+    for w in work:
+        inputfile, histname, step, eff = w
+        if len(args.steps) and step not in args.steps:
+            continue
+        rets = runSmoothing(
+            inputfile, histname, outdir, step, args, effHist=eff, era=args.era
+        )
+        for ret in rets:
+            if ret is not None:
+                resultDict[ret.name] = ret
+
+    resultDict.update(
+        {
+            "meta_info": wums.output_tools.make_meta_info_dict(
+                args=args, wd=common.base_dir
+            )
+        }
+    )
+
+    outfile = outdir + args.outfilename
+    logger.info(f"Going to store histograms in file {outfile}")
+    logger.info(f"All keys: {resultDict.keys()}")
+    time0 = time.time()
+    with lz4.frame.open(outfile, "wb") as f:
+        pickle.dump(resultDict, f, protocol=pickle.HIGHEST_PROTOCOL)
+    logger.info(f"Output saved: {time.time()-time0}")
+    copyOutputToEos(outdir, outdir_original, eoscp=args.eoscp)
