@@ -1,3 +1,242 @@
+hayden notes
+
+Plot with variation? Can do with respect to ptll and yll, may need to zoom, go through plotting script
+
+
+
+cd /work/submit/hayden17
+
+APPTAINER_BIND="/tmp,/home/submit,/work/submit,/ceph/submit,/scratch/submit,/cvmfs,/etc/grid-security,/run" \
+singularity run /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling:latest
+
+source WRemnants/setup.sh
+
+Singularity> cd /work/submit/hayden17/WRemnants
+
+Singularity> python scripts/histmakers/histmaker_test.py --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ --era 2017G
+
+
+IN=histmaker_test_scetlib_dyturboCorr.hdf5
+OUT=~/public_html/
+TAG=zmumu_test2
+PROCS="Data Zmumu"
+
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG -n nominal_prefiring \
+  --hists ptll \
+  --procFilters Data Zmumu --flow none \
+  variation --varName nominal_prefiring \
+  --selectAxis tensor_axis_0 --selectEntries 0 1
+
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG -n nominal_prefiring \
+  --hists ptll-absYll \
+  --procFilters Data Zmumu --flow none \
+  variation --varName nominal_prefiring \
+  --selectAxis tensor_axis_0 --selectEntries 0 1
+
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG -n nominal_prefiring \
+  --hists absYll \
+  --procFilters Data Zmumu --flow none \
+  variation --varName nominal_prefiring \
+  --selectAxis tensor_axis_0 --selectEntries 0 1
+
+for q in 0 1 2 3 4 5 6 7; do
+  python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG \
+    --procFilters $PROCS \
+    --baseName ptll_vs_absYll_csQ${q} \
+    --hists ptll-absYll \
+    --postfix Q${q}
+done
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName nLepton --hists nLepton
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName mll --hists mll
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName ptll --hists ptll
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName yll --hists yll
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName phill --hists phill
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName cosThetaStarll --hists cosThetaStarll
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName phiStarll --hists phiStarll
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName ptll_vs_yll --hists ptll-yll
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName muleadpt --hists mu_pt --postfix leading
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName mutrailpt --hists mu_pt --postfix trailing
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName muleadeta --hists mu_eta --postfix leading
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName mutraileta --hists mu_eta --postfix trailing
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName mupospt --hists mu_pt --postfix positive
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName munegpt --hists mu_pt --postfix negative
+
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName muposeta --hists mu_eta --postfix positive
+python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName munegeta --hists mu_eta --postfix negative
+
+https://submit.mit.edu/~hayden17/zmumu_test2/
+
+Imports / setup
+* import os Used for file/path utilities (here: getting the script name, building output filename).
+* import ROOT Makes ROOT available; later you use ROOT C++ helpers in strings passed to RDataFrame (ROOT::VecOps::Nonzero, ROOT::Math::PtEtaPhiMVector).
+* from utilities import parsing Your project’s helper that builds a standard CLI argument parser.
+* from wremnants.datasets.datagroups import Datagroups Provides dataset grouping utilities and the analysisLabel helper.
+* from wums import logging Your project’s logging utility.
+
+Analysis label + argument parsing
+* analysis_label = Datagroups.analysisLabel(os.path.basename(__file__)) Takes the current filename (like myanalysis.py) and converts it to an “analysis label” string used to pick dataset configs / modes.
+* parser, initargs = parsing.common_parser(analysis_label) Creates an argparse parser with standard options (era, dataPath, maxFiles, filters, verbosity, etc.). initargs is whatever extra metadata this helper returns.
+* args = parser.parse_args() Reads command-line arguments into args.
+* logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger) Sets up a logger using the script name and CLI verbosity/color options.
+
+More imports used for hist + running
+* import hist The hist package: axes + histogram objects.
+* import narf Framework to build and run the RDF computation graph over datasets.
+* from wremnants.datasets.dataset_tools import getDatasets Loads dataset definitions (files, metadata, data-vs-MC, etc.) based on CLI args.
+* from wremnants.histmaker_tools import write_analysis_output Writes the produced histograms / sums into an output file (HDF5 here).
+
+Load datasets
+
+datasets = getDatasets(
+    maxFiles=args.maxFiles,
+    filt=args.filterProcs,
+    excl=args.excludeProcs,
+    base_path=args.dataPath,
+    mode=analysis_label,
+    era=args.era,
+)
+* Calls getDatasets(...) to construct the list of dataset objects to run over.
+* maxFiles: cap files per dataset (useful for quick tests).
+* filt / excl: include/exclude process patterns.
+* base_path: where the data files live.
+* mode: selects a dataset “mode” (here based on your script name).
+* era: selects dataset era/year.
+
+Define histogram axes
+* axis_nLepton = hist.axis.Integer(0, 5, name="nLepton", underflow=False) Integer axis with bins for 0,1,2,3,4 (no underflow bin). Used to histogram total lepton count.
+* axis_mll = hist.axis.Regular(60, 76, 106, name="mll") 60 uniform bins from 76 to 106 for dimuon invariant mass.
+* axis_ptll = hist.axis.Regular(60, 0, 120, name="ptll") 60 uniform bins from 0 to 120 for dimuon pT.
+* axis_yll = hist.axis.Regular(48, -2.4, 2.4, name="yll") 48 uniform bins from -2.4 to 2.4 for dimuon rapidity.
+* axis_mu_pt = hist.axis.Regular(60, 25, 150, name="mu_pt") 60 bins from 25 to 150 for single-muon pT.
+* axis_mu_eta = hist.axis.Regular(48, -2.4, 2.4, name="mu_eta") 48 bins from -2.4 to 2.4 for single-muon eta.
+
+The per-dataset computation graph
+Function header
+* def build_graph(df, dataset): This is called once per dataset. df is an RDataFrame-like object you add Define/Filter/HistoBoost nodes to. dataset holds metadata (name, is_data, etc.).
+* logger.info(f"build graph for dataset: {dataset.name}") Logs which dataset you’re building the graph for.
+* results = [] A list to collect histogram handles to return.
+
+Event weights
+
+if dataset.is_data:
+    df = df.DefinePerSample("weight", "1.0")
+else:
+    df = df.Define("weight", "std::copysign(1.0, genWeight)")
+* For data: define a per-sample constant weight of 1.
+* For MC: define weight as the sign of genWeight (+1 or -1). This keeps negative-weight events (common in NLO MC) but ignores magnitude and ignores other corrections.
+
+Sum of weights (bookkeeping)
+* weightsum = df.SumAndCount("weight") Creates an action that will compute:
+    * sum of weight
+    * number of events contributing Useful for normalization / sanity checks.
+
+Trigger selection
+* df = df.Filter("HLT_HIMu17") Keeps only events that pass that trigger bit.
+
+Simple lepton count
+* df = df.Define("nLepton", "nElectron + nMuon") Adds a new column: total number of reconstructed electrons + muons in the event (as stored in the nano-like format).
+
+Z→μμ candidate selection (all new physics logic)
+“Good muon” mask
+
+df = df.Define(
+    "goodMu",
+    "Muon_pt > 25 && abs(Muon_eta) < 2.4 && Muon_tightId && Muon_pfRelIso04_all < 0.15"
+)
+* Creates a boolean vector goodMu with one entry per muon in the event.
+* A muon is “good” if:
+    * Muon_pt > 25
+    * |Muon_eta| < 2.4
+    * Muon_tightId is true
+    * relative isolation < 0.15
+Indices of good muons
+* df = df.Define("goodMu_idx", "ROOT::VecOps::Nonzero(goodMu)") Converts that boolean mask into a vector of indices where it’s true (e.g. [0, 2]).
+Exactly two good muons
+* df = df.Filter("goodMu_idx.size() == 2", "Exactly two good muons") Event-level requirement: there must be exactly two passing muons.
+
+Opposite-sign requirement
+* df = df.Define("i0", "int(goodMu_idx[0])").Define("i1", "int(goodMu_idx[1])") Pulls the two indices out into scalars i0 and i1 so you can index arrays like Muon_pt[i0].
+* df = df.Filter("Muon_charge[i0] * Muon_charge[i1] < 0", "Opposite-sign muons") Requires charges to multiply to negative → one + and one −.
+
+Build dimuon 4-vector and kinematics
+* MU_MASS = 0.105658 Muon mass in GeV used for 4-vector construction.
+
+df = df.Define("mu0_p4", f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i0], Muon_eta[i0], Muon_phi[i0], {MU_MASS})") \
+    .Define("mu1_p4", f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i1], Muon_eta[i1], Muon_phi[i1], {MU_MASS})") \
+    .Define("dimu_p4", "mu0_p4 + mu1_p4") \
+    .Define("mll", "dimu_p4.M()") \
+    .Define("ptll", "dimu_p4.Pt()") \
+    .Define("yll", "dimu_p4.Rapidity()")
+* mu0_p4, mu1_p4: build ROOT 4-vectors from each muon’s (pT, eta, phi, mass).
+* dimu_p4: vector sum → the Z candidate 4-vector.
+* mll: invariant mass of the pair.
+* ptll: transverse momentum of the pair.
+* yll: rapidity of the pair.
+Z mass window
+* df = df.Filter("mll > 76 && mll < 106", "Z mass window") Keeps only events with dimuon mass consistent with a Z candidate.
+
+Histogramming
+Z/dimuon histograms + nLepton
+
+hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton"])
+hist_mll  = df.HistoBoost("mll",  [axis_mll],  ["mll"])
+hist_ptll = df.HistoBoost("ptll", [axis_ptll], ["ptll"])
+hist_yll  = df.HistoBoost("yll",  [axis_yll],  ["yll"])
+* Each HistoBoost(name, [axis], [column]) creates a histogram action:
+    * It will fill that histogram using the column values from the currently filtered dataframe.
+* Note: in many RDF setups, the weight column is automatically applied by HistoBoost; in others you’d need to pass it explicitly. In your setup it’s presumably handled by the framework.
+Single-muon scalars and histograms
+
+df = df.Define("mu0_pt", "Muon_pt[i0]").Define("mu1_pt", "Muon_pt[i1]") \
+    .Define("mu0_eta", "Muon_eta[i0]").Define("mu1_eta", "Muon_eta[i1]")
+* Extracts the two muons’ pT and eta into scalar columns so histogramming is straightforward.
+
+hist_mu0_pt  = df.HistoBoost("mu0_pt",  [axis_mu_pt],  ["mu0_pt"])
+hist_mu1_pt  = df.HistoBoost("mu1_pt",  [axis_mu_pt],  ["mu1_pt"])
+hist_mu0_eta = df.HistoBoost("mu0_eta", [axis_mu_eta], ["mu0_eta"])
+hist_mu1_eta = df.HistoBoost("mu1_eta", [axis_mu_eta], ["mu1_eta"])
+* Fills separate histograms for muon 0 and muon 1 (as ordered in goodMu_idx).
+Collect results + return
+* results += [hist_mll, hist_ptll, hist_yll, hist_mu0_pt, hist_mu1_pt, hist_mu0_eta, hist_mu1_eta, hist_nLepton] Adds all histogram handles to the list to return.
+* return results, weightsum Returns:
+    * the histograms to be executed
+    * the weight sum/count action
+
+Run graph over all datasets
+* resultdict = narf.build_and_run(datasets, build_graph) For each dataset:
+    * constructs the RDF graph via build_graph
+    * executes it
+    * stores outputs (histograms + weightsum) in resultdict keyed by dataset/process.
+
+Write output
+* fout = f"{os.path.basename(__file__).replace('py', 'hdf5')}" Output filename = your script name but .hdf5 extension.
+* write_analysis_output(resultdict, fout, args) Writes the results (hists + metadata) to that HDF5 file, using CLI args for bookkeeping.
+
+If you want the one most important high-level summary: this script selects triggered events with exactly two tight isolated muons of opposite charge in the Z mass window, then saves histograms of the Z candidate and the two muons.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # WRemnants
 
 WRemnants is the analysis framework for the CMS electroweak precision measurements such as the W boson mass, Z boson mass, strong coupling constraint, cross section measurements, and related studies on generator level, experimental calibrations, and future projections. It handles the full analysis chain from processing collision events (NanoAOD) into histograms, through systematic uncertainty estimation, to fit input preparation. The statistical inference is performed by the companion [rabbit](https://github.com/WMass/rabbit) framework.
