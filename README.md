@@ -1,6 +1,8 @@
-hayden notes
+# Hayden notes
 
 other data, other variations
+
+## Setup
 
 cd /work/submit/hayden17
 
@@ -13,11 +15,12 @@ Singularity> cd /work/submit/hayden17/WRemnants
 
 Singularity> python scripts/histmakers/histmaker_test.py --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ --era 2017G
 
+## Making Plots
 
 IN=histmaker_test_scetlib_dyturboCorr.hdf5
 OUT=~/public_html/
 TAG=zmumu_test{date}
-PROCS="Data Zmumu" Wmunu and Ztautau
+PROCS="Data Zmumu" - or Wmunu/Ztautau
 
 python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
@@ -123,7 +126,7 @@ https://submit.mit.edu/~hayden17/zmumu_test{date}/
 
 
 
-
+# Description of Histmaker Template
 
 Imports / setup
 * import os Used for file/path utilities (here: getting the script name, building output filename).
@@ -509,7 +512,7 @@ If you want the one most important high-level summary: this script selects trigg
 
 
 
-# WRemnants
+# WRemnants (Old README)
 
 WRemnants is the analysis framework for the CMS electroweak precision measurements such as the W boson mass, Z boson mass, strong coupling constraint, cross section measurements, and related studies on generator level, experimental calibrations, and future projections. It handles the full analysis chain from processing collision events (NanoAOD) into histograms, through systematic uncertainty estimation, to fit input preparation. The statistical inference is performed by the companion [rabbit](https://github.com/WMass/rabbit) framework.
 
