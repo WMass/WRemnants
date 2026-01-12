@@ -22,25 +22,22 @@ TAG=zmumu_test2
 PROCS="Data Zmumu"
 
 python scripts/plotting/makeDataMCStackPlot.py $IN \
-  -o $OUT -f $TAG -n nominal_prefiring \
+  -o $OUT -f $TAG \
+  -n nominal_prefiring \
   --hists ptll \
-  --procFilters Data Zmumu --flow none \
-  variation --varName nominal_prefiring \
-  --selectAxis tensor_axis_0 --selectEntries 0 1
-
-python scripts/plotting/makeDataMCStackPlot.py $IN \
-  -o $OUT -f $TAG -n nominal_prefiring \
-  --hists ptll-absYll \
-  --procFilters Data Zmumu --flow none \
-  variation --varName nominal_prefiring \
-  --selectAxis tensor_axis_0 --selectEntries 0 1
-
-python scripts/plotting/makeDataMCStackPlot.py $IN \
-  -o $OUT -f $TAG -n nominal_prefiring \
+  --rrange 0.995 1.005 \
+  --procFilters Zmumu --noData --flow none \
+  variation --varName nominal_prefiring --varLabel "up" "down"\
+  --selectAxis prefire_variation --selectEntries 0 1
+  
+  python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG \
+  -n nominal_prefiring \
   --hists absYll \
-  --procFilters Data Zmumu --flow none \
+  --rrange 0.995 1.005 \
+  --procFilters Zmumu --noData --flow none \
   variation --varName nominal_prefiring \
-  --selectAxis tensor_axis_0 --selectEntries 0 1
+  --selectAxis prefire_variation --selectEntries 0 1
 
 for q in 0 1 2 3 4 5 6 7; do
   python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG \
