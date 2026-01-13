@@ -4,6 +4,7 @@ import math
 from utilities import common, parsing
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.histmaker_tools import make_quantile_helper
+from wremnants import syst_tools, theory_corrections, theory_tools
 from wums import logging
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
@@ -27,6 +28,19 @@ datasets = getDatasets(
     mode=analysis_label,
     era=args.era,
 )
+
+theory_corrs = args.theoryCorr
+
+corr_helpers = theory_corrections.load_corr_helpers(
+    [d.name for d in datasets if d.name in common.zprocs], theory_corrs, base_dir=f"{common.data_dir}/TheoryCorrections/5TeV/"
+)
+
+procs = [
+    p
+    for p, grp in (("Z", common.zprocs),)
+    if any(d.name in grp for d in datasets)
+]
+theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=procs)
 
 quantile_file = "histmaker_test_scetlib_dyturboCorr.hdf5"
 
@@ -85,6 +99,10 @@ def build_graph(df, dataset):
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
     weightsum = df.SumAndCount("weight")
+
+    df = df.Define(
+        "isEvenEvent", f"event % 2 == 0"
+    )
 
 
     # filter events
@@ -164,7 +182,15 @@ def build_graph(df, dataset):
     if dataset.is_data:
         df = df.Define("nominal_weight", "1.0")
     else:
-        df = df.Define("nominal_weight", "weight*L1PreFiringWeight_Nom")
+        df = df.Define("exp_weight", "weight*L1PreFiringWeight_Nom")
+
+        theory_helpers = {}
+        if dataset.name in common.zprocs:
+            theory_helpers = theory_helpers_procs[dataset.name[0]]
+
+        df = theory_tools.define_theory_weights_and_corrs(
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+        )
 
     # ---- Fill histograms ----
     hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton", "nominal_weight"])
@@ -249,6 +275,19 @@ def build_graph(df, dataset):
             tensor_axes=[axis_prefire_tensor],
         )
         results.append(hist_mutraileta_prefire)
+
+        df = syst_tools.add_theory_hists(
+                        results,
+                        df,
+                        args,
+                        dataset.name,
+                        corr_helpers,
+                        theory_helpers,
+                        [axis_ptll, axis_absYll, axis_cosThetaStarll],
+                        ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
+                        base_name=f"nominal",
+                        for_wmass=False,
+                    )
 
     
     results += hist_ptll_absYll_byQ

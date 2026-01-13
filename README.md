@@ -1,6 +1,8 @@
 # Hayden notes
 
-other data, other variations
+start with alphas variations
+ptll
+add up and down
 
 ## Setup
 
@@ -19,15 +21,16 @@ Singularity> python scripts/histmakers/histmaker_test.py --dataPath /scratch/sub
 
 IN=histmaker_test_scetlib_dyturboCorr.hdf5
 OUT=~/public_html/
-TAG=zmumu_test{date}
-PROCS="Data Zmumu" - or Wmunu/Ztautau
-
+TAG=jan{date}
+PROCS="Data Zmumu" - or Ztautau/Other
+  
 python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
   -n nominal \
   --hists ptll \
   --rrange 0.995 1.005 \
-  --procFilters Zmumu --noData --flow none \
+  --postfix w \
+  --procFilters Other --noData --flow none \
   variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
   
@@ -36,17 +39,18 @@ python scripts/plotting/makeDataMCStackPlot.py $IN \
   -n nominal \
   --hists absYll \
   --rrange 0.995 1.005 \
-  --procFilters Zmumu --noData --flow none \
+  --postfix w \
+  --procFilters Other --noData --flow none \
   variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
-  
+
 python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
   -n muleadeta \
   --hists mu_eta \
   --rrange 0.995 1.005 \
-  --postfix leading \
-  --procFilters Zmumu --noData --flow none \
+  --postfix wleading \
+  --procFilters Other --noData --flow none \
   variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
   
@@ -55,8 +59,8 @@ python scripts/plotting/makeDataMCStackPlot.py $IN \
   -n mutraileta \
   --hists mu_eta \
   --rrange 0.995 1.005 \
-  --postfix trailing \
-  --procFilters Zmumu --noData --flow none \
+  --postfix wtrailing \
+  --procFilters Other --noData --flow none \
   variation --varName prefiring --varLabel "up" "down"\
   --selectAxis prefire_variation --selectEntries 0 1
 
@@ -90,7 +94,7 @@ python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters
 python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName muposeta --hists mu_eta --postfix positive
 python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG --procFilters $PROCS --baseName munegeta --hists mu_eta --postfix negative
 
-https://submit.mit.edu/~hayden17/zmumu_test{date}/
+https://submit.mit.edu/~hayden17/jan{date}/
 
 
 
