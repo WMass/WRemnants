@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import os
 import pickle
 import sys
@@ -26,6 +25,12 @@ ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
 from scripts.analysisTools.plotUtils.utility import (
+    adjustSettings_CMS_lumi,
+    common_plot_parser,
+    copyOutputToEos,
+    createPlotDirAndCopyPhp,
+    drawNTH1,
+    getMinMaxMultiHisto,
     safeOpenFile,
 )
 
@@ -74,8 +79,7 @@ def convert_binEdges_idx(ed_list, binning):
     return (low, high)
 
 
-parser = argparse.ArgumentParser()
-
+parser = common_plot_parser()
 parser.add_argument(
     "-i",
     "--infile",
@@ -110,7 +114,9 @@ parser.add_argument(
     action="store_true",
     help="Make templates with QCD instead of nonprompt contribution",
 )
-
+parser.add_argument(
+    "--plotdir", type=str, default=None, help="Output directory for plots"
+)
 args = parser.parse_args()
 
 logger = logging.setup_logger(os.path.basename(__file__), 4)
@@ -131,30 +137,6 @@ groupsToConsider = (
     if not args.doQCD
     else ["QCD"]
 )
-
-eta_genBinning = array("d", [round(-2.4 + 0.1 * i, 1) for i in range(49)])
-charge_genBinning = array("d", [-2, 0, 2])
-
-delta_eta = (eta_genBinning[-1] - eta_genBinning[0]) / args.nEtaBins
-delta_ch = (charge_genBinning[-1] - charge_genBinning[0]) / args.nChargeBins
-
-decorrBins_eta = [
-    (
-        round((eta_genBinning[0] + i * delta_eta), 1),
-        round((eta_genBinning[0] + (i + 1) * delta_eta), 1),
-    )
-    for i in range(args.nEtaBins)
-]
-decorrBins_ch = [
-    (
-        round((charge_genBinning[0] + i * delta_ch), 1),
-        round((charge_genBinning[0] + (i + 1) * delta_ch), 1),
-    )
-    for i in range(args.nChargeBins)
-]
-
-logger.info(f"Decorrelating in the eta bins: {decorrBins_eta}")
-logger.info(f"Decorrelating in the charge bins: {decorrBins_ch}")
 
 groups = Datagroups(
     args.infile,
@@ -198,13 +180,45 @@ groups.loadHistsForDatagroups(
     "nominal", syst="", procsToRead=datasets, applySelection=True
 )
 
+hnomi = histInfo[datasets[0]].hists["nominal"]
+nPtBins = hnomi.axes["pt"].size
+ptEdges = hnomi.axes["pt"].edges
+nEtaBins = hnomi.axes["eta"].size
+etaEdges = hnomi.axes["eta"].edges
+nChargeBins = hnomi.axes["charge"].size
+chargeEdges = hnomi.axes["charge"].edges
+
+eta_genBinning = array("d", [round(x, 1) for x in etaEdges])
+charge_genBinning = array("d", chargeEdges)
+
+delta_eta = (eta_genBinning[-1] - eta_genBinning[0]) / args.nEtaBins
+delta_ch = (charge_genBinning[-1] - charge_genBinning[0]) / args.nChargeBins
+
+decorrBins_eta = [
+    (
+        round((eta_genBinning[0] + i * delta_eta), 1),
+        round((eta_genBinning[0] + (i + 1) * delta_eta), 1),
+    )
+    for i in range(args.nEtaBins)
+]
+decorrBins_ch = [
+    (
+        round((charge_genBinning[0] + i * delta_ch), 1),
+        round((charge_genBinning[0] + (i + 1) * delta_ch), 1),
+    )
+    for i in range(args.nChargeBins)
+]
+
+logger.info(f"Decorrelating in the eta bins: {decorrBins_eta}")
+logger.info(f"Decorrelating in the charge bins: {decorrBins_ch}")
+
 out_hist = ROOT.TH3D(
     f"fakeRatio_utAngleSign_{'Data' if not args.doQCD else 'QCD'}",
     "",
     len(eta_genBinning) - 1,
     eta_genBinning,
-    30,
-    array("d", [round(26.0 + 1.0 * i, 1) for i in range(31)]),
+    nPtBins,
+    array("d", [round(x, 1) for x in ptEdges]),
     len(charge_genBinning) - 1,
     charge_genBinning,
 )
@@ -275,7 +289,7 @@ for ch_edges in decorrBins_ch:
         for idx_ch in range(ch_low_idx + 1, ch_high_idx + 1):
             for idx_eta in range(eta_low_idx + 1, eta_high_idx + 1):
                 # logger.debug(f"Setting weights for chBin={idx_ch}, etaBin={idx_eta}")
-                for idx_pt in range(1, 31):
+                for idx_pt in range(1, 1 + nPtBins):
                     out_hist.SetBinContent(
                         idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt)
                     )
@@ -294,6 +308,63 @@ base_dir = common.base_dir
 resultDict.update(
     {"meta_info": wums.output_tools.make_meta_info_dict(args=args, wd=base_dir)}
 )
+
+if args.plotdir is not None:
+
+    plotdir_original = args.plotdir
+    plotdir = createPlotDirAndCopyPhp(plotdir_original, eoscp=args.eoscp)
+    hists_corr = []
+    legEntries = []
+    etaID = 0
+    # for 1D plots
+    canvas1D = ROOT.TCanvas("canvas1D", "", 800, 900)
+    adjustSettings_CMS_lumi()
+    integrateCharge = True
+    for ieta in [1, 24, 48]:
+        etamu = "#eta^{#mu}"
+        etaleg = f"{decorrBins_eta[etaID][0]} < {etamu} < {decorrBins_eta[etaID][1]}"
+        etaID += 1
+        for icharge in [1] if integrateCharge else [1, 2]:
+            hists_corr.append(
+                out_hist.ProjectionY(
+                    f"projPt_{ieta}_{icharge}", ieta, ieta, icharge, icharge
+                )
+            )
+            if integrateCharge:
+                chargeleg = ""
+                legEntries.append(f"{etaleg}")
+            else:
+                chargeleg = "#it{q}^{#mu} = " + ("-1" if icharge == 1 else "+1")
+                legEntries.append(f"{etaleg}, {chargeleg}")
+
+    miny, maxy = getMinMaxMultiHisto(hists_corr)
+    if miny < 0:
+        miny = 0
+    maxy = 1.4 * (maxy - miny)
+    drawNTH1(
+        hists_corr,
+        legEntries,
+        "#it{p}_{T}^{#mu}",
+        "Correction: #it{u}_{T}^{#mu} > 0 #rightarrow #it{u}_{T}^{#mu} < 0"
+        + f"::{miny},{maxy}",
+        "correction_uT_vs_pT_eta_charge",
+        plotdir,
+        lowerPanelHeight=0.4,
+        legendCoords=(
+            "0.4,0.98,0.74,0.92" if integrateCharge else "0.16,0.98,0.74,0.92;2"
+        ),
+        labelRatioTmp="Ratio to first::0.2,1.8",
+        topMargin=0.06,
+        rightMargin=0.02,
+        drawLumiLatex=True,
+        onlyLineColor=True,
+        useLineFirstHistogram=True,
+        drawErrorAll=True,
+        yAxisExtendConstant=1.0,
+    )
+
+    copyOutputToEos(plotdir, plotdir_original, eoscp=args.eoscp)
+
 
 outfileName = "fakeTransferTemplates"
 if args.postfix:

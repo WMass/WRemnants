@@ -375,6 +375,7 @@ def make_parser(parser=None):
             "lumi",
             "fakenorm",
             "effisyst",
+            "effisystTrigIso",
             "decornorm",
             "ptscale",
         ],
@@ -1524,7 +1525,7 @@ def setup(
                 suffix = "".join([a.capitalize() for a in args.massDiffWVar.split("-")])
                 combine_helpers.add_mass_diff_variations(
                     datagroups,
-                    args.massDiffWVa,
+                    args.massDiffWVar,
                     name=massWeightName,
                     processes=signal_samples_forMass,
                     constrain=constrainMass,
@@ -2153,9 +2154,6 @@ def setup(
                     )
                     hnom = fakeselector.get_hist(h, *args, **kwargs)
                     hvar = (1 + variation_size) * hnom
-                    ## applying the variations only on the utAngleSign<0 bin
-                    ## TODO: select axis by name and bin id by input argument
-                    # hvar.values()[..., -1] = hnom.values()[..., -1]
                     if keepConstantAxisBin:
                         ax_names = [n for n in hvar.axes.name]
                         for name in keepConstantAxisBin.keys():
@@ -2166,7 +2164,7 @@ def setup(
                             ax_index = ax_names.index(name)
                             idxs = [slice(None)] * hvar.ndim
                             idxs[ax_index] = keepConstantAxisBin[name]
-                    hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
+                        hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
 
                     hvar = syst_tools.decorrelateByAxes(hvar, hnom, axesToDecorrNames)
 
@@ -2230,84 +2228,81 @@ def setup(
                     mirror = True
                     groupName = "muon_eff_syst"
                     scale = args.effSystScale
+                    splitGroupDict = {
+                        f"{groupName}_{x}": f".*effSyst.*{x}"
+                        for x in list(effSystTypes)
+                    }
                     actionSF = None
                     effActionArgs = {}
-                    if (
-                        any(x in args.decorrSystByVar for x in ["effi", "effisyst"])
-                        and "utAngleSign" in fitvar
-                        and decorr_syst_var == "utAngleSign"
+                    if any(
+                        x in args.decorrSystByVar
+                        for x in ["effi", "effisyst", "effisystTrigIso"]
                     ):
-                        logger.warning(
-                            "'utAngleSign' is a fit axis, effSyst will be decorrelated by it"
-                        )
-                        logger.warning(
-                            "but only for trigger/isolation steps (others are kept correlated)"
-                        )
-                        logger.warning(
-                            "with an additional scaling of their magnitude by sqrt(2)"
-                        )
-                        # if "utAngleSign" in fitvar and decorr_syst_var == "utAngleSign":
-                        # then decorrelate only for trigger and iso
-                        # this is because the effSyst were derived inclusively in uT
-                        # but it was impossible to measure them in bins of uT,
-                        # so we dont't really know if they are flat vs uT or not.
-                        # This also includes an additional inflation by sqrt(2) for trigger/isolation
-                        #
-                        # reco-tracking-idip
-                        datagroups.addSystematic(
-                            name,
-                            mirror=mirror,
-                            groups=[groupName, *effCommonGroups],
-                            splitGroup={
-                                f"{groupName}_{x}": f".*effSyst.*{x}"
-                                for x in list(effTypesNoUt)
-                            },
-                            systAxes=axes,
-                            labelsByAxis=axlabels,
-                            baseName=name + "_",
-                            processes=["MCnoQCD"],
-                            passToFakes=passSystToFakes,
-                            systNameReplace=nameReplace,
-                            scale=scale,
-                            skipEntries=[{"reco-tracking-idip-trigger-iso": [3, 4]}],
-                        )
-                        # trigger-isolation
-                        datagroups.addSystematic(
-                            name,
-                            mirror=mirror,
-                            groups=[groupName, *effCommonGroups],
-                            splitGroup={
-                                f"{groupName}_{x}": f".*effSyst.*{x}"
-                                for x in list(effTypesUt)
-                            },
-                            systAxes=[
-                                "reco-tracking-idip-trigger-iso",
-                                "n_syst_variations",
-                                f"{decorr_syst_var}_",
-                            ],
-                            labelsByAxis=["WPSYST", "_etaDecorr", decorr_syst_var],
-                            actionRequiresNomi=True,
-                            action=syst_tools.decorrelateByAxes,
-                            actionArgs=dict(
-                                axesToDecorrNames=[decorr_syst_var],
-                                newDecorrAxesNames=[f"{decorr_syst_var}_"],
-                            ),
-                            baseName=name + "_",
-                            processes=["MCnoQCD"],
-                            passToFakes=passSystToFakes,
-                            systNameReplace=nameReplace,
-                            scale=scale * np.sqrt(2),
-                            skipEntries=[{"reco-tracking-idip-trigger-iso": [0, 1, 2]}],
-                        )
-                    else:
-                        splitGroupDict = {
-                            f"{groupName}_{x}": f".*effSyst.*{x}"
-                            for x in list(effSystTypes)
-                        }
                         if (
-                            any(x in args.decorrSystByVar for x in ["effi", "effisyst"])
-                            and decorr_syst_var in fitvar
+                            "effisystTrigIso" in args.decorrSystByVar
+                            and "utAngleSign" in fitvar
+                            and decorr_syst_var == "utAngleSign"
                         ):
+                            # if "utAngleSign" in fitvar and decorr_syst_var == "utAngleSign":
+                            # then decorrelate only for trigger and iso
+                            # This also includes an additional inflation by sqrt(2) for trigger/isolation
+                            #
+                            logger.warning(
+                                "'utAngleSign' is a fit axis, effSyst will be decorrelated by it"
+                            )
+                            logger.warning(
+                                "but only for trigger/isolation steps (others are kept correlated)"
+                            )
+                            logger.warning(
+                                "with an additional scaling of their magnitude by sqrt(2)"
+                            )
+                            # reco-tracking-idip
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup={
+                                    f"{groupName}_{x}": f".*effSyst.*{x}"
+                                    for x in list(effTypesNoUt)
+                                },
+                                systAxes=axes,
+                                labelsByAxis=axlabels,
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale,
+                                skipEntries=[
+                                    {"reco-tracking-idip-trigger-iso": [3, 4]}
+                                ],
+                            )
+                            # trigger-isolation
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup={
+                                    f"{groupName}_{x}": f".*effSyst.*{x}"
+                                    for x in list(effTypesUt)
+                                },
+                                systAxes=[*axes, f"{decorr_syst_var}_"],
+                                labelsByAxis=[*axlabels, decorr_syst_var],
+                                actionRequiresNomi=True,
+                                action=syst_tools.decorrelateByAxes,
+                                actionArgs=dict(
+                                    axesToDecorrNames=[decorr_syst_var],
+                                    newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                                ),
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale * np.sqrt(2),
+                                skipEntries=[
+                                    {"reco-tracking-idip-trigger-iso": [0, 1, 2]}
+                                ],
+                            )
+                        else:
                             axes = [
                                 "reco-tracking-idip-trigger-iso",
                                 "n_syst_variations",
@@ -2319,6 +2314,23 @@ def setup(
                                 axesToDecorrNames=[decorr_syst_var],
                                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
                             )
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup=splitGroupDict,
+                                systAxes=axes,
+                                labelsByAxis=axlabels,
+                                actionRequiresNomi=True,
+                                action=actionSF,
+                                actionArgs=effActionArgs,
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale,
+                            )
+                    else:
                         datagroups.addSystematic(
                             name,
                             mirror=mirror,
@@ -2326,9 +2338,6 @@ def setup(
                             splitGroup=splitGroupDict,
                             systAxes=axes,
                             labelsByAxis=axlabels,
-                            actionRequiresNomi=True,
-                            action=actionSF,
-                            actionArgs=effActionArgs,
                             baseName=name + "_",
                             processes=["MCnoQCD"],
                             passToFakes=passSystToFakes,
