@@ -7,12 +7,28 @@ from wremnants.histmaker_tools import make_quantile_helper
 from wremnants import syst_tools, theory_corrections, theory_tools
 from wums import logging
 
+import ROOT
+
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+# Import helper to create PDF alphas from theory corrections
+try:
+    import sys
+    # Add the scripts directory to path for import
+    scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from histmakers.histmaker_test_helper import create_pdf_alphas_from_corrections
+except ImportError as e:
+    logger.warning(f"Could not import histmaker_test_helper: {e}. PDF alphas from corrections will be skipped.")
+    # Fallback if import fails
+    def create_pdf_alphas_from_corrections(*args, **kwargs):
+        return args[1] if len(args) > 1 else None
 
 import hist
 
@@ -31,9 +47,84 @@ datasets = getDatasets(
 
 theory_corrs = args.theoryCorr
 
-corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.zprocs], theory_corrs, base_dir=f"{common.data_dir}/TheoryCorrections/5TeV/"
-)
+# Match Z processes by checking if name starts with any Z process name
+zproc_names = [d.name for d in datasets if any(d.name.startswith(zp) for zp in common.zprocs_all)]
+
+# Check if PDF weight branches are available by checking a sample file
+# PDF-based corrections (like scetlib_dyturboCT18Z_pdfas) require PDF weight branches
+has_pdf_weights = False
+if datasets:
+    sample_file = None
+    for d in datasets:
+        if not d.is_data and d.filepaths:
+            sample_file = d.filepaths[0]
+            break
+    if sample_file:
+        try:
+            temp_df = ROOT.RDataFrame("Events", sample_file)
+            # Check for common PDF weight branches
+            pdf_branches = ["LHEPdfWeightAltSet11", "LHEPdfWeight"]
+            has_pdf_weights = any(branch in temp_df.GetColumnNames() for branch in pdf_branches)
+            if has_pdf_weights:
+                logger.info("PDF weight branches found in input files")
+            else:
+                logger.warning("PDF weight branches NOT found - will skip PDF-based theory corrections")
+        except Exception as e:
+            logger.warning(f"Could not check for PDF branches: {e}. Assuming PDF weights are missing.")
+
+# Filter out PDF-based corrections if PDF weights are not available
+# These corrections require PDF weight branches that may not exist
+# (corrections in theory_corr_weight_map that use expand_pdf_entries with alphas=True or renorm=True)
+pdf_based_corrections = [
+    "scetlib_dyturboCT18Z_pdfas",
+    "scetlib_dyturboMSHT20_pdfas",
+    "scetlib_dyturboMSHT20an3lo_pdfas",
+    "scetlib_dyturboN3p1LL_pdfas",
+    "scetlib_dyturboN4p0LL_pdfas",
+    "scetlib_nnlojetN3p1LLN3LO_pdfas",
+    "scetlib_nnlojetN4p0LLN3LO_pdfas",
+    "scetlib_dyturboN3p0LL_LatticeNP_pdfas",
+]
+
+# Keep track of original corrections for loading correction histograms
+# (even if we can't use PDF weights, we still want to load the correction to extract alphas variations)
+theory_corrs_for_loading = list(theory_corrs) if isinstance(theory_corrs, list) else ([theory_corrs] if theory_corrs else [])
+
+# Filter corrections for weight tensor creation (but still load the correction histograms)
+theory_corrs_for_weights = theory_corrs_for_loading.copy()
+if not has_pdf_weights and theory_corrs:
+    original_corrs = list(theory_corrs) if isinstance(theory_corrs, list) else [theory_corrs]
+    theory_corrs_for_weights = [c for c in theory_corrs_for_loading if c not in pdf_based_corrections]
+    removed = [c for c in original_corrs if c in pdf_based_corrections]
+    if removed:
+        logger.warning(
+            f"PDF weights not available - will skip PDF weight tensors for: {removed}. "
+            f"But correction histograms will still be loaded to extract alphas variations. "
+            f"Corrections for weight tensors: {theory_corrs_for_weights if theory_corrs_for_weights else 'none'}"
+        )
+        # Update args.theoryCorr so it's used correctly in define_theory_weights_and_corrs
+        args.theoryCorr = theory_corrs_for_weights
+
+# Try loading theory corrections from 5TeV directory first, then fall back to standard location
+# Load ALL corrections (including pdfas ones) so we can access their histograms
+corr_helpers = {}
+base_dirs = [
+    f"{common.data_dir}/TheoryCorrections/5TeV/",
+    f"{common.data_dir}/TheoryCorrections/",
+]
+
+for base_dir in base_dirs:
+    logger.info(f"Trying to load theory corrections from: {base_dir}")
+    # Load all corrections (including pdfas) to access their histograms
+    corr_helpers = theory_corrections.load_corr_helpers(
+        zproc_names, theory_corrs_for_loading, base_dir=base_dir
+    )
+    # Check if we got any corrections
+    if any(corr_helpers.get(proc, {}) for proc in zproc_names):
+        logger.info(f"Successfully loaded theory corrections from: {base_dir}")
+        break
+    else:
+        logger.warning(f"No theory corrections found in: {base_dir}")
 
 procs = [
     p
@@ -178,6 +269,10 @@ def build_graph(df, dataset):
         df = df.Redefine("cosThetaStarll_qbin", "std::min(7, std::max(0, cosThetaStarll_qbin))")
 
 
+    # Initialize variables for filtering corrections
+    removed_corrs = []
+    corr_helpers_filtered = corr_helpers
+    
     # prefiring
     if dataset.is_data:
         df = df.Define("nominal_weight", "1.0")
@@ -188,11 +283,59 @@ def build_graph(df, dataset):
         if dataset.name in common.zprocs:
             theory_helpers = theory_helpers_procs[dataset.name[0]]
 
-        df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
-        )
+        # Filter out PDF-based corrections if required PDF branches don't exist in this dataframe
+        # This check happens per-dataset since different datasets might have different branches
+        available_cols = df.GetColumnNames()
+        theory_corrs_filtered = list(args.theoryCorr) if args.theoryCorr else []
+        
+        # Map of corrections to their required PDF branches (from theory_tools.py pdfMap)
+        correction_pdf_branches = {
+            "scetlib_dyturboCT18Z_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_dyturboCT18ZVars": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_dyturboN3p1LL_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_dyturboN4p0LL_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_nnlojetN3p1LLN3LO_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_nnlojetN4p0LLN3LO_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_dyturboN3p0LL_LatticeNP_pdfas": "LHEPdfWeightAltSet11",  # ct18z
+            "scetlib_dyturboMSHT20_pdfas": "LHEPdfWeightAltSet12",  # msht20
+            "scetlib_dyturboMSHT20Vars": "LHEPdfWeightAltSet12",  # msht20
+            "scetlib_dyturboMSHT20an3lo_pdfas": "LHEPdfWeightAltSet24",  # msht20an3lo
+            "scetlib_dyturboMSHT20an3loVars": "LHEPdfWeightAltSet24",  # msht20an3lo
+        }
+        
+        removed_corrs = []
+        for corr in theory_corrs_filtered[:]:  # Copy list to iterate safely
+            if corr in correction_pdf_branches:
+                required_branch = correction_pdf_branches[corr]
+                if required_branch not in available_cols:
+                    theory_corrs_filtered.remove(corr)
+                    removed_corrs.append(corr)
+        
+        if removed_corrs:
+            logger.warning(
+                f"For dataset {dataset.name}, removed PDF-based corrections (missing required branches): {removed_corrs}. "
+                f"Remaining: {theory_corrs_filtered if theory_corrs_filtered else 'none'}"
+            )
+            # Temporarily modify args.theoryCorr for this dataset
+            original_theoryCorr = args.theoryCorr
+            args.theoryCorr = theory_corrs_filtered
 
-    # ---- Fill histograms ----
+        # Filter corr_helpers to match filtered theory corrections
+        if removed_corrs and dataset.name in corr_helpers:
+            # Create a filtered copy of corr_helpers for this dataset
+            corr_helpers_filtered = corr_helpers.copy()
+            corr_helpers_filtered[dataset.name] = {
+                k: v for k, v in corr_helpers[dataset.name].items()
+                if k in theory_corrs_filtered
+            }
+
+        df = theory_tools.define_theory_weights_and_corrs(
+            df, dataset.name, corr_helpers_filtered, args, theory_helpers=theory_helpers
+        )
+        
+        # Restore original theoryCorr after processing this dataset
+        if removed_corrs:
+            args.theoryCorr = original_theoryCorr
     hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton", "nominal_weight"])
     hist_mll  = df.HistoBoost("mll",  [axis_mll],  ["mll", "nominal_weight"])
     hist_ptll = df.HistoBoost("ptll", [axis_ptll], ["ptll", "nominal_weight"])
@@ -276,18 +419,34 @@ def build_graph(df, dataset):
         )
         results.append(hist_mutraileta_prefire)
 
+        # Use filtered corr_helpers if we filtered corrections
+        corr_helpers_to_use = corr_helpers_filtered if removed_corrs else corr_helpers
+        
         df = syst_tools.add_theory_hists(
                         results,
                         df,
                         args,
                         dataset.name,
-                        corr_helpers,
+                        corr_helpers_to_use,
                         theory_helpers,
                         [axis_ptll, axis_absYll, axis_cosThetaStarll],
                         ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
                         base_name=f"nominal",
                         for_wmass=False,
                     )
+        
+        # If PDF weights are not available, try to create PDF alphas histograms from theory corrections
+        # This allows plotting with alphasVar axis even when PDF weight branches are missing
+        if dataset.name in corr_helpers:
+            df = create_pdf_alphas_from_corrections(
+                results,
+                df,
+                dataset.name,
+                corr_helpers,
+                [axis_ptll, axis_absYll, axis_cosThetaStarll],
+                ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
+                base_name="nominal",
+            )
 
     
     results += hist_ptll_absYll_byQ
