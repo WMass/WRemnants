@@ -4,6 +4,24 @@ start with alphas variations
 ptll
 add up and down
 
+revert makeDataMC ... and datagroups.py
+
+The regex fix worked. The log now shows:
+INFO:histmaker_test_helper.py: Found alphas variations in correction scetlib_dyturboN3p0LL_LatticeNP_pdfas: ['pdfCT18ZNNLO_as_0118', 'pdfCT18ZNNLO_as_0116', 'pdfCT18ZNNLO_as_0120']
+The alphas variations are now being correctly identified from the correction file.
+However, the histograms still can't be created because:
+The PDF weight branch LHEPdfWeightAltSet11 is missing from your input files (line 880: Did not find PDF branch LHEPdfWeightAltSet11)
+The correction is being removed from processing because the required branch is missing (line 876: removed PDF-based corrections (missing required branches))
+Current status:
+Correction file is loaded
+Alphas variations are detected: pdfCT18ZNNLO_as_0118, pdfCT18ZNNLO_as_0116, pdfCT18ZNNLO_as_0120
+Histograms cannot be created without PDF weight branches
+To actually create the histograms, you need:
+Input files that contain the LHEPdfWeightAltSet11 branch (CT18Z PDF weights)
+The code is working correctly; it's detecting the variations but can't proceed without the PDF weight data in the input files. If you have files with PDF weights, the histograms should be created automatically.
+
+python scripts/histmakers/histmaker_test.py      --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/      --era 2017G      --theoryCorr scetlib_dyturboN3p0LL_LatticeNP_pdfas
+
 ## Setup
 
 cd /work/submit/hayden17
@@ -23,6 +41,33 @@ IN=histmaker_test_scetlib_dyturboCorr.hdf5
 OUT=~/public_html/
 TAG=jan{date}
 PROCS="Data Zmumu" - or Ztautau/Other
+
+IN=histmaker_test_scetlib_dyturboCorr.hdf5
+OUT=~/public_html/
+TAG=jan15
+PROCS="Data Zmumu"
+
+<!--python scripts/plotting/makeDataMCStackPlot.py $IN \-->
+<!--  -o $OUT -f $TAG \-->
+<!--  -n nominal \-->
+<!--  --hists ptll \-->
+<!--  --rrange 0.995 1.005 \-->
+<!--  --postfix alphas+prefiring \-->
+<!--  --procFilters Zmumu --noData --flow none \-->
+<!--  variation \-->
+<!--  --varName prefiring prefiring nominal nominal \-->
+<!--  --selectAxis prefire_variation prefire_variation alphas alphas \-->
+<!--  --selectEntries 0 1 as0116 as0120 \-->
+<!--  --varLabel "prefiring up" "prefiring down" "alphaS down" "alphaS up"-->
+
+python scripts/plotting/makeDataMCStackPlot.py $IN \
+  -o $OUT -f $TAG \
+  -n nominal \
+  --hists ptll \
+  --rrange 0.995 1.005 \
+  --procFilters Zmumu --noData --flow none \
+  variation --varName nominal \
+  --selectAxis alphas --selectEntries as0116 as0120
   
 python scripts/plotting/makeDataMCStackPlot.py $IN \
   -o $OUT -f $TAG \
