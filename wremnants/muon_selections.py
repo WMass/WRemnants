@@ -66,6 +66,7 @@ def select_veto_muons(
     ptCut=15.0,
     staPtCut=15.0,
     etaCut=2.4,
+    dxybsCut=0.05,
     useGlobalOrTrackerVeto=False,
     tightGlobalOrTracker=True,
 ):
@@ -75,11 +76,12 @@ def select_veto_muons(
     # tightGlobalOrTracker relevant only when useGlobalOrTrackerVeto = True
     df = df.Define(
         "vetoMuonsPre",
-        "Muon_looseId && abs(Muon_dxybs) < 0.05 && Muon_correctedCharge != -99",
+        f"Muon_looseId && abs(Muon_dxybs) < {dxybsCut} && Muon_correctedCharge != -99",
     )
+    nHitsSA = common.muonEfficiency_standaloneNumberOfValidHits
     df = df.Define(
         "Muon_isGoodGlobal",
-        f"Muon_isGlobal && Muon_highPurity && Muon_standalonePt > {staPtCut} && Muon_standaloneNumberOfValidHits > 0 && wrem::vectDeltaR2(Muon_standaloneEta, Muon_standalonePhi, Muon_correctedEta, Muon_correctedPhi) < 0.09",
+        f"Muon_isGlobal && Muon_highPurity && Muon_standalonePt > {staPtCut} && Muon_standaloneNumberOfValidHits >= {nHitsSA} && wrem::vectDeltaR2(Muon_standaloneEta, Muon_standalonePhi, Muon_correctedEta, Muon_correctedPhi) < 0.09",
     )
     if useGlobalOrTrackerVeto:
         if tightGlobalOrTracker:

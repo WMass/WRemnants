@@ -226,15 +226,15 @@ if __name__ == "__main__":
         if "eta" in axes:
             # this assumes the 48 eta bins are rebinned uniformly, and 0 is an edge of the central bins
             nEtaBins = df_p.shape[0] if "charge" not in axes else int(df_p.shape[0] / 2)
-            nEtaBinsOneSide = int(nEtaBins / 2)
+            lowest_eta = -2.4
             etaWidth = 4.8 / nEtaBins
             df_p["yticks"] = (
                 df_p["eta"]
-                .apply(lambda x: round((x - nEtaBinsOneSide) * etaWidth, 1))
+                .apply(lambda x: round(lowest_eta + x * etaWidth, 1))
                 .astype(str)
                 + r"<\mathit{\eta}^{\mu}<"
                 + df_p["eta"]
-                .apply(lambda x: round((x - nEtaBinsOneSide) * etaWidth + etaWidth, 1))
+                .apply(lambda x: round(lowest_eta + (x + 1) * etaWidth, 1))
                 .astype(str)
             )
             if "charge" in axes:
@@ -369,6 +369,22 @@ if __name__ == "__main__":
             axis_ranges = {i: rf"$\phi^{{\mu}}$ bin {i}" for i in range(nPhiBins)}
             df_p["yticks"] = (
                 df_p["phi"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
+        elif "charge" in axes:
+            axis_ranges = {
+                0: rf"$\mathit{{q}}_{{T}}^{{\mu}}$ < 0",
+                1: rf"$\mathit{{q}}_{{T}}^{{\mu}}$ > 0",
+            }
+            df_p["yticks"] = (
+                df_p["charge"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
+        elif "utAngleSign" in axes:
+            axis_ranges = {
+                0: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ < 0",
+                1: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ > 0",
+            }
+            df_p["yticks"] = (
+                df_p["utAngleSign"].apply(lambda x: str(axis_ranges[x])).astype(str)
             )
         elif "nRecoVtx" in axes:
             nRecoVtxBins = df.shape[0]

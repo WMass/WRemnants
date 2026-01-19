@@ -201,7 +201,7 @@ def common_parser(analysis_label=""):
         help="Skip the qcdScaleByHelicity histogram (it can be huge)",
     )
     parser.add_argument(
-        "--noRecoil", action="store_true", help="Don't apply recoild correction"
+        "--noRecoil", action="store_true", help="Don't apply recoil correction"
     )
     parser.add_argument(
         "--recoilHists",
@@ -514,10 +514,22 @@ def common_parser(analysis_label=""):
             help="Lower threshold for muon pt in the veto definition",
         )
         parser.add_argument(
+            "--vetoRecoStaPt",
+            default=15,
+            type=float,
+            help="Lower threshold for muon standalone pt in the veto definition (should typically match vetoRecoPt, but not necessary)",
+        )
+        parser.add_argument(
             "--vetoRecoEta",
             default=2.4,
             type=float,
             help="Upper threshold for muon absolute eta in the veto definition",
+        )
+        parser.add_argument(
+            "--dxybs",
+            default=0.05,
+            type=float,
+            help="Upper threshold for muon absolute dxy with respect to beamspot",
         )
         parser.add_argument(
             "--oneMCfileEveryN",
@@ -915,6 +927,11 @@ def plot_parser():
         type=float,
         default=None,
         help="Use a custom figure width, otherwise chosen automatic",
+    )
+    parser.add_argument(
+        "--noBinWidthNorm",
+        action="store_true",
+        help="Do not normalize bin yields by bin width",
     )
 
     return parser

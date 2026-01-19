@@ -71,7 +71,7 @@ parser.add_argument(
     "--procFilters",
     type=str,
     nargs="*",
-    help="Filter to plot (default no filter, only specify if you want a subset",
+    help="Filter to plot (default no filter, only specify if you want a subset)",
 )
 parser.add_argument(
     "--excludeProcs",
@@ -172,6 +172,24 @@ parser.add_argument(
     default=["eta", "pt", "charge"],
 )
 parser.add_argument(
+    "--fakeTransferAxis",
+    type=str,
+    default="utAngleSign",
+    help="""
+    Axis where the fake prediction on non-valid bins (i.e. where the A-Ax-B-Bx regions are empty)
+    is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
+)
+parser.add_argument(
+    "--fakeTransferCorrFileName",
+    type=str,
+    default="fakeTransferTemplates",
+    help="""                                                                                                                  
+    Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.                         
+    Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape                         
+    at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.                           
+    """,
+)
+parser.add_argument(
     "--fineGroups",
     action="store_true",
     help="Plot each group as a separate process, otherwise combine groups based on predefined dictionary",
@@ -197,6 +215,14 @@ parser.add_argument(
     default=(0.05, 0.8),
     help="Location in (x,y) for additional text, aligned to upper left",
 )
+parser.add_argument(
+    "--vertLineEdges",
+    type=float,
+    nargs="*",
+    default=[],
+    help="Horizontal axis edges where to plot vertical lines",
+)
+
 subparsers = parser.add_subparsers(dest="variation")
 variation = subparsers.add_parser(
     "variation", help="Arguments for adding variation hists"
@@ -309,9 +335,21 @@ if len(args.presel):
     for ps in args.presel:
         if "=" in ps:
             axName, axRange = ps.split("=")
-            axMin, axMax = map(float, axRange.split(","))
-            logger.info(f"{axName} in [{axMin},{axMax}]")
-            presel[axName] = s[complex(0, axMin) : complex(0, axMax) : hist.sum]
+            if "," in ps:
+                axMin, axMax = [
+                    complex(0, float(p)) if p != str() else None
+                    for p in axRange.split(",")
+                ]
+                logger.info(f"{axName} in [{axMin},{axMax}]")
+                presel[axName] = s[axMin : axMax : hist.sum]
+            else:
+                logger.info(f"Selecting {axName} {axRange.split('.')[1]}")
+                if axRange == "hist.overflow":
+                    presel[axName] = hist.overflow
+                if axRange == "hist.underflow":
+                    presel[axName] = hist.underflow
+                if axRange == "hist.sum":
+                    presel[axName] = hist.sum
         else:
             logger.info(f"Integrating boolean {ps} axis")
             presel[ps] = s[:: hist.sum]
@@ -327,32 +365,48 @@ if args.axlim or args.rebin or args.absval:
         args.rebinBeforeSelection,
     )
 
-if args.selection:
+if args.selection == "none":
     applySelection = False
-    if args.selection != "none":
-        translate = {
-            "hist.overflow": hist.overflow,
-            "hist.underflow": hist.underflow,
-            "hist.sum": hist.sum,
-        }
-        for selection in args.selection.split(","):
-            axis, value = selection.split("=")
-            if value.startswith("["):
-                parts = [
-                    translate[p] if p in translate else int(p) if p != str() else None
-                    for p in value[1:-1].split(":")
-                ]
-                select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
-            elif value == "hist.overflow":
-                select[axis] = hist.overflow
-            elif value == "hist.underflow":
-                select[axis] = hist.overflow
-            else:
-                select[axis] = int(value)
+elif args.selection:
+    translate = {
+        "hist.overflow": hist.overflow,
+        "hist.underflow": hist.underflow,
+        "hist.sum": hist.sum,
+    }
+    for selection in args.selection.split(","):
+        axis, value = selection.split("=")
+        if value.startswith("["):
+            parts = [
+                translate[p] if p in translate else int(p) if p != str() else None
+                for p in value[1:-1].split(":")
+            ]
+            select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
+        elif value == "hist.overflow":
+            select[axis] = hist.overflow
+        elif value == "hist.underflow":
+            select[axis] = hist.underflow
+        else:
+            select[axis] = int(value)
+    applySelection = (
+        False
+        # do not trigger ABCD method if a cut is applied on the variables defining the ABCD regions
+        if any(
+            abcd_var in [cut_str.split("=")[0] for cut_str in args.selection.split(",")]
+            for abcd_var in ["relIso", "mt", "passMT", "passIso"]
+        )
+        else True
+    )
 else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
+histselector_kwargs = dict(
+    fakeTransferAxis=(
+        args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
+    ),
+    fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+    histAxesRemovedBeforeFakes=[str(x.split("=")[0]) for x in args.presel],
+)
 if applySelection:
     groups.set_histselectors(
         datasets,
@@ -364,6 +418,7 @@ if applySelection:
         mode=args.fakeEstimation,
         forceGlobalScaleFakes=args.forceGlobalScaleFakes,
         mcCorr=args.fakeMCCorr,
+        **histselector_kwargs,
     )
 
 if not args.nominalRef:
@@ -519,6 +574,9 @@ for h in args.hists:
     else:
         binwnorm = None
         ylabel = r"$Events\,/\,bin$"
+    if args.noBinWidthNorm:
+        binwnorm = None
+        ylabel = r"$Events\,/\,bin$"
 
     if args.rlabel is None:
         if args.noData:
@@ -583,7 +641,11 @@ for h in args.hists:
         normalize_to_data=args.normToData,
         noSci=args.noSciy,
         logoPos=args.logoPos,
-        width_scale=1.25 if len(h.split("-")) == 1 else 1,
+        width_scale=(
+            args.customFigureWidth
+            if args.customFigureWidth
+            else 1.25 if len(h.split("-")) == 1 else 1
+        ),
         legPos=args.legPos,
         leg_padding=args.legPadding,
         lowerLeg=not args.noLowerLeg,
@@ -591,6 +653,7 @@ for h in args.hists:
         lowerLegPos=args.lowerLegPos,
         lower_leg_padding=args.lowerLegPadding,
         subplotsizes=args.subplotSizes,
+        x_vertLines_edges=args.vertLineEdges,
     )
 
     to_join = [f"{h.replace('-','_')}"]

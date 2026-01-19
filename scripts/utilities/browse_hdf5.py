@@ -18,6 +18,9 @@ if __name__ == "__main__":
     parser.add_argument("inputfile", type=str, nargs=1, help="Input file")
     parsers = parser.add_subparsers(dest="printMode")
     printAll = parsers.add_parser("all", help="Print everything in the input file")
+    printMeta = parsers.add_parser(
+        "meta", help="Print only meta info in the input file"
+    )
     printProcs = parsers.add_parser("proc", help="Print only names of processes")
     printHist = parsers.add_parser(
         "hist", help="Print more information about histograms"
@@ -25,6 +28,13 @@ if __name__ == "__main__":
     # printHist.add_argument("-w", "--what", type=str, default="all",
     #                       choices=["all", "procs", "hists", "axes"],
     #                       help="What to print")
+    printMeta.add_argument(
+        "-k",
+        "--key",
+        type=str,
+        default=None,
+        help="Print only the content of this key (the default shows all keys)",
+    )
     printHist.add_argument(
         "-p", "--process", type=str, default=None, help="Select this process to print"
     )
@@ -52,6 +62,12 @@ if __name__ == "__main__":
 
     if args.printMode == "all":
         print(results)
+    elif args.printMode == "meta":
+        if args.key:
+            print(results["meta_info"][args.key])
+        else:
+            print(results["meta_info"])
+            print(f"All keys: {results["meta_info"].keys()}")
     elif args.printMode == "proc":
         procs = list(filter(lambda x: x != "meta_info", results.keys()))
         print("\nList of processes:\n")

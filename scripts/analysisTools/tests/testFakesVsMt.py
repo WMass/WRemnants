@@ -87,6 +87,7 @@ def plotProjection1D(
     mTvalueRange=[],
     rebinVariable=None,
     scaleQCDMC=1.0,
+    noMtABCD=False,
 ):
 
     firstBinMt = 1
@@ -109,8 +110,9 @@ def plotProjection1D(
         rootHists[d].GetAxis(2).SetRange(chargeBin, chargeBin)
         rootHists[d].GetAxis(3).SetRange(firstBinMt, lastBinMt)
         rootHists[d].GetAxis(4).SetRange(isoAxisRange[0], isoAxisRange[1])
-        rootHists[d].GetAxis(5).SetRange(jetAxisRange[0], jetAxisRange[1])
-        rootHists[d].GetAxis(6).SetRange(1, rootHists[d].GetAxis(6).GetNbins())
+        if not noMtABCD:
+            rootHists[d].GetAxis(5).SetRange(jetAxisRange[0], jetAxisRange[1])
+            rootHists[d].GetAxis(6).SetRange(1, rootHists[d].GetAxis(6).GetNbins())
         if d == "Data":
             hdata = rootHists[d].Projection(projectAxisToKeep, "EO")
             hdata.SetName(f"{plotName}_{d}")
@@ -231,6 +233,8 @@ def drawAndFitFRF(
     # following two are test histograms which make sense for pol1 fits
     histoChi2diffTest=None,
     histoPullsPol1Slope=None,
+    noMtABCD=False,
+    erfAsMainModel=False,
 ):
 
     # moreTextLatex is used to write text with TLatex, and the syntax is textToWrite::x1,y1,ypass,textsize
@@ -289,8 +293,8 @@ def drawAndFitFRF(
         ymax += diff * 0.45
         if ymin < 0:
             ymin = 0
-        if ymax > 5.0:
-            ymax = 5.0
+        if ymax > 4.0:
+            ymax = 4.0
 
     h1.GetXaxis().SetTitle(xAxisName)
     h1.GetXaxis().SetTitleOffset(1.2)
@@ -321,7 +325,7 @@ def drawAndFitFRF(
     fitBinLow = h1.GetXaxis().FindFixBin(xMinFit + 0.001)
     fitBinHigh = h1.GetXaxis().FindFixBin(xMaxFit + 0.001)
     fitBinEdges = [
-        round(h1.GetXaxis().GetBinLowEdge(i), 2)
+        round(h1.GetXaxis().GetBinLowEdge(i), 3)
         for i in range(fitBinLow, fitBinHigh + 1)
     ]
     # logger.info(fitBinEdges)
@@ -335,11 +339,14 @@ def drawAndFitFRF(
         binOriginalHisto = ib + fitBinLow - 1
         h1fitRange.SetBinContent(ib, h1.GetBinContent(binOriginalHisto))
         h1fitRange.SetBinError(ib, h1.GetBinError(binOriginalHisto))
+        # logger.error(h1fitRange.GetXaxis().GetBinLowEdge(ib))
     boost_hist = narf.root_to_hist(h1fitRange)
 
+    fitModel = (
+        "1-Erf[x]" if erfAsMainModel else f"pol{fitPolDegree}"
+    )  # just for legend, set here to make sure it is changed consistently with line below
     # FIT WITH TENSORFLOW
     global polN_scaled_global
-    fitModel = f"pol{fitPolDegree}"  # just for legend, set here to make sure it is changed consistently with line below
     params = np.array([1.0] + [0.0 for i in range(fitPolDegree)])
     if polN_scaled_global == None:
         polN_scaled_global = partial(
@@ -349,10 +356,45 @@ def drawAndFitFRF(
             degree=fitPolDegree,
         )
 
-    fitres_tf1 = wums.fitutils.fit_hist(boost_hist, polN_scaled_global, params)
-    f1 = ROOT.TF1("f1", polN_scaled_global, xMinFit, xMaxFit, len(params))
-    status = fitres_tf1["status"]
-    covstatus = fitres_tf1["covstatus"]
+    xvalMin = h1.GetXaxis().GetBinLowEdge(1)
+    xvalMax = h1.GetXaxis().GetBinUpEdge(h1.GetNbinsX())
+
+    fitres_tf1_antiErf = None
+    f1_antiErf = None
+    if erfAsMainModel:
+        fitres_tf1_main = wums.fitutils.fit_hist(
+            boost_hist, antiErf_tf, np.array([1.0, 60.0, 5.0])
+        )
+        f1_main = ROOT.TF1(
+            "f1_antiErf",
+            "[0] * (1.0 - TMath::Erf((x-[1])/[2]))",
+            xMinFit,
+            xMaxFit,
+        )
+        funcFullRange = ROOT.TF1(
+            "funcFullRange", "[0] * (1.0 - TMath::Erf((x-[1])/[2]))", xvalMin, 200
+        )  # define this one until "infinity"
+        funcFullRange.SetParameters(np.array(fitres_tf1_main["x"], dtype=np.dtype("d")))
+    else:
+        fitres_tf1_main = wums.fitutils.fit_hist(boost_hist, polN_scaled_global, params)
+        f1_main = ROOT.TF1("f1_main", polN_scaled_global, xMinFit, xMaxFit, len(params))
+        if not noMtABCD:
+            fitres_tf1_antiErf = wums.fitutils.fit_hist(
+                boost_hist, antiErf_tf, np.array([1.0, 60.0, 5.0])
+            )
+            f1_antiErf = ROOT.TF1(
+                "f1_antiErf",
+                "[0] * (1.0 - TMath::Erf((x-[1])/[2]))",
+                xMinFit,
+                xMaxFit,
+            )
+        funcFullRange = ROOT.TF1(
+            "funcFullRange", polN_scaled_global, xvalMin, 200, len(params)
+        )  # define this one until "infinity"
+        funcFullRange.SetParameters(np.array(fitres_tf1_main["x"], dtype=np.dtype("d")))
+
+    status = fitres_tf1_main["status"]
+    covstatus = fitres_tf1_main["covstatus"]
     if status:
         logger.warning(f"\n\n-----> STATUS: fit had status {status}\n\n")
         if status not in badFitsID.keys():
@@ -366,31 +408,21 @@ def drawAndFitFRF(
         else:
             badCovMatrixID[covstatus] += 1
 
-    fitres_tf1_antiErf = wums.fitutils.fit_hist(
-        boost_hist, antiErf_tf, np.array([1.0, 60.0, 5.0])
-    )
-    f1_antiErf = ROOT.TF1(
-        "f1_antiErf",
-        "[0] * (1.0 - TMath::Erf((x-[1])/[2]))",
-        xMinFit,
-        xMaxFit,
-    )
-
     # get chi 2:
-    chi2 = fitres_tf1["loss_val"]
-    ndof = int(len(fitBinEdges) - 1 - f1.GetNpar())
+    chi2 = fitres_tf1_main["loss_val"]
+    ndof = int(len(fitBinEdges) - 1 - f1_main.GetNpar())
     chi2prob = ROOT.TMath.Prob(chi2, ndof)
     chi2text = f"#chi^{{2}} = {round(chi2,1)} / {ndof}"
-    if chi2prob < 0.05:
-        perc_chi2prob = 100.0 * chi2prob
-        sign = "="
-        if perc_chi2prob < 0.1:
-            perc_chi2prob = 0.1
-            sign = "<"
-        chi2text += " (prob {} {}%)".format(sign, round(perc_chi2prob, 1))
+    # if chi2prob < 0.05:
+    #     perc_chi2prob = 100.0 * chi2prob
+    #     sign = "="
+    #     if perc_chi2prob < 0.1:
+    #         perc_chi2prob = 0.1
+    #         sign = "<"
+    #     chi2text += " (prob {} {}%)".format(sign, round(perc_chi2prob, 1))
 
     global pol0_scaled_global
-    if fitPolDegree == 1:
+    if fitPolDegree == 1 and not erfAsMainModel:
         params0 = np.array([1.0])
         if pol0_scaled_global == None:
             pol0_scaled_global = partial(
@@ -406,51 +438,56 @@ def drawAndFitFRF(
             histoChi2diffTest.Fill(chi2diffTest)
         if histoPullsPol1Slope:
             histoPullsPol1Slope.Fill(
-                fitres_tf1["x"][1] / np.sqrt(fitres_tf1["cov"][1][1])
+                fitres_tf1_main["x"][1] / np.sqrt(fitres_tf1_main["cov"][1][1])
             )
-    f1.SetParameters(np.array(fitres_tf1["x"], dtype=np.dtype("d")))
-    f1.SetLineWidth(3)
-    # f1.SetLineStyle(9) # ROOT.kDashed == thin dashes, almost dotted
-    f1.SetLineColor(ROOT.kBlue + 1)
+    f1_main.SetParameters(np.array(fitres_tf1_main["x"], dtype=np.dtype("d")))
+    f1_main.SetLineWidth(3)
+    # f1_main.SetLineStyle(9) # ROOT.kDashed == thin dashes, almost dotted
+    f1_main.SetLineColor(ROOT.kBlue + 1)
+
     # draw extrapolation
-    f2 = ROOT.TF1(
-        "f2",
-        polN_scaled_global,
-        xMaxFit,
-        h1.GetXaxis().GetBinLowEdge(1 + h1.GetNbinsX()),
-        len(params),
-    )
-    for i in range(1 + fitPolDegree):
-        f2.SetParameter(i, f1.GetParameter(i))
+    if erfAsMainModel:
+        f2 = ROOT.TF1(
+            "f2_antiErf",
+            "[0] * (1.0 - TMath::Erf((x-[1])/[2]))",
+            xMaxFit,
+            h1.GetXaxis().GetBinLowEdge(1 + h1.GetNbinsX()),
+        )
+    else:
+        f2 = ROOT.TF1(
+            "f2",
+            polN_scaled_global,
+            xMaxFit,
+            h1.GetXaxis().GetBinLowEdge(1 + h1.GetNbinsX()),
+            len(params),
+        )
+
+    for i in range(3 if erfAsMainModel else (1 + fitPolDegree)):
+        f2.SetParameter(i, f1_main.GetParameter(i))
+
     f2.SetLineColor(ROOT.kRed + 2)
-    f2.SetLineWidth(3)
-    f2.SetLineStyle(9)
+    f2.SetLineWidth(2)
+    f2.SetLineStyle(2)
 
-    # test anti error function
-    f1_antiErf.SetParameters(np.array(fitres_tf1_antiErf["x"], dtype=np.dtype("d")))
-    f1_antiErf.SetLineWidth(3)
-    # f1_antiErf.SetLineStyle(9) # ROOT.kDashed == thin dashes, almost dotted
-    f1_antiErf.SetLineColor(ROOT.kRed + 2)
+    if not noMtABCD and not erfAsMainModel:
+        # test anti error function
+        f1_antiErf.SetParameters(np.array(fitres_tf1_antiErf["x"], dtype=np.dtype("d")))
+        f1_antiErf.SetLineWidth(3)
+        f1_antiErf.SetLineColor(ROOT.kRed + 2)
 
-    xvalMin = h1.GetXaxis().GetBinLowEdge(1)
-    xvalMax = h1.GetXaxis().GetBinUpEdge(h1.GetNbinsX())
-    funcFullRange = ROOT.TF1(
-        "funcFullRange", polN_scaled_global, xvalMin, 200, len(params)
-    )  # define this one until "infinity"
-    funcFullRange.SetParameters(np.array(fitres_tf1["x"], dtype=np.dtype("d")))
     hband = ROOT.TH1D("hband", "", 400, xvalMin, xvalMax)
     hband.SetStats(0)
     hband.SetFillColor(ROOT.kGray)
     # hband.SetFillStyle(3001)
     for ib in range(1, hband.GetNbinsX() + 1):
         xval = hband.GetBinCenter(ib)
-        val = f1.Eval(xval)
+        val = f1_main.Eval(xval)
         # logger.info(f"val({xval}) = {val}")
         hband.SetBinContent(ib, val)
 
-    npar = len(params)
+    npar = 3 if erfAsMainModel else len(params)
     # diagonalize and get eigenvalues and eigenvectors
-    e, v = np.linalg.eigh(fitres_tf1["cov"])
+    e, v = np.linalg.eigh(fitres_tf1_main["cov"])
     # store all variations for faster access below
     altParameters = np.array(
         [np.zeros(npar, dtype=np.dtype("d"))] * (npar * 2), dtype=np.dtype("d")
@@ -458,8 +495,8 @@ def drawAndFitFRF(
     # logger.info(altParameters)
     for ivar in range(npar):
         shift = np.sqrt(e[ivar]) * v[:, ivar]
-        altParameters[ivar] = fitres_tf1["x"] + shift
-        altParameters[ivar + npar] = fitres_tf1["x"] - shift
+        altParameters[ivar] = fitres_tf1_main["x"] + shift
+        altParameters[ivar + npar] = fitres_tf1_main["x"] - shift
 
     tf1_func_alt = ROOT.TF1()
     tf1_func_alt.SetName("tf1_func_alt")
@@ -480,10 +517,11 @@ def drawAndFitFRF(
         hband.SetBinError(ib, err)
 
     hband.Draw("E2 SAME")
-    f1.Draw("L SAME")
+    f1_main.Draw("L SAME")
     if xMaxFit < xvalMax:
         f2.Draw("L SAME")
-    f1_antiErf.Draw("L SAME")
+    if not noMtABCD and not erfAsMainModel:
+        f1_antiErf.Draw("L SAME")
     h1.Draw("EP SAME")
 
     nColumnsLeg = 1
@@ -501,11 +539,16 @@ def drawAndFitFRF(
 
     leg.SetNColumns(nColumnsLeg)
     leg.AddEntry(h1, "Measurement", "PE")
-    leg.AddEntry(f1, f"Fit {fitModel} in [{int(xMinFit)}, {int(xMaxFit)}]", "L")
+    # TODO improve rounding based on variable
+    leg_xMinFit = int(xMinFit) if xMinFit > 1 else float(round(xMinFit, 3))
+    leg_xMaxFit = int(xMaxFit) if xMaxFit > 1 else float(round(xMaxFit, 3))
+    leg.AddEntry(f1_main, f"Fit {fitModel}", "L")
+    # leg.AddEntry(f1_main, f"Fit {fitModel} in [{leg_xMinFit}, {leg_xMaxFit}]", "L")
     if xMaxFit < xvalMax:
         leg.AddEntry(f2, f"Extrapolation", "L")
     leg.AddEntry(hband, "Fit uncertainty", "F")
-    leg.AddEntry(f1_antiErf, f"Fit f(x) = 1 - Erf[x]", "L")
+    if not noMtABCD and not erfAsMainModel:
+        leg.AddEntry(f1_antiErf, f"Fit f(x) = 1 - Erf[x]", "L")
     leg.Draw("same")
     canvas.RedrawAxis("sameaxis")
 
@@ -667,13 +710,35 @@ def runStudy(fname, charges, mainOutputFolder, args):
     histoChi2diffTest = None
     histoPullsPol1Slope = None
 
-    etaLabel = "#eta" if not args.absEta else "|#eta|"
+    inputHistDict = {
+        "mt": "mTStudyForFakes",
+        "oneMinusCosdphi": "mTStudyForFakesAlt",
+        "mtOverPt": "mTStudyForFakesAlt2",
+        "altMt": "mTStudyForFakesAlt3",
+        "dxybs": "mTStudyForFakesAlt4",
+    }
+
+    etaLabel = "#eta^{#mu}" if not args.absEta else "|#eta^{#mu}|"
+    ptLabel = "#it{p}_{T}^{#mu}"
+    mtLabel = "#it{m}_{T}"
+    metLabel = "#it{p}_{T}^{miss}"
+    dphiMuMetLabel = "#Delta#phi(#mu,^{ }#it{p}_{T}^{miss})"
+
+    zAxisNames = {
+        "mt": f"{mtLabel} (GeV)",
+        "oneMinusCosdphi": f"1 - {dphiMuMetLabel}",
+        "mtOverPt": "#it{m}_{T} / #it{p}_{T}^{#mu}",
+        "altMt": f"{metLabel} (1 - {dphiMuMetLabel})",
+        "dxybs": "Thr - |dxy_{bs}^{#mu}| (cm)",
+    }
+    xABCD = args.xABCD
+    noMtABCD = xABCD != "mt"
 
     xAxisName = args.xAxisName
-    if args.absEta and "|#eta|" not in xAxisName and "#eta" in xAxisName:
-        xAxisName.replace("#eta", "|#eta|")
+    if args.absEta and "|#eta" not in xAxisName and "#eta" in xAxisName:
+        xAxisName = etaLabel
     yAxisName = args.yAxisName
-    zAxisName = args.met + " " + args.zAxisName
+    zAxisName = args.zAxisName if len(args.zAxisName) else zAxisNames[xABCD]
 
     adjustSettings_CMS_lumi()
     canvas = ROOT.TCanvas("canvas", "", 800, 800)
@@ -702,7 +767,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
     datasetsNoFakes = list(filter(lambda x: x != "Fake", datasets))
     datasetsNoQCDFakes = list(filter(lambda x: x not in ["QCD", "Fake"], datasets))
     logger.info(f"All original datasets available {datasets}")
-    inputHistName = "mTStudyForFakes"
+    inputHistName = inputHistDict[xABCD]
     groups.setNominalName(inputHistName)
     groups.loadHistsForDatagroups(
         inputHistName, syst="", procsToRead=datasets, applySelection=False
@@ -723,7 +788,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             d: None for d in datasets
         }  # for 1D plots, mt rebinned by 2 but no eta-pt rebinning
         rootHists_asNominal = {d: None for d in datasets}
-        rootHists_forMtWithDataDrivenFakes = {d: None for d in datasetsNoQCD}
+        rootHists_forMtWithDataDrivenFakes = {d: None for d in datasets}
         hnarf_fakerateDeltaPhi = None
         for d in datasets:
             s = hist.tag.Slicer()
@@ -739,7 +804,11 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 hnarfTMP = hnarfTMP[
                     {"absdz_cm": s[:: hist.sum]}
                 ]  # FIXME: JUST A TEST !!!
-                # hnarfTMP = hnarfTMP[{"absdz_cm": s[complex(0,0.1)::hist.sum]}] # FIXME: JUST A TEST !!!
+            if noMtABCD and "passMT" in hnarfTMP.axes.name:
+                # integrate all mT (unless required differently,
+                # but to use dphi should not cut on mT)
+                hnarfTMP = hnarfTMP[{"passMT": s[:: hist.sum]}]
+                # hnarfTMP = hnarfTMP[{"passMT": False}]
             hnarf = hnarfTMP.copy()
             hnarf_forplots = hnarf.copy()
             hnarf_asNominal = hnarf.copy()
@@ -782,142 +851,151 @@ def runStudy(fname, charges, mainOutputFolder, args):
                         hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
                             {"hasJets": s[:: hist.sum]}
                         ]
-                lowMtUpperBound = int(args.mtNominalRange.split(",")[1])
+                lowMtUpperBound = float(args.mtNominalRange.split(",")[1])
                 hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
-                    {"mt": s[: complex(0, lowMtUpperBound) : hist.sum]}
+                    {xABCD: s[: complex(0, lowMtUpperBound) : hist.sum]}
                 ]
                 chargeIndex = 0 if charge in ["minus", "inclusive"] else 1
                 hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
                     {"charge": s[chargeIndex : chargeIndex + 1 : hist.sum]}
                 ]
-                hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
-                    {"DphiMuonMet": s[:: hist.rebin(2)]}
-                ]
-                # make all TH of FRF in bins of dphi
-                histo_fakes_dphiBins = narf.hist_to_root(
-                    hnarf_fakerateDeltaPhi
-                )  # this is a THnD with eta-pt-passIso-DphiMuonMet
-                histo_FRFvsDphi = {}
-                nBinsDphi = histo_fakes_dphiBins.GetAxis(3).GetNbins()
-                for idp in range(nBinsDphi):
-                    idpBin = idp + 1
-                    histo_fakes_dphiBins.GetAxis(3).SetRange(idpBin, idpBin)
+                if "DphiMuonMet" in hnarf_fakerateDeltaPhi.axes.name:
+                    hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
+                        {"DphiMuonMet": s[:: hist.rebin(2)]}
+                    ]
+                if not noMtABCD:
+                    # make all TH of FRF in bins of dphi
+                    histo_fakes_dphiBins = narf.hist_to_root(
+                        hnarf_fakerateDeltaPhi
+                    )  # this is a THnD with eta-pt-passIso-DphiMuonMet
+                    histo_FRFvsDphi = {}
+                    nBinsDphi = histo_fakes_dphiBins.GetAxis(3).GetNbins()
+                    for idp in range(nBinsDphi):
+                        idpBin = idp + 1
+                        histo_fakes_dphiBins.GetAxis(3).SetRange(idpBin, idpBin)
+                        histo_fakes_dphiBins.GetAxis(2).SetRange(1, 1)
+                        histo_fakes_dphiBins_failIso = histo_fakes_dphiBins.Projection(
+                            1, 0, "E"
+                        )
+                        histo_fakes_dphiBins_failIso.SetName(
+                            f"histo_fakes_dphiBins_failIso_idp{idp}"
+                        )
+                        histo_fakes_dphiBins.GetAxis(3).SetRange(idpBin, idpBin)
+                        histo_fakes_dphiBins.GetAxis(2).SetRange(2, 2)
+                        histo_fakes_dphiBins_passIso = histo_fakes_dphiBins.Projection(
+                            1, 0, "E"
+                        )
+                        histo_fakes_dphiBins_passIso.SetName(
+                            f"histo_fakes_dphiBins_passIso_idp{idp}"
+                        )
+                        histo_FRFvsDphi[idp] = copy.deepcopy(
+                            histo_fakes_dphiBins_passIso.Clone(
+                                f"histo_FRFvsDphi_idp{idp}"
+                            )
+                        )
+                        histo_FRFvsDphi[idp].Divide(histo_fakes_dphiBins_failIso)
+                    ##
+                    histo_fakes_dphiBins.GetAxis(3).SetRange(1, nBinsDphi)
                     histo_fakes_dphiBins.GetAxis(2).SetRange(1, 1)
                     histo_fakes_dphiBins_failIso = histo_fakes_dphiBins.Projection(
                         1, 0, "E"
                     )
                     histo_fakes_dphiBins_failIso.SetName(
-                        f"histo_fakes_dphiBins_failIso_idp{idp}"
+                        "histo_fakes_dphiBins_failIso_idpInclusive"
                     )
-                    histo_fakes_dphiBins.GetAxis(3).SetRange(idpBin, idpBin)
+                    histo_fakes_dphiBins.GetAxis(3).SetRange(1, nBinsDphi)
                     histo_fakes_dphiBins.GetAxis(2).SetRange(2, 2)
                     histo_fakes_dphiBins_passIso = histo_fakes_dphiBins.Projection(
                         1, 0, "E"
                     )
                     histo_fakes_dphiBins_passIso.SetName(
-                        f"histo_fakes_dphiBins_passIso_idp{idp}"
+                        "histo_fakes_dphiBins_passIso_idpInclusive"
                     )
-                    histo_FRFvsDphi[idp] = copy.deepcopy(
-                        histo_fakes_dphiBins_passIso.Clone(f"histo_FRFvsDphi_idp{idp}")
+                    histo_FRFvsDphi["inclusive"] = copy.deepcopy(
+                        histo_fakes_dphiBins_passIso.Clone(
+                            "histo_FRFvsDphi_idpInclusive"
+                        )
                     )
-                    histo_FRFvsDphi[idp].Divide(histo_fakes_dphiBins_failIso)
-                ##
-                histo_fakes_dphiBins.GetAxis(3).SetRange(1, nBinsDphi)
-                histo_fakes_dphiBins.GetAxis(2).SetRange(1, 1)
-                histo_fakes_dphiBins_failIso = histo_fakes_dphiBins.Projection(
-                    1, 0, "E"
-                )
-                histo_fakes_dphiBins_failIso.SetName(
-                    "histo_fakes_dphiBins_failIso_idpInclusive"
-                )
-                histo_fakes_dphiBins.GetAxis(3).SetRange(1, nBinsDphi)
-                histo_fakes_dphiBins.GetAxis(2).SetRange(2, 2)
-                histo_fakes_dphiBins_passIso = histo_fakes_dphiBins.Projection(
-                    1, 0, "E"
-                )
-                histo_fakes_dphiBins_passIso.SetName(
-                    "histo_fakes_dphiBins_passIso_idpInclusive"
-                )
-                histo_FRFvsDphi["inclusive"] = copy.deepcopy(
-                    histo_fakes_dphiBins_passIso.Clone("histo_FRFvsDphi_idpInclusive")
-                )
-                histo_FRFvsDphi["inclusive"].Divide(histo_fakes_dphiBins_failIso)
-                ##
-                # now should plot
-                hists = [
-                    unroll2Dto1D(
-                        histo_FRFvsDphi["inclusive"],
-                        newname=f"unrolled_{histo_FRFvsDphi['inclusive'].GetName()}",
-                        cropNegativeBins=False,
-                    )
-                ]
-                for idp in range(nBinsDphi):
-                    hists.append(
+                    histo_FRFvsDphi["inclusive"].Divide(histo_fakes_dphiBins_failIso)
+                    ##
+                    # now should plot
+                    hists = [
                         unroll2Dto1D(
-                            histo_FRFvsDphi[idp],
-                            newname=f"unrolled_{histo_FRFvsDphi[idp].GetName()}",
+                            histo_FRFvsDphi["inclusive"],
+                            newname=f"unrolled_{histo_FRFvsDphi['inclusive'].GetName()}",
                             cropNegativeBins=False,
                         )
-                    )
-
-                legEntries = ["inclusive"] + [
-                    f"#Delta#phi bin {idp}" for idp in range(nBinsDphi)
-                ]
-                ptBinRanges = []
-                for ipt in range(histo_FRFvsDphi["inclusive"].GetNbinsY()):
-                    ptBinRanges.append(
-                        "[{ptmin},{ptmax}] GeV".format(
-                            ptmin=int(
-                                histo_FRFvsDphi["inclusive"]
-                                .GetYaxis()
-                                .GetBinLowEdge(ipt + 1)
-                            ),
-                            ptmax=int(
-                                histo_FRFvsDphi["inclusive"]
-                                .GetYaxis()
-                                .GetBinLowEdge(ipt + 2)
-                            ),
+                    ]
+                    for idp in range(nBinsDphi):
+                        hists.append(
+                            unroll2Dto1D(
+                                histo_FRFvsDphi[idp],
+                                newname=f"unrolled_{histo_FRFvsDphi[idp].GetName()}",
+                                cropNegativeBins=False,
+                            )
                         )
+
+                    legEntries = ["inclusive"] + [
+                        f"#Delta#phi bin {idp}" for idp in range(nBinsDphi)
+                    ]
+                    ptBinRanges = []
+                    for ipt in range(histo_FRFvsDphi["inclusive"].GetNbinsY()):
+                        ptBinRanges.append(
+                            "[{ptmin},{ptmax}] GeV".format(
+                                ptmin=int(
+                                    histo_FRFvsDphi["inclusive"]
+                                    .GetYaxis()
+                                    .GetBinLowEdge(ipt + 1)
+                                ),
+                                ptmax=int(
+                                    histo_FRFvsDphi["inclusive"]
+                                    .GetYaxis()
+                                    .GetBinLowEdge(ipt + 2)
+                                ),
+                            )
+                        )
+                    drawNTH1(
+                        hists,
+                        legEntries,
+                        "Unrolled (%s, %s) bin" % (etaLabel, ptLabel),
+                        "Fakerate factor",
+                        f"FRFvsDeltaPhi_{charge}",
+                        outfolder,
+                        leftMargin=0.06,
+                        rightMargin=0.01,
+                        labelRatioTmp="BinX/inclusive::0.7,1.3",
+                        legendCoords="0.06,0.99,0.91,0.99;6",
+                        lowerPanelHeight=0.5,
+                        skipLumi=True,
+                        passCanvas=canvas_unroll,
+                        drawVertLines="{a},{b}".format(
+                            a=histo_FRFvsDphi["inclusive"].GetNbinsY(),
+                            b=histo_FRFvsDphi["inclusive"].GetNbinsX(),
+                        ),
+                        textForLines=ptBinRanges,
+                        transparentLegend=False,
+                        drawErrorAll=True,
+                        onlyLineColor=True,
+                        noErrorRatioDen=False,
+                        useLineFirstHistogram=True,
+                        setOnlyLineRatio=True,
+                        lineWidth=1,
                     )
-                drawNTH1(
-                    hists,
-                    legEntries,
-                    "Unrolled " + etaLabel + "-p_{{T}} bin",
-                    "Fakerate factor",
-                    f"FRFvsDeltaPhi_{charge}",
-                    outfolder,
-                    leftMargin=0.06,
-                    rightMargin=0.01,
-                    labelRatioTmp="BinX/inclusive::0.7,1.3",
-                    legendCoords="0.06,0.99,0.91,0.99;6",
-                    lowerPanelHeight=0.5,
-                    skipLumi=True,
-                    passCanvas=canvas_unroll,
-                    drawVertLines="{a},{b}".format(
-                        a=histo_FRFvsDphi["inclusive"].GetNbinsY(),
-                        b=histo_FRFvsDphi["inclusive"].GetNbinsX(),
-                    ),
-                    textForLines=ptBinRanges,
-                    transparentLegend=False,
-                    drawErrorAll=True,
-                    onlyLineColor=True,
-                    noErrorRatioDen=False,
-                    useLineFirstHistogram=True,
-                    setOnlyLineRatio=True,
-                    lineWidth=1,
-                )
             ##
             dphiMuonMetCut = args.dphiMuonMetCut * np.pi
-            hnarf = hnarf[
-                {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :: hist.sum]}
-            ]  # test dphi cut
+            if "DphiMuonMet" in hnarf.axes.name:
+                hnarf = hnarf[
+                    {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :: hist.sum]}
+                ]  # test dphi cut
             rootHists[d] = narf.hist_to_root(
                 hnarf
             )  # this is a THnD with eta-pt-charge-mt-passIso-hasJets-DphiMuonMet
-            hnarf_forplots = hnarf_forplots[
-                {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :]}
-            ]  # cut but do not integrate
-            hnarf_forplots = hnarf_forplots[{"mt": s[:: hist.rebin(2)]}]
+            if "DphiMuonMet" in hnarf_forplots.axes.name:
+                hnarf_forplots = hnarf_forplots[
+                    {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :]}
+                ]  # cut but do not integrate
+            if xABCD == "mt":
+                hnarf_forplots = hnarf_forplots[{xABCD: s[:: hist.rebin(2)]}]
             rootHists_forplots[d] = narf.hist_to_root(
                 hnarf_forplots
             )  # this is a THnD with eta-pt-charge-mt-passIso-hasJets-DphiMuonMet
@@ -925,9 +1003,10 @@ def runStudy(fname, charges, mainOutputFolder, args):
             # integrate njet and Dphi in appropriate range
             if "hasJets" in hnarf_asNominal.axes.name:
                 hnarf_asNominal = hnarf_asNominal[{"hasJets": s[:: hist.sum]}]
-            hnarf_asNominal = hnarf_asNominal[
-                {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :: hist.sum]}
-            ]
+            if "DphiMuonMet" in hnarf_asNominal.axes.name:
+                hnarf_asNominal = hnarf_asNominal[
+                    {"DphiMuonMet": s[complex(0, 0.01 + dphiMuonMetCut) :: hist.sum]}
+                ]
             hnarf_forMtWithDataDrivenFakes = hnarf_asNominal.copy()
             mtThreshold = float(args.mtNominalRange.split(",")[-1])
             # now select signal region
@@ -936,30 +1015,30 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 hnarf_asNominal = sel.fakeHistABCD(
                     hnarf_asNominal,
                     thresholdMT=mtThreshold,
-                    axis_name_mt="mt",
+                    axis_name_mt=xABCD,
                     integrateLowMT=True,
                     integrateHighMT=True,
                 )
                 hnarf_forMtWithDataDrivenFakes = sel.fakeHistABCD(
                     hnarf_forMtWithDataDrivenFakes,
                     thresholdMT=mtThreshold,
-                    axis_name_mt="mt",
+                    axis_name_mt=xABCD,
                     integrateLowMT=True,
                     integrateHighMT=False,
                 )
             else:
-                nMtBins = hnarf_asNominal.axes["mt"].size
+                nMtBins = hnarf_asNominal.axes[xABCD].size
                 # just select signal region: pass isolation and mT > mtThreshold with overflow included
                 hnarf_asNominal = hnarf_asNominal[
                     {
                         "passIso": True,
-                        "mt": s[complex(0, mtThreshold) :: hist.sum],
+                        xABCD: s[complex(0, mtThreshold) :: hist.sum],
                     }
                 ]
                 hnarf_forMtWithDataDrivenFakes = hnarf_forMtWithDataDrivenFakes[
                     {
                         "passIso": True,
-                        "mt": s[complex(0, mtThreshold) : nMtBins],
+                        xABCD: s[complex(0, mtThreshold) : nMtBins],
                     }
                 ]
             rootHists_asNominal[d] = narf.hist_to_root(hnarf_asNominal)
@@ -972,7 +1051,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                     "charge": 0 if charge in ["minus", "inclusive"] else 1,
                 }
             ]
-            if d in datasetsNoQCD:
+            if d in datasets:
                 rootHists_forMtWithDataDrivenFakes[d] = narf.hist_to_root(
                     hnarf_forMtWithDataDrivenFakes
                 )
@@ -1002,17 +1081,20 @@ def runStudy(fname, charges, mainOutputFolder, args):
 
         axisVar = {
             0: ["muon_eta", etaLabel],
-            1: ["muon_pt", "p_{T} (GeV)"],
-            3: ["mT", args.met + " m_{T} (GeV)"],
-            6: ["deltaPhiMuonMET", "#Delta#phi(#mu,MET) (GeV)"],
+            1: ["muon_pt", ptLabel + " (GeV)"],
         }
+        if noMtABCD:
+            axisVar[3] = [xABCD, zAxisName]
+        else:
+            axisVar[3] = ["mT", args.met + f" {mtLabel} (GeV)"]
+            axisVar[6] = ["deltaPhiMuonMET", dphiMuMetLabel]
 
         # bin number from root histogram
         chargeBin = 1 if charge in ["minus", "inclusive"] else 2
 
         # plot mT with data-driven fakes, as a test (should add the mT correction in fact)
         hmcMt = {}
-        for d in datasetsNoQCD:
+        for d in datasets:
             if d == "Data":
                 continue
             hmcMt[d] = rootHists_forMtWithDataDrivenFakes[d]
@@ -1020,14 +1102,35 @@ def runStudy(fname, charges, mainOutputFolder, args):
         if "Data" in rootHists_forMtWithDataDrivenFakes.keys():
             hdataMt = rootHists_forMtWithDataDrivenFakes["Data"]
 
+            plotName = xABCD + "_passIso_jetInclusive_passCut"
+            plotDistribution1D(
+                hdataMt,
+                hmcMt,
+                datasetsNoFakes,
+                outfolder_dataMC,
+                canvas1Dshapes=canvas1Dshapes,
+                xAxisName=zAxisName,
+                plotName=plotName,
+                scaleProcs={"QCD": args.scaleQCDMC} if args.scaleQCDMC else {},
+            )
             plotDistribution1D(
                 hdataMt,
                 hmcMt,
                 datasetsNoQCD,
                 outfolder_dataMC,
                 canvas1Dshapes=canvas1Dshapes,
-                xAxisName=f"{args.met} m_{{T}} (GeV)",
-                plotName=f"mT_passIso_jetInclusive_passMT_dataDrivenFakes",
+                xAxisName=zAxisName,
+                plotName=f"{plotName}_dataDrivenFakes",
+            )
+            # hmcMt_noFakes = {d: v for d,v in hmcMt.items() if d != "Fake"}
+            plotDistribution1D(
+                hdataMt,
+                hmcMt,  # hmcMt_noFakes,
+                datasetsNoQCDFakes,
+                outfolder_dataMC,
+                canvas1Dshapes=canvas1Dshapes,
+                xAxisName=zAxisName,
+                plotName=f"{plotName}_noFakes",
             )
 
         # plot mT, eta, pt in some regions iso-nJet regions, for checks
@@ -1035,113 +1138,128 @@ def runStudy(fname, charges, mainOutputFolder, args):
         for xbin in axisVar.keys():
             if "Data" not in rootHists_forplots.keys():
                 continue
-            # Dphi in 4 mT bins, for jet inclusive and pass/fail iso
-            if xbin == 6:
-                mtRanges = [0, 20, 40, 60, -1]
-                for imt in range(len(mtRanges) - 1):
-                    mtLow = str(mtRanges[imt])
-                    mtHigh = "inf" if mtRanges[imt + 1] < 0 else str(mtRanges[imt + 1])
-                    mtTitle = f"mT{mtLow}to{mtHigh}"
-                    mtRange = [mtRanges[imt], mtRanges[imt + 1]]
-                    plotProjection1D(
-                        rootHists_forplots,
-                        datasetsNoFakes,
-                        outfolder_dataMC,
-                        canvas1Dshapes=canvas1Dshapes,
-                        chargeBin=chargeBin,
-                        projectAxisToKeep=xbin,
-                        xAxisName=axisVar[xbin][1],
-                        plotName=f"{axisVar[xbin][0]}_failIso_jetInclusive_{mtTitle}",
-                        isoAxisRange=[1, 1],
-                        jetAxisRange=[1, 2],
-                        mTvalueRange=mtRange,
-                        scaleQCDMC=args.scaleQCDMC,
-                    )
-                    plotProjection1D(
-                        rootHists_forplots,
-                        datasetsNoFakes,
-                        outfolder_dataMC,
-                        canvas1Dshapes=canvas1Dshapes,
-                        chargeBin=chargeBin,
-                        projectAxisToKeep=xbin,
-                        xAxisName=axisVar[xbin][1],
-                        plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive_{mtTitle}",
-                        isoAxisRange=[2, 2],
-                        jetAxisRange=[1, 2],
-                        mTvalueRange=mtRange,
-                        scaleQCDMC=args.scaleQCDMC,
-                    )
-                continue  # no need for the rest of the plots for this variable
-            ######
-
-            plotProjection1D(
-                rootHists_forplots,
-                datasetsNoFakes,
-                outfolder_dataMC,
-                canvas1Dshapes=canvas1Dshapes,
-                chargeBin=chargeBin,
-                projectAxisToKeep=xbin,
-                xAxisName=axisVar[xbin][1],
-                plotName=f"{axisVar[xbin][0]}_passIso_1orMoreJet",
-                isoAxisRange=[2, 2],
-                jetAxisRange=[2, 2],
-                scaleQCDMC=args.scaleQCDMC,
-            )
-            plotProjection1D(
-                rootHists_forplots,
-                datasetsNoFakes,
-                outfolder_dataMC,
-                canvas1Dshapes=canvas1Dshapes,
-                chargeBin=chargeBin,
-                projectAxisToKeep=xbin,
-                xAxisName=axisVar[xbin][1],
-                plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive",
-                isoAxisRange=[2, 2],
-                jetAxisRange=[1, 2],
-                scaleQCDMC=args.scaleQCDMC,
-            )
-            plotProjection1D(
-                rootHists_forplots,
-                datasetsNoFakes,
-                outfolder_dataMC,
-                canvas1Dshapes=canvas1Dshapes,
-                chargeBin=chargeBin,
-                projectAxisToKeep=xbin,
-                xAxisName=axisVar[xbin][1],
-                plotName=f"{axisVar[xbin][0]}_failIso_1orMoreJet",
-                isoAxisRange=[1, 1],
-                jetAxisRange=[2, 2],
-                scaleQCDMC=args.scaleQCDMC,
-            )
-            plotProjection1D(
-                rootHists_forplots,
-                datasetsNoFakes,
-                outfolder_dataMC,
-                canvas1Dshapes=canvas1Dshapes,
-                chargeBin=chargeBin,
-                projectAxisToKeep=xbin,
-                xAxisName=axisVar[xbin][1],
-                plotName=f"{axisVar[xbin][0]}_failIso_jetInclusive",
-                isoAxisRange=[1, 1],
-                jetAxisRange=[1, 2],
-                scaleQCDMC=args.scaleQCDMC,
-            )
-            # signal region adding mT cut too
-            plotProjection1D(
-                rootHists_forplots,
-                datasetsNoFakes,
-                outfolder_dataMC,
-                canvas1Dshapes=canvas1Dshapes,
-                chargeBin=chargeBin,
-                projectAxisToKeep=xbin,
-                xAxisName=axisVar[xbin][1],
-                plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive_passMt",
-                isoAxisRange=[2, 2],
-                jetAxisRange=[1, 2],
-                mTvalueRange=[40, -1],
-                scaleQCDMC=args.scaleQCDMC,
-            )
-
+            if noMtABCD:
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive",
+                    isoAxisRange=[2, 2],
+                    jetAxisRange=None,
+                    scaleQCDMC=args.scaleQCDMC,
+                    noMtABCD=noMtABCD,
+                )
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_failIso_jetInclusive",
+                    isoAxisRange=[1, 1],
+                    jetAxisRange=None,
+                    scaleQCDMC=args.scaleQCDMC,
+                    noMtABCD=noMtABCD,
+                )
+            else:
+                # Dphi in 4 mT bins, for jet inclusive and pass/fail iso
+                if xbin == 6:
+                    mtRanges = [0, 20, 40, 60, -1]
+                    for imt in range(len(mtRanges) - 1):
+                        mtLow = str(mtRanges[imt])
+                        mtHigh = (
+                            "inf" if mtRanges[imt + 1] < 0 else str(mtRanges[imt + 1])
+                        )
+                        mtTitle = f"mT{mtLow}to{mtHigh}"
+                        mtRange = [mtRanges[imt], mtRanges[imt + 1]]
+                        plotProjection1D(
+                            rootHists_forplots,
+                            datasetsNoFakes,
+                            outfolder_dataMC,
+                            canvas1Dshapes=canvas1Dshapes,
+                            chargeBin=chargeBin,
+                            projectAxisToKeep=xbin,
+                            xAxisName=axisVar[xbin][1],
+                            plotName=f"{axisVar[xbin][0]}_failIso_jetInclusive_{mtTitle}",
+                            isoAxisRange=[1, 1],
+                            jetAxisRange=[1, 2],
+                            mTvalueRange=mtRange,
+                            scaleQCDMC=args.scaleQCDMC,
+                        )
+                        plotProjection1D(
+                            rootHists_forplots,
+                            datasetsNoFakes,
+                            outfolder_dataMC,
+                            canvas1Dshapes=canvas1Dshapes,
+                            chargeBin=chargeBin,
+                            projectAxisToKeep=xbin,
+                            xAxisName=axisVar[xbin][1],
+                            plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive_{mtTitle}",
+                            isoAxisRange=[2, 2],
+                            jetAxisRange=[1, 2],
+                            mTvalueRange=mtRange,
+                            scaleQCDMC=args.scaleQCDMC,
+                        )
+                    continue  # no need for the rest of the plots for this variable
+                ######
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_passIso_1orMoreJet",
+                    isoAxisRange=[2, 2],
+                    jetAxisRange=[2, 2],
+                    scaleQCDMC=args.scaleQCDMC,
+                )
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_failIso_1orMoreJet",
+                    isoAxisRange=[1, 1],
+                    jetAxisRange=[2, 2],
+                    scaleQCDMC=args.scaleQCDMC,
+                )
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_passIso_jetInclusive",
+                    isoAxisRange=[2, 2],
+                    jetAxisRange=[1, 2],
+                    scaleQCDMC=args.scaleQCDMC,
+                )
+                plotProjection1D(
+                    rootHists_forplots,
+                    datasetsNoFakes,
+                    outfolder_dataMC,
+                    canvas1Dshapes=canvas1Dshapes,
+                    chargeBin=chargeBin,
+                    projectAxisToKeep=xbin,
+                    xAxisName=axisVar[xbin][1],
+                    plotName=f"{axisVar[xbin][0]}_failIso_jetInclusive",
+                    isoAxisRange=[1, 1],
+                    jetAxisRange=[1, 2],
+                    scaleQCDMC=args.scaleQCDMC,
+                )
         ###################################
         ###################################
         ###   Now the actual study on fakes
@@ -1155,14 +1273,16 @@ def runStudy(fname, charges, mainOutputFolder, args):
         # set charge from charge axis
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
+        if not noMtABCD:
+            histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
         # now get a TH3
         histoPassIso = histo_fakes.Projection(0, 1, 3, "E")
         histoPassIso.SetName("fakes_passIso")
         histoPassIso.SetTitle("fakes_passIso")
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(4).SetRange(1, 1)  # FailIso
-        histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
+        if not noMtABCD:
+            histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
         histoFailIso = histo_fakes.Projection(0, 1, 3, "E")
         histoFailIso.SetName("fakes_failIso")
         histoFailIso.SetTitle("fakes_failIso")
@@ -1172,11 +1292,12 @@ def runStudy(fname, charges, mainOutputFolder, args):
         mtThreshold = float(args.mtNominalRange.split(",")[-1])
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(3).SetRange(
-            histo_fakes.GetAxis(3).FindFixBin(mtThreshold + 0.001),
+            histo_fakes.GetAxis(3).FindFixBin(mtThreshold + 0.0005),
             histo_fakes.GetAxis(3).GetNbins(),
         )  # high mT
         histo_fakes.GetAxis(4).SetRange(1, 1)  # FailIso
-        histo_fakes.GetAxis(5).SetRange(1, 2)  # jet inclusive
+        if not noMtABCD:
+            histo_fakes.GetAxis(5).SetRange(1, 2)  # jet inclusive
         histoPassMtFailIso = histo_fakes.Projection(0, 1, 3, "E")
         histoPassMtFailIso.SetName("fakes_passMt_failIso_jetInclusive")
         histoPassMtFailIso.SetTitle("fakes_passMt_failIso_jetInclusive")
@@ -1190,10 +1311,11 @@ def runStudy(fname, charges, mainOutputFolder, args):
         # also integrate mt < mtThreshold
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(3).SetRange(
-            1, histo_fakes.GetAxis(3).FindFixBin(mtThreshold - 0.001)
+            1, histo_fakes.GetAxis(3).FindFixBin(mtThreshold - 0.0005)
         )
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        histo_fakes.GetAxis(5).SetRange(1, 2)  # always integrate jet here
+        if not noMtABCD:
+            histo_fakes.GetAxis(5).SetRange(1, 2)  # always integrate jet here
         # now get a TH2 for passIso
         histoPassIsoLowMt_jetInclusive_vsEtaPt = histo_fakes.Projection(1, 0, "E")
         histoPassIsoLowMt_jetInclusive_vsEtaPt.SetName(
@@ -1228,7 +1350,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
         ## now redo the same for the >=1 jet region
         ## could be done from previous TH3 histograms integrating in mT, but they don't always have the same jet cut
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        histo_fakes.GetAxis(5).SetRange(2, 2)  # always integrate jet here
+        if not noMtABCD:
+            histo_fakes.GetAxis(5).SetRange(2, 2)  # always integrate jet here
         # now get a TH2 for passIso
         histoPassIsoLowMt_1orMoreJet_vsEtaPt = histo_fakes.Projection(1, 0, "E")
         histoPassIsoLowMt_1orMoreJet_vsEtaPt.SetName(
@@ -1321,7 +1444,11 @@ def runStudy(fname, charges, mainOutputFolder, args):
         # histoFailIso.Rebin3D(args.rebinEta, args.rebinPt, 1)
         # histoPassMtFailIso.Rebin3D(args.rebinEta, args.rebinPt, 1)
 
-        mtEdges = [round(int(x), 1) for x in args.mtBinEdges.split(",")]
+        mtEdges = (
+            [round(float(x), 3) for x in args.mtBinEdges.strip().split(",")]
+            if noMtABCD
+            else [round(int(x), 1) for x in args.mtBinEdges.split(",")]
+        )
         nMtBins = len(mtEdges) - 1
         ratio = []
         for imt in range(nMtBins):
@@ -1345,10 +1472,10 @@ def runStudy(fname, charges, mainOutputFolder, args):
             )
 
             h2PassIso.SetTitle(
-                "Low Iso: %s m_{T} #in [%d, %d]" % (args.met, lowEdge, highEdge)
+                "Low Iso: %s #in [%d, %d]" % (zAxisName, lowEdge, highEdge)
             )
             h2FailIso.SetTitle(
-                "High Iso: %s m_{T} #in [%d, %d]" % (args.met, lowEdge, highEdge)
+                "High Iso: %s #in [%d, %d]" % (zAxisName, lowEdge, highEdge)
             )
             if not args.skipPlot2D:
                 drawCorrelationPlot(
@@ -1383,7 +1510,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 )
 
             ratio.append(h2PassIso.Clone(f"fakerateFactor_mt{lowEdge}to{highEdge}"))
-            ratio[imt].SetTitle("%s m_{T} #in [%d, %d]" % (args.met, lowEdge, highEdge))
+            ratio[imt].SetTitle("%s #in [%d, %d]" % (zAxisName, lowEdge, highEdge))
             ratio[imt].Divide(h2FailIso)
             if not args.skipPlot2D:
                 drawCorrelationPlot(
@@ -1403,7 +1530,14 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 )
 
         if args.mtNominalRange:
-            lowEdge, highEdge = map(int, args.mtNominalRange.split(","))
+            lowEdge, highEdge = (
+                map(float, args.mtNominalRange.split(","))
+                if noMtABCD
+                else map(int, args.mtNominalRange.split(","))
+            )
+            lowEdgeStr, highEdgeStr = args.mtNominalRange.split(",")
+            lowEdgeStr = lowEdgeStr.replace(".", "p")
+            highEdgeStr = highEdgeStr.replace(".", "p")
             binStart = histoPassIso.GetZaxis().FindFixBin(lowEdge)
             binEnd = (
                 histoPassIso.GetZaxis().FindFixBin(highEdge + 0.001) - 1
@@ -1418,13 +1552,13 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 )
             h2PassIso = getTH2fromTH3(
                 histoPassIso,
-                f"pt_eta_nominalmt{lowEdge}to{highEdge}_passIso",
+                f"pt_eta_nominalmt{lowEdgeStr}to{highEdgeStr}_passIso",
                 binStart,
                 binEnd,
             )
             h2FailIso = getTH2fromTH3(
                 histoFailIso,
-                f"pt_eta_nominalmt{lowEdge}to{highEdge}_failIso",
+                f"pt_eta_nominalmt{lowEdgeStr}to{highEdgeStr}_failIso",
                 binStart,
                 binEnd,
             )
@@ -1432,10 +1566,10 @@ def runStudy(fname, charges, mainOutputFolder, args):
             cropNegativeContent(h2FailIso)
 
             nominalFakerateFactor = h2PassIso.Clone(
-                f"nominalFakerateFactor_mt{lowEdge}to{highEdge}"
+                f"nominalFakerateFactor_mt{lowEdgeStr}to{highEdgeStr}"
             )
             nominalFakerateFactor.SetTitle(
-                "%s m_{T} #in [%d, %d]" % (args.met, lowEdge, highEdge)
+                "%s #in [%s, %s]" % (zAxisName, lowEdgeStr, highEdgeStr)
             )
             nominalFakerateFactor.Divide(h2FailIso)
             drawCorrelationPlot(
@@ -1456,22 +1590,22 @@ def runStudy(fname, charges, mainOutputFolder, args):
             # plot also at high mt, including overflow
             h2PassIso_highMt = getTH2fromTH3(
                 histoPassIso,
-                f"pt_eta_mt{highEdge}toInf_passIso",
+                f"pt_eta_mt{highEdgeStr}toInf_passIso",
                 binEnd,
                 1 + histoPassIso.GetNbinsZ(),
             )
             h2FailIso_highMt = getTH2fromTH3(
                 histoFailIso,
-                f"pt_eta_mt{highEdge}toInf_failIso",
+                f"pt_eta_mt{highEdgeStr}toInf_failIso",
                 binEnd,
                 1 + histoFailIso.GetNbinsZ(),
             )
             cropNegativeContent(h2PassIso_highMt)
             cropNegativeContent(h2FailIso_highMt)
             highMtFakerateFactor = h2PassIso_highMt.Clone(
-                f"highMtFakerateFactor_mt{highEdge}toInf"
+                f"highMtFakerateFactor_mt{highEdgeStr}toInf"
             )
-            highMtFakerateFactor.SetTitle("%s m_{T} > %d" % (args.met, highEdge))
+            highMtFakerateFactor.SetTitle("%s > %s" % (zAxisName, highEdgeStr))
             highMtFakerateFactor.Divide(h2FailIso_highMt)
             drawCorrelationPlot(
                 highMtFakerateFactor,
@@ -1514,13 +1648,13 @@ def runStudy(fname, charges, mainOutputFolder, args):
             drawNTH1(
                 [highMtFRF_unrolled, nomiFRF_unrolled],
                 [highMtFakerateFactor.GetTitle(), nominalFakerateFactor.GetTitle()],
-                "Unrolled eta-p_{T} bin",
+                "Unrolled (%s, %s) bin" % (etaLabel, ptLabel),
                 "Fakerate factor",
                 f"FRFnomiAndHighMt_etaPt_{charge}",
                 outfolder,
                 leftMargin=0.06,
                 rightMargin=0.01,
-                labelRatioTmp="Nomi/highMt",
+                labelRatioTmp=f"High {zAxisName} / nomi",
                 legendCoords="0.06,0.99,0.91,0.99;2",
                 lowerPanelHeight=0.5,
                 skipLumi=True,
@@ -1556,7 +1690,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
 
         hFRFcorr = ROOT.TH2D(
             f"fakerateFactorCorrection_{charge}",
-            "%s m_{T} > %d GeV" % (args.met, int(args.mtNominalRange.split(",")[1])),
+            "%s > %s GeV" % (zAxisName, args.mtNominalRange.split(",")[1]),
             h2PassIso.GetNbinsX(),
             round(etaLow, 1),
             round(etaHigh, 1),
@@ -1586,7 +1720,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             ptBinHigh = int(h2PassIso.GetYaxis().GetBinLowEdge(ipt + 1))
             fakerateFactor_vs_etaMt = ROOT.TH2D(
                 "fakerateFactor_vs_etaMt_pt%dto%d" % (ptBinLow, ptBinHigh),
-                "Muon p_{T} #in [%d, %d] GeV" % (ptBinLow, ptBinHigh),
+                "%s #in [%d, %d] GeV" % (ptLabel, ptBinLow, ptBinHigh),
                 h2PassIso.GetNbinsX(),
                 round(etaLow, 1),
                 round(etaHigh, 1),
@@ -1613,8 +1747,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 # logger.info(f"ieta = {ieta}    {ptBinLow} < pt < {ptBinHigh}     {etaBinLow} < eta < {etaBinHigh}    {etaBinLow} < etaNoRound < {etaBinHigh}")
                 hFRfactorVsMt = ROOT.TH1D(
                     f"hFRfactorVsMt_ieta{ieta}_pt{ptBinLow}to{ptBinHigh}",
-                    "%.1f < %s < %.1f, p_{T} #in [%d, %d] GeV"
-                    % (etaBinLow, etaLabel, etaBinHigh, ptBinLow, ptBinHigh),
+                    "%.1f < %s < %.1f, %s #in [%d, %d] GeV"
+                    % (etaBinLow, etaLabel, etaBinHigh, ptLabel, ptBinLow, ptBinHigh),
                     nMtBins,
                     array.array("d", mtEdges),
                 )
@@ -1634,9 +1768,13 @@ def runStudy(fname, charges, mainOutputFolder, args):
                         hTmp[imt - 1].SetBinContent(1, max(0.0, binContent))
                         hTmp[imt - 1].SetBinError(1, binError)
 
-                textLatex = (
-                    "%.1f < %s < %.1f;%d < p_{T} < %d GeV::0.2,0.88,0.08,0.045"
-                    % (etaBinLow, etaLabel, etaBinHigh, ptBinLow, ptBinHigh)
+                textLatex = "%.1f < %s < %.1f;%d < %s < %d GeV::0.2,0.88,0.08,0.045" % (
+                    etaBinLow,
+                    etaLabel,
+                    etaBinHigh,
+                    ptBinLow,
+                    ptLabel,
+                    ptBinHigh,
                 )
                 if nMtBins > 2:
                     ## get high mt value to evaluate the correction, can use the mean of the mt distribution for each etapt bin
@@ -1676,6 +1814,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
                         useBinnedCorr=args.useBinnedCorrection,
                         histoChi2diffTest=histoChi2diffTest,
                         histoPullsPol1Slope=histoPullsPol1Slope,
+                        noMtABCD=noMtABCD,
+                        erfAsMainModel=args.fitErf,
                     )
                     # logger.info(f"{valFRF}, {valFRFCap}")
                     if valFRF < 0:
@@ -1851,7 +1991,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             drawNTH1(
                 hList,
                 legEntries,
-                "Unrolled eta-p_{T} bin",
+                "Unrolled (%s, %s) bin" % (etaLabel, ptLabel),
                 "FRF correction",
                 f"FRFcorrAndUnc_etaPt_{charge}",
                 outfolder,
@@ -1895,7 +2035,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             drawNTH1(
                 hListV2,
                 legEntriesV2,
-                "Unrolled eta-p_{T} bin",
+                "Unrolled (%s, %s) bin" % (etaLabel, ptLabel),
                 "FRF correction::0.5,1.6",
                 f"FRFcorrAndUnc_etaPt_{charge}_v2",
                 outfolder,
@@ -1945,7 +2085,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                 nominalFakerateFactor.GetTitle(),
                 f"{nominalFakerateFactor.GetTitle()} with FRF corr",
             ],
-            "Unrolled eta-p_{T} bin",
+            "Unrolled (%s, %s) bin" % (etaLabel, ptLabel),
             "Fakerate factor",
             f"FRFnomiAndHighMtAndCorr_etaPt_{charge}",
             outfolder,
@@ -2098,7 +2238,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
 
 def runStudyVsDphi(fname, charges, mainOutputFolder, args):
 
-    etaLabel = "#eta" if not args.absEta else "|#eta|"
+    etaLabel = "#eta^{#mu}" if not args.absEta else "|#eta^{#mu}|"
+    ptLabel = "#it{p}_{T}^{#mu}"
 
     xAxisName = args.xAxisName
     yAxisName = args.yAxisName
@@ -2167,9 +2308,9 @@ def runStudyVsDphi(fname, charges, mainOutputFolder, args):
                 logger.warning(f"Histogram has {nPtBins} pt bins")
             nPtBins = hnarf.axes["pt"].size
 
-            lowMtUpperBound = int(args.mtNominalRange.split(",")[1])
-            hnarf = hnarf[{"mt": s[: complex(0, lowMtUpperBound) : hist.sum]}]
-            # hnarf = hnarf[{"mt" : s[::hist.sum]}]
+            lowMtUpperBound = float(args.mtNominalRange.split(",")[1])
+            hnarf = hnarf[{args.xABCD: s[: complex(0, lowMtUpperBound) : hist.sum]}]
+            # hnarf = hnarf[{args.xABCD : s[::hist.sum]}]
             chargeIndex = 0 if charge in ["minus", "inclusive"] else 1
             hnarf = hnarf[{"charge": s[chargeIndex : chargeIndex + 1 : hist.sum]}]
 
@@ -2251,13 +2392,13 @@ def runStudyVsDphi(fname, charges, mainOutputFolder, args):
                 for b in etapt_bins:
                     hs.append(hists[b])
                     etaText = f"{htmp.GetXaxis().GetBinLowEdge(b[0]):.1f} < {etaLabel} < {htmp.GetXaxis().GetBinLowEdge(b[0]+1):.1f}"
-                    ptText = f"{htmp.GetYaxis().GetBinLowEdge(b[1]):.0f} < p_{{T}} < {htmp.GetYaxis().GetBinLowEdge(b[1]+1):.0f}"
+                    ptText = f"{htmp.GetYaxis().GetBinLowEdge(b[1]):.0f} < {ptLabel} < {htmp.GetYaxis().GetBinLowEdge(b[1]+1):.0f}"
                     legEntries.append(f"{etaText} && {ptText} GeV")
 
                 drawNTH1(
                     hs,
                     legEntries,
-                    "#Delta#phi(#mu,MET)",
+                    "#Delta#phi(#mu, #it{p}_{T}^{miss})",
                     "Fakerate factor",
                     f"FRFvsDeltaPhi_{d}_someBins_ipt{ipt}_{charge}",
                     outfolder,
@@ -2285,11 +2426,17 @@ if __name__ == "__main__":
     parser = common_plot_parser()
     parser.add_argument("inputfile", type=str, nargs=1)
     parser.add_argument("outputfolder", type=str, nargs=1)
-    parser.add_argument("-x", "--xAxisName", default="Muon #eta", help="x axis name")
     parser.add_argument(
-        "-y", "--yAxisName", default="Muon p_{T} (GeV)", help="y axis name"
+        "--xABCD",
+        default="mt",
+        choices=["mt", "oneMinusCosdphi", "mtOverPt", "altMt", "dxybs"],
+        help="X variable to use for ABCD method (y is pass isolation)",
     )
-    parser.add_argument("-z", "--zAxisName", default="m_{T} (GeV)", help="z axis name")
+    parser.add_argument("-x", "--xAxisName", default="#eta^{#mu}", help="x axis name")
+    parser.add_argument(
+        "-y", "--yAxisName", default="#it{p}_{T}^{#mu} (GeV)", help="y axis name"
+    )
+    parser.add_argument("-z", "--zAxisName", default="", help="z axis name")
     parser.add_argument(
         "--met",
         default="DeepMET",
@@ -2326,6 +2473,11 @@ if __name__ == "__main__":
         default=1,
         type=int,
         help="Degree for polynomial used in the fits",
+    )
+    parser.add_argument(
+        "--fitErf",
+        action="store_true",
+        help="Main fit is an (inverse) error function, only if using mT for ABCD",
     )
     parser.add_argument(
         "--maxPt",
@@ -2396,9 +2548,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger = logging.setup_logger(os.path.basename(__file__), args.verbose)
-    # if args.absEta:
-    #    logger.error("Option --absolute-eta not implemented correctly yet. Abort")
-    #    quit()
 
     if args.charge == "both":
         charges = ["plus", "minus"]
@@ -2407,7 +2556,11 @@ if __name__ == "__main__":
 
     ROOT.TH1.SetDefaultSumw2()
 
-    subFolder = f"/{args.integralMtMethod}Integral_fit{args.mtFitRange.replace(',','to')}_pol{args.fitPolDegree}"
+    fitRangeStr = args.mtFitRange.strip()
+    fitRangeStr = fitRangeStr.replace(",", "to").replace(".", "p").replace("-", "m")
+    subFolder = (
+        f"/{args.integralMtMethod}Integral_fit{fitRangeStr}_pol{args.fitPolDegree}"
+    )
     if args.rebinEta > 1:
         subFolder += f"_rebinEta{args.rebinEta}"
     if args.rebinPt > 1:
@@ -2424,6 +2577,10 @@ if __name__ == "__main__":
         subFolder += f"_absEta"
     if args.postfix:
         subFolder += f"_{args.postfix}"
+    if args.xABCD != "mt":
+        subFolder += f"_{args.xABCD}"
+    if args.fitErf:
+        subFolder += f"_fitErf"
     subFolder += "/"
     outdir_original = args.outputfolder[0] + subFolder
 

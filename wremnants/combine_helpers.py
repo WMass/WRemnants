@@ -1,7 +1,6 @@
 import hist
 import numpy as np
 
-from utilities.io_tools import input_tools
 from wremnants import histselections, syst_tools
 from wremnants.datasets.datagroup import Datagroup_member
 from wums import boostHistHelpers as hh
@@ -89,20 +88,20 @@ def add_mass_diff_variations(
 
 
 def add_recoil_uncertainty(
-    card_tool,
+    datagroups,
     samples,
     passSystToFakes=False,
     pu_type="highPU",
     flavor="",
     group_compact=True,
 ):
-    met = input_tools.args_from_metadata(card_tool, "met")
+    met = datagroups.args_from_metadata("met")
     if flavor == "":
-        flavor = input_tools.args_from_metadata(card_tool, "flavor")
+        flavor = datagroups.args_from_metadata("flavor")
     if pu_type == "highPU" and (
         met in ["RawPFMET", "DeepMETReso", "DeepMETPVRobust", "DeepMETPVRobustNoPUPPI"]
     ):
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
@@ -117,7 +116,7 @@ def add_recoil_uncertainty(
 
     if pu_type == "lowPU":
         group_compact = False
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_syst",
             processes=samples,
             mirror=True,
@@ -130,7 +129,7 @@ def add_recoil_uncertainty(
             passToFakes=passSystToFakes,
         )
 
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
@@ -291,7 +290,7 @@ def add_nominal_with_correlated_BinByBinStat(
 
 
 def add_electroweak_uncertainty(
-    card_tool,
+    datagroups,
     ewUncs,
     flavor="mu",
     samples="single_v_samples",
@@ -299,7 +298,7 @@ def add_electroweak_uncertainty(
     wlike=False,
 ):
     # different uncertainty for W and Z samples
-    all_samples = card_tool.procGroups[samples]
+    all_samples = datagroups.procGroups[samples]
     z_samples = [p for p in all_samples if p[0] == "Z"]
     w_samples = [p for p in all_samples if p[0] == "W"]
 
@@ -307,7 +306,7 @@ def add_electroweak_uncertainty(
         if "renesanceEW" in ewUnc:
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
@@ -320,7 +319,7 @@ def add_electroweak_uncertainty(
                 )
         elif ewUnc == "powhegFOEW":
             if z_samples:
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
@@ -332,7 +331,7 @@ def add_electroweak_uncertainty(
                     passToFakes=passSystToFakes,
                     name="ewScheme",
                 )
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
@@ -377,7 +376,7 @@ def add_electroweak_uncertainty(
             else:
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
-            card_tool.addSystematic(
+            datagroups.addSystematic(
                 f"{ewUnc}_Corr",
                 systAxes=["systIdx"],
                 mirror=True,
