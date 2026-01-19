@@ -384,9 +384,8 @@ def build_graph(df, dataset):
             df, dataset.name, gen_levels, mode="w_mass" if isW else "z_wlike"
         )
 
-        lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
-
         for level in gen_levels:
+            lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
             lep_cols = [
                 f"{level}Lep_absEta",
                 f"{level}Lep_pt",

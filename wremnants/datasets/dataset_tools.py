@@ -139,7 +139,7 @@ def makeFilelist(
             files = buildFileList(path)
             if maxFiles > 0 and len(files) >= maxFiles:
                 logger.info(
-                    f"Booking {len(files)} of {maxFiles} files with tag {prod_tag} with path {path}"
+                    f"Booking {maxFiles} of {len(files)} files with tag {prod_tag} with path {path}"
                 )
                 break
 
@@ -153,7 +153,7 @@ def makeFilelist(
                     logger.warning(f"Falling back to tag {prod_tag} with path {path}")
                 else:
                     logger.info(
-                        f"Booking {len(files)} of {maxFiles} files with tag {prod_tag} with path {path}"
+                        f"Booking {maxFiles} of {len(files)} files with tag {prod_tag} with path {path}"
                     )
                 break
 

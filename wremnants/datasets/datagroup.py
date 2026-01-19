@@ -83,7 +83,7 @@ class Datagroup(object):
 
         if member not in [m for m in self.members]:
             logger.warning(
-                f"The member {member.name} can not be found in the group {self.name}! Do nothing here."
+                f"The member {member.name} can not be found in the group {self.name}! Available members are {[m.name for m in self.members]}. Do nothing here."
             )
             return
 

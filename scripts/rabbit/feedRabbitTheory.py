@@ -11,7 +11,7 @@ import rabbit.io_tools
 from rabbit.tensorwriter import TensorWriter
 from utilities import common, parsing
 from utilities.io_tools import input_tools
-from wremnants import theory_corrections
+from wremnants import theory_corrections, theory_tools
 from wremnants.datasets.datagroups import Datagroups
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -289,11 +289,14 @@ class AlphaSTheoryFitTW(TensorWriter):
                 return name
         self.logger.debug(f"Did not find absY axis! Available axes: {h.axes.name}")
 
-    def get_charge_axis_name(self, h):
+    def get_charge_axis_name(self, h, v=0):
         for name in ["chargeVgen", "charge", "qGen"]:
             if name in h.axes.name:
                 return name
-        self.logger.debug(f"Did not find charge axis! Available axes: {h.axes.name}")
+        if v:
+            self.logger.debug(
+                f"Did not find charge axis! Available axes: {h.axes.name}"
+            )
 
     def get_mass_axis_name(self, h):
         for name in ["massVgen", "Q"]:
@@ -476,9 +479,10 @@ parser.add_argument(
     "--fitresultMapping", type=str, default="Select helicitySig:slice(0,1)"
 )
 parser.add_argument(
-    "--fitresultChannelSigmaUL",
+    "--channelSigmaUL",
     type=str,
-    default="Select helicitySig:slice(0,1)_ch0_masked",
+    default="Select helicitySig:slice(0,1) ch0_masked",
+    help="Channel name for the sigmaUL distribution in the fit result.",
 )
 parser.add_argument(
     "--pseudodataGenerator",
@@ -496,10 +500,11 @@ parser.add_argument(
     "Expect the prediction histogram to be named as <generator>_hist",
 )
 parser.add_argument(
-    "--constrainAlphaS", action="store_true", help="Constrain alpha_S in the fit."
-)
-parser.add_argument(
-    "--constrainMW", action="store_true", help="Constrain mW in the fit."
+    "--nois",
+    nargs="+",
+    type=str,
+    default=["alphaS"],
+    choices=["alphaS", "mW"],
 )
 parser.add_argument("--noFitSigmaUL", action="store_true", help="Don't fit sigmaUL.")
 parser.add_argument(
@@ -518,7 +523,7 @@ parser.add_argument(
     "Will be stitched with the --predGenerator file.",
 )
 parser.add_argument(
-    "--fitresultChannelAis",
+    "--channelAis",
     type=str,
     default="AngularCoefficients ch0_masked ptVGen:rebin(0,3,6,9,12,16,20,24,28,33,44)_ch0_masked",
 )
@@ -527,9 +532,9 @@ parser.add_argument(
     "--fitW",
     action="store_true",
     help="Include W in the fit."
-    "Will use --predWFile for predictions and --infileW for the unfolded distribution.",
+    "Will use --predWFile for predictions and --infile for the unfolded distribution.",
 )
-parser.add_argument("--fitresultChannelW", type=str, default="Select_ch1_masked")
+parser.add_argument("--channelW", type=str, default="Select ch1_masked")
 parser.add_argument("--outname", default="carrot", help="output file name")
 parser.add_argument(
     "--sparse",
@@ -547,8 +552,6 @@ parser.add_argument(
 args = parser.parse_args()
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-if not args.fitW:
-    args.constrainMW = True  # nothing to fit here...
 
 # Build tensor
 writer = AlphaSTheoryFitTW(
@@ -577,9 +580,6 @@ if args.pseudodataGenerator:
         ]  # select baseline variation # TODO bit of a hardcode
     h_data_sigmaUL = h_data_sigmaUL.project("qT", "absY")
     h_data_sigmaUL *= 16800  # lumi
-    print(
-        h_data_sigmaUL.variances(flow=False) ** 0.5 / h_data_sigmaUL.values(flow=False)
-    )
     writer.add_channel(h_data_sigmaUL.axes, "chSigmaUL")
     writer.add_data(h_data_sigmaUL, "chSigmaUL")
     writer.set_reference("chSigmaUL", h_data_sigmaUL)
@@ -589,27 +589,38 @@ else:
     fitresult, meta = rabbit.io_tools.get_fitresult(
         args.infile, result="asimov", meta=True
     )
+    logger.debug(
+        f"Available models in fit result: {list(fitresult['mappings'].keys())}"
+    )
 
     # covariance across any number of physics models
-    h_data_cov = fitresult["mappings"][args.fitresultMapping][
-        "hist_postfit_inclusive_cov"
-    ].get()
+    logger.debug("Reading data covariance matrix from fit result")
+    h_data_cov = (
+        fitresult["mappings"][args.fitresultMapping]["hist_postfit_inclusive_cov"].get()
+        * 16800**2
+    )
     writer.add_data_covariance(h_data_cov)  # N.B: run fit with --externalCovariance
 
     # the order of add_channel must be OPPOSITE of what is in postfit_cov due to rabbit
 
+    logger.debug(
+        f"Available channels in fit result model {args.fitresultMapping}: {list(fitresult['mappings'][args.fitresultMapping]['channels'].keys())}"
+    )
     # if set, read and initialize the W lepton channel
     if args.fitW:
-        h_data_prefsrLep = fitresult["mappings"][args.fitresultMapping]["channels"][
-            args.fitresultChannelW
-        ]["hist_postfit_inclusive"].get()
+        h_data_prefsrLep = (
+            fitresult["mappings"][args.fitresultMapping]["channels"][args.channelW][
+                "hist_postfit_inclusive"
+            ].get()
+            * 16800
+        )
         writer.add_channel(h_data_prefsrLep.axes, "chW")
         writer.add_data(h_data_prefsrLep, "chW")
 
     # if set, read and initialize Ai's channel
     if args.fitAngularCoeffs:
         h_data_ai = fitresult["mappings"][args.fitresultMapping]["channels"][
-            args.fitresultChannelAis
+            args.channelAis
         ]["hist_postfit_inclusive"].get()
         writer.add_channel(h_data_ai.axes, "chAis")
         writer.add_data(h_data_ai, "chAis")
@@ -619,9 +630,12 @@ else:
 
     # read and initialize sigmaUL channel
     if not args.noFitSigmaUL:
-        h_data = fitresult["mappings"][args.fitresultMapping]["channels"][
-            args.fitresultChannelSigmaUL
-        ]["hist_postfit_inclusive"].get()[:, :, 0]
+        h_data = (
+            fitresult["mappings"][args.fitresultMapping]["channels"][
+                args.channelSigmaUL
+            ]["hist_postfit_inclusive"].get()
+            * 16800
+        )  # [:, :, 0]
         writer.add_channel(h_data.axes, "chSigmaUL")
         writer.add_data(h_data, "chSigmaUL")
         writer.set_reference("chSigmaUL", h_data)
@@ -729,110 +743,112 @@ if not args.noFitSigmaUL:
 
 # alphaS variation
 logger.info("Now at variations for AlphaS")
-if args.predGenerator == "scetlib_dyturbo":
+symmetrize = "quadratic" if "alphaS" not in args.nois else "average"
+if not args.noFitSigmaUL:
+    pdf_name = theory_tools.pdfMap[args.pdfs[0]]["name"]
+    alphas_var_name = f"{args.predGenerator}{args.pdfs[0].upper()}_pdfas"
     alphas_vars = theory_corrections.load_corr_helpers(
         bosons,
-        ["scetlib_dyturboCT18Z_pdfas"],
+        [alphas_var_name],
         make_tensor=False,
         minnlo_ratio=False,
     )
-    symmetrize = "quadratic" if args.constrainAlphaS else "average"
+    writer.add_systematic(
+        [
+            alphas_vars["Z"][alphas_var_name][{"vars": 2}],
+            alphas_vars["Z"][alphas_var_name][{"vars": 1}],
+        ],
+        "pdfAlphaS",
+        "Zmumu",
+        "chSigmaUL",
+        noi=("alphaS" in args.nois),
+        constrained=not ("alphaS" in args.nois),
+        symmetrize=symmetrize,
+        kfactor=1.0,
+        groups=(
+            [f"{pdf_name}", f"{pdf_name}AlphaS", "theory"]
+            if "alphaS" not in args.nois
+            else [f"{pdf_name}"]
+        ),
+    )
 
-    if not args.noFitSigmaUL:
-        writer.add_systematic(
-            [
-                alphas_vars["Z"]["scetlib_dyturboCT18Z_pdfas"][{"vars": 2}],
-                alphas_vars["Z"]["scetlib_dyturboCT18Z_pdfas"][{"vars": 1}],
-            ],
-            "pdfAlphaS",
-            "Zmumu",
-            "chSigmaUL",
-            noi=not args.constrainAlphaS,
-            constrained=args.constrainAlphaS,
-            symmetrize=symmetrize,
-            kfactor=1.5 / 2.0,
-            groups=(
-                ["pdfCT18Z", "pdfCT18ZAlphaS", "theory"]
-                if args.constrainAlphaS
-                else ["pdfCT18Z"]
-            ),
-        )
+if args.fitW or args.fitAngularCoeffs:
+    if args.predGenerator == "scetlib_dyturbo":
 
-    # alphaS variations for W come from same as Z
-    if args.fitW:
-        # TODO clean up
-        with h5py.File(
-            f"/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
-            "r",
-        ) as h5file:
-            results = input_tools.load_results_h5py(h5file)
-            lumi = 16800
-            h_Wp = results["WplusmunuPostVFP"]["output"][
-                "prefsr_pdfAlphaSByHelicity"
-            ].get()
-            weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-            xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
-            h_Wp *= xsec * lumi / weight_sum
-            h_Wm = results["WminusmunuPostVFP"]["output"][
-                "prefsr_pdfAlphaSByHelicity"
-            ].get()
-            weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-            xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
-            h_Wm *= xsec * lumi / weight_sum
-            h_W = hh.addHists(h_Wp, h_Wm)
-            print(h_W)
-            h_W = h_W.project("absEtaGen", "ptGen", "qGen", "alphasVar")
+        # alphaS variations for W come from same as Z
+        if args.fitW:
+            # TODO clean up
+            with h5py.File(
+                f"/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
+                "r",
+            ) as h5file:
+                results = input_tools.load_results_h5py(h5file)
+                lumi = 16800
+                h_Wp = results["WplusmunuPostVFP"]["output"][
+                    "prefsr_pdfAlphaSByHelicity"
+                ].get()
+                weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
+                xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+                h_Wp *= xsec * lumi / weight_sum
+                h_Wm = results["WminusmunuPostVFP"]["output"][
+                    "prefsr_pdfAlphaSByHelicity"
+                ].get()
+                weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
+                xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+                h_Wm *= xsec * lumi / weight_sum
+                h_W = hh.addHists(h_Wp, h_Wm)
+                h_W = h_W.project("absEtaGen", "ptGen", "qGen", "vars")
 
-        writer.add_systematic(
-            [
-                h_W[{"vars": 2}],
-                h_W[{"vars": 1}],
-            ],
-            "pdfAlphaS",
-            "Wmunu",
-            "chW",
-            noi=not args.constrainAlphaS,
-            constrained=args.constrainAlphaS,
-            symmetrize=symmetrize,
-            kfactor=1.5 / 2.0,
-            groups=(
-                ["pdfCT18Z", "pdfCT18ZAlphaS", "theory"]
-                if args.constrainAlphaS
-                else ["pdfCT18Z"]
-            ),
-            format=False,
-        )
+            writer.add_systematic(
+                [
+                    h_W[{"vars": 2}],
+                    h_W[{"vars": 1}],
+                ],
+                "pdfAlphaS",
+                "Wmunu",
+                "chW",
+                noi=("alphaS" in args.nois),
+                constrained=not ("alphaS" in args.nois),
+                symmetrize=symmetrize,
+                kfactor=1.5 / 2.0,
+                groups=(
+                    [f"{pdf_name}", f"{pdf_name}AlphaS", "theory"]
+                    if "alphaS" not in args.nois
+                    else [f"{pdf_name}"]
+                ),
+                format=False,
+            )
 
-    # Ai's alphaS predictions come only from MiNNLO
-    if args.fitAngularCoeffs:
-        with h5py.File(
-            args.predAiFile.replace("w_z_helicity_xsecs", "w_z_gen_dists"), "r"
-        ) as ff:
-            inputs = input_tools.load_results_h5py(ff)
-            alpha_vars_hels = inputs["ZmumuPostVFP"]["output"][
-                "nominal_gen_helicity_nominal_gen_pdfCT18ZalphaS002"
-            ].get()
-        writer.add_systematic(
-            [
-                alpha_vars_hels[{"alphasVar": "as0120"}],
-                alpha_vars_hels[{"alphasVar": "as0116"}],
-            ],
-            "pdfAlphaS",
-            "Zmumu",
-            "chAis",
-            noi=not args.constrainAlphaS,
-            constrained=args.constrainAlphaS,
-            symmetrize=symmetrize,
-            kfactor=1.5 / 2.0,
-            groups=(
-                ["pdfCT18Z", "pdfCT18ZAlphaS", "theory"]
-                if args.constrainAlphaS
-                else ["pdfCT18Z"]
-            ),
-        )
+        # Ai's alphaS predictions come only from MiNNLO
+        if args.fitAngularCoeffs:
+            with h5py.File(
+                args.predAiFile.replace("w_z_helicity_xsecs", "w_z_gen_dists"), "r"
+            ) as ff:
+                inputs = input_tools.load_results_h5py(ff)
+                alpha_vars_hels = inputs["ZmumuPostVFP"]["output"][
+                    "nominal_gen_helicity_nominal_gen_pdfCT18ZalphaS002"
+                ].get()
+            writer.add_systematic(
+                [
+                    alpha_vars_hels[{"alphasVar": "as0120"}],
+                    alpha_vars_hels[{"alphasVar": "as0116"}],
+                ],
+                "pdfAlphaS",
+                "Zmumu",
+                "chAis",
+                noi=("alphaS" in args.nois),
+                constrained=not ("alphaS" in args.nois),
+                symmetrize=symmetrize,
+                kfactor=1.5 / 2.0,
+                groups=(
+                    ["pdfCT18Z", "pdfCT18ZAlphaS", "theory"]
+                    if "alphaS" not in args.nois
+                    else ["pdfCT18Z"]
+                ),
+            )
 
-else:
-    raise Exception("No valid configuration found for alphaS variation.")
+    else:
+        raise Exception("No valid configuration found for alphaS variation.")
 
 # mW variations
 if args.fitW:
@@ -880,10 +896,12 @@ if args.fitW:
         "chW",
         mirror=False,
         symmetrize="average",
-        noi=not args.constrainMW,
-        constrained=args.constrainMW,
+        noi=("mW" in args.nois),
+        constrained=not ("mW" in args.nois),
         format=False,
-        groups=["ZmassAndWidth", "theory"] if args.constrainMW else ["ZmassAndWidth"],
+        groups=(
+            ["ZmassAndWidth", "theory"] if "mW" not in args.nois else ["ZmassAndWidth"]
+        ),
     )
 
 logger.info(f"Now at variations from {args.predGenerator}")
@@ -891,8 +909,8 @@ generator_vars = theory_corrections.load_corr_helpers(
     bosons,
     [
         args.predGenerator,
-        f"{args.predGenerator}MSHT20mcrange",
-        f"{args.predGenerator}MSHT20mbrange",
+        f"scetlib_dyturboMSHT20mcrange",
+        f"scetlib_dyturboMSHT20mbrange",
     ],
     make_tensor=False,
     minnlo_ratio=False,
@@ -923,7 +941,6 @@ if args.fitW:
             "absEtaGen", "ptGen", "qGen", "vars"
         )
 
-        print(results["WplusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mcrange"].get())
         h_Wp = results["WplusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mcrange"].get()
         weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
         xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
@@ -965,15 +982,27 @@ for proc in generator_vars.keys():  # loop over processes
     h = generator_vars[proc][args.predGenerator]
 
     # correlated NP uncertainties
-    corr_NP_uncs = [
-        ["Lambda20.25", "Lambda2-0.25", "chargeVgenNP0scetlibNPZLambda2"],
-        ["Lambda4.16", "Lambda4.01", "chargeVgenNP0scetlibNPZLambda4"],
-        [
-            "Delta_Lambda20.02",
-            "Delta_Lambda2-0.02",
-            "chargeVgenNP0scetlibNPZDelta_Lambda2",
-        ],
-    ]
+    if "lattice" in args.predGenerator.lower():
+        corr_NP_uncs = [
+            ["lambda20.5", "lambda20.0", "chargeVgenNP0scetlibNPLambda2"],
+            ["lambda40.16", "lambda40.01", "chargeVgenNP0scetlibNPLambda4"],
+            [
+                "delta_lambda20.105",
+                "delta_lambda20.145",
+                "chargeVgenNP0scetlibNPDelta_Lambda2",
+            ],
+        ]
+    else:
+        corr_NP_uncs = [
+            ["Lambda20.25", "Lambda2-0.25", "chargeVgenNP0scetlibNPZLambda2"],
+            ["Lambda4.16", "Lambda4.01", "chargeVgenNP0scetlibNPZLambda4"],
+            [
+                "Delta_Lambda20.02",
+                "Delta_Lambda2-0.02",
+                "chargeVgenNP0scetlibNPZDelta_Lambda2",
+            ],
+        ]
+
     for var in corr_NP_uncs:
         writer.add_systematic(
             [h[{"vars": var[0]}], h[{"vars": var[1]}]],
@@ -986,9 +1015,28 @@ for proc in generator_vars.keys():  # loop over processes
         )
 
     # gamma NP uncertainties
-    gamma_NP_uncs = [
-        ["omega_nu0.5", "c_nu-0.1-omega_nu0.5", "scetlibNPgamma"],
-    ]
+    if "lattice" in args.predGenerator.lower():
+        gamma_NP_uncs = [
+            [
+                "lambda2_nu0.0696-lambda4_nu0.0122-lambda_inf_nu1.1Ext",
+                "lambda2_nu0.1044-lambda4_nu0.0026-lambda_inf_nu2.1Ext",
+                "scetlibNPgammaEigvar1",
+            ],
+            [
+                "lambda2_nu0.1153-lambda4_nu0.0032-lambda_inf_nu1.6Ext",
+                "lambda2_nu0.0587-lambda4_nu0.0116-lambda_inf_nu1.6Ext",
+                "scetlibNPgammaEigvar2",
+            ],
+            [
+                "lambda2_nu0.0873-lambda4_nu0.0092",
+                "lambda2_nu0.0867-lambda4_nu0.0056",
+                "scetlibNPgammaEigvar3",
+            ],
+        ]
+    else:
+        gamma_NP_uncs = [
+            ["omega_nu0.5", "c_nu-0.1-omega_nu0.5", "scetlibNPgamma"],
+        ]
     for var in gamma_NP_uncs:
         writer.add_systematic(
             [h[{"vars": var[0]}], h[{"vars": var[1]}]],
@@ -1050,7 +1098,7 @@ for proc in generator_vars.keys():  # loop over processes
         )
 
     # mass quark effects
-    h = generator_vars[proc][f"{args.predGenerator}MSHT20mbrange"]
+    h = generator_vars[proc][f"scetlib_dyturboMSHT20mbrange"]
     var_axis_name = "vars" if proc == "Z" else "pdfVar"
     writer.add_scale_systematic(
         [h[{var_axis_name: -1}], h[{var_axis_name: 1}], h[{var_axis_name: 0}]],
@@ -1061,7 +1109,7 @@ for proc in generator_vars.keys():  # loop over processes
         groups=["bcQuarkMass", "pTModeling", "theory"],
         format=format,
     )
-    h = generator_vars[proc][f"{args.predGenerator}MSHT20mcrange"]
+    h = generator_vars[proc][f"scetlib_dyturboMSHT20mcrange"]
     writer.add_scale_systematic(
         [h[{var_axis_name: -1}], h[{var_axis_name: 1}], h[{var_axis_name: 0}]],
         "pdfMSHT20mcrange",
@@ -1146,25 +1194,27 @@ if args.fitAngularCoeffs:
 
 else:
 
-    # for sigmaUL only, scetlib+dyturbo has the latest & greatest PDFs
-    corr_helpers = theory_corrections.load_corr_helpers(
-        bosons,
-        ["scetlib_dyturboCT18ZVars"],
-        make_tensor=False,
-        minnlo_ratio=False,
-    )
-
     if not args.noFitSigmaUL:
-        h = corr_helpers["Z"]["scetlib_dyturboCT18ZVars"]
+
+        corr_helpers = theory_corrections.load_corr_helpers(
+            bosons,
+            [
+                f"{args.predGenerator}{args.pdfs[0].upper()}Vars"
+            ],  # TODO gotta fix the naming
+            make_tensor=False,
+            minnlo_ratio=False,
+        )
+
+        h = corr_helpers["Z"][f"{args.predGenerator}{args.pdfs[0].upper()}Vars"]
         for ivar in range(1, len(h.axes[-1]), 2):
             writer.add_systematic(
                 [h[{"vars": ivar + 1}], h[{"vars": ivar}]],
-                f"pdf{int((ivar+1)/2)}CT18Z",
+                f"pdf{int((ivar+1)/2)}{args.pdfs[0].upper()}",
                 "Zmumu",
                 "chSigmaUL",
                 symmetrize="quadratic",
                 kfactor=1 / 1.645,
-                groups=["pdfCT18Z", f"pdfCT18ZNoAlphaS", "theory"],
+                groups=[f"{pdf_name}", f"{pdf_name}NoAlphaS", "theory"],
             )
 
     if args.fitW:
@@ -1424,10 +1474,9 @@ directory = args.outfolder
 if directory == "":
     directory = "./"
 filename = args.outname
-if not args.constrainAlphaS:
-    filename += "_alphaS"
-if not args.constrainMW:
-    filename += "_mW"
+filename += f"_{args.predGenerator}"
+filename += f"_{args.pdfs[0]}"
+filename += f"_{'_'.join(args.nois)}"
 if args.postfix:
     filename += f"_{args.postfix}"
 writer.write(outfolder=directory, outfilename=filename)

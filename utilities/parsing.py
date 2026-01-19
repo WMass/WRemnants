@@ -168,9 +168,9 @@ def common_parser(analysis_label=""):
         type=str,
         action=NoneFilterAction,
         default=[
-            "scetlib_dyturbo",
-            "scetlib_dyturboCT18ZVars",
-            "scetlib_dyturboCT18Z_pdfas",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas",
         ],
         choices=theory_corrections.valid_theory_corrections(),
         help="Apply corrections from indicated generator. First will be nominal correction.",

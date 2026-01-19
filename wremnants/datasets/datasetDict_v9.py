@@ -231,6 +231,13 @@ dataDictV9 = {
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu_10",
     },
+    "WtoNMu_MN-30-V-0p001": {
+        "filepaths": [
+            "{BASE_PATH}/WtoNMu_MN-30-V-0p001_TuneCP5_13TeV_madgraph-pythia8/"
+        ],
+        "xsec": common.xsec_WtoNMu,
+        "group": "WtoNMu_30",
+    },
     "WtoNMu_MN-50-V-0p001": {
         "filepaths": [
             "{BASE_PATH}/WtoNMu_MN-50-V-0p001_TuneCP5_13TeV_madgraph-pythia8/"

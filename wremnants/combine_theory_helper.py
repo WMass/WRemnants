@@ -41,7 +41,7 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        self.corr_hist_name = (corr_hists[0] + "Corr") if corr_hists else None
+        self.corr_hist_name = (corr_hists[0] + "_Corr") if corr_hists else None
 
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -912,26 +912,21 @@ class TheoryHelper(object):
             if scale != -1.0
             else theory_tools.pdf_inflation_factor(pdfInfo, self.args.noi)
         )
-        if self.from_hels:
-            pdf_hist = f"{pdfName}UncertByHelicity"
-            pdf_corr_hist = f"{pdfName}UncertByHelicity"
-        else:
-            pdf_hist = pdfName
-            pdf_corr_hist = (
-                f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
-            )
+        pdf_hist = pdfName
 
         if self.pdf_from_corr:
-            theory_unc = self.datagroups.args_from_metadata("theoryCorr")
-            if not theory_unc:
-                logger.error(
-                    "Can not add resummation uncertainties. No theory correction was applied!"
-                )
-            if pdf_hist[:-4] not in theory_unc:
-                logger.error(
-                    f"Did not find {pdf_hist} correction in file! Cannot use SCETlib+DYTurbo PDF uncertainties"
+            pdf_corr_hist = f"{self.corr_hist_name.replace("Corr", "pdfvars_Corr")}"
+            if pdf_corr_hist.replace(
+                "_Corr", ""
+            ) not in self.datagroups.args_from_metadata("theoryCorr"):
+                raise RuntimeError(
+                    f"PDF correction histogram {pdf_corr_hist} not found in metadata. "
+                    "Cannot add PDF uncertainty from corrections!"
                 )
             pdf_hist = pdf_corr_hist
+
+        if self.from_hels:
+            pdf_hist += "ByHelicity"
 
         logger.info(f"Using PDF hist {pdf_hist}, apply scaling of {scale}")
 
@@ -990,25 +985,33 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            pdf_corr_hist = (
-                f"scetlib_dyturbo{pdf.upper().replace('AN3LO', 'an3lo')}VarsCorr"
-                if self.corr_hist_name == "scetlib_dyturboCorr"
-                else self.corr_hist_name.replace("Corr", "VarsCorr")
-            )
-            asname = pdf_corr_hist.replace("Vars", "_pdfas")
-            # alphaS from correction histograms only available for these sets,
+            asname = f"{self.corr_hist_name.replace("Corr", "pdfas_Corr")}"
+            # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
-            if not ("MSHT20" in asname or "CT18Z" in asname or "MSHT20an3lo" in asname):
-                asname = "scetlib_dyturboCT18Z_pdfasCorr"
-                as_range = theory_tools.pdfMap["ct18z"]["alphasRange"]
-            if asname.replace("Corr", "") not in self.datagroups.args_from_metadata(
+            if asname.replace("_Corr", "") not in self.datagroups.args_from_metadata(
                 "theoryCorr"
             ):
-                logger.warning(
-                    f"AlphaS correction histogram {asname} not found in theoryCorrs."
-                )
+                asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
+                if asname.replace("_Corr", "") in self.datagroups.args_from_metadata(
+                    "theoryCorr"
+                ):
+                    logger.warning(
+                        f"AlphaS correction histogram {asname} not found in theoryCorrs. "
+                        "Falling back to default alphaS corrections scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfasCorr."
+                    )
+                    pdf = "ct18z"
+                    pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
+                    pdfName = pdfInfo["name"]
+                    as_range = pdfInfo["alphasRange"]
+                    as_range = theory_tools.pdfMap[pdf]["alphasRange"]
+                else:
+                    raise RuntimeError(
+                        f"AlphaS correction histogram {asname} not found in theoryCorrs. "
+                        "Cannot add alphaS uncertainty!"
+                    )
         else:
             asname = f"{pdfName}alphaS{as_range}"
+
         if self.as_from_corr and self.from_hels and not asname.endswith("ByHelicity"):
             asname += "ByHelicity"
 
@@ -1134,7 +1137,7 @@ class TheoryHelper(object):
 
         if from_minnlo:
             if self.from_hels:
-                bhist = "pdfMSHT20mbrangeUncertByHelicity"
+                bhist = "pdfMSHT20mbrangeByHelicity"
             else:
                 bhist = "pdfMSHT20mbrange"
         else:

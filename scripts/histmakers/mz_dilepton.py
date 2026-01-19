@@ -273,6 +273,7 @@ all_axes = {
     "nonTrigMuons_charge0": hist.axis.Regular(
         2, -2.0, 2.0, underflow=False, overflow=False, name="nonTrigMuons_charge0"
     ),
+    "ptll_resolution": hist.axis.Regular(1000, -1, 1, name="ptll_resolution"),
 }
 
 auxiliary_gen_axes = [
@@ -1068,6 +1069,25 @@ def build_graph(df, dataset):
             )
 
     # test plots
+    if args.validationHists:
+        # resolution plot
+        df = df.Define("ptll_relResolution", "(ptll - postfsrPTV)/postfsrPTV")
+        df = df.Define("ptll_resolution", "(ptll - postfsrPTV)")
+        results.append(
+            df.HistoBoost(
+                f"nominal_relResolution",
+                [all_axes["ptll_resolution"], all_axes["ptll"], axis_absYll],
+                ["ptll_resolution", "postfsrPTV", "absYll", "nominal_weight"],
+            )
+        )
+        results.append(
+            df.HistoBoost(
+                f"nominal_resolution",
+                [all_axes["ptll_resolution"], all_axes["ptll"], axis_absYll],
+                ["ptll_resolution", "postfsrPTV", "absYll", "nominal_weight"],
+            )
+        )
+
     if args.validationHists and args.useDileptonTriggerSelection:
         df_plusTrig = df.Filter("trigMuons_passTrigger0")
         df_minusTrig = df.Filter("nonTrigMuons_passTrigger0")

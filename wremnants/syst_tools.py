@@ -1730,7 +1730,7 @@ def add_qcdScaleByHelicityUnc_hist(
 def add_pdfUncertByHelicity_hist(
     results, df, helper, pdf, pdf_name, axes, cols, base_name="nominal", **kwargs
 ):
-    name = Datagroups.histName(base_name, syst=f"{pdf_name}UncertByHelicity")
+    name = Datagroups.histName(base_name, syst=f"{pdf_name}ByHelicity")
     tensorName = f"helicity{pdf_name}Weight_tensor"
     if tensorName not in df.GetColumnNames():
         # usually already defined when calculating central PDF weight
@@ -1747,7 +1747,7 @@ def add_pdfUncertByHelicity_hist(
             ],
         )
     safeTensorName = f"{tensorName}_clamped"
-    renorm = theory_tools.pdfMap[pdf].get("renorm", False)
+    renorm = theory_tools.pdfMap.get(pdf, {}).get("renorm", False)
     if renorm:
         central_event_weight = "nominal_weight"
     else:
@@ -1841,7 +1841,7 @@ def add_theory_corr_hists(
 
         var_axis = helpers[generator].tensor_axes[-1]
 
-        name = Datagroups.histName(base_name, syst=f"{generator}Corr")
+        name = Datagroups.histName(base_name, syst=f"{generator}_Corr")
         weight_tensor_name = f"{generator}Weight_tensor"
         add_syst_hist(
             results, df, name, axes, cols, weight_tensor_name, var_axis, **kwargs
@@ -1878,7 +1878,7 @@ def add_theory_corr_hists(
             # include nominal as well
             omegaidxs = [0] + omegaidxs
 
-            tensor_name = f"{generator}FlavDepNP"
+            tensor_name = f"{generator}_FlavDepNP"
             if tensor_name not in df.GetColumnNames():
                 np_idx_helper = ROOT.wrem.index_taker[
                     df.GetColumnType(weight_tensor_name), len(omegaidxs)
@@ -1934,7 +1934,7 @@ def add_theory_corr_hists(
             # include nominal as well
             scaleidxs = [0] + scaleidxs
 
-            tensor_name = f"{generator}PtDepScales"
+            tensor_name = f"{generator}_PtDepScales"
             if tensor_name not in df.GetColumnNames():
                 scale_idx_helper = ROOT.wrem.index_taker[
                     df.GetColumnType(weight_tensor_name), len(scaleidxs)
@@ -2575,6 +2575,7 @@ def add_theory_hists(
                 scale_cols,
                 **info,
             )
+
         if theory_helpers.get("pdf") is not None:
             pdf_helpers = theory_helpers.get("pdf")
             for pdf in args.pdfs:
@@ -2597,12 +2598,28 @@ def add_theory_hists(
                     cols,
                     **info,
                 )
-        if theory_helpers.get("alphaS") is not None:
+        for pdf_name, pdf_from_corr_helper in theory_helpers.get(
+            "pdf_from_corr", {}
+        ).items():
             logger.debug(
-                f"Make AlphaS uncertainty by helicity histograms for {dataset_name}"
+                f"Make PDF (from correction file) uncertainty by helicity histograms for {dataset_name} and PDF from correction {pdf_name}"
             )
-            for k, v in theory_helpers["alphaS"].items():
-                add_pdfAlphaSByHelicity_hist(results, df, v, axes, cols, name=k, **info)
+            add_pdfUncertByHelicity_hist(
+                results,
+                df,
+                pdf_from_corr_helper,
+                pdf_name,
+                pdf_name,
+                axes,
+                cols,
+                **info,
+            )
+
+        for k, v in theory_helpers.get("alphaS", {}).items():
+            logger.debug(
+                f"Make alphaS uncertainty by helicity histogram for {dataset_name} and alphaS from correction {k}"
+            )
+            add_pdfAlphaSByHelicity_hist(results, df, v, axes, cols, name=k, **info)
 
         add_breit_wigner_mass_weights_hist(
             results, df, axes, cols, proc=dataset_name, **info

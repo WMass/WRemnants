@@ -2,6 +2,7 @@ import hist
 import numpy as np
 
 from wremnants import histselections, syst_tools
+from wremnants.datasets.datagroup import Datagroup_member
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -306,7 +307,7 @@ def add_electroweak_uncertainty(
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
                 datagroups.addSystematic(
-                    f"{ewUnc}Corr",
+                    f"{ewUnc}_Corr",
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
                     labelsByAxis=[f"renesanceEWCorr"],
@@ -319,10 +320,10 @@ def add_electroweak_uncertainty(
         elif ewUnc == "powhegFOEW":
             if z_samples:
                 datagroups.addSystematic(
-                    f"{ewUnc}Corr",
+                    f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[f"{ewUnc}_Corr"],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -331,10 +332,10 @@ def add_electroweak_uncertainty(
                     name="ewScheme",
                 )
                 datagroups.addSystematic(
-                    f"{ewUnc}Corr",
+                    f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[f"{ewUnc}_Corr"],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -376,12 +377,12 @@ def add_electroweak_uncertainty(
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
             datagroups.addSystematic(
-                f"{ewUnc}Corr",
+                f"{ewUnc}_Corr",
                 systAxes=["systIdx"],
                 mirror=True,
                 passToFakes=passSystToFakes,
                 processes=samples,
-                labelsByAxis=[f"{ewUnc}Corr"],
+                labelsByAxis=[f"{ewUnc}_Corr"],
                 scale=scale,
                 preOp=preOp,
                 groups=[f"theory_ew_{ewUnc}", "theory_ew", "theory"],
@@ -537,3 +538,92 @@ def add_noi_unfolding_variations(
                 h_scale=scalemap,
             ),
         )
+
+
+def add_bsm_mixing(
+    datagroups,
+    inputBaseName,
+    bsm_name,
+    mixing=0.01,
+    passSystToFakes=True,
+):
+
+    # Scale SM down with `f(x) = 1-x'
+    preOpMap = {
+        m.name: lambda h, x=mixing: hh.scaleHist(h, 1 - x)
+        for m in datagroups.groups["Wmunu"].members
+    }
+
+    if mixing > 0:
+        # load bsm members
+        model, mass = bsm_name.split("_")
+        bsm_member_info = datagroups.get_members_from_results(
+            startswith=[f"{model}_MN-{mass}-"]
+        )
+        bsm_members = [Datagroup_member(k, v) for k, v in bsm_member_info.items()]
+
+        if len(bsm_members) != 1:
+            raise NotImplementedError(
+                f"Expected exactly 1 BSM member, but got {len(bsm_members)}"
+            )
+
+        # Get SM cross section
+        xsec = 0
+        for m in datagroups.groups["Wmunu"].members:
+            xsec += m.xsec
+
+        # scale BSM cross section to SM cross section
+        for m in bsm_members:
+            m.xsec = xsec
+
+        # Scale BSM up with `f(x) = x'
+        preOpMap.update(
+            {m.name: lambda h, x=mixing: hh.scaleHist(h, x) for m in bsm_members}
+        )
+
+        # add BSM sample to Wmunu group for this systematic
+        datagroups.groups["Wmunu"].addMembers(bsm_members)
+
+    datagroups.addSystematic(
+        histname=inputBaseName,
+        name=f"{bsm_name}_mixing",
+        processes=["Wmunu"],
+        mirror=True,
+        noi=True,
+        noConstraint=True,
+        passToFakes=passSystToFakes,
+        preOpMap=preOpMap,
+    )
+
+    if mixing > 0:
+        # remove the sample again
+        datagroups.groups["Wmunu"].deleteMembers(bsm_members)
+
+
+def add_bsm_process(
+    datagroups,
+    bsm_process,
+):
+    # add BSM sample as new process
+    model, mass = bsm_process.split("_")
+    bsm_members = datagroups.get_members_from_results(
+        startswith=[f"{model}_MN-{mass}-"]
+    )
+    if len(bsm_members) != 1:
+        raise NotImplementedError(
+            f"Expected exactly 1 BSM member, but got {len(bsm_members)}"
+        )
+    datagroups.addGroup(
+        bsm_process,
+        members=bsm_members,
+    )
+    datagroups.unconstrainedProcesses.append(bsm_process)
+
+    # Get SM cross section
+    xsec = 0
+    for m in datagroups.groups["Wmunu"].members:
+        xsec += m.xsec
+
+    # scale BSM cross section to SM cross section
+    for m in datagroups.groups[bsm_process].members:
+        m.xsec = xsec
