@@ -364,7 +364,9 @@ if args.axlim or args.rebin or args.absval:
         args.rebinBeforeSelection,
     )
 
-if args.selection and args.selection != "none":
+if args.selection == "none":
+    applySelection = False
+elif args.selection:
     translate = {
         "hist.overflow": hist.overflow,
         "hist.underflow": hist.underflow,
