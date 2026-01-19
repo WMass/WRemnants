@@ -1356,6 +1356,7 @@ def setup(
             pseudodataGroups.fakerate_axes = args.fakerateAxes
 
         datagroups.addPseudodataHistogramFakes(pseudodata, pseudodataGroups)
+
     if args.pseudoData and not datagroups.xnorm:
         if args.pseudoDataFitInputFile:
             indata = rabbit.debugdata.FitInputData(args.pseudoDataFitInputFile)
