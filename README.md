@@ -1,29 +1,8 @@
 # Hayden notes
 
-get the other new files
-works:
-'scetlib_dyturboN3p0LL_LatticeNP_pdfasCorrZ.pkl.lz4'
-
-scetlib_dyturboN3p0LL_LatticeNP_pdfasCorrZ.pkl.lz4
-
-theory_corrs
-['scetlib_dyturboN3p0LL_LatticeNP_pdfas']
-
-scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_CorrZ.pkl.lz4        
-scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_CorrZ.pkl.lz4
-scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfvars_CorrZ.pkl.lz4
-
-(Pdb) fname
-'/work/submit/hayden17/WRemnants/utilities/../wremnants-data/data//TheoryCorrections/5020GeV/scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_CorrZ.pkl.lz4'
-(Pdb) label
-'Z'
-(Pdb) get_corr_name(generator, minnlo_ratio=minnlo_ratio)
-'scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_minnlo_ratio'
-(Pdb) proc
-'Z'
-(Pdb) histname
-'scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_minnlo_ratio'
-(Pdb) 
+rabbit/tests/make_tensor.py
+rabbit_fit.py
+.github/main.yaml
 
 ## Setup
 
@@ -36,8 +15,6 @@ source WRemnants/setup.sh
 
 Singularity> cd /work/submit/hayden17/WRemnants
 
-Singularity>    python scripts/histmakers/histmaker_test.py      --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/      --era 2017G      --filterProcs Zmumu2017G --theoryCorr scetlib_dyturboN3p0LL_LatticeNP_pdfas  -v 4
-
 Singularity>  python scripts/histmakers/histmaker_test.py      --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/      --era 2017G      --filterProcs Zmumu2017G --theoryCorr scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas
 
 import pdb; pdb.set_trace()
@@ -46,15 +23,8 @@ import pdb; pdb.set_trace()
 
 IN=histmaker_test_scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr.hdf5
 OUT=~/public_html/
-TAG=jan20
-PROCS="Data Zmumu"
-
-IN=histmaker_test_scetlib_dyturboN3p0LL_LatticeNP_pdfasCorr.hdf5
-OUT=~/public_html/
 TAG=jan{date}
 PROCS="Data Zmumu" - or Ztautau/Other
-
-python scripts/plotting/makeDataMCStackPlot.py $IN -o $OUT -f $TAG -n nominal --hists ptll --rrange 0.995 1.005 --procFilters Zmumu --noData --flow none variation --varName scetlib_dyturboN3p0LL_LatticeNP_pdfasCorr --selectAxis vars --selectEntries pdfCT18ZNNLO_as_0116 pdfCT18ZNNLO_as_0120
 
 Singularity> python scripts/plotting/makeDataMCStackPlot.py $IN   -o $OUT -f $TAG   -n nominal   --hists ptll   --rrange 0.995 1.005   --procFilters Zmumu --noData --flow none   variation --varName scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr  --selectAxis vars --selectEntries pdfCT18ZNNLO_as_0116  pdfCT18ZNNLO_as_0120
 
