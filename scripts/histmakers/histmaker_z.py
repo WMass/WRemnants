@@ -32,7 +32,7 @@ datasets = getDatasets(
 theory_corrs = args.theoryCorr
 
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.zprocs], theory_corrs, base_dir=f"{common.data_dir}/TheoryCorrections/5TeV/"
+    [d.name for d in datasets if d.name in common.zprocs], theory_corrs, base_dir=f"{common.data_dir}/TheoryCorrections/5020GeV"
 )
 
 procs = [
@@ -40,7 +40,6 @@ procs = [
     for p, grp in (("Z", common.zprocs),)
     if any(d.name in grp for d in datasets)
 ]
-# theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=procs)
 
 quantile_file = "histmaker_test_scetlib_dyturboCorr.hdf5"
 
@@ -184,34 +183,29 @@ def build_graph(df, dataset):
     else:
         df = df.Define("exp_weight", "weight*L1PreFiringWeight_Nom")
 
-        # theory_helpers = {}
-        # if dataset.name in common.zprocs:
-        #     theory_helpers = theory_helpers_procs[dataset.name[0]]
-
-        # df = theory_tools.define_theory_weights_and_corrs(
-            # df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
-        # )
-        # import pdb; pdb.set_trace()
         df = theory_tools.define_prefsr_vars(df)
         df = df.DefinePerSample("central_pdf_weight", "1.0")
         df = df.Alias("nominal_weight_uncorr", "exp_weight")
         df = df.DefinePerSample("theory_weight_truncate", "10.0")
-        df = theory_tools.define_theory_corr_weight_column(df, "scetlib_dyturboN3p0LL_LatticeNP_pdfas")
-        # df = df.Define("scetlib_dyturboN3p0LL_LatticeNP_pdfas_corr_weight", "1.0")
+        # df = theory_tools.define_theory_corr_weight_column(df, "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas")
+        theory_corr_name = theory_corrs[0]
+        df = theory_tools.define_theory_corr_weight_column(df, theory_corr_name)
 
         df = df.Define(
-                "scetlib_dyturboN3p0LL_LatticeNP_pdfasWeight_tensor",
-                corr_helpers[dataset.name]["scetlib_dyturboN3p0LL_LatticeNP_pdfas"],
+                # "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasWeight_tensor",
+                f"{theory_corr_name}Weight_tensor",
+                corr_helpers[dataset.name]["scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas"],
                 [
                     "massVgen",
                     "absYVgen",
                     "ptVgen",
                     "chargeVgen",
-                    "scetlib_dyturboN3p0LL_LatticeNP_pdfas_corr_weight",
+                    "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_corr_weight",
                 ],
             )
-        df = df.Define("nominal_weight", "scetlib_dyturboN3p0LL_LatticeNP_pdfasWeight_tensor[0]")
-        # import pdb; pdb.set_trace()
+        
+        # df = df.Define("nominal_weight", "scetlib_dyturboN3p0LL_LatticeNP_pdfasWeight_tensor[0]")
+        df = df.Define("nominal_weight", f"{theory_corr_name}Weight_tensor[0]")
 
     # ---- Fill histograms ----
     hist_nLepton = df.HistoBoost("nLepton", [axis_nLepton], ["nLepton", "nominal_weight"])
@@ -303,23 +297,11 @@ def build_graph(df, dataset):
             [axis_ptll, axis_absYll, axis_cosThetaStarll],
             ["ptll", "absYll", "cosThetaStarll"],
             corr_helpers[dataset.name],
-            ["scetlib_dyturboN3p0LL_LatticeNP_pdfas"],
+            # ["scetlib_dyturboN3p0LL_LatticeNP_pdfas"],
+            theory_corrs,
             modify_central_weight=True,
             isW=False,
         )
-
-        # df = syst_tools.add_theory_hists(
-        #                 results,
-        #                 df,
-        #                 args,
-        #                 dataset.name,
-        #                 corr_helpers,
-        #                 theory_helpers,
-        #                 [axis_ptll, axis_absYll, axis_cosThetaStarll],
-        #                 ["ptll", "absYll", "cosThetaStarll", "nominal_weight"],
-        #                 base_name=f"nominal",
-        #                 for_wmass=False,
-        #             )
 
     
     results += hist_ptll_absYll_byQ
@@ -338,4 +320,3 @@ resultdict = narf.build_and_run(datasets, build_graph)
 
 fout = f"{os.path.basename(__file__).replace('py', 'hdf5')}"
 write_analysis_output(resultdict, fout, args)
-
