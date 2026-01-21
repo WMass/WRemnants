@@ -26,6 +26,11 @@ OUT=~/public_html/
 TAG=jan{date}
 PROCS="Data Zmumu" - or Ztautau/Other
 
+IN=/tmp/rabbit_test/fitresults.hdf5
+OUT=~/public_html/
+TAG=jan21
+PROCS="Data Zmumu"
+
 Singularity> python scripts/plotting/makeDataMCStackPlot.py $IN   -o $OUT -f $TAG   -n nominal   --hists ptll   --rrange 0.995 1.005   --procFilters Zmumu --noData --flow none   variation --varName scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr  --selectAxis vars --selectEntries pdfCT18ZNNLO_as_0116  pdfCT18ZNNLO_as_0120
 
 https://submit.mit.edu/~hayden17/jan{date}/
