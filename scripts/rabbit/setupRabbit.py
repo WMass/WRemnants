@@ -28,7 +28,7 @@ from wremnants.syst_tools import (
     widthWeightNames,
 )
 from wums import boostHistHelpers as hh
-from wums import logging
+from wums import logging, output_tools
 
 
 def make_subparsers(parser):
@@ -3062,6 +3062,15 @@ if __name__ == "__main__":
         outfile = "Combination"
     logger.info(f"Writing output to {outfile}")
 
-    writer.write(outfolder=outfolder, outfilename=outfile, args=args)
+    # propagate meta info into result file
+    meta = {
+        "meta_info": output_tools.make_meta_info_dict(
+            args=args,
+            wd=common.base_dir,
+        ),
+        "meta_info_input": datagroups.getMetaInfo(),
+    }
+
+    writer.write(outfolder=outfolder, outfilename=outfile, meta_data_dict=meta)
 
     logging.summary()
