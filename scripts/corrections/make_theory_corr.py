@@ -56,11 +56,11 @@ def parse_args():
         "--proc",
         type=str,
         required=True,
-        choices=[
-            "z",
-            "w",
-            "bsm",
-        ],
+        # choices=[
+        #     "z",
+        #     "w",
+        #     "bsm",
+        # ],
         help="Process",
     )
     parser.add_argument(
@@ -214,7 +214,7 @@ def main():
     if args.proc == "z":
         eventgen_procs = ["ZmumuPostVFP"]
         filesByProc = {"ZmumuPostVFP": args.corrFiles}
-    else:
+    elif args.proc in ["w", "bsm"]:
         wpfiles = list(
             filter(
                 lambda x: "wp" in os.path.basename(x).lower() or "Wp" in x,
@@ -253,6 +253,9 @@ def main():
                 "WtoNMu_MN-30-V-0p001",
                 "WtoNMu_MN-50-V-0p001",
             ]
+    else:
+        eventgen_procs = [args.proc]
+        filesByProc = {args.proc: args.corrFiles}
 
     minnloh = hh.sumHists(
         [
@@ -355,7 +358,7 @@ def main():
     generator = args.generator
     if args.postfix:
         generator += args.postfix
-    outfile = f"{args.outpath}/{generator}Corr{args.proc.upper()}.pkl.lz4"
+    outfile = f"{args.outpath}/{generator}Corr{args.proc[0].upper()}.pkl.lz4"
 
     meta_dict = {}
     for f in [args.minnloFile] + args.corrFiles:

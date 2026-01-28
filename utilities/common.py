@@ -101,10 +101,22 @@ vprocs_lowpu = wprocs_lowpu + zprocs_lowpu
 zprocs_recoil_lowpu = ["Zmumu", "Zee"]
 wprocs_recoil_lowpu = ["Wminusmunu", "Wminusenu", "Wplusmunu", "Wplusenu"]
 
+# 5020GeV samples
+wprocs_5020GeV = [
+    "Wminusmunu5020GeV",
+    "Wminusenu5020GeV",
+    "Wminustaunu5020GeV",
+    "Wplusmunu5020GeV",
+    "Wplusenu5020GeV",
+    "Wplustaunu5020GeV",
+]
+zprocs_5020GeV = ["Zmumu5020GeV", "Zee5020GeV", "Ztautau5020GeV"]
+vprocs_5020GeV = wprocs_5020GeV + zprocs_5020GeV
+
 background_MCprocs = ["Top", "Diboson", "QCD", "DYlowMass"]
-zprocs_all = zprocs_lowpu + zprocs
-wprocs_all = wprocs_lowpu + wprocs
-vprocs_all = vprocs_lowpu + vprocs
+zprocs_all = zprocs + zprocs_lowpu + zprocs_5020GeV
+wprocs_all = wprocs + wprocs_lowpu + wprocs_5020GeV
+vprocs_all = vprocs + vprocs_lowpu + vprocs_5020GeV
 
 # input files for muon momentum scale nuisances
 calib_dir = f"{data_dir}/calibration/"

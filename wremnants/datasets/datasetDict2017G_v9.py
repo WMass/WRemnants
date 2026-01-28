@@ -19,42 +19,42 @@ dataDictV9_2017G = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
     },
-    "Zmumu2017G": {
+    "Zmumu5020GeV": {
         "filepaths": [
             "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_DYJetsToLL,
         "group": "Zmumu",
     },
-    "Ztautau2017G": {
+    "Ztautau5020GeV": {
         "filepaths": [
             "{BASE_PATH}/DYJetsToTauTau_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_DYJetsToLL * common.Z_TAU_TO_LEP_RATIO,
         "group": "Ztautau",
     },
-    "Wplusmunu2017G": {
+    "Wplusmunu5020GeV": {
         "filepaths": [
             "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_WplusJetsToMuNu,
         "group": "Wmunu",
     },
-    "Wminusmunu2017G": {
+    "Wminusmunu5020GeV": {
         "filepaths": [
             "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_WminusJetsToMuNu,
         "group": "Wmunu",
     },
-    # "Wplustaunu2017G": {
+    # "Wplustaunu5020GeV": {
     #     "filepaths": [
     #         "{BASE_PATH}/WplusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
     #     ],
     #     "xsec": common.BR_TAUToMU * xsec_WplusJetsToMuNu,
     #     "group": "Wtaunu",
     # },
-    "Wminustaunu2017G": {
+    "Wminustaunu5020GeV": {
         "filepaths": [
             "{BASE_PATH}/WminusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],

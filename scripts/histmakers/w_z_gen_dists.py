@@ -127,6 +127,7 @@ datasets = getDatasets(
     nanoVersion="v9",
     base_path=args.dataPath,
     mode=analysis_label,
+    era=args.era,
 )
 
 logger.debug(f"Will process samples {[d.name for d in datasets]}")
