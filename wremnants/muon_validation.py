@@ -327,7 +327,7 @@ def make_hists_for_manual_scale_shifts(df, axes, cols, cols_gen_smeared, results
 
 def muon_scale_variation_from_manual_shift(
     resultdict,
-    procs=["WplusmunuPostVFP", "WminusmunuPostVFP", "ZmumuPostVFP"],
+    procs=["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP", "Zmumu_2016PostVFP"],
 ):
     for proc in procs:
         proc_hists = resultdict[proc]["output"]

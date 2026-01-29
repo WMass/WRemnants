@@ -7,11 +7,11 @@ lumijson = (
 
 # from GenXSecAnalyzer
 xsec_DYJetsToLL = 698.3  # +/- 2.133
-xsec_WplusJetsToMuNu = 4477  # +/- 17.27
-xsec_WminusJetsToMuNu = 2940  # +/- 9.153
+xsec_WplusJetsToLNu = 4477  # +/- 17.27
+xsec_WminusJetsToLL = 2940  # +/- 9.153
 
-dataDictV9_2017G = {
-    "data2017G": {
+dataDict = {
+    "SingleMuon_2017G": {
         "filepaths": [
             "{BASE_PATH}/SingleMuon/Run2017G-UL2017_MiniAODv2_NanoAODv9_GT36-v2",
         ],
@@ -19,46 +19,46 @@ dataDictV9_2017G = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
     },
-    "Zmumu2017G": {
+    "Zmumu_2017G": {
         "filepaths": [
             "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_DYJetsToLL,
         "group": "Zmumu",
     },
-    "Ztautau2017G": {
+    "Ztautau_2017G": {
         "filepaths": [
             "{BASE_PATH}/DYJetsToTauTau_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
         "xsec": xsec_DYJetsToLL * common.Z_TAU_TO_LEP_RATIO,
         "group": "Ztautau",
     },
-    "Wplusmunu2017G": {
+    "Wplusmunu_2017G": {
         "filepaths": [
             "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
-        "xsec": xsec_WplusJetsToMuNu,
+        "xsec": xsec_WplusJetsToLNu,
         "group": "Wmunu",
     },
-    "Wminusmunu2017G": {
+    "Wminusmunu_2017G": {
         "filepaths": [
             "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
-        "xsec": xsec_WminusJetsToMuNu,
+        "xsec": xsec_WminusJetsToLL,
         "group": "Wmunu",
     },
     # "Wplustaunu2017G": {
     #     "filepaths": [
     #         "{BASE_PATH}/WplusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
     #     ],
-    #     "xsec": common.BR_TAUToMU * xsec_WplusJetsToMuNu,
+    #     "xsec": xsec_WplusJetsToLNu * (common.BR_TAUToMU + common.BR_TAUToE),
     #     "group": "Wtaunu",
     # },
-    "Wminustaunu2017G": {
+    "Wminustaunu_2017G": {
         "filepaths": [
             "{BASE_PATH}/WminusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
         ],
-        "xsec": common.BR_TAUToMU * xsec_WminusJetsToMuNu,
+        "xsec": xsec_WminusJetsToLL * (common.BR_TAUToMU + common.BR_TAUToE),
         "group": "Wtaunu",
     },
 }

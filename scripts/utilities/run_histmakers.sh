@@ -15,13 +15,13 @@ shift
 
 if [ "$MODE" == "wmass" ]; then
     HISTMAKER="mw_with_mu_eta_pt"
-    separateProcs=("WminusmunuPostVFP" "WplusmunuPostVFP" "WminustaunuPostVFP" "WplustaunuPostVFP")
+    separateProcs=("Wminusmunu_2016PostVFP" "Wplusmunu_2016PostVFP" "Wminustaunu_2016PostVFP" "Wplustaunu_2016PostVFP")
 elif [ "$MODE" == "wlike" ]; then
     HISTMAKER="mz_wlike_with_mu_eta_pt"
-    separateProcs=("ZmumuPostVFP" "ZtautauPostVFP")
+    separateProcs=("Zmumu_2016PostVFP" "Ztautau_2016PostVFP")
 elif [ "$MODE" == "dilepton" ]; then
     HISTMAKER="mz_dilepton"
-    separateProcs=("ZmumuPostVFP" "ZtautauPostVFP")
+    separateProcs=("Zmumu_2016PostVFP" "Ztautau_2016PostVFP")
 fi
 
 OUTPUT_FILE=$OUTPUT_DIR/${HISTMAKER}_${POSTFIX}.hdf5

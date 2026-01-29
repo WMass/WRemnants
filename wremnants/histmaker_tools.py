@@ -237,7 +237,7 @@ def make_quantile_helper(
     axes,
     dependent_axes=[],
     name="nominal",
-    processes=["ZmumuPostVFP"],
+    processes=["Zmumu_2016PostVFP"],
     n_quantiles=[],
 ):
     """

@@ -20,12 +20,12 @@ hist_response_scaled = None
 hist_response_smeared = None
 
 procs = []
-procs.append("ZmumuPostVFP")
-procs.append("ZtautauPostVFP")
-procs.append("WplusmunuPostVFP")
-procs.append("WminusmunuPostVFP")
-procs.append("WplustaunuPostVFP")
-procs.append("WminustaunuPostVFP")
+procs.append("Zmumu_2016PostVFP")
+procs.append("Ztautau_2016PostVFP")
+procs.append("Wplusmunu_2016PostVFP")
+procs.append("Wminusmunu_2016PostVFP")
+procs.append("Wplustaunu_2016PostVFP")
+procs.append("Wminustaunu_2016PostVFP")
 
 
 with h5py.File(infile, "r") as f:

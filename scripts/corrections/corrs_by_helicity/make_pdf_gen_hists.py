@@ -40,7 +40,13 @@ def parse_arguments():
         action="store_true",
         help="If set, will run a skimming step to only keep the PDF histograms in the file, saving a new output file.",
     )
-
+    parser.add_argument(
+        "-j",
+        "--njobs",
+        type=int,
+        default=300,
+        help="Number of parallel threads",
+    )
     return parser.parse_args()
 
 
@@ -55,12 +61,17 @@ def main():
 
     for pdf in args.pdf:
 
-        command = f"python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --useCorrByHelicityBinning --pdf {pdf} -o {args.outdir} --maxFiles '-1' -j 300 --filterProcs ZmumuPostVFP WplusmunuPostVFP WminusmunuPostVFP --addHelicityAxis --postfix pdfByHelicity"
+        command = f"""
+        python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --pdf {pdf} -o {args.outdir} --maxFiles '-1' -j {args.njobs} \
+        --filterProcs 'Zmumu_MiNNLO' 'Wplusmunu_MiNNLO' 'Wminusmunu_MiNNLO' --aggregateGroups Zmumu Wmunu \
+        --addHelicityAxis --postfix pdfByHelicity
+        """
         print(f"Running command: {command}")
         os.system(command)
 
         if args.skim:
-            skim_command = f"python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity.hdf5 --filterHists nominal_gen_pdf --excludeHists alpha --outfile {args.outdir}/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity_skimmed.hdf5"
+            pdf_replace = f"_{pdf}" if pdf != "ct18z" else ""
+            skim_command = f"python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1{pdf_replace}_pdfByHelicity.hdf5 --filterHists nominal_gen_pdf --excludeHists alpha --outfile {args.outdir}/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity_skimmed.hdf5"
             print(f"Running skimming command: {skim_command}")
             os.system(skim_command)
 

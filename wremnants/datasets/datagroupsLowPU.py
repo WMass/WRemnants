@@ -16,7 +16,7 @@ def make_datagroups_lowPU(dg, combine=False, excludeGroups=None, filterGroups=No
         members=dg.get_members_from_results(startswith="Ztautau"),
     )
 
-    if dg.flavor == "mu" or dg.flavor == "mumu":
+    if dg.flavor in ["mu", "mumu"]:
         dg.addGroup(
             "Zmumu",
             members=dg.get_members_from_results(startswith="Zmumu"),
@@ -29,7 +29,7 @@ def make_datagroups_lowPU(dg, combine=False, excludeGroups=None, filterGroups=No
                 ),
             )
 
-    if dg.flavor == "e" or dg.flavor == "ee":
+    if dg.flavor in ["e", "ee"]:
         dg.addGroup(
             "Zee",
             members=dg.get_members_from_results(startswith="Zee"),

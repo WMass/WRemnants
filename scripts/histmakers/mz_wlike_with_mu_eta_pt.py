@@ -292,7 +292,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
 )
 
 theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args, corrs=["qcdScale", "alphaS", "pdf"]
+    args.pdfs, args.theoryCorr, corrs=["qcdScale", "alphaS", "pdf"]
 )
 
 # extra axes which can be used to label tensor_axes
@@ -1310,7 +1310,10 @@ def build_graph(df, dataset):
                     "nominal_weight",
                 ]
                 # assume to have same coeffs for plus and minus (no reason for it not to be the case)
-                if dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
+                if (
+                    dataset.name == "Zmumu_2016PostVFP"
+                    or dataset.name == "Ztautau_2016PostVFP"
+                ):
                     helpers_class = muRmuFPolVar_helpers_Z
                     process_name = "Z"
                 for coeffKey in helpers_class.keys():
@@ -1335,7 +1338,7 @@ def build_graph(df, dataset):
                             storage=hist.storage.Double(),
                         )
                     )
-        if args.unfolding and dataset.name == "ZmumuPostVFP":
+        if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
             for level in args.unfoldingLevels:
                 noiAsPoiHistName = Datagroups.histName(
                     "nominal", syst=f"{level}_yieldsUnfolding"

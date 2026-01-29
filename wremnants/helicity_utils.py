@@ -34,6 +34,7 @@ def make_helicity_weight_helper(
     is_z=False,
     filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_theoryAgnosticBinning_scetlib_dyturboCorr_maxFiles_m1.hdf5",
     rebin_ptVgen_edges=None,
+    rebin_absYVgen_edges=None,
 ):
 
     with h5py.File(filename, "r") as ff:
@@ -45,6 +46,10 @@ def make_helicity_weight_helper(
     if rebin_ptVgen_edges is not None:
         hist_helicity_xsec_scales = hh.rebinHist(
             hist_helicity_xsec_scales, "ptVgen", rebin_ptVgen_edges
+        )
+    if rebin_absYVgen_edges is not None:
+        hist_helicity_xsec_scales = hh.rebinHist(
+            hist_helicity_xsec_scales, "absYVgen", rebin_absYVgen_edges
         )
 
     corrh = helicity_xsec_to_angular_coeffs(hist_helicity_xsec_scales)

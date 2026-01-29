@@ -147,7 +147,7 @@ def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
     isW = dataset.name in common.wprocs
-    isWmunu = dataset.name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]
+    isWmunu = dataset.name in ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
     isZ = dataset.name in common.zprocs
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"

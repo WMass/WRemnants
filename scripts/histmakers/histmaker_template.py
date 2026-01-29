@@ -22,7 +22,6 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=args.excludeProcs,
     base_path=args.dataPath,
-    mode=analysis_label,
     era=args.era,
 )
 

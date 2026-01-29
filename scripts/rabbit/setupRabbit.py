@@ -127,6 +127,12 @@ def make_subparsers(parser):
             action="store_true",
             help="Simultaneously unfold W and Z and correlate Z background in W channel",
         )
+        parser.add_argument(
+            "--constrainNOIs",
+            action="store_true",
+            help="Constrain NOI variation",
+        )
+
         parser = parsing.set_parser_default(parser, "massVariation", 10)
 
     return parser
@@ -180,7 +186,13 @@ def make_parser(parser=None):
         type=str,
         default=None,
         help="Add BSM as independent process, not propagating the effect into the fakes",
-        choices=["WtoNMu_0", "WtoNMu_5", "WtoNMu_10", "WtoNMu_30", "WtoNMu_50"],
+        choices=[
+            "WtoNMuMass5",
+            "WtoNMuMass10",
+            "WtoNMuMass30",
+            "WtoNMuMass50",
+            "WtoMuNuSMEFT",
+        ],
     )
     parser.add_argument(
         "--addBSMMixing",
@@ -1396,9 +1408,6 @@ def setup(
     else:
         datagroups.addNominalHistograms(
             real_data=args.realData,
-            exclude_bin_by_bin_stat=(
-                "signal_samples" if args.correlateSignalMCstat else None
-            ),
             bin_by_bin_stat_scale=(
                 args.binByBinStatScaleForMW
                 if wmass
@@ -1551,6 +1560,7 @@ def setup(
                 scale_norm=args.scaleNormXsecHistYields,
                 gen_level=args.unfoldingLevel,
                 fitresult=unfolding_scalemap,
+                constrained=args.constrainNOIs,
             )
 
     if args.muRmuFPolVar and not isTheoryAgnosticPolVar:
@@ -1564,23 +1574,19 @@ def setup(
         )
         muRmuFPolVar_helper.add_theoryAgnostic_uncertainty()
 
-    if args.correlateSignalMCstat:
-        if datagroups.xnorm and args.fitresult is None:
-            # use variations from reco histogram and apply them to xnorm
-            source = ("nominal", f"{inputBaseName}_yieldsUnfolding_theory_weight")
-            # need to find the reco variables that correspond to the reco fit, reco fit must be done with variables in same order as gen bins
-            gen2reco = {
-                "qGen": "charge",
-                "ptGen": "pt",
-                "absEtaGen": "eta",
-                "qVGen": "charge",
-                "ptVGen": "ptll",
-                "absYVGen": "yll",
-            }
-            recovar = [gen2reco[v] for v in fitvar]
-        else:
-            recovar = fitvar
-            source = None
+    if args.correlateSignalMCstat and datagroups.xnorm and args.fitresult is None:
+        # use variations from reco histogram and apply them to xnorm
+        source = ("nominal", f"{inputBaseName}_yieldsUnfolding_theory_weight")
+        # need to find the reco variables that correspond to the reco fit, reco fit must be done with variables in same order as gen bins
+        gen2reco = {
+            "qGen": "charge",
+            "ptGen": "pt",
+            "absEtaGen": "eta",
+            "qVGen": "charge",
+            "ptVGen": "ptll",
+            "absYVGen": "yll",
+        }
+        recovar = [gen2reco[v] for v in fitvar]
 
         combine_helpers.add_explicit_BinByBinStat(
             datagroups,

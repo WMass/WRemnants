@@ -673,16 +673,16 @@ if args.fitW:
         lumi = 16800
         inputs = input_tools.load_results_h5py(h5file)
 
-        weight_sum = inputs["WplusmunuPostVFP"]["weight_sum"]
-        xsec = inputs["WplusmunuPostVFP"]["dataset"]["xsec"]
-        h_Wp_lep_fiducial = inputs["WplusmunuPostVFP"]["output"][
+        weight_sum = inputs["Wplusmunu_2016PostVFP"]["weight_sum"]
+        xsec = inputs["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
+        h_Wp_lep_fiducial = inputs["Wplusmunu_2016PostVFP"]["output"][
             "nominal_gen_prefsrlep"
         ].get()
         h_Wp_lep_fiducial *= xsec * lumi / weight_sum
 
-        weight_sum = inputs["WminusmunuPostVFP"]["weight_sum"]
-        xsec = inputs["WminusmunuPostVFP"]["dataset"]["xsec"]
-        h_Wm_lep_fiducial = inputs["WminusmunuPostVFP"]["output"][
+        weight_sum = inputs["Wminusmunu_2016PostVFP"]["weight_sum"]
+        xsec = inputs["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
+        h_Wm_lep_fiducial = inputs["Wminusmunu_2016PostVFP"]["output"][
             "nominal_gen_prefsrlep"
         ].get()
         h_Wm_lep_fiducial *= xsec * lumi / weight_sum
@@ -784,17 +784,17 @@ if args.fitW or args.fitAngularCoeffs:
             ) as h5file:
                 results = input_tools.load_results_h5py(h5file)
                 lumi = 16800
-                h_Wp = results["WplusmunuPostVFP"]["output"][
+                h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
                     "prefsr_pdfAlphaSByHelicity"
                 ].get()
-                weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-                xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+                weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+                xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
                 h_Wp *= xsec * lumi / weight_sum
-                h_Wm = results["WminusmunuPostVFP"]["output"][
+                h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
                     "prefsr_pdfAlphaSByHelicity"
                 ].get()
-                weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-                xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+                weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+                xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
                 h_Wm *= xsec * lumi / weight_sum
                 h_W = hh.addHists(h_Wp, h_Wm)
                 h_W = h_W.project("absEtaGen", "ptGen", "qGen", "vars")
@@ -825,7 +825,7 @@ if args.fitW or args.fitAngularCoeffs:
                 args.predAiFile.replace("w_z_helicity_xsecs", "w_z_gen_dists"), "r"
             ) as ff:
                 inputs = input_tools.load_results_h5py(ff)
-                alpha_vars_hels = inputs["ZmumuPostVFP"]["output"][
+                alpha_vars_hels = inputs["Zmumu_2016PostVFP"]["output"][
                     "nominal_gen_helicity_nominal_gen_pdfCT18ZalphaS002"
                 ].get()
             writer.add_systematic(
@@ -861,8 +861,8 @@ if args.fitW:
         "r",
     ) as ff:
         inputs = input_tools.load_results_h5py(ff)
-        mass_vars_Wp = inputs["WplusmunuPostVFP"]["prefsr_massWeightW"].get()
-        mass_vars_Wm = inputs["WminusmunuPostVFP"]["prefsr_massWeightW"].get()
+        mass_vars_Wp = inputs["Wplusmunu_2016PostVFP"]["prefsr_massWeightW"].get()
+        mass_vars_Wm = inputs["Wminusmunu_2016PostVFP"]["prefsr_massWeightW"].get()
 
     mass_vars_W = hh.addHists(mass_vars_Wp, mass_vars_Wm)
     mass_vars_W = mass_vars_W.project(
@@ -925,15 +925,17 @@ if args.fitW:
         results = input_tools.load_results_h5py(h5file)
         lumi = 16800
 
-        h_Wp = results["WplusmunuPostVFP"]["output"]["prefsr_scetlib_dyturboCorr"].get()
-        weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-        xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
-        h_Wp *= xsec * lumi / weight_sum
-        h_Wm = results["WminusmunuPostVFP"]["output"][
+        h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
             "prefsr_scetlib_dyturboCorr"
         ].get()
-        weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-        xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+        weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
+        h_Wp *= xsec * lumi / weight_sum
+        h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
+            "prefsr_scetlib_dyturboCorr"
+        ].get()
+        weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wm *= xsec * lumi / weight_sum
         h_W = hh.addHists(h_Wp, h_Wm)
         generator_vars["W"] = {}
@@ -941,26 +943,34 @@ if args.fitW:
             "absEtaGen", "ptGen", "qGen", "vars"
         )
 
-        h_Wp = results["WplusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mcrange"].get()
-        weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-        xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
+            "prefsr_pdfMSHT20mcrange"
+        ].get()
+        weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wp *= xsec * lumi / weight_sum
-        h_Wm = results["WminusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mcrange"].get()
-        weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-        xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
+            "prefsr_pdfMSHT20mcrange"
+        ].get()
+        weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wm *= xsec * lumi / weight_sum
         h_W = hh.addHists(h_Wp, h_Wm)
         generator_vars["W"][f"{args.predGenerator}MSHT20mcrange"] = h_W.project(
             "absEtaGen", "ptGen", "qGen", "pdfVar"
         )
 
-        h_Wp = results["WplusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mbrange"].get()
-        weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-        xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
+            "prefsr_pdfMSHT20mbrange"
+        ].get()
+        weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wp *= xsec * lumi / weight_sum
-        h_Wm = results["WminusmunuPostVFP"]["output"]["prefsr_pdfMSHT20mbrange"].get()
-        weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-        xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
+            "prefsr_pdfMSHT20mbrange"
+        ].get()
+        weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wm *= xsec * lumi / weight_sum
         h_W = hh.addHists(h_Wp, h_Wm)
         generator_vars["W"][f"{args.predGenerator}MSHT20mbrange"] = h_W.project(
@@ -1131,13 +1141,13 @@ if args.fitAngularCoeffs:
         "r",
     ) as ff:
         inputs = input_tools.load_results_h5py(ff)
-        pdf_vars = inputs["ZmumuPostVFP"]["output"][
+        pdf_vars = inputs["Zmumu_2016PostVFP"]["output"][
             "nominal_gen_helicity_pdfCT18Z"
         ].get()
-        pdf_vars_Wp = inputs["WplusmunuPostVFP"]["output"][
+        pdf_vars_Wp = inputs["Wplusmunu_2016PostVFP"]["output"][
             "nominal_gen_helicity_pdfCT18Z"
         ].get()
-        pdf_vars_Wm = inputs["WminusmunuPostVFP"]["output"][
+        pdf_vars_Wm = inputs["Wminusmunu_2016PostVFP"]["output"][
             "nominal_gen_helicity_pdfCT18Z"
         ].get()
         pdf_vars_W = hh.addHists(pdf_vars_Wp, pdf_vars_Wm)
@@ -1226,17 +1236,17 @@ else:
         ) as h5file:
             results = input_tools.load_results_h5py(h5file)
             lumi = 16800
-            h_Wp = results["WplusmunuPostVFP"]["output"][
+            h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
                 "prefsr_pdfCT18ZUncertByHelicity"
             ].get()
-            weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-            xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+            weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+            xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
             h_Wp *= xsec * lumi / weight_sum
-            h_Wm = results["WminusmunuPostVFP"]["output"][
+            h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
                 "prefsr_pdfCT18ZUncertByHelicity"
             ].get()
-            weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-            xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+            weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+            xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
             h_Wm *= xsec * lumi / weight_sum
             h_W = hh.addHists(h_Wp, h_Wm)
             h_W = h_W.project("absEtaGen", "ptGen", "qGen", "pdfVar")
@@ -1368,13 +1378,17 @@ if args.fitW:
     ) as h5file:
         results = input_tools.load_results_h5py(h5file)
         lumi = 16800
-        h_Wp = results["WplusmunuPostVFP"]["output"]["prefsr_qcdScaleByHelicity"].get()
-        weight_sum = results["WplusmunuPostVFP"]["weight_sum"]
-        xsec = results["WplusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
+            "prefsr_qcdScaleByHelicity"
+        ].get()
+        weight_sum = results["Wplusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wp *= xsec * lumi / weight_sum
-        h_Wm = results["WminusmunuPostVFP"]["output"]["prefsr_qcdScaleByHelicity"].get()
-        weight_sum = results["WminusmunuPostVFP"]["weight_sum"]
-        xsec = results["WminusmunuPostVFP"]["dataset"]["xsec"]
+        h_Wm = results["Wminusmunu_2016PostVFP"]["output"][
+            "prefsr_qcdScaleByHelicity"
+        ].get()
+        weight_sum = results["Wminusmunu_2016PostVFP"]["weight_sum"]
+        xsec = results["Wminusmunu_2016PostVFP"]["dataset"]["xsec"]
         h_Wm *= xsec * lumi / weight_sum
         h_W = hh.addHists(h_Wp, h_Wm)
 

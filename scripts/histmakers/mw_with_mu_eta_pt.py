@@ -429,20 +429,25 @@ if args.unfolding:
 
     unfolder_z = unfolding_tools.UnfolderZ(
         reco_axes_edges={
-            "ptll": common.get_dilepton_ptV_binning(),
-            "yll": common.yll_10quantiles_binning,
+            "ptll": common.ptZ_binning,
+            "yll": common.yll_20quantiles_binning,
         },
         unfolding_axes_names=["ptVGen", "absYVGen", "helicitySig"],
         unfolding_levels=args.unfoldingLevels,
         poi_as_noi=args.poiAsNoi,
         fitresult=args.fitresult,
+        fitresult_channel="ch0_masked",
         cutsmap=cutsmap,
     )
 
     if args.fitresult:
-        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
+        unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(
+            args.fitresult, channel="ch1_masked"
+        )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=["Z", "W"])
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr, procs=["Z", "W"]
+)
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = differential.get_theoryAgnostic_axes(
@@ -679,15 +684,14 @@ smearing_weights_procs = []
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
-    isW = dataset.name in common.wprocs
+    isW = dataset.group in ["Wmunu", "Wtaunu"]
     isBSM = dataset.name.startswith("WtoNMu")
-    isWmunu = isBSM or dataset.name in [
-        "WplusmunuPostVFP",
-        "WminusmunuPostVFP",
+    isWmunu = isBSM or dataset.group in ["Wmunu"]
+    isZ = dataset.group in [
+        "Zmumu",
+        "Ztautau",
     ]
-
-    isZ = dataset.name in common.zprocs
-    isZveto = isZ or dataset.name in ["DYJetsToMuMuMass10to50PostVFP"]
+    isZveto = isZ or dataset.group in ["DYlowMass"]
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"
     isQCDMC = dataset.group == "QCD"
@@ -886,8 +890,8 @@ def build_graph(df, dataset):
                         cols = [*nominal_cols, *unfolding_cols[level]]
                         break
 
-        elif dataset.name == "ZmumuPostVFP":
-            if args.unfolding and dataset.name == "ZmumuPostVFP":
+        elif dataset.name == "Zmumu_2016PostVFP":
+            if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
                 df = unfolder_z.add_gen_histograms(
                     args, df, results, dataset, corr_helpers, theory_helpers
                 )
@@ -1827,7 +1831,7 @@ def build_graph(df, dataset):
                         )
                     )
 
-            elif dataset.name == "ZmumuPostVFP":
+            elif dataset.name == "Zmumu_2016PostVFP":
                 unfolder_z.add_poi_as_noi_histograms(
                     df,
                     results,
@@ -1844,13 +1848,13 @@ def build_graph(df, dataset):
             "nominal_weight",
         ]
         # assume to have same coeffs for plus and minus (no reason for it not to be the case)
-        if dataset.name in ["WplusmunuPostVFP", "WplustaunuPostVFP"]:
+        if dataset.name in ["Wplusmunu_2016PostVFP", "Wplustaunu_2016PostVFP"]:
             helpers_class = muRmuFPolVar_helpers_plus
             process_name = "W"
-        elif dataset.name in ["WminusmunuPostVFP", "WminustaunuPostVFP"]:
+        elif dataset.name in ["Wminusmunu_2016PostVFP", "Wminustaunu_2016PostVFP"]:
             helpers_class = muRmuFPolVar_helpers_minus
             process_name = "W"
-        elif dataset.name in ["ZmumuPostVFP", "ZtautauPostVFP"]:
+        elif dataset.name in ["Zmumu_2016PostVFP", "Ztautau_2016PostVFP"]:
             helpers_class = muRmuFPolVar_helpers_Z
             process_name = "Z"
         else:

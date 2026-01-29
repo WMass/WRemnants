@@ -196,11 +196,11 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
     # NOTE: kappaFO varies muR and muF together, muf varies only muF
     scales_map = {
         "pdf0": "mur1-muf1",
-        "kappaFO0.5-kappaf2.": "murH-muf1",
+        "kappaFO0.5-kappaf2.": "mur0p5-muf1",
         "kappaFO2.-kappaf0.5": "mur2-muf1",
-        "kappaf0.5": "mur1-mufH",
+        "kappaf0.5": "mur1-muf0p5",
         "kappaf2.": "mur1-muf2",
-        "kappaFO0.5": "murH-mufH",
+        "kappaFO0.5": "mur0p5-muf0p5",
         "kappaFO2.": "mur2-muf2",
     }
 
@@ -631,10 +631,30 @@ def read_matched_scetlib_hist(
     hnonsing = hh.addHists(-1 * hfo_sing, hfo, flow=False, by_ax_name=False)
 
     if "qT" in hfo.axes.name and zero_nons_bins is not None:
+
+        def translate_slice(ax, s):
+            if not isinstance(s, slice):
+                return s
+            start = (
+                int(ax.index(s.start.imag) + s.start.real)
+                if isinstance(s.start, complex)
+                else s.start
+            )
+            stop = (
+                int(ax.index(s.stop.imag) + s.stop.real + 1)
+                if isinstance(s.stop, complex)
+                else s.stop
+            )
+
+            return slice(start, stop, s.step)
+
+        qt_slice = translate_slice(hnonsing.axes[ax], zero_nons_bins)
+        logger.info(f"Zeroing bins with slices {qt_slice}")
         slices = tuple(
-            zero_nons_bins if ax == "qT" else slice(None) for ax in hnonsing.axes.name
+            qt_slice if ax == "qT" else slice(None) for ax in hnonsing.axes.name
         )
-        hnonsing.view()[slices] = np.zeros_like(hnonsing[{"qT": zero_nons_bins}])
+        hnonsing.values(flow=True)[slices] = 0
+        hnonsing.variances(flow=True)[slices] = 0
 
     # variations are driven by resummed result, collect common variations from nonsingular piece
     # if needed
@@ -846,13 +866,57 @@ def read_dyturbo_angular_coeffs(
     return h
 
 
-def read_mu_hist_combine_tau(minnlof, mu_sample, hist_name, combine_with_tau=True):
-    hmu = read_and_scale(minnlof, mu_sample, hist_name, apply_xsec=False)
-    sumw = read_sumw(minnlof, mu_sample)
-    xsec = read_xsec(minnlof, mu_sample)
+def read_mu_hist_combine_tau(
+    minnlof, mu_sample, hist_name, eras, combine_with_tau=True
+):
+    with h5py.File(minnlof, "r") as h5file:
+        results = load_results_h5py(h5file)
+        sumw = 0
+        xsec = 0
+        hmu = None
 
-    if combine_with_tau:
-        tau_sample = mu_sample.replace("mu", "tau")
-        hmu += read_and_scale(minnlof, tau_sample, hist_name, apply_xsec=False)
-        sumw += read_sumw(minnlof, tau_sample)
-    return hmu * xsec / sumw
+        for era in eras:
+
+            mu_sample_era = f"{mu_sample}_{era}"
+            if mu_sample_era not in results.keys():
+                logger.warning(f"Sample {mu_sample_era} not found, continue without")
+            else:
+                sumw += read_sumw(minnlof, mu_sample_era)
+                hmu_era = load_and_scale(
+                    results, mu_sample_era, hist_name, apply_xsec=False
+                )
+                xsec_era = read_xsec(minnlof, mu_sample_era)
+                if xsec == 0:
+                    xsec = xsec_era
+                elif xsec_era != xsec:
+                    raise RuntimeError(
+                        f"Incompatible cross sections for sample {mu_sample} across eras {eras}"
+                    )
+
+                if hmu is None:
+                    hmu = hmu_era
+                else:
+                    hmu += hmu_era
+
+            if combine_with_tau:
+                tau_sample_era = mu_sample_era.replace("mu", "tau")
+                if tau_sample_era not in results.keys():
+                    logger.warning(
+                        f"Sample {tau_sample_era} not found, continue without"
+                    )
+                    continue
+
+                hmu_era = load_and_scale(
+                    results, tau_sample_era, hist_name, apply_xsec=False
+                )
+                if hmu is None:
+                    hmu = hmu_era
+                else:
+                    hmu += hmu_era
+
+                sumw += read_sumw(minnlof, tau_sample_era)
+
+        if xsec == 0:
+            raise RuntimeError("Got cross section of 0")
+
+        return hmu * xsec / sumw

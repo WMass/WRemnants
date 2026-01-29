@@ -333,22 +333,18 @@ class Datagroups(object):
                     and (len(mcCorr) == 0 or mcCorr[0] not in ["none", None])
                 ):
                     # set QCD MC nonclosure corrections
-                    if "QCDmuEnrichPt15PostVFP" not in self.results:
+                    histname_qcd_mc = f"QCDmuEnrichPt15_{self.era}"
+                    if histname_qcd_mc not in self.results:
                         logger.warning(
-                            "Dataset 'QCDmuEnrichPt15PostVFP' not in results, continue without fake correction"
+                            f"Dataset '{histname_qcd_mc}' not in results, continue without fake correction"
                         )
                         return
-                    if (
-                        "unweighted"
-                        not in self.results["QCDmuEnrichPt15PostVFP"]["output"]
-                    ):
+                    if "unweighted" not in self.results[histname_qcd_mc]["output"]:
                         logger.warning(
                             "Histogram 'unweighted' not found, continue without fake correction"
                         )
                         return
-                    hQCD = self.results["QCDmuEnrichPt15PostVFP"]["output"][
-                        "unweighted"
-                    ].get()
+                    hQCD = self.results[histname_qcd_mc]["output"]["unweighted"].get()
                     self.groups[g].histselector.set_correction(hQCD, axes_names=mcCorr)
             else:
                 self.groups[g].histselector = signalselector(
@@ -1816,7 +1812,7 @@ class Datagroups(object):
                 )
                 hist_fake = pseudodataGroups.groups[self.fakeName].hists[pseudodata]
             elif pseudodata == "mcClosure":
-                hist_fake = pseudodataGroups.results["QCDmuEnrichPt15PostVFP"][
+                hist_fake = pseudodataGroups.results[f"QCDmuEnrichPt15_{self.era}"][
                     "output"
                 ]["unweighted"].get()
 

@@ -154,61 +154,59 @@ def add_explicit_BinByBinStat(
         If None, use variations from nominal histogram
     """
 
-    recovar_syst = [f"_{n}" for n in recovar]
-    info = dict(
-        baseName="binByBinStat_" + "_".join(datagroups.procGroups[samples]) + "_",
-        name=f"binByBinStat{label}",
-        group=f"binByBinStat{label}",
-        passToFakes=False,
-        processes=[samples],
-        mirror=True,
-        labelsByAxis=[f"_{p}" if p != recovar[0] else p for p in recovar],
+    nominalName = source[0]
+    histname = source[1]
+
+    logger.info(f"Now in channel {datagroups.channel} to make beta variations")
+
+    procs_to_add = datagroups.expandProcesses([samples])
+
+    datagroups.loadHistsForDatagroups(
+        nominalName,
+        histname,
+        label="syst",
+        procsToRead=procs_to_add,
     )
 
-    if source is not None:
-        # signal region selection
-        if wmass:
-            action_sel = lambda h, x: histselections.SignalSelectorABCD(h[x]).get_hist(
-                h[x]
-            )
-        else:
-            action_sel = lambda h, x: h[x]
-
-        integration_var = {
-            a: hist.sum for a in datagroups.gen_axes_names
-        }  # integrate out gen axes for bin by bin uncertainties
-        integration_var["acceptance"] = hist.sum
-
-        datagroups.addSystematic(
-            **info,
-            nominalName=source[0],
-            histname=source[1],
-            systAxes=recovar,
-            actionRequiresNomi=True,
-            action=lambda hv, hn: hh.addHists(
-                hn.project(*datagroups.gen_axes_names),
-                action_sel(hv, {"acceptance": True}).project(
-                    *recovar, *datagroups.gen_axes_names
-                ),
-                scale2=(
-                    np.sqrt(action_sel(hv, integration_var).variances(flow=True))
-                    / action_sel(hv, integration_var).values(flow=True)
-                )[..., *[np.newaxis] * len(datagroups.gen_axes_names)],
-            ),
+    if len(procs_to_add) != 1:
+        logger.debug(
+            f"Does only work for exactly one process at a time, got {procs_to_add}!"
         )
+
+    proc = procs_to_add[0]
+
+    # signal region selection
+    if wmass:
+        action_sel = lambda h, x: histselections.SignalSelectorABCD(h[x]).get_hist(h[x])
     else:
-        datagroups.addSystematic(
-            **info,
-            systAxes=recovar_syst,
-            action=lambda h: hh.addHists(
-                h.project(*recovar),
-                hh.expand_hist_by_duplicate_axes(
-                    h.project(*recovar), recovar, recovar_syst
-                ),
-                scale2=np.sqrt(h.project(*recovar).variances(flow=True))
-                / h.project(*recovar).values(flow=True),
-            ),
-        )
+        action_sel = lambda h, x: h[x]
+
+    integration_var = {
+        a: hist.sum for a in datagroups.gen_axes_names
+    }  # integrate out gen axes for bin by bin uncertainties
+    integration_var["acceptance"] = hist.sum
+
+    hnom = datagroups.groups[proc].hists[datagroups.nominalName]
+    hnom = hnom.project(*datagroups.gen_axes_names)
+
+    hvar = datagroups.groups[proc].hists["syst"]
+    hvar_acc = action_sel(hvar, {"acceptance": True}).project(
+        *recovar, *datagroups.gen_axes_names
+    )
+    hvar_reco = action_sel(hvar, integration_var)
+
+    rel_unc = np.sqrt(hvar_reco.variances(flow=True)) / hvar_reco.values(flow=True)
+
+    hvar = hh.scaleHist(
+        hvar_acc, rel_unc[..., *[np.newaxis] * len(datagroups.gen_axes_names)]
+    )
+
+    datagroups.writer.add_beta_variations(
+        hvar,
+        proc,
+        source_channel=datagroups.channel.replace("_masked", ""),
+        dest_channel=datagroups.channel,
+    )
 
 
 def add_nominal_with_correlated_BinByBinStat(
@@ -429,6 +427,7 @@ def add_noi_unfolding_variations(
     process="signal_samples",
     scalemap=None,
     fitresult=None,
+    constrained=False,
 ):
 
     poi_axes_syst = [f"_{n}" for n in poi_axes] if datagroups.xnorm else poi_axes[:]
@@ -442,7 +441,7 @@ def add_noi_unfolding_variations(
         passToFakes=passSystToFakes,
         systAxes=poi_axes_syst,
         processes=[process],
-        noConstraint=True,
+        noConstraint=not constrained,
         noi=True,
         mirror=True,
         scale=(
@@ -557,9 +556,8 @@ def add_bsm_mixing(
 
     if mixing > 0:
         # load bsm members
-        model, mass = bsm_name.split("_")
         bsm_member_info = datagroups.get_members_from_results(
-            startswith=[f"{model}_MN-{mass}-"]
+            startswith=f"{bsm_name}_{datagroups.era}"
         )
         bsm_members = [Datagroup_member(k, v) for k, v in bsm_member_info.items()]
 
@@ -603,22 +601,22 @@ def add_bsm_mixing(
 
 def add_bsm_process(
     datagroups,
-    bsm_process,
+    bsm_name,
 ):
     # add BSM sample as new process
-    model, mass = bsm_process.split("_")
     bsm_members = datagroups.get_members_from_results(
-        startswith=[f"{model}_MN-{mass}-"]
+        startswith=f"{bsm_name}_{datagroups.era}"
     )
     if len(bsm_members) != 1:
         raise NotImplementedError(
             f"Expected exactly 1 BSM member, but got {len(bsm_members)}"
         )
+    # since this group is created manually, the BSM is not added to the fakes (which is likely intented thing for BSM)
     datagroups.addGroup(
-        bsm_process,
+        bsm_name,
         members=bsm_members,
     )
-    datagroups.unconstrainedProcesses.append(bsm_process)
+    datagroups.unconstrainedProcesses.append(bsm_name)
 
     # Get SM cross section
     xsec = 0
@@ -626,5 +624,5 @@ def add_bsm_process(
         xsec += m.xsec
 
     # scale BSM cross section to SM cross section
-    for m in datagroups.groups[bsm_process].members:
+    for m in datagroups.groups[bsm_name].members:
         m.xsec = xsec

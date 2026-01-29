@@ -55,7 +55,11 @@ def main():
 
         pdf = THEORY_PREDS[pred]["pdf"]
 
-        command = f"python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --useCorrByHelicityBinning --theoryCorr {pred} -o {args.outdir} --maxFiles -1 -j 300 --filterProcs ZmumuPostVFP WplusmunuPostVFP WminusmunuPostVFP --addHelicityAxis --pdf {pdf}"
+        command = f"""
+            python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --theoryCorr {pred} \
+            --filterProcs 'Zmumu_MiNNLO' 'Wplusmunu_MiNNLO' 'Wminusmunu_MiNNLO' --aggregateGroups Zmumu Wmunu \
+            -o {args.outdir} --maxFiles -1 -j 300 --addHelicityAxis --pdf {pdf}
+            """
         print(f"Running command: {command}")
         os.system(command)
 

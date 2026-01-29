@@ -63,7 +63,9 @@ def add_xnorm_histograms(
     # TODO: this does not look correct since theoryAgnostic_axes only contain only polarization independent observables (pTV, YV, mV, qV)
     #   and the helicity weights are only nonzero for polarization dependent variables (cos(theta*), phi*, lepton eta, ...)
 
-    df_xnorm = define_helicity_weights(df_xnorm, is_z=dataset_name == "ZmumuPostVFP")
+    df_xnorm = define_helicity_weights(
+        df_xnorm, is_z=dataset_name == "Zmumu_2016PostVFP"
+    )
     df_xnorm = df_xnorm.DefinePerSample("xnorm", "0.5")
     axis_xnorm = hist.axis.Regular(
         1, 0.0, 1.0, name="count", underflow=False, overflow=False
