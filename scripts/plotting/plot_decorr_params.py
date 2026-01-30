@@ -19,9 +19,10 @@ def get_values_and_impacts_as_panda(
     global_impacts=False,
     scale=1.0,
     scale_from_poi_name=False,
+    result=None,
 ):
 
-    fitres, meta = rabbit.io_tools.get_fitresult(input_file, meta=True)
+    fitres, meta = rabbit.io_tools.get_fitresult(input_file, meta=True, result=result)
     poi_names = rabbit.io_tools.get_poi_names(meta)
     poi_values = []
     totals = []
@@ -79,6 +80,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Fitresult file from combinetf with nominal fit",
+    )
+    parser.add_argument(
+        "--result",
+        default=None,
+        type=str,
+        help="fitresults key in file (e.g. 'asimov'). Leave empty for data fit result.",
     )
     parser.add_argument(
         "--data",
@@ -152,6 +159,7 @@ if __name__ == "__main__":
             args.infileInclusive,
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
+            result=args.result,
         )
         fInclusive = rabbit.io_tools.get_fitresult(args.infileInclusive)
         nll_inclusive = fInclusive["nllvalreduced"]
@@ -162,12 +170,14 @@ if __name__ == "__main__":
             args.infileNominal,
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
+            result=args.result,
         )
 
     df = get_values_and_impacts_as_panda(
         args.infile,
         partial_impacts_to_read=partial_impacts_to_read,
         global_impacts=args.globalImpacts,
+        result=args.result,
     )
 
     df["Params"] = df["Name"].apply(lambda x: x.split("_")[0])
@@ -490,12 +500,13 @@ if __name__ == "__main__":
             logger.info(f"nll_inclusive = {nll_inclusive}; nll = {nll}")
 
             chi2_stat = 2 * (nll_inclusive - nll)
-            if args.data:
-                chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
-            else:
+            chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
+            if args.result == "asimov":
+                chi2_stat = 0
+            elif not args.data:
                 # in case of pseudodata fits there are no statistical fluctuations and we can only access the expected p-value, where ndf has to be added to the test statistic
                 chi2_stat += ndf
-                chi2_label = r"<\mathit{\chi}^2/\mathit{ndf}>"
+                chi2_label = f"<{chi2_label}>"
 
             p_value = 1 - chi2.cdf(chi2_stat, ndf)
             logger.info(f"ndf = {ndf}; Chi2 = {chi2_stat}; p-value={p_value}")

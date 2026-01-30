@@ -584,6 +584,17 @@ def make_parser(parser=None):
         "--massVariation", type=float, default=100, help="Variation of boson mass"
     )
     parser.add_argument(
+        "--widthVariationW",
+        type=str,
+        nargs=2,
+        default=["0.6", "0.6"],
+        choices=["0.6", "6", "36", "48"],
+        # [["0.6", "0.6"], ["6", "0.6"], ["48", "0.6"], ["0.6", "36"], ["6", "36"], ["48", "36"]],
+        help="""Variation of W boson width (as string), specifying Down/Up variations.
+        If using --noi wwidth, the default is changed to ["48", "36"].
+        """,
+    )
+    parser.add_argument(
         "--ewUnc",
         type=str,
         nargs="*",
@@ -1626,20 +1637,39 @@ def setup(
         )
 
     if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
-        if "wwidth" in args.noi:
-            width_info = dict(
-                name="WidthW42MeV",
-                skipEntries=widthWeightNames(proc="W", exclude=(2.043, 2.127)),
-                systNameReplace=[["2p043GeV", "Down"], ["2p127GeV", "Up"]],
-            )
-            # name="WidthWm6p36MeV",
-            # skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
-            # systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
-        else:
+        widthVarTag = ""
+        if (
+            args.widthVariationW[0] == args.widthVariationW[1]
+            and args.widthVariationW[0] == "0.6"
+        ):
             width_info = dict(
                 name="WidthW0p6MeV",
                 skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
                 systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+            )
+        else:
+            widthLowValues = {
+                "0.6": "2.09053",
+                "6": "2.085",
+                "48": "2.043",
+            }
+            widthHighValues = {
+                "0.6": "2.09173",
+                "36": "2.127",
+            }
+            widthVarDown = args.widthVariationW[0].replace(".", "p")
+            widthVarUp = args.widthVariationW[1].replace(".", "p")
+            widthVarTag = f"WidthWm{widthVarDown}p{widthVarUp}MeV"
+            wlv = widthLowValues[args.widthVariationW[0]]
+            whv = widthHighValues[args.widthVariationW[1]]
+            wlvStr = wlv.replace(".", "p") + "GeV"
+            whvStr = whv.replace(".", "p") + "GeV"
+            width_info = dict(
+                name=widthVarTag,
+                skipEntries=widthWeightNames(
+                    proc="W", exclude=(float(wlv), float(whv))
+                ),
+                systNameReplace=[[wlvStr, "Down"], [whvStr, "Up"]],
             )
 
         width_info.update(
@@ -3002,6 +3032,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+    if "wwidth" in args.noi:
+        parser = parsing.set_parser_default(parser, "widthVariationW", ["48", "36"])
+        args = parser.parse_args()
 
     isUnfolding = args.analysisMode == "unfolding"
     isTheoryAgnostic = args.analysisMode in [
