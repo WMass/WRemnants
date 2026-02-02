@@ -296,6 +296,7 @@ def make_parser(parser=None):
             "wwidth",
             "xsec",
             "massdiffW",
+            "widthdiffW",
             "massdiffZ",
         ],
         default=["wmass"],
@@ -317,6 +318,15 @@ def make_parser(parser=None):
         help="For use with --noi massDiffW, select the variable to define the different mass differences",
     )
     parser.add_argument(
+        "--widthDiffWVar",
+        type=str,
+        default=None,
+        choices=[
+            "charge",
+        ],
+        help="For use with --noi widthDiffW, select the variable to define the different mass differences",
+    )
+    parser.add_argument(
         "--massDiffZVar",
         type=str,
         default=None,
@@ -333,6 +343,13 @@ def make_parser(parser=None):
     )
     parser.add_argument(
         "--fitMassDecorr",
+        type=str,
+        default=[],
+        nargs="*",
+        help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
+    )
+    parser.add_argument(
+        "--fitWidthDecorr",
         type=str,
         default=[],
         nargs="*",
@@ -1642,8 +1659,9 @@ def setup(
             args.widthVariationW[0] == args.widthVariationW[1]
             and args.widthVariationW[0] == "0.6"
         ):
+            widthVarTag = "WidthW0p6MeV"
             width_info = dict(
-                name="WidthW0p6MeV",
+                name=widthVarTag,
                 skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
                 systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
             )
@@ -1702,10 +1720,56 @@ def setup(
                 **width_info,
             )
         else:
-            datagroups.addSystematic(
-                widthWeightName,
-                **width_info,
-            )
+            if len(args.fitWidthDecorr) == 0:
+                datagroups.addSystematic(
+                    widthWeightName,
+                    **width_info,
+                )
+            else:
+                suffix = "".join([a.capitalize() for a in args.fitWidthDecorr])
+                new_names = [f"{a}_decorr" for a in args.fitWidthDecorr]
+                datagroups.addSystematic(
+                    histname=widthWeightName,
+                    processes=signal_samples_forMass,
+                    name=f"{widthVarTag}Decorr{suffix}{label}",
+                    groups=[f"widthDecorr{label}", "theory"],
+                    skipEntries=[
+                        (x, *[-1] * len(args.fitWidthDecorr))
+                        for x in width_info["skipEntries"]
+                    ],
+                    noi="wwidth" in args.noi,
+                    noConstraint="wwidth" in args.noi,
+                    mirror=False,
+                    systAxes=["width", *new_names],
+                    systNameReplace=width_info["systNameReplace"],
+                    passToFakes=passSystToFakes,
+                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                    isPoiHistDecorr=len(args.fitWidthDecorr),
+                    actionRequiresNomi=True,
+                    action=syst_tools.decorrelateByAxes,
+                    actionArgs=dict(
+                        axesToDecorrNames=args.fitWidthDecorr,
+                        newDecorrAxesNames=new_names,
+                        axlim=args.decorrAxlim,
+                        rebin=args.decorrRebin,
+                        absval=args.decorrAbsval,
+                    ),
+                )
+
+            if "widthdiffW" in args.noi:
+                suffix = "".join(
+                    [a.capitalize() for a in args.widthDiffWVar.split("-")]
+                )
+                combine_helpers.add_mass_diff_variations(
+                    datagroups,
+                    args.widthDiffWVar,
+                    name=widthWeightName,
+                    processes=signal_samples_forMass,
+                    constrain=constrainMass,
+                    suffix=suffix,
+                    label=label,
+                    passSystToFakes=passSystToFakes,
+                )
 
     if "sin2thetaW" in args.noi or (not stat_only and not args.noTheoryUnc):
         datagroups.addSystematic(
@@ -2166,6 +2230,7 @@ def setup(
                         ),
                     )
 
+            # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2'
             if "utAngleSign" in fitvar:
                 # TODO: extend and use previous function fake_nonclosure(...)
                 def fake_nonclosure_byAxis(
@@ -2180,7 +2245,7 @@ def setup(
                     # with keepConstantAxisBin one can keep a range of bins untouched by passing slice(start, stop)
                     # e.g. keepConstantAxisBin={"utAngleSign": slice(1, 2)}, maybe also by values with complex numbers
 
-                    logger.debug(
+                    logger.info(
                         f"Doing decorr nonclosure with keepConstantAxisBin={keepConstantAxisBin}"
                     )
                     hnom = fakeselector.get_hist(h, *args, **kwargs)
