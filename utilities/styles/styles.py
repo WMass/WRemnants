@@ -312,6 +312,13 @@ nuisance_grouping = {
         "prefire",
         "muonCalibration",
         "Fake",
+        "massShift",
+        "pythia_shower_kt",
+        "resumTNP",
+        "resumNonpert",
+        "resumTransition",
+        "resumScale",
+        "bcQuarkMass",
     ],
     "efficiency": [
         "muon_eff_all",

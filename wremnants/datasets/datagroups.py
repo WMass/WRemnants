@@ -1315,12 +1315,17 @@ class Datagroups(object):
         action=None,
         actionArgs={},
         actionRequiresNomi=False,
+        lastAction=None,
+        lastActionArgs={},
+        lastActionRequiresNomi=False,
         **kwargs,
     ):
         """
         'preOp': Operation that is applied on each member before members are summed up to groups and before the selection is performed
         'action': Operation that is applied after everything else
         """
+
+        s = hist.tag.Slicer()
 
         if group is not None:
             groups = [*groups, group]
@@ -1436,6 +1441,21 @@ class Datagroups(object):
                         ]
 
                 logger.debug(f"Add systematic {var_name}")
+
+                if lastAction is not None:
+                    if lastActionRequiresNomi:
+                        hnom = self.groups[proc].hists[self.nominalName]
+                        apply_last_action = lambda h: lastAction(
+                            h, hnom, **lastActionArgs
+                        )
+                    else:
+                        apply_last_action = lambda h: lastAction(h, **lastActionArgs)
+
+                    if isinstance(hists, hist.Hist):
+                        hists = apply_last_action(hists)
+                    else:
+                        hists = tuple(apply_last_action(h) for h in hists)
+
                 self.writer.add_systematic(
                     hists,
                     var_name,
