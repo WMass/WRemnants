@@ -58,7 +58,7 @@ args = parser.parse_args()
 
 logger = logging.setup_logger("make_ptv_unfolding_corr", 4 if args.debug else 3)
 
-genh = input_tools.read_and_scale(args.genFile, "ZmumuPostVFP", "nominal_gen")
+genh = input_tools.read_and_scale(args.genFile, "Zmumu_2016PostVFP", "nominal_gen")
 
 unfolded_res = pickle.load(open(args.unfoldingFile, "rb"))
 unfolded_datah = unfolded_res["results"]["pmaskedexp"]["chan_13TeV"]["Z"][

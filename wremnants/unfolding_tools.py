@@ -18,9 +18,7 @@ def add_out_of_acceptance(datasets, group, newGroupName=None):
         if dataset.group == group:
             ds = deepcopy(dataset)
 
-            if newGroupName is None:
-                ds.group = ds.group + "OOA"
-            else:
+            if newGroupName is not None:
                 ds.group = newGroupName
             ds.out_of_acceptance = True
 
@@ -242,20 +240,41 @@ def add_xnorm_histograms(
     return df_xnorm
 
 
-def reweight_to_fitresult(
-    filename, result=None, mapping="Select", channel="ch0_masked"
-):
+def reweight_to_fitresult(filename, result=None, mapping=None, channel=None):
     import wums.boostHistHelpers as hh
     from rabbit.io_tools import get_fitresult
 
     fitresult, meta = get_fitresult(filename[0], result, meta=True)
-    results = fitresult["mappings"][mapping]["channels"][channel]
 
+    def get_result(fres):
+        mappings = fres["mappings"]
+        if mapping is None:
+            if len(mappings.keys()) == 1:
+                channels = next(iter(mappings.values()))["channels"]
+            else:
+                raise RuntimeError(
+                    f"Expected exactly 1 mapping but got {[k for k in mappings.keys()]}"
+                )
+        else:
+            channels = mappings[mapping]["channels"]
+
+        if channel is None:
+            if len(channels.keys()) == 1:
+                res = next(iter(channels.values()))
+            else:
+                raise RuntimeError(
+                    f"Expected exactly 1 channel but got {[k for k in channels.keys()]}"
+                )
+        else:
+            res = channels[channel]
+        return res
+
+    results = get_result(fitresult)
     hPostfit = results[f"hist_postfit_inclusive"].get()
 
     if len(filename) == 2:
         fitresult_den, meta_den = get_fitresult(filename[1], result, meta=True)
-        results_den = fitresult_den["mappings"][mapping]["channels"][channel]
+        results_den = get_result(fitresult_den)
         hPrefit = results_den[f"hist_prefit_inclusive"].get()
     else:
         hPrefit = results[f"hist_prefit_inclusive"].get()
@@ -311,6 +330,16 @@ def reweight_to_fitresult(
     return corr_helper
 
 
+def rebin_pt(edges):
+    # use 2 ptll bin for each ptVGen bin, except first and last
+    # first gen bin same size as reco bin, then 1 gen bin for 2 reco bins
+    new_edges = np.array([*edges[:2], *edges[3::2]])
+    if len(new_edges) % 2:
+        # in case it's an odd number of edges, last two bins are overflow
+        edges = edges[:-1]
+    return new_edges
+
+
 class UnfolderZ:
     """
     To be used in histmakers to define columns and add histograms for unfolding of Z dilepton kinematics
@@ -344,15 +373,6 @@ class UnfolderZ:
         self.poi_as_noi = poi_as_noi
         self.unfolding_levels = unfolding_levels
 
-        def rebin_pt(edges):
-            # use 2 ptll bin for each ptVGen bin, except first and last
-            # first gen bin same size as reco bin, then 1 gen bin for 2 reco bins
-            new_edges = np.array([*edges[:2], *edges[3::2]])
-            if len(new_edges) % 2:
-                # in case it's an odd number of edges, last two bins are overflow
-                edges = edges[:-1]
-            return new_edges
-
         self.weightsByHelicity_helper_unfolding = None
 
         self.unfolding_axes = {}
@@ -374,12 +394,15 @@ class UnfolderZ:
 
             if self.add_helicity_axis:
                 if self.weightsByHelicity_helper_unfolding is None:
-                    edges = [ax for ax in a if ax.name == "ptVGen"][0].edges
+                    # need to rebin to the edges used for the unfolding, and remove of out of acceptance bins (|Y|>2.5 and pT>44)
+                    pt_edges = [ax for ax in a if ax.name == "ptVGen"][0].edges
+                    absY_edges = [ax for ax in a if ax.name == "absYVGen"][0].edges
                     # helper to derive helicity xsec shape from event by event reweighting
                     self.weightsByHelicity_helper_unfolding = helicity_utils.make_helicity_weight_helper(
                         is_z=True,
-                        filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_maxFiles_m1_alphaSunfoldingBinning_helicity.hdf5",
-                        rebin_ptVgen_edges=edges,
+                        rebin_ptVgen_edges=pt_edges,
+                        rebin_absYVgen_edges=absY_edges,
+                        filename=f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs.hdf5",
                     )
 
                 for ax in a:

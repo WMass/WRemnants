@@ -47,9 +47,13 @@ def main():
 
     for pred in args.preds:
 
-        command = f"python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --useCorrByHelicityBinning --theoryCorr {pred} -o {args.outdir} --maxFiles '-1' -j 300 --filterProcs ZmumuPostVFP WplusmunuPostVFP WminusmunuPostVFP --addHelicityAxis --pdf {THEORY_PREDS[pred]['pdf']}"
+        command = f"""
+        python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --theoryCorr {pred} \
+        --filterProcs 'Zmumu_MiNNLO' 'Wplusmunu_MiNNLO' 'Wminusmunu_MiNNLO' --aggregateGroups Zmumu Wmunu \
+        -o {args.outdir} --addHelicityAxis --pdf {THEORY_PREDS[pred]['pdf']} --maxFiles '-1' -j 300
+        """
         print(f"Running command: {command}")
-        # os.system(command)
+        os.system(command)
 
         if args.skim:
             skim_command = f"python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {args.outdir}/w_z_gen_dists_{pred + "_Corr"}_maxFiles_m1.hdf5 --filterHistsRegex '^(.*pdfvars_Corr.*|nominal_gen_pdf_uncorr)$' --outfile {args.outdir}/w_z_gen_dists_{pred + "_Corr"}_maxFiles_m1_skimmed.hdf5"

@@ -905,7 +905,7 @@ class TheoryHelper(object):
 
     def add_pdf_uncertainty(self, operation=None, scale=-1.0):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
-        pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
+        pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
         scale = (
             scale
@@ -980,7 +980,7 @@ class TheoryHelper(object):
 
     def add_pdf_alphas_variation(self, noi=False):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
-        pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
+        pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
         as_range = pdfInfo["alphasRange"]
 
@@ -1000,7 +1000,7 @@ class TheoryHelper(object):
                         "Falling back to default alphaS corrections scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfasCorr."
                     )
                     pdf = "ct18z"
-                    pdfInfo = theory_tools.pdf_info_map("ZmumuPostVFP", pdf)
+                    pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf)
                     pdfName = pdfInfo["name"]
                     as_range = pdfInfo["alphasRange"]
                     as_range = theory_tools.pdfMap[pdf]["alphasRange"]

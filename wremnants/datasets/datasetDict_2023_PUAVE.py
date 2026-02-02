@@ -3,7 +3,7 @@ BR_W_LEP = 3 * 0.1086  # PDG
 
 # TODO update xsecs to 13.6 TeV?
 
-dataDictLowPU2023 = {
+dataDict = {
     "Zmumu": {
         "filepaths": [
             "{BASE_PATH}/{ERA}/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos"

@@ -94,7 +94,11 @@ hnom = "nominal_gen"
 
 unfolded_data = pickle.load(open(args.unfolded, "rb")) if args.unfolded else None
 
-procs = ["WplusmunuPostVFP", "WminusmunuPostVFP"] if args.w else ["ZmumuPostVFP"]
+procs = (
+    ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
+    if args.w
+    else ["Zmumu_2016PostVFP"]
+)
 
 hists_nom = []
 hists_err = []

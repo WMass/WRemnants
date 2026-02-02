@@ -115,7 +115,9 @@ parser.add_argument(
 parser = parsing.set_parser_default(
     parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"]
 )
-parser = parsing.set_parser_default(parser, "excludeProcs", ["QCD"])
+parser = parsing.set_parser_default(
+    parser, "excludeProcs", ["QCD", "WtoNMu", "DYlowMass"]
+)
 parser = parsing.set_parser_default(
     parser, "pt", common.get_default_ptbins(analysis_label)
 )
@@ -155,17 +157,17 @@ if args.useTheoryAgnosticBinning:
     axis_ptV_thag = theoryAgnostic_axes[0]
     dilepton_ptV_binning = axis_ptV_thag.edges
 else:
-    dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
+    dilepton_ptV_binning = common.ptZ_binning if not args.finePtBinning else range(200)
 
 if "yll" in args.axes:
-    # use 10 quantiles in case "yll" is used as nominal axis
-    edges_yll = common.yll_10quantiles_binning
+    # use 20 quantiles in case "yll" is used as nominal axis
+    edges_yll = common.yll_20quantiles_binning
     edges_absYll = edges_yll[len(edges_yll) // 2 :]
     axis_yll = hist.axis.Variable(edges_yll, name="yll")
     axis_absYll = hist.axis.Variable(edges_absYll, name="absYll", underflow=False)
 else:
-    axis_yll = hist.axis.Regular(20, -2.5, 2.5, name="yll")
-    axis_absYll = hist.axis.Regular(10, 0.0, 2.5, name="absYll", underflow=False)
+    axis_yll = hist.axis.Regular(100, -2.5, 2.5, name="yll")
+    axis_absYll = hist.axis.Regular(50, 0.0, 2.5, name="absYll", underflow=False)
 
 # available axes for dilepton validation plots
 all_axes = {
@@ -312,13 +314,13 @@ if args.csVarsHist:
         overflow=False,
     )
 
-    quantile_file = f"{common.data_dir}/angularCoefficients/mz_dilepton_scetlib_dyturboCorr_maxFiles_m1_alphaSunfoldingBinning_csQuantiles.hdf5"
+    quantile_file = f"{common.data_dir}/angularCoefficients/mz_dilepton_scetlib_dyturbo_CT18Z_N3p0LL_N2LO_Corr_maxFiles_m1_csQuantiles.hdf5"
     quantile_helper_csVars = make_quantile_helper(
         quantile_file,
         ["cosThetaStarll", "phiStarll"],
         ["ptll", "absYll"],
         name="nominal_csQuantiles",
-        processes=["ZmumuPostVFP"],
+        processes=["Zmumu_2016PostVFP"],
         n_quantiles=[n_quantiles],
     )
 
@@ -361,7 +363,9 @@ procs = [
     for p, grp in (("W", common.wprocs), ("Z", common.zprocs))
     if any(d.name in grp for d in datasets)
 ]
-theory_helpers_procs = theory_corrections.make_theory_helpers(args, procs=procs)
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr, procs=procs
+)
 
 # extra axes which can be used to label tensor_axes
 if args.binnedScaleFactors:
@@ -554,7 +558,7 @@ def build_graph(df, dataset):
         ]
         cols = [*cols, "run"]
 
-    if args.unfolding and dataset.name == "ZmumuPostVFP":
+    if args.unfolding and dataset.group == "Zmumu":
         df = unfolder_z.add_gen_histograms(
             args, df, results, dataset, corr_helpers, theory_helpers=theory_helpers
         )
@@ -993,7 +997,7 @@ def build_graph(df, dataset):
     )
     results.append(hNValidPixelHitsNonTrig)
 
-    if args.unfolding and args.poiAsNoi and dataset.name == "ZmumuPostVFP":
+    if args.unfolding and args.poiAsNoi and dataset.group == "Zmumu":
         unfolder_z.add_poi_as_noi_histograms(
             df,
             results,
@@ -1015,9 +1019,8 @@ def build_graph(df, dataset):
 
     if not args.noAuxiliaryHistograms:
         for obs in [
-            "ptll",
+            ["ptll", "yll"],
             "mll",
-            "yll",
             "cosThetaStarll",
             "phiStarll",
             "etaPlus",
@@ -1025,15 +1028,18 @@ def build_graph(df, dataset):
             "ptPlus",
             "ptMinus",
         ]:
+            if isinstance(obs, str):
+                obs = [obs]
+            obs_name = f"nominal_{'_'.join(obs)}"
+            obs_axes = [all_axes[o] for o in obs]
+
             if dataset.is_data:
-                results.append(df.HistoBoost(f"nominal_{obs}", [all_axes[obs]], [obs]))
+                results.append(df.HistoBoost(obs_name, obs_axes, obs))
             else:
                 results.append(
-                    df.HistoBoost(
-                        f"nominal_{obs}", [all_axes[obs]], [obs, "nominal_weight"]
-                    )
+                    df.HistoBoost(obs_name, obs_axes, [*obs, "nominal_weight"])
                 )
-                if isWorZ:
+                if isWorZ and not args.onlyMainHistograms:
                     df = syst_tools.add_theory_hists(
                         results,
                         df,
@@ -1041,9 +1047,9 @@ def build_graph(df, dataset):
                         dataset.name,
                         corr_helpers,
                         theory_helpers,
-                        [all_axes[obs]],
-                        [obs],
-                        base_name=f"nominal_{obs}",
+                        obs_axes,
+                        obs,
+                        base_name=obs_name,
                         for_wmass=False,
                     )
 
@@ -1055,18 +1061,19 @@ def build_graph(df, dataset):
                     f"nominal_{obs}", [all_axes[obs]], [obs, "nominal_weight"]
                 )
             )
-            df = syst_tools.add_theory_hists(
-                results,
-                df,
-                args,
-                dataset.name,
-                corr_helpers,
-                theory_helpers,
-                [all_axes[obs]],
-                [obs],
-                base_name=f"nominal_{obs}",
-                for_wmass=False,
-            )
+            if not args.onlyMainHistograms:
+                df = syst_tools.add_theory_hists(
+                    results,
+                    df,
+                    args,
+                    dataset.name,
+                    corr_helpers,
+                    theory_helpers,
+                    [all_axes[obs]],
+                    [obs],
+                    base_name=f"nominal_{obs}",
+                    for_wmass=False,
+                )
 
     # test plots
     if args.validationHists:

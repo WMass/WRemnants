@@ -19,8 +19,6 @@ parser = parsing.set_parser_default(
 )
 parser = parsing.set_parser_default(parser, "era", "2017H")
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -45,8 +43,7 @@ from wremnants.histmaker_tools import (
 
 ###################################
 flavor = args.flavor  # mumu, ee
-sigProcs = ["Zmumu"] if flavor == "mumu" else ["Zee"]
-base_group = sigProcs[0]
+base_group = f"Z{flavor}"
 
 # dilepton invariant mass cuts
 mass_min = 60
@@ -61,16 +58,15 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=list(
         set(
-            args.excludeProcs + ["singlemuon"] if flavor == "ee" else ["singleelectron"]
+            args.excludeProcs + [f"SingleMuon_{args.era}"]
+            if flavor == "ee"
+            else [f"HighEGJet_{args.era}"]
         )
     ),
     base_path=args.dataPath,
-    extended="msht20an3lo" not in args.pdfs,
-    mode=analysis_label,
     era=args.era,
     nanoVersion="v12",
 )
-
 
 for d in datasets:
     logger.info(f"Dataset {d.name}")
@@ -108,7 +104,9 @@ axis_wlike_met = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axes_mt = [axis_mt]
 cols_mt = ["transverseMass"]
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(args)
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr
+)
 axis_ptVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["ptVgen"]
 axis_chargeVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["chargeVgen"]
 
@@ -134,12 +132,12 @@ if args.unfolding:
     )
 
     if not args.poiAsNoi:
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
 
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs_lowpu], theory_corrs
+    [d.name for d in datasets if d.name in common.vprocs], theory_corrs
 )
 
 # recoil initialization
@@ -154,11 +152,8 @@ def build_graph(df, dataset):
 
     results = []
 
-    isW = dataset.name in common.wprocs_lowpu
-    isZ = dataset.name in common.zprocs_lowpu
-
     theory_helpers = None
-    if dataset.name in common.vprocs_lowpu:
+    if dataset.name in common.vprocs:
         theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
@@ -172,7 +167,7 @@ def build_graph(df, dataset):
     axes = nominal_axes
     cols = nominal_cols
 
-    if args.unfolding and dataset.name in sigProcs:
+    if args.unfolding and dataset.group == base_group:
         df = unfolder_z.add_gen_histograms(
             args, df, results, dataset, corr_helpers, theory_helpers
         )
@@ -538,7 +533,7 @@ def build_graph(df, dataset):
                 )
             )
 
-            if dataset.name in common.vprocs_lowpu:
+            if dataset.name in common.vprocs:
                 df = syst_tools.add_theory_hists(
                     results,
                     df,
@@ -662,7 +657,7 @@ def build_graph(df, dataset):
             if not args.noRecoil and args.recoilUnc:
                 df = recoilHelper.add_recoil_unc_Z(df, results, dataset, c, a, n)
 
-    if args.unfolding and args.poiAsNoi and dataset.name in sigProcs:
+    if args.unfolding and args.poiAsNoi and dataset.group == base_group:
         unfolder_z.add_poi_as_noi_histograms(
             df,
             results,

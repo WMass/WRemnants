@@ -14,7 +14,11 @@ from wremnants import (
 )
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.histmaker_tools import (
+    aggregate_groups,
+    scale_to_data,
+    write_analysis_output,
+)
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -45,12 +49,6 @@ parser.add_argument(
     "--genPtBinningAsReco",
     action="store_true",
     help="Use unfolding binning to produce the gen results",
-)
-parser.add_argument(
-    "--useCorrByHelicityBinning",
-    action="store_true",
-    help="Use finer absY binning to produce the gen results."
-    "Used in particular to produce the smooth PDF corrections.",
 )
 parser.add_argument(
     "--singleLeptonHists",
@@ -100,7 +98,7 @@ parser.add_argument(
 parser.add_argument(
     "--finePtVBinning",
     action="store_true",
-    help="Use 1 GeV binning for ptVgen (e.g., for theory corrections)",
+    help="Use 0.5 GeV binning for ptVgen (e.g., for theory corrections)",
 )
 parser.add_argument(
     "--centralBosonPDFWeight",
@@ -108,14 +106,16 @@ parser.add_argument(
     help="Apply PDF reweighting using boson parameterized corrections",
 )
 
-
 parser = parsing.set_parser_default(parser, "filterProcs", common.vprocs)
+parser = parsing.set_parser_default(parser, "era", "13TeVGen")
+parser = parsing.set_parser_default(parser, "aggregateGroups", [])
 args = parser.parse_args()
 
 if not args.theoryCorrections:
     parser = parsing.set_parser_default(parser, "theoryCorr", [])
     parser = parsing.set_parser_default(parser, "ewTheoryCorr", [])
 args = parser.parse_args()
+
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -126,10 +126,10 @@ datasets = getDatasets(
     extended="msht20an3lo" not in args.pdfs,
     nanoVersion="v9",
     base_path=args.dataPath,
-    mode=analysis_label,
+    era=args.era,
 )
 
-logger.debug(f"Will process samples {[d.name for d in datasets]}")
+logger.info(f"Will process samples {[d.name for d in datasets]}")
 
 axis_ygen = hist.axis.Regular(10, -5.0, 5.0, name="y")
 col_rapidity = "yVgen" if args.signedY else "absYVgen"
@@ -162,8 +162,27 @@ axis_chargel_gen = hist.axis.Regular(
     overflow=False,
 )
 
+# fine mass bins for studies
+# axis_massZgen = hist.axis.Variable(
+#     [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 13000],
+#     name="massVgen",
+#     underflow=False,
+#     overflow=False,
+# )
+
+# axis_massWgen = hist.axis.Variable([4.0, 13000.0], name="massVgen")
+axis_massWgen = hist.axis.Variable([0, 75, 80, 85, 120.0, 13000], name="massVgen")
+axis_massZgen = hist.axis.Variable([60.0, 120.0, 13000], name="massVgen")
+
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
-corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, theory_corrs)
+procsWithTheoryCorr = [d.name for d in datasets if d.name in common.vprocs]
+if len(procsWithTheoryCorr) and len(theory_corrs):
+    corr_helpers = theory_corrections.load_corr_helpers(
+        procsWithTheoryCorr, theory_corrs
+    )
+else:
+    corr_helpers = {}
+
 
 corrs = []
 if args.helicity and args.propagatePDFstoHelicity:
@@ -171,7 +190,7 @@ if args.helicity and args.propagatePDFstoHelicity:
 if args.centralBosonPDFWeight:
     corrs.append("pdf_central")
 theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args, procs=["Z", "W"], corrs=corrs
+    args.pdfs, args.theoryCorr, procs=["Z", "W"], corrs=corrs
 )
 
 
@@ -197,34 +216,23 @@ def build_graph(df, dataset):
     else:
         theory_helpers = {}
 
-    if args.addCharmAxis:
-        axis_massWgen = hist.axis.Variable(
-            [4.0, 13000.0], name="massVgen", underflow=True, overflow=False
-        )
-    else:
-        axis_massWgen = hist.axis.Regular(
-            120, 0, 120.0, name="massVgen", underflow=True, overflow=True
-        )
-
-    axis_massZgen = hist.axis.Regular(12, 60.0, 120.0, name="massVgen")
-
     theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
     )
     axis_ptV_thag = theoryAgnostic_axes[0]
     axis_yV_thag = theoryAgnostic_axes[1]
 
-    if args.useUnfoldingBinning:
+    if args.useUnfoldingBinning and "Z" in dataset.name:
         unfolding_axes, unfolding_cols, unfolding_selections = (
             differential.get_dilepton_axes(
                 ["ptVGen", "absYVGen"],
                 {
-                    "ptll": common.get_dilepton_ptV_binning(fine=False),
-                    "yll": (common.yll_10quantiles_binning),
+                    "ptll": common.ptZ_binning,
+                    "yll": common.yll_20quantiles_binning,
                 },
                 "prefsr",
                 add_out_of_acceptance_axis=False,
-                rebin_pt=not args.genPtBinningAsReco,
+                rebin_pt=None if args.genPtBinningAsReco else unfolding_tools.rebin_pt,
             )
         )
         axis_absYVgen = hist.axis.Variable(
@@ -237,20 +245,6 @@ def build_graph(df, dataset):
             name="ptVgen",
             underflow=False,
         )
-
-        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
-    elif args.useCorrByHelicityBinning:
-        axis_absYVgen = hist.axis.Variable(
-            common.absYVgen_binning_corr,
-            name="absYVgen",
-            underflow=False,
-        )
-        axis_ptVgen = hist.axis.Variable(
-            common.ptVgen_binning_corr,
-            name="ptVgen",
-            underflow=False,
-        )
-        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
     elif args.useTheoryAgnosticBinning:
         axis_absYVgen = hist.axis.Variable(
             axis_yV_thag.edges,  # same axis as theory agnostic norms
@@ -263,31 +257,23 @@ def build_graph(df, dataset):
             underflow=False,
         )
     else:
+        if args.finePtVBinning:
+            edges_ptV = np.append(np.arange(0, 100.5, 0.5), 13000.0)
+        else:
+            edges_ptV = (
+                common.ptZgen_binning_corr if isZ else common.ptWgen_binning_corr
+            )
+        edges_absYV = (
+            common.absYZgen_binning_corr if isZ else common.absYWgen_binning_corr
+        )
+
         axis_absYVgen = hist.axis.Variable(
-            [
-                0.0,
-                0.25,
-                0.5,
-                0.75,
-                1.0,
-                1.25,
-                1.5,
-                1.75,
-                2.0,
-                2.25,
-                2.5,
-                2.75,
-                3.0,
-                3.25,
-                3.5,
-                4.0,
-                5.0,
-            ],  # this is the same binning as hists from theory corrections
+            edges_absYV,
             name="absYVgen",
             underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            (*common.get_dilepton_ptV_binning(fine=args.finePtVBinning), 13000.0),
+            edges_ptV,
             name="ptVgen",
             underflow=False,
         )
@@ -311,7 +297,9 @@ def build_graph(df, dataset):
         df, dataset.name, corr_helpers, args, theory_helpers
     )
 
-    if isZ:
+    if isZ or dataset.group in [
+        "DYlowMass",
+    ]:
         nominal_axes = [
             axis_massZgen,
             axis_rapidity,
@@ -896,8 +884,8 @@ def build_graph(df, dataset):
         and "winhac" not in dataset.name
         and "LHEScaleWeight" in df.GetColumnNames()
         and "LHEPdfWeight" in df.GetColumnNames()
+        and not args.onlyMainHistograms
     ):
-
         df = syst_tools.add_theory_hists(
             results,
             df,
@@ -957,6 +945,12 @@ def build_graph(df, dataset):
 
 
 resultdict = narf.build_and_run(datasets, build_graph)
+if len(args.aggregateGroups) > 0:
+    if not args.noScaleToData:
+        scale_to_data(
+            resultdict
+        )  # weight to cross section / sum(weights) * lumi with lumi=1 w/o data
+    aggregate_groups(datasets, resultdict, args.aggregateGroups)
 write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
@@ -969,29 +963,20 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
     helicity_xsecs_out = {}
     for dataset in datasets:
         name = dataset.name
-        if "nominal_gen_helicity_xsecs_scale" not in resultdict[name]["output"]:
-            logger.warning(
-                f"Failed to find nominal_gen_helicity_xsecs_scale hist for proc {name}. Skipping!"
-            )
-            continue
         for var in ["", "lhe", "hardProcess", "postShower", "postBeamRemnants"]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             if var == "":
                 suffix = ""
             else:
                 suffix = f"_{var}"
 
-            helicity_xsecs = resultdict[name]["output"][
-                f"nominal_gen_helicity_xsecs_scale{suffix}"
-            ].get()
+            histname = f"nominal_gen_helicity_xsecs_scale{suffix}"
+            if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
+                continue
+
+            helicity_xsecs = resultdict[name]["output"][histname].get()
 
             key = f"{name[0]}{suffix}"
 
@@ -1014,17 +999,11 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
             "CT18alphaS002",
             "NNPDF40alphaS001",
         ]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             histname = f"nominal_gen_helicity_nominal_gen_pdf{var}"
             if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
                 continue
 
             helicity_xsecs = resultdict[name]["output"][histname].get()

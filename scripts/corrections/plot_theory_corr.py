@@ -31,7 +31,7 @@ parser.add_argument(
 parser.add_argument(
     "--datasets",
     nargs="*",
-    default=["ZmumuPostVFP"],
+    default=["Zmumu_2016PostVFP"],
     help="Apply corrections from indicated generator. First will be nominal correction.",
 )
 parser.add_argument(
@@ -87,7 +87,7 @@ corr_dict = theory_corrections.load_corr_helpers(
 den_dict = {
     p: {
         g: theory_corrections.load_corr_hist(
-            f"{args.baseDir}/{g}Corr{p[0]}.pkl.lz4", p[0], f"{g}_den"
+            f"{args.baseDir}/{g}_Corr{p[0]}.pkl.lz4", p[0], f"minnlo_ref_hist"
         )
         for g in args.theoryCorr
     }
@@ -96,7 +96,7 @@ den_dict = {
 num_dict = {
     p: {
         g: theory_corrections.load_corr_hist(
-            f"{args.baseDir}/{g}Corr{p[0]}.pkl.lz4", p[0], f"{g}_num"
+            f"{args.baseDir}/{g}_Corr{p[0]}.pkl.lz4", p[0], f"{g}_hist"
         )
         for g in args.theoryCorr
     }
@@ -369,6 +369,10 @@ for dataset, corr_hists in corr_dict.items():
             corrh_den = den_dict[dataset][corr]
             corrh_num = num_dict[dataset][corr]
 
+            corrh_den, corrh_num = theory_corrections.rebin_corr_hists(
+                [corrh_den, corrh_num]
+            )
+
             charge_axis_names = [n for n in corrh.axes.name if n.startswith("charge")]
             if (
                 len(charge_axis_names) == 0
@@ -433,20 +437,28 @@ for dataset, corr_hists in corr_dict.items():
             # split hists into systematics
             corrh_systs = {idx: corrh[{**sel, syst_axis: idx}] for idx in idxs}
 
-            corrh_den_systs = (
-                {idx: corrh_den[{**sel, syst_axis: idx}] for idx in idxs}
-                if syst_axis in corrh_den
-                else {1: corrh_den}
-            )
-            corrh_num_systs = (
-                {idx: corrh_num[{**sel, syst_axis: idx}] for idx in idxs}
-                if syst_axis in corrh_num
-                else {1: corrh_num}
-            )
+            if syst_axis in corrh_den.axes.name:
+                corrh_den_systs = {
+                    idx: corrh_den[{**sel, syst_axis: idx}]
+                    for idx in idxs
+                    if idx < len(corrh_den.axes[syst_axis])
+                }
+            else:
+                corrh_den_systs = {1: corrh_den}
 
-            hists = [h for h in corrh_systs.values()]
-            hists_den = [h for h in corrh_den_systs.values()]
-            hists_num = [h for h in corrh_num_systs.values()]
+            if syst_axis in corrh_num.axes.name:
+                corrh_num_systs = {
+                    idx: corrh_num[{**sel, syst_axis: idx}]
+                    for idx in idxs
+                    if idx < len(corrh_num.axes[syst_axis])
+                }
+            else:
+                corrh_num_systs = {1: corrh_num}
+
+            hists = [hh.disableFlow(h) for h in corrh_systs.values()]
+            hists_den = [hh.disableFlow(h) for h in corrh_den_systs.values()]
+            hists_num = [hh.disableFlow(h) for h in corrh_num_systs.values()]
+
             all_hists += hists
             all_hists_den += hists_den
             all_hists_num += hists_num
@@ -463,8 +475,8 @@ for dataset, corr_hists in corr_dict.items():
             all_axes += axes
             if "2d" in args.plots and len(axes) >= 2:
                 for n, (idx, h) in zip(names, corrh_systs.items()):
-                    h_den = hists_den[idx]
-                    h_num = hists_num[idx]
+                    h_den = hists_den[idx] if len(hists_den) > idx else hists_den[0]
+                    h_num = hists_num[idx] if len(hists_num) > idx else hists_num[0]
                     if len(axes) == 2:
                         make_plot_2d(
                             h,

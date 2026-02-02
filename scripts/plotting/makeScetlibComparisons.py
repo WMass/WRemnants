@@ -16,9 +16,9 @@ s = hist.tag.Slicer()
 lookup = {
     "minnlo": {
         "dirs": {
-            "z": ("ZmumuPostVFP", "output"),
-            "wp": ("WplusmunuPostVFP", "output"),
-            "wm": ("WminusmunuPostVFP", "output"),
+            "z": ("Zmumu_2016PostVFP", "output"),
+            "wp": ("Wplusmunu_2016PostVFP", "output"),
+            "wm": ("Wminusmunu_2016PostVFP", "output"),
         },
         "ptV": {
             "hist": "nominal_gen",

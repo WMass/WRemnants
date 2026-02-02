@@ -1,3 +1,4 @@
+import importlib
 import os
 import random
 
@@ -5,26 +6,17 @@ import ROOT
 import XRootD.client
 
 import narf
-from wremnants.datasets.datasetDict2017_v9 import dataDictV9_2017
-from wremnants.datasets.datasetDict2017G_v9 import dataDictV9_2017G
-from wremnants.datasets.datasetDict2018_v9 import dataDictV9_2018
-from wremnants.datasets.datasetDict_gen import genDataDict
-from wremnants.datasets.datasetDict_lowPU import dataDictLowPU
-from wremnants.datasets.datasetDict_lowPU2023 import dataDictLowPU2023
-
-# set the debug level for logging incase of full printout
-from wremnants.datasets.datasetDict_v9 import dataDictV9, dataDictV9extended
 from wums import logging
 
 logger = logging.child_logger(__name__)
 
 default_nfiles = {
-    "WminusmunuPostVFP": 1700,
-    "WplusmunuPostVFP": 2000,
-    "WminustaunuPostVFP": 400,
-    "WplustaunuPostVFP": 500,
-    "ZmumuPostVFP": 900,
-    "ZtautauPostVFP": 1200,
+    "Wminusmunu_2016PostVFP": 1700,
+    "Wplusmunu_2016PostVFP": 2000,
+    "Wminustaunu_2016PostVFP": 400,
+    "Wplustaunu_2016PostVFP": 500,
+    "Zmumu_2016PostVFP": 900,
+    "Ztautau_2016PostVFP": 1200,
 }
 
 
@@ -177,23 +169,15 @@ def makeFilelist(
     return toreturn
 
 
-def getDataPath(mode=None):
+def getDataPath():
     import socket
 
     hostname = socket.gethostname()
 
     if hostname.endswith(".cern.ch"):
-        if mode and "lowpu" in mode:
-            base_path = "root://eoscms.cern.ch//store/cmst3/group/wmass/LowPU"
-        else:
-            base_path = (
-                "root://eoscms.cern.ch//store/cmst3/group/wmass/w-mass-13TeV/NanoAOD"
-            )
+        base_path = "/scratch/shared/NanoAOD"
     elif hostname.endswith(".mit.edu"):
-        if mode and "lowpu" in mode:
-            base_path = "/scratch/submit/cms/wmass/NanoAOD/LowPU"
-        else:
-            base_path = "/scratch/submit/cms/wmass/NanoAOD"
+        base_path = "/scratch/submit/cms/wmass/NanoAOD"
     elif hostname == "cmsanalysis.pi.infn.it":
         # NOTE: If anyone wants to run lowpu analysis at Pisa they'd probably want a different path
         base_path = "/scratchnvme/wmass/NANOV9/postVFP"
@@ -216,7 +200,6 @@ def getDatasets(
     maxFiles=default_nfiles,
     filt=None,
     excl=None,
-    mode=None,
     base_path=None,
     nanoVersion="v9",
     data_tags=[
@@ -233,49 +216,27 @@ def getDatasets(
     oneMCfileEveryN=None,
     checkFileForZombie=False,
     era="2016PostVFP",
-    extended=True,
+    extended=False,
 ):
 
     if maxFiles is None or (isinstance(maxFiles, int) and maxFiles < -1):
         maxFiles = default_nfiles
 
     if not base_path:
-        base_path = getDataPath(mode)
+        base_path = getDataPath()
     logger.info(f"Loading samples from {base_path}.")
 
-    # TODO avoid use of nested if statements with e.g. a unified dict
-    if nanoVersion == "v9":
-        if era == "2016PostVFP":
-            dataDict = dataDictV9
-            if extended:
-                dataDict = dataDictV9extended
-            logger.info("Using NanoAOD V9 for 2016PostVFP")
-        elif era == "2017":
-            dataDict = dataDictV9_2017
-            logger.info("Using NanoAOD V9 for 2017")
-        elif era == "2017G":
-            dataDict = dataDictV9_2017G
-            logger.info("Using NanoAOD V9 for 2017G")
-        elif era == "2018":
-            dataDict = dataDictV9_2018
-            logger.info("Using NanoAOD V9 for 2018")
-        else:
-            raise ValueError(f"Unsupported era {era}")
-    elif nanoVersion == "v12":  # 2022/2023
-        pass
+    module = importlib.import_module(f"wremnants.datasets.datasetDict_{era}")
+    if extended:
+        dataDict = getattr(module, "dataDict_extended", {})
+        if len(dataDict) == 0:
+            raise ValueError(f"Extended datasets not defined for module '{module}'")
     else:
-        raise ValueError("Only NanoAODv9/v12 is supported")
+        dataDict = getattr(module, "dataDict")
 
-    if mode:
-        if "gen" in mode:
-            dataDict.update(genDataDict)
-        elif "lowpu" in mode:
-            if era == "2017H":
-                dataDict = dataDictLowPU
-            elif "2023_PUAVE" in era:
-                dataDict = dataDictLowPU2023
-            else:
-                raise ValueError(f"Low pileup era {era} not supported")
+    dataDict_NanoGen = getattr(module, "dataDict_nanoGen", {})
+    if dataDict_NanoGen:
+        dataDict.update(dataDict_NanoGen)
 
     narf_datasets = []
     for sample, info in dataDict.items():
@@ -284,7 +245,7 @@ def getDatasets(
         if excl not in [None, []] and (info["group"] in excl or sample in excl):
             continue
 
-        if sample in genDataDict:
+        if sample in dataDict_NanoGen:
             base_path_sample = base_path.replace("NanoAOD", "NanoGen")
         else:
             base_path_sample = base_path
@@ -322,8 +283,6 @@ def getDatasets(
         )
 
         if is_data:
-            if mode == "gen":
-                continue
             narf_info.update(
                 dict(
                     is_data=True,

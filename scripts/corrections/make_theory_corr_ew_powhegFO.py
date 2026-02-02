@@ -81,7 +81,7 @@ if args.debug:
 
 # integrate over pt and phistar
 h = h[{"ptVlhe": hist.sum, "phiStarlhe": hist.sum}]
-h = hh.rebinHist(h, "absYVlhe", common.absYV_binning)
+h = hh.rebinHist(h, "absYVlhe", common.absYZgen_binning_corr)
 
 hcorr = hist.Hist(*h.axes)
 # safe default
