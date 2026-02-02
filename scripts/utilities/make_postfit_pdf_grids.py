@@ -154,9 +154,9 @@ pdf_scale = input_meta["meta_info"]["args"]["scalePdf"]
 pdf_symm = input_meta["meta_info"]["args"]["symmetrizePdfUnc"]
 
 if pdf_scale == -1:
-    pdf_scale = theory_tools.pdfMap[pdf_input][
-        "inflationFactor"
-    ]  # TODO: Modify name for Luca's changes
+    pdf_scale = theory_tools.pdf_inflation_factor(
+        theory_tools.pdfMap[pdf_input], input_meta["meta_info"]["args"]["noi"]
+    )
     logger.info(f"Using default inflation factor from theory_tools: {pdf_scale}")
 
 pdf_lha = lhapdf.getPDFSet(pdf_name)

@@ -112,7 +112,7 @@ class TheoryHelper(object):
         self.helicity_fit_unc = helicity_fit_unc
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
-        if "nnlojet" in self.corr_hist_name:
+        if self.corr_hist_name and "nnlojet" in self.corr_hist_name:
             self.add_stat_unc()
         # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
         self.add_helicity_shower_kt_uncertainty()
