@@ -42,7 +42,13 @@ parser.add_argument(
     "-v", "--verbose", choices=[0, 1, 2, 3, 4], default=3, help="Set verbosity level."
 )
 parser.add_argument(
+    "-l", "--fit-label", type=str, default="cmsmw", help="Label in the output PDF grids"
+)
+parser.add_argument(
     "--noColorLogger", action="store_true", help="Disable colored logging output."
+)
+parser.add_argument(
+    "--pseudoData", type=str, default=None, help="Pseudo-data label to use."
 )
 args = parser.parse_args()
 
@@ -84,11 +90,13 @@ def apply_symmetrization(matrix, symm, labels):
         return quadratic_symmetrization(matrix, labels)
 
 
-def write_new_grids(base_name, outfolder, postfit_matrix, central_grid, pdf_scale):
+def write_new_grids(
+    base_name, outfolder, fitlabel, postfit_matrix, central_grid, pdf_scale
+):
     scale_label = (
         "unscaled" if pdf_scale == 1 else f"uncx{pdf_scale:.1f}".replace(".", "p")
     )
-    new_pdf = f"{os.path.basename(base_name)}_cmsmw_{scale_label}"
+    new_pdf = f"{os.path.basename(base_name)}_{fitlabel}_{scale_label}"
 
     outdir = os.path.join(outfolder, new_pdf)
     if not os.path.exists(outdir):
@@ -127,7 +135,9 @@ Q = 100
 max_nf = 5
 photon = False
 
-fitresult, meta = io_tools.get_fitresult(args.fitresult, meta=True)
+fitresult, meta = io_tools.get_fitresult(
+    args.fitresult, meta=True, result=args.pseudoData
+)
 
 input_meta = meta["meta_info_input"]
 
@@ -211,5 +221,10 @@ new_central = grids[0] + np.sum(pulls * matrix, axis=1)
 postfit_matrix = matrix.dot(K).add(new_central, axis=0)
 
 write_new_grids(
-    central_pdf_path, args.outfolder, postfit_matrix, new_central, pdf_scale
+    central_pdf_path,
+    args.outfolder,
+    args.fit_label,
+    postfit_matrix,
+    new_central,
+    pdf_scale,
 )
