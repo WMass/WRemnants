@@ -8,6 +8,7 @@ from wums import logging
 
 parser = argparse.ArgumentParser()
 parser.add_argument("infile", type=str, help=".pkl.lz4 from with meta_info")
+parser.add_argument("-a", "--all", action="store_true", help="Print all meta info")
 parser.add_argument("--timestamp", action="store_true", help="Print timestamp")
 parser.add_argument("--hash", action="store_true", help="Print git hash")
 parser.add_argument("--diff", action="store_true", help="Print git diff")
@@ -40,13 +41,27 @@ def print_command_from_dict(infile):
                 meta_data["meta_info"][arg] if "meta_info" in meta_data else None,
             )
 
-        logger.info(get("command"))
-        if args.timestamp:
-            logger.info("Timestamp: " + get("time"))
-        if args.hash:
-            logger.info("Git hash: " + get("git_hash"))
-        if args.diff:
-            logger.info("Git diff: " + get("git_diff"))
+        if not args.all:
+            logger.info(get("command"))
+            if args.timestamp:
+                logger.info("Timestamp: " + get("time"))
+            if args.hash:
+                logger.info("Git hash: " + get("git_hash"))
+            if args.diff:
+                logger.info("Git diff: " + get("git_diff"))
+        else:
+            logger.info("Full metadata:")
+            for k in meta_data.keys():
+                v = get(k)
+                if type(v) is dict:
+                    logger.info(
+                        f"{k}: "
+                        + "\n"
+                        + "\n\t".join([f"{kk}: {vv}" for kk, vv in v.items()])
+                        + "\n"
+                    )
+                else:
+                    logger.info(f"{k}: {v}")
     else:
         dg = Datagroups(args.infile)
         logger.info(dg.getScriptCommand())

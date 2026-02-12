@@ -4,7 +4,11 @@ logger = logging.child_logger(__name__)
 
 
 def make_datagroups_2016(
-    dg, combine=False, pseudodata_pdfset=None, excludeGroups=None, filterGroups=None
+    dg,
+    combine=False,
+    pseudodata_pdfset=None,
+    excludeGroups=None,
+    filterGroups=None,
 ):
     # reset datagroups
     dg.groups = {}
@@ -47,9 +51,7 @@ def make_datagroups_2016(
         )
         dg.addGroup(
             "DYlowMass",
-            members=dg.get_members_from_results(
-                startswith=["DYlowMass", "DYJetsToMuMuMass10to50"]
-            ),
+            members=dg.get_members_from_results(startswith=["DYJetsToMuMuMass10to50"]),
         )
         dg.addGroup(
             "Top",

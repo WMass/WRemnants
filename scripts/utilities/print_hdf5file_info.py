@@ -23,7 +23,7 @@ if args.mode == "hists":
         print(names)
     else:
         h = input_tools.read_and_scale(args.infile, args.sample, args.hist)
-        print(f"Histogram {args.hist}")
+        print(f"Histogram {args.hist} has axes {h.axes}")
         print(h)
 
 if args.mode == "samples":

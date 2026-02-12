@@ -70,17 +70,15 @@ def quadrature_sum_hist(hists, is_down):
 def load_hist(filename, fittype="postfit", helicity=False):
     fitresult = rabbit.io_tools.get_fitresult(filename)
     obs = {args.obs, "helicity", "chargeVgen"} if helicity else {args.obs}
-    if "physics_models" in fitresult.keys():
-        if any("Project" in k for k in fitresult["physics_models"].keys()):
-            model_key = [
-                k for k in fitresult["physics_models"].keys() if "Project" in k
-            ][0]
-            h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+    if "mappings" in fitresult.keys():
+        if any("Project" in k for k in fitresult["mappings"].keys()):
+            model_key = [k for k in fitresult["mappings"].keys() if "Project" in k][0]
+            h = fitresult["mappings"][model_key]["channels"]["ch0"][
                 f"hist_{fittype}_inclusive"
             ]
         else:
             model_key = "Basemodel"
-        h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+        h = fitresult["mappings"][model_key]["channels"]["ch0"][
             f"hist_{fittype}_inclusive"
         ]
     else:
@@ -96,7 +94,11 @@ hnom = "nominal_gen"
 
 unfolded_data = pickle.load(open(args.unfolded, "rb")) if args.unfolded else None
 
-procs = ["WplusmunuPostVFP", "WminusmunuPostVFP"] if args.w else ["ZmumuPostVFP"]
+procs = (
+    ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
+    if args.w
+    else ["Zmumu_2016PostVFP"]
+)
 
 hists_nom = []
 hists_err = []
@@ -276,7 +278,11 @@ if args.xlim:
 
 hists = hists_nom + hists_err
 
-xlabels = {"absYVgen": r"|\mathit{y}^{V}|", "ptVgen": r"\mathit{p}_{T}^{V}"}
+xlabels = {
+    "absYVgen": r"|\mathit{y}^{V}|",
+    "ptVgen": r"\mathit{p}_{T}^{V}",
+    "pt": r"\mathit{p}_{T}^{\ell}",
+}
 xlabel = xlabels[args.obs]
 
 ylabel = r"$d\sigma"
@@ -288,7 +294,7 @@ else:
     xlabel = r"$" + xlabel.replace("^{V}", "^{Z}") + "$"
 # ylabel += r"\ cross\ section\ "
 
-if args.obs in ["ptVgen"]:
+if args.obs in ["ptVgen", "pt"]:
     xlabel += " (GeV)"
     ylabel += r"\ (pb\,/\,GeV)$"
 else:

@@ -1,8 +1,8 @@
 import hist
 import numpy as np
 
-from utilities.io_tools import input_tools
 from wremnants import histselections, syst_tools
+from wremnants.datasets.datagroup import Datagroup_member
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -88,20 +88,20 @@ def add_mass_diff_variations(
 
 
 def add_recoil_uncertainty(
-    card_tool,
+    datagroups,
     samples,
     passSystToFakes=False,
     pu_type="highPU",
     flavor="",
     group_compact=True,
 ):
-    met = input_tools.args_from_metadata(card_tool, "met")
+    met = datagroups.args_from_metadata("met")
     if flavor == "":
-        flavor = input_tools.args_from_metadata(card_tool, "flavor")
+        flavor = datagroups.args_from_metadata("flavor")
     if pu_type == "highPU" and (
         met in ["RawPFMET", "DeepMETReso", "DeepMETPVRobust", "DeepMETPVRobustNoPUPPI"]
     ):
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
@@ -116,7 +116,7 @@ def add_recoil_uncertainty(
 
     if pu_type == "lowPU":
         group_compact = False
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_syst",
             processes=samples,
             mirror=True,
@@ -129,7 +129,7 @@ def add_recoil_uncertainty(
             passToFakes=passSystToFakes,
         )
 
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
@@ -153,67 +153,142 @@ def add_explicit_BinByBinStat(
         If None, use variations from nominal histogram
     """
 
-    recovar_syst = [f"_{n}" for n in recovar]
-    info = dict(
-        baseName="binByBinStat_" + "_".join(datagroups.procGroups[samples]) + "_",
-        name=f"binByBinStat{label}",
-        group=f"binByBinStat{label}",
-        passToFakes=False,
-        processes=[samples],
-        mirror=True,
-        labelsByAxis=[f"_{p}" if p != recovar[0] else p for p in recovar],
+    nominalName = source[0]
+    histname = source[1]
+
+    logger.info(f"Now in channel {datagroups.channel} to make beta variations")
+
+    procs_to_add = datagroups.expandProcesses([samples])
+
+    datagroups.loadHistsForDatagroups(
+        nominalName,
+        histname,
+        label="syst",
+        procsToRead=procs_to_add,
     )
 
-    if source is not None:
-        # signal region selection
-        if wmass:
-            action_sel = lambda h, x: histselections.SignalSelectorABCD(h[x]).get_hist(
-                h[x]
-            )
-        else:
-            action_sel = lambda h, x: h[x]
-
-        integration_var = {
-            a: hist.sum for a in datagroups.gen_axes_names
-        }  # integrate out gen axes for bin by bin uncertainties
-        integration_var["acceptance"] = hist.sum
-
-        datagroups.addSystematic(
-            **info,
-            nominalName=source[0],
-            histname=source[1],
-            systAxes=recovar,
-            actionRequiresNomi=True,
-            action=lambda hv, hn: hh.addHists(
-                hn.project(*datagroups.gen_axes_names),
-                action_sel(hv, {"acceptance": True}).project(
-                    *recovar, *datagroups.gen_axes_names
-                ),
-                scale2=(
-                    np.sqrt(action_sel(hv, integration_var).variances(flow=True))
-                    / action_sel(hv, integration_var).values(flow=True)
-                )[..., *[np.newaxis] * len(datagroups.gen_axes_names)],
-            ),
+    if len(procs_to_add) != 1:
+        logger.debug(
+            f"Does only work for exactly one process at a time, got {procs_to_add}!"
         )
+
+    proc = procs_to_add[0]
+
+    # signal region selection
+    if wmass:
+        action_sel = lambda h, x: histselections.SignalSelectorABCD(h[x]).get_hist(h[x])
     else:
-        # if args.fitresult: # FIXME
-        #     info["group"] = "binByBinStat"
-        datagroups.addSystematic(
-            **info,
-            systAxes=recovar_syst,
-            action=lambda h: hh.addHists(
-                h.project(*recovar),
-                hh.expand_hist_by_duplicate_axes(
-                    h.project(*recovar), recovar, recovar_syst
-                ),
-                scale2=np.sqrt(h.project(*recovar).variances(flow=True))
-                / h.project(*recovar).values(flow=True),
-            ),
+        action_sel = lambda h, x: h[x]
+
+    integration_var = {
+        a: hist.sum for a in datagroups.gen_axes_names
+    }  # integrate out gen axes for bin by bin uncertainties
+    integration_var["acceptance"] = hist.sum
+
+    hnom = datagroups.groups[proc].hists[datagroups.nominalName]
+    hnom = hnom.project(*datagroups.gen_axes_names)
+
+    hvar = datagroups.groups[proc].hists["syst"]
+    hvar_acc = action_sel(hvar, {"acceptance": True}).project(
+        *recovar, *datagroups.gen_axes_names
+    )
+    hvar_reco = action_sel(hvar, integration_var)
+
+    rel_unc = np.sqrt(hvar_reco.variances(flow=True)) / hvar_reco.values(flow=True)
+
+    hvar = hh.scaleHist(
+        hvar_acc, rel_unc[..., *[np.newaxis] * len(datagroups.gen_axes_names)]
+    )
+
+    datagroups.writer.add_beta_variations(
+        hvar,
+        proc,
+        source_channel=datagroups.channel.replace("_masked", ""),
+        dest_channel=datagroups.channel,
+    )
+
+
+def add_nominal_with_correlated_BinByBinStat(
+    datagroups, wmass, base_name, masked, masked_flow_axes=[]
+):
+    # signal MC stat is correlated between detector level and gen level with explicit parameters
+    #   setting signal histogram variances to 0 in detector level
+    #   subtracting signal histogram variaiances of detector level from gen level to keep only contribution that is not at detector level
+    if wmass:
+        action_sel = lambda h, x: histselections.SignalSelectorABCD(h[x]).get_hist(h[x])
+    else:
+        action_sel = lambda h, x: h[x]
+
+    # load gen level nominal
+    datagroups.loadHistsForDatagroups(
+        baseName=datagroups.nominalName,
+        syst=datagroups.nominalName,
+        procsToRead=datagroups.groups.keys(),
+        label=datagroups.nominalName,
+        forceNonzero=False,
+        sumFakesPartial=True,
+    )
+
+    # load generator level nominal
+    gen_name = f"{base_name}_yieldsUnfolding_theory_weight"
+    datagroups.loadHistsForDatagroups(
+        baseName="nominal",
+        syst=gen_name,
+        procsToRead=datagroups.groups.keys(),
+        label=gen_name,
+        forceNonzero=False,
+        sumFakesPartial=True,
+    )
+
+    for proc in datagroups.predictedProcesses():
+        logger.info(f"Add process {proc} in channel {datagroups.channel}")
+
+        # nominal histograms of prediction
+        norm_proc_hist_reco = datagroups.groups[proc].hists[gen_name]
+        norm_proc_hist = datagroups.groups[proc].hists[datagroups.nominalName]
+
+        norm_proc_hist_reco = action_sel(norm_proc_hist_reco, {"acceptance": True})
+
+        if norm_proc_hist_reco.axes.name != datagroups.fit_axes:
+            norm_proc_hist_reco = norm_proc_hist_reco.project(*datagroups.fit_axes)
+
+        if norm_proc_hist.axes.name != datagroups.fit_axes:
+            norm_proc_hist = norm_proc_hist.project(*datagroups.fit_axes)
+
+        norm_proc_hist.variances(flow=True)[...] = norm_proc_hist.variances(
+            flow=True
+        ) - norm_proc_hist_reco.variances(flow=True)
+
+        datagroups.groups[proc].hists[datagroups.nominalName]
+
+        if len(masked_flow_axes) > 0:
+            datagroups.axes_disable_flow = [
+                n
+                for n in norm_proc_hist.axes.name
+                if n not in masked_flow_axes and n != "helicitySig"
+            ]
+            norm_proc_hist = hh.disableFlow(
+                norm_proc_hist, datagroups.axes_disable_flow
+            )
+
+        if datagroups.channel not in datagroups.writer.channels:
+            datagroups.writer.add_channel(
+                axes=norm_proc_hist.axes,
+                name=datagroups.channel,
+                masked=masked,
+                flow=len(masked_flow_axes) > 0,
+            )
+
+        datagroups.writer.add_process(
+            norm_proc_hist,
+            proc,
+            datagroups.channel,
+            signal=proc in datagroups.unconstrainedProcesses,
         )
 
 
 def add_electroweak_uncertainty(
-    card_tool,
+    datagroups,
     ewUncs,
     flavor="mu",
     samples="single_v_samples",
@@ -221,7 +296,7 @@ def add_electroweak_uncertainty(
     wlike=False,
 ):
     # different uncertainty for W and Z samples
-    all_samples = card_tool.procGroups[samples]
+    all_samples = datagroups.procGroups[samples]
     z_samples = [p for p in all_samples if p[0] == "Z"]
     w_samples = [p for p in all_samples if p[0] == "W"]
 
@@ -229,8 +304,8 @@ def add_electroweak_uncertainty(
         if "renesanceEW" in ewUnc:
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
-                card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                datagroups.addSystematic(
+                    f"{ewUnc}_Corr",
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
                     labelsByAxis=[f"renesanceEWCorr"],
@@ -242,11 +317,11 @@ def add_electroweak_uncertainty(
                 )
         elif ewUnc == "powhegFOEW":
             if z_samples:
-                card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                datagroups.addSystematic(
+                    f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[f"{ewUnc}_Corr"],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -254,11 +329,11 @@ def add_electroweak_uncertainty(
                     passToFakes=passSystToFakes,
                     name="ewScheme",
                 )
-                card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                datagroups.addSystematic(
+                    f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[f"{ewUnc}_Corr"],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -299,40 +374,73 @@ def add_electroweak_uncertainty(
             else:
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
-            card_tool.addSystematic(
-                f"{ewUnc}Corr",
+            datagroups.addSystematic(
+                f"{ewUnc}_Corr",
                 systAxes=["systIdx"],
                 mirror=True,
                 passToFakes=passSystToFakes,
                 processes=samples,
-                labelsByAxis=[f"{ewUnc}Corr"],
+                labelsByAxis=[f"{ewUnc}_Corr"],
                 scale=scale,
                 preOp=preOp,
                 groups=[f"theory_ew_{ewUnc}", "theory_ew", "theory"],
             )
 
 
+def get_scalemap(datagroups, axes, gen_level, select={}, rename_axes={}):
+    # make sure each gen bin variation has a similar effect in the reco space so that
+    #  we have similar sensitivity to all parameters within the given up/down variations
+    #  the scale map must have identical values in the fitted and corresponding masked channel
+    signal_samples = datagroups.procGroups["signal_samples"]
+    hScale = datagroups.getHistsForProcAndSyst(
+        signal_samples[0],
+        f"{gen_level}_yieldsUnfolding",
+        nominal_name="nominal",
+        applySelection=False,
+    )
+    hScale = hScale[{"acceptance": True, **select}]
+    hScale.values(flow=True)[...] = abs(hScale.values(flow=True))
+    hScale = hScale.project(*axes)
+    hScale = hh.disableFlow(hScale, ["absYVGen", "absEtaGen"])
+    for o, n in rename_axes.items():
+        hScale.axes[o]._ax.metadata["name"] = n
+    # scalemap with preserving normalization
+    hScale.values(flow=True)[...] = (
+        1.0
+        / hScale.values(flow=True)
+        * hScale.sum(flow=True).value
+        / np.prod(hScale.values(flow=True).shape)
+    )
+    return hScale
+
+
 def add_noi_unfolding_variations(
     datagroups,
     label,
     passSystToFakes,
-    xnorm,
     poi_axes,
     prior_norm=1,
-    scale_norm=0.01,
+    scale_norm=1,
     poi_axes_flow=["ptGen", "ptVGen"],
     gen_level="postfsr",
+    process="signal_samples",
+    scalemap=None,
+    fitresult=None,
+    constrained=False,
 ):
-    poi_axes_syst = [f"_{n}" for n in poi_axes] if xnorm else poi_axes[:]
+
+    poi_axes_syst = [f"_{n}" for n in poi_axes] if datagroups.xnorm else poi_axes[:]
     noi_args = dict(
-        histname=gen_level if xnorm else f"nominal_{gen_level}_yieldsUnfolding",
+        histname=(
+            gen_level if datagroups.xnorm else f"nominal_{gen_level}_yieldsUnfolding"
+        ),
         name=f"nominal_{gen_level}_yieldsUnfolding",
         baseName=f"{label}_",
         group=f"normXsec{label}",
         passToFakes=passSystToFakes,
         systAxes=poi_axes_syst,
-        processes=["signal_samples"],
-        noConstraint=True,
+        processes=[process],
+        noConstraint=not constrained,
         noi=True,
         mirror=True,
         scale=(
@@ -341,60 +449,57 @@ def add_noi_unfolding_variations(
         labelsByAxis=[f"_{p}" if p != poi_axes[0] else p for p in poi_axes],
     )
 
-    def disable_flow(h, axes_names=["absYVGen", "absEtaGen"]):
-        # disable flow for syst axes to not add systematic uncertainties in these bins
-        for var in axes_names:
-            if var in h.axes.name:
-                h = hh.disableFlow(h, var)
-        return h
+    if fitresult is not None:
+        # produce a scalemap based on uncertainties of the gen bin variations of an initial fit
 
-    def get_scalemap(axes, select={}, rename_axes={}):
-        # make sure each gen bin variation has a similar effect in the reco space so that
-        #  we have similar sensitivity to all parameters within the given up/down variations
-        # FIXME: this currently doesn't work, not sure why ...
-        signal_samples = datagroups.procGroups["signal_samples"]
-        hScale = datagroups.getHistsForProcAndSyst(
-            signal_samples[0],
-            f"{gen_level}_yieldsUnfolding",
-            nominal_name="nominal",
-        )
-        hScale = hScale[{"acceptance": True, **select}]
-        hScale.values(flow=True)[...] = abs(hScale.values(flow=True))
-        hScale = hScale.project(*axes)
-        hScale = disable_flow(hScale)
-        for o, n in rename_axes.items():
-            hScale.axes[o]._ax.metadata["name"] = n
-        # scalemap with preserving normalization
-        hScale.values(flow=True)[...] = (
-            1.0
-            / hScale.values(flow=True)
-            * hScale.sum(flow=True).value
-            / np.prod(hScale.values(flow=True).shape)
-        )
-        return hScale
+        from rabbit.io_tools import get_fitresult
 
-    if xnorm:
+        mapping = "Select"
+
+        fitresult, meta = get_fitresult(fitresult, meta=True)
+        results = fitresult["mappings"][mapping]["channels"]["ch0_masked"]
+
+        scalemap = results[f"hist_postfit_inclusive"].get()
+
+        scalemap.values(flow=True)[...] = scalemap.variances(
+            flow=True
+        ) ** 0.5 / scalemap.values(flow=True)
+
+    if datagroups.xnorm:
 
         def make_poi_xnorm_variations(h, poi_axes, poi_axes_syst, norm, h_scale=None):
+            h = hh.disableFlow(
+                h,
+                [
+                    "absYVGen",
+                    "absEtaGen",
+                ],
+            )
             hVar = hh.expand_hist_by_duplicate_axes(
                 h, poi_axes[::-1], poi_axes_syst[::-1]
             )
-            hVar = disable_flow(hVar, axes_names=["_absYVGen", "_absEtaGen"])
+
             if h_scale is not None:
                 hVar = hh.multiplyHists(hVar, h_scale)
             return hh.addHists(h, hVar, scale2=norm)
 
+        if scalemap is None:
+            scalemap = get_scalemap(
+                datagroups,
+                poi_axes,
+                gen_level,
+                rename_axes={o: n for o, n in zip(poi_axes, poi_axes_syst)},
+            )
+
         datagroups.addSystematic(
             **noi_args,
+            systAxesFlow=[f"_{n}" for n in poi_axes if n in poi_axes_flow],
             action=make_poi_xnorm_variations,
             actionArgs=dict(
                 poi_axes=poi_axes,
                 poi_axes_syst=poi_axes_syst,
                 norm=scale_norm,
-                h_scale=get_scalemap(
-                    poi_axes,
-                    rename_axes={o: n for o, n in zip(poi_axes, poi_axes_syst)},
-                ),
+                h_scale=scalemap,
             ),
         )
     else:
@@ -406,23 +511,117 @@ def add_noi_unfolding_variations(
                     "acceptance": hist.tag.Slicer()[:: hist.sum],
                 }
             ]
+
             hVar = h[{"acceptance": True}]
-            hVar = disable_flow(hVar)
+            hVar = hh.disableFlow(hVar, ["absYVGen", "absEtaGen"])
+
             if h_scale is not None:
                 hVar = hh.multiplyHists(hVar, h_scale)
+
             return hh.addHists(hNom, hVar, scale2=norm)
+
+        if scalemap is None:  # or fitresult is not None:
+            scalemap = get_scalemap(datagroups, poi_axes, gen_level)
 
         datagroups.addSystematic(
             **noi_args,
             systAxesFlow=[n for n in poi_axes if n in poi_axes_flow],
             preOpMap={
                 m.name: make_poi_variations
-                for g in datagroups.procGroups["signal_samples"]
+                for g in datagroups.expandProcess(process)
                 for m in datagroups.groups[g].members
             },
             preOpArgs=dict(
                 poi_axes=poi_axes,
                 norm=scale_norm,
-                h_scale=get_scalemap(poi_axes),
+                h_scale=scalemap,
             ),
         )
+
+
+def add_bsm_mixing(
+    datagroups,
+    inputBaseName,
+    bsm_name,
+    mixing=0.01,
+    passSystToFakes=True,
+):
+
+    # Scale SM down with `f(x) = 1-x'
+    preOpMap = {
+        m.name: lambda h, x=mixing: hh.scaleHist(h, 1 - x)
+        for m in datagroups.groups["Wmunu"].members
+    }
+
+    if mixing > 0:
+        # load bsm members
+        bsm_member_info = datagroups.get_members_from_results(
+            startswith=f"{bsm_name}_{datagroups.era}"
+        )
+        bsm_members = [Datagroup_member(k, v) for k, v in bsm_member_info.items()]
+
+        if len(bsm_members) != 1:
+            raise NotImplementedError(
+                f"Expected exactly 1 BSM member, but got {len(bsm_members)}"
+            )
+
+        # Get SM cross section
+        xsec = 0
+        for m in datagroups.groups["Wmunu"].members:
+            xsec += m.xsec
+
+        # scale BSM cross section to SM cross section
+        for m in bsm_members:
+            m.xsec = xsec
+
+        # Scale BSM up with `f(x) = x'
+        preOpMap.update(
+            {m.name: lambda h, x=mixing: hh.scaleHist(h, x) for m in bsm_members}
+        )
+
+        # add BSM sample to Wmunu group for this systematic
+        datagroups.groups["Wmunu"].addMembers(bsm_members)
+
+    datagroups.addSystematic(
+        histname=inputBaseName,
+        name=f"{bsm_name}_mixing",
+        processes=["Wmunu"],
+        mirror=True,
+        noi=True,
+        noConstraint=True,
+        passToFakes=passSystToFakes,
+        preOpMap=preOpMap,
+    )
+
+    if mixing > 0:
+        # remove the sample again
+        datagroups.groups["Wmunu"].deleteMembers(bsm_members)
+
+
+def add_bsm_process(
+    datagroups,
+    bsm_name,
+):
+    # add BSM sample as new process
+    bsm_members = datagroups.get_members_from_results(
+        startswith=f"{bsm_name}_{datagroups.era}"
+    )
+    if len(bsm_members) != 1:
+        raise NotImplementedError(
+            f"Expected exactly 1 BSM member, but got {len(bsm_members)}"
+        )
+    # since this group is created manually, the BSM is not added to the fakes (which is likely intented thing for BSM)
+    datagroups.addGroup(
+        bsm_name,
+        members=bsm_members,
+    )
+    datagroups.unconstrainedProcesses.append(bsm_name)
+
+    # Get SM cross section
+    xsec = 0
+    for m in datagroups.groups["Wmunu"].members:
+        xsec += m.xsec
+
+    # scale BSM cross section to SM cross section
+    for m in datagroups.groups[bsm_name].members:
+        m.xsec = xsec

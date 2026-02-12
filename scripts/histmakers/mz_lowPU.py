@@ -1,6 +1,6 @@
 import os
 
-from utilities import common, differential, parsing
+from utilities import common, parsing
 from wremnants.datasets.datagroups import Datagroups
 from wums import logging
 
@@ -19,8 +19,6 @@ parser = parsing.set_parser_default(
 )
 parser = parsing.set_parser_default(parser, "era", "2017H")
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -28,7 +26,6 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 import hist
 
 import narf
-import wremnants
 import wremnants.lowpu as lowpu
 from wremnants import (
     muon_selections,
@@ -46,8 +43,7 @@ from wremnants.histmaker_tools import (
 
 ###################################
 flavor = args.flavor  # mumu, ee
-sigProcs = ["Zmumu"] if flavor == "mumu" else ["Zee"]
-base_group = sigProcs[0]
+base_group = f"Z{flavor}"
 
 # dilepton invariant mass cuts
 mass_min = 60
@@ -62,16 +58,15 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=list(
         set(
-            args.excludeProcs + ["singlemuon"] if flavor == "ee" else ["singleelectron"]
+            args.excludeProcs + [f"SingleMuon_{args.era}"]
+            if flavor == "ee"
+            else [f"HighEGJet_{args.era}"]
         )
     ),
     base_path=args.dataPath,
-    extended="msht20an3lo" not in args.pdfs,
-    mode=analysis_label,
     era=args.era,
     nanoVersion="v12",
 )
-
 
 for d in datasets:
     logger.info(f"Dataset {d.name}")
@@ -109,39 +104,40 @@ axis_wlike_met = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axes_mt = [axis_mt]
 cols_mt = ["transverseMass"]
 
-qcdScaleByHelicity_helper = (
-    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity(is_z=True)
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr
 )
-axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
-axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
+axis_ptVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["ptVgen"]
+axis_chargeVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["chargeVgen"]
 
 if args.unfolding:
-    unfolding_axes = {}
-    unfolding_cols = {}
-    unfolding_selections = {}
-    for level in args.unfoldingLevels:
-        a, c, s = differential.get_dilepton_axes(
-            args.unfoldingAxes,
-            {"ptll": nominal_axes[0].edges, "yll": nominal_axes[1].edges},
-            level,
-            add_out_of_acceptance_axis=args.poiAsNoi,
-        )
 
-        unfolding_axes[level] = a
-        unfolding_cols[level] = c
-        unfolding_selections[level] = s
+    if args.unfoldingInclusive:
+        cutsmap = {"fiducial": "masswindow"}
+    else:
+        cutsmap = {
+            "pt_min": lep_pt_min,
+            "pt_max": lep_pt_max,
+            "mass_min": mass_min,
+            "mass_max": mass_max,
+        }
 
-        if not args.poiAsNoi:
-            datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
-            if len(args.unfoldingLevels) > 1:
-                logger.warning(
-                    f"Exact unfolding with multiple gen level definitions is not possible, take first one: {args.unfoldingLevels[0]} and continue."
-                )
-                break
+    unfolder_z = unfolding_tools.UnfolderZ(
+        reco_axes_edges={"ptll": nominal_axes[0].edges, "yll": nominal_axes[1].edges},
+        unfolding_axes_names=args.unfoldingAxes,
+        unfolding_levels=args.unfoldingLevels,
+        poi_as_noi=args.poiAsNoi,
+        cutsmap=cutsmap,
+        low_pu=True,
+    )
+
+    if not args.poiAsNoi:
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
+
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs_lowpu], theory_corrs
+    [d.name for d in datasets if d.name in common.vprocs], theory_corrs
 )
 
 # recoil initialization
@@ -156,8 +152,9 @@ def build_graph(df, dataset):
 
     results = []
 
-    isW = dataset.name in common.wprocs_lowpu
-    isZ = dataset.name in common.zprocs_lowpu
+    theory_helpers = None
+    if dataset.name in common.vprocs:
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -170,60 +167,20 @@ def build_graph(df, dataset):
     axes = nominal_axes
     cols = nominal_cols
 
-    if args.unfolding and dataset.name in sigProcs:
-        df = unfolding_tools.define_gen_level(
-            df, dataset.name, args.unfoldingLevels, mode=analysis_label
+    if args.unfolding and dataset.group == base_group:
+        df = unfolder_z.add_gen_histograms(
+            args, df, results, dataset, corr_helpers, theory_helpers
         )
 
-        if hasattr(dataset, "out_of_acceptance"):
-            logger.debug("Reject events in fiducial phase space")
-            df = unfolding_tools.select_fiducial_space(
-                df,
-                args.unfoldingLevels[0],
-                mode="wlike",
-                pt_min=lep_pt_min,
-                pt_max=lep_pt_max,
-                mass_min=mass_min,
-                mass_max=mass_max,
-                selections=unfolding_selections[args.unfoldingLevels[0]],
-                accept=False,
-            )
-        else:
-            for level in args.unfoldingLevels:
-                logger.debug(f"Select events in {level} fiducial phase space")
-                df = unfolding_tools.select_fiducial_space(
-                    df,
-                    level,
-                    mode="wlike",
-                    pt_min=lep_pt_min,
-                    pt_max=lep_pt_max,
-                    mass_min=mass_min,
-                    mass_max=mass_max,
-                    selections=unfolding_selections[level],
-                    select=not args.poiAsNoi,
-                    accept=True,
-                )
-
-                if args.poiAsNoi:
-                    df_xnorm = df.Filter(f"{level}_acceptance")
-                else:
-                    df_xnorm = df
-
-                unfolding_tools.add_xnorm_histograms(
-                    results,
-                    df,
-                    args,
-                    dataset.name,
-                    corr_helpers,
-                    qcdScaleByHelicity_helper,
-                    [a for a in unfolding_axes[level] if a.name != "acceptance"],
-                    [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
-                    base_name=level,
-                )
-                if not args.poiAsNoi:
-                    axes = [*axes, *unfolding_axes[level]]
-                    cols = [*cols, *unfolding_cols[level]]
-                    break
+        if not unfolder_z.poi_as_noi:
+            axes = [
+                *nominal_axes,
+                *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+            ]
+            cols = [
+                *nominal_cols,
+                *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+            ]
 
     df = df.Define("TrigLep_charge", "isEvenEvent ? -1 : 1")  # wlike charge
 
@@ -400,7 +357,7 @@ def build_graph(df, dataset):
 
         df = df.Define("exp_weight", "SFMC")
         df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
     else:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -576,14 +533,14 @@ def build_graph(df, dataset):
                 )
             )
 
-            if dataset.name in common.vprocs_lowpu:
+            if dataset.name in common.vprocs:
                 df = syst_tools.add_theory_hists(
                     results,
                     df,
                     args,
                     dataset.name,
                     corr_helpers,
-                    qcdScaleByHelicity_helper,
+                    theory_helpers,
                     a,
                     c,
                     base_name=n,
@@ -700,23 +657,13 @@ def build_graph(df, dataset):
             if not args.noRecoil and args.recoilUnc:
                 df = recoilHelper.add_recoil_unc_Z(df, results, dataset, c, a, n)
 
-    if args.unfolding and args.poiAsNoi and dataset.name in sigProcs:
-        for level in args.unfoldingLevels:
-            noiAsPoiHistName = Datagroups.histName(
-                "nominal", syst=f"{level}_yieldsUnfolding"
-            )
-            logger.debug(
-                f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
-            )
-            yield_axes = [*axes, *unfolding_axes[level]]
-            yield_cols = [*cols, *unfolding_cols[level]]
-            results.append(
-                df.HistoBoost(
-                    noiAsPoiHistName,
-                    yield_axes,
-                    [*yield_cols, f"nominal_weight"],
-                )
-            )
+    if args.unfolding and args.poiAsNoi and dataset.group == base_group:
+        unfolder_z.add_poi_as_noi_histograms(
+            df,
+            results,
+            axes,
+            cols,
+        )
 
     if hasattr(dataset, "out_of_acceptance"):
         # Rename dataset to not overwrite the original one

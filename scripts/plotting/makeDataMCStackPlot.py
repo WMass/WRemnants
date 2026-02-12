@@ -56,7 +56,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--axlim",
-    type=float,
+    type=parsing.str_to_complex_or_int,
     default=[],
     nargs="*",
     help="Restrict axis to this range (assumes pairs of values by axis, with trailing axes optional)",
@@ -71,7 +71,20 @@ parser.add_argument(
     "--procFilters",
     type=str,
     nargs="*",
-    help="Filter to plot (default no filter, only specify if you want a subset",
+    help="Filter to plot (default no filter, only specify if you want a subset)",
+)
+parser.add_argument(
+    "--excludeProcs",
+    type=str,
+    nargs="*",
+    help="Exclude processes matched by group name or (subset) of name",
+    default=[
+        "QCD",
+        "WtoNMu_5",
+        "WtoNMu_10",
+        "WtoNMu_30",
+        "WtoNMu_50",
+    ],
 )
 parser.add_argument("--noData", action="store_true", help="Don't plot data")
 parser.add_argument("--noFill", action="store_true", help="Don't fill")
@@ -116,7 +129,7 @@ parser.add_argument(
     type=str,
     help="Set the mode for the fake estimation",
     default="extended1D",
-    choices=["simple", "extrapolate", "extended1D", "extended2D"],
+    choices=["mc", "simple", "extrapolate", "extended1D", "extended2D"],
 )
 parser.add_argument(
     "--fakeMCCorr",
@@ -167,6 +180,16 @@ parser.add_argument(
     is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
 )
 parser.add_argument(
+    "--fakeTransferCorrFileName",
+    type=str,
+    default="fakeTransferTemplates",
+    help="""                                                                                                                  
+    Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.                         
+    Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape                         
+    at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.                           
+    """,
+)
+parser.add_argument(
     "--fineGroups",
     action="store_true",
     help="Plot each group as a separate process, otherwise combine groups based on predefined dictionary",
@@ -192,6 +215,14 @@ parser.add_argument(
     default=(0.05, 0.8),
     help="Location in (x,y) for additional text, aligned to upper left",
 )
+parser.add_argument(
+    "--vertLineEdges",
+    type=float,
+    nargs="*",
+    default=[],
+    help="Horizontal axis edges where to plot vertical lines",
+)
+
 subparsers = parser.add_subparsers(dest="variation")
 variation = subparsers.add_parser(
     "variation", help="Arguments for adding variation hists"
@@ -274,7 +305,7 @@ outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eos
 groups = Datagroups(
     args.infile,
     filterGroups=args.procFilters,
-    excludeGroups=None if args.procFilters else ["QCD"],
+    excludeGroups=args.excludeProcs,
 )
 
 if not args.fineGroups:
@@ -305,10 +336,12 @@ if len(args.presel):
         if "=" in ps:
             axName, axRange = ps.split("=")
             if "," in ps:
-                #axMin, axMax = map(float, axRange.split(","))
-                axMin, axMax = [float(p) if p != str() else None for p in axRange.split(",")]
+                axMin, axMax = [
+                    complex(0, float(p)) if p != str() else None
+                    for p in axRange.split(",")
+                ]
                 logger.info(f"{axName} in [{axMin},{axMax}]")
-                presel[axName] = s[complex(0, axMin) : complex(0, axMax) : hist.sum]
+                presel[axName] = s[axMin : axMax : hist.sum]
             else:
                 logger.info(f"Selecting {axName} {axRange.split('.')[1]}")
                 if axRange == "hist.overflow":
@@ -332,12 +365,14 @@ if args.axlim or args.rebin or args.absval:
         args.rebinBeforeSelection,
     )
 
-if args.selection and args.selection != "none":
+if args.selection == "none":
+    applySelection = False
+elif args.selection:
     translate = {
-            "hist.overflow": hist.overflow,
-            "hist.underflow": hist.underflow,
-            "hist.sum": hist.sum,
-        }
+        "hist.overflow": hist.overflow,
+        "hist.underflow": hist.underflow,
+        "hist.sum": hist.sum,
+    }
     for selection in args.selection.split(","):
         axis, value = selection.split("=")
         if value.startswith("["):
@@ -352,15 +387,26 @@ if args.selection and args.selection != "none":
             select[axis] = hist.underflow
         else:
             select[axis] = int(value)
-    applySelection = False if any(  # does not trigger ABCD fake estimation if a cut is applied on the variables used to define ABCD regions
-        abcd_var in [cut_str.split("=")[0] for cut_str in args.selection.split(",")] 
-        for abcd_var in ["relIso", "mt"]
-        ) else True
+    applySelection = (
+        False
+        # do not trigger ABCD method if a cut is applied on the variables defining the ABCD regions
+        if any(
+            abcd_var in [cut_str.split("=")[0] for cut_str in args.selection.split(",")]
+            for abcd_var in ["relIso", "mt", "passMT", "passIso"]
+        )
+        else True
+    )
 else:
     applySelection = True
 
 groups.fakerate_axes = args.fakerateAxes
-groups.fakeTransferAxis = args.fakeTransferAxis
+histselector_kwargs = dict(
+    fakeTransferAxis=(
+        args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
+    ),
+    fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+    histAxesRemovedBeforeFakes=[str(x.split("=")[0]) for x in args.presel],
+)
 if applySelection:
     groups.set_histselectors(
         datasets,
@@ -372,6 +418,7 @@ if applySelection:
         mode=args.fakeEstimation,
         forceGlobalScaleFakes=args.forceGlobalScaleFakes,
         mcCorr=args.fakeMCCorr,
+        **histselector_kwargs,
     )
 
 if not args.nominalRef:
@@ -443,7 +490,7 @@ if addVariation:
         else:
             varname = name
 
-        reload = name != args.baseName
+        reload = name != args.baseName or do_transform
         # The action map will only work if reloading, otherwise need to apply some transform
         # to the already loaded hist
         if load_op and reload:
@@ -527,6 +574,9 @@ for h in args.hists:
     else:
         binwnorm = None
         ylabel = r"$Events\,/\,bin$"
+    if args.noBinWidthNorm:
+        binwnorm = None
+        ylabel = r"$Events\,/\,bin$"
 
     if args.rlabel is None:
         if args.noData:
@@ -591,7 +641,11 @@ for h in args.hists:
         normalize_to_data=args.normToData,
         noSci=args.noSciy,
         logoPos=args.logoPos,
-        width_scale=1.25 if len(h.split("-")) == 1 else 1,
+        width_scale=(
+            args.customFigureWidth
+            if args.customFigureWidth
+            else 1.25 if len(h.split("-")) == 1 else 1
+        ),
         legPos=args.legPos,
         leg_padding=args.legPadding,
         lowerLeg=not args.noLowerLeg,
@@ -599,6 +653,7 @@ for h in args.hists:
         lowerLegPos=args.lowerLegPos,
         lower_leg_padding=args.lowerLegPadding,
         subplotsizes=args.subplotSizes,
+        x_vertLines_edges=args.vertLineEdges,
     )
 
     to_join = [f"{h.replace('-','_')}"]

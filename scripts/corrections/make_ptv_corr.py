@@ -1,15 +1,13 @@
-import argparse
-
 import hist
 import numpy as np
 
-from utilities import common
+from utilities import common, parsing
 from utilities.io_tools import input_tools, output_tools
 from wremnants.datasets.datagroups import Datagroups
 from wums import boostHistHelpers as hh
 from wums import logging
 
-parser = argparse.ArgumentParser()
+parser = parsing.base_parser()
 parser.add_argument("-i", "--inputFile", type=str, required=True)
 parser.add_argument(
     "--outpath",
@@ -17,7 +15,6 @@ parser.add_argument(
     default=f"{common.data_dir}/TheoryCorrections",
     help="Output path",
 )
-parser.add_argument("--debug", action="store_true", help="Print debug output")
 parser.add_argument(
     "-p", "--postfix", type=str, default=None, help="Postfix for output file name"
 )
@@ -40,7 +37,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-logger = logging.setup_logger("make_ptv_corr", 4 if args.debug else 3)
+logger = logging.setup_logger(__file__, args.verbose)
 
 nominalName = "nominal"
 syst = "uncorr"
@@ -100,8 +97,8 @@ output_dict = {
 }
 
 meta_dict = input_tools.get_metadata(args.inputFile)
-outfile = args.outpath + "/dataRecoPtll"
-output_tools.write_theory_corr_hist(
+outfile = f"{args.outpath}/dataRecoPtllCorr{args.proc}.pkl.lz4"
+output_tools.write_lz4_pkl_output(
     outfile, args.proc.upper(), output_dict, args, meta_dict
 )
 logger.info(f"Average correction is {np.mean(corrh.values())}")

@@ -26,7 +26,6 @@ import math
 import hist
 
 import narf
-import wremnants
 import wremnants.lowpu as lowpu
 from wremnants import (
     muon_selections,
@@ -45,22 +44,19 @@ from wums import logging
 
 ###################################
 flavor = args.flavor  # mu, e
-if flavor == "mu":
-    sigProcs = ["Wminusmunu", "Wplusmunu"]
-    base_group = "Wmunu"
-else:
-    sigProcs = ["Wminusenu", "Wplusenu"]
-    base_group = "Wenu"
+base_group = f"W{flavor}nu"
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=list(
-        set(args.excludeProcs + ["singlemuon"] if flavor == "e" else ["singleelectron"])
+        set(
+            args.excludeProcs + [f"HighEGJet_{args.era}"]
+            if flavor == "mu"
+            else [f"SingleMuon_{args.era}"]
+        )
     ),
     base_path=args.dataPath,
-    extended="msht20an3lo" not in args.pdfs,
-    mode=analysis_label,
     era=args.era,
     nanoVersion="v12",
 )
@@ -69,6 +65,7 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 for d in datasets:
     logger.info(f"Dataset {d.name}")
+
 
 mtw_min = 40  # for Wmass (roughly half the boson mass)
 
@@ -141,12 +138,11 @@ columns_fakerate = [
     "transverseMass",
 ]  ## was transverseMass
 
-
-qcdScaleByHelicity_helper = (
-    wremnants.theory_corrections.make_qcd_uncertainty_helper_by_helicity()
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr
 )
-axis_ptVgen = qcdScaleByHelicity_helper.hist.axes["ptVgen"]
-axis_chargeVgen = qcdScaleByHelicity_helper.hist.axes["chargeVgen"]
+axis_ptVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["ptVgen"]
+axis_chargeVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["chargeVgen"]
 
 groups_to_aggregate = args.aggregateGroups
 
@@ -179,7 +175,7 @@ if args.unfolding:
 # extra axes which can be used to label tensor_axes
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs_lowpu], theory_corrs
+    [d.name for d in datasets if d.name in common.vprocs], theory_corrs
 )
 
 # recoil initialization
@@ -194,6 +190,10 @@ def build_graph(df, dataset):
     results = []
     isQCDMC = dataset.group == "QCD"
 
+    theory_helpers = None
+    if dataset.name in common.vprocs:
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
+
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
     else:
@@ -204,7 +204,7 @@ def build_graph(df, dataset):
     axes = nominal_axes
     cols = nominal_cols
 
-    if args.unfolding and dataset.name in sigProcs:
+    if args.unfolding and dataset.group == base_group:
         df = unfolding_tools.define_gen_level(
             df, dataset.name, args.unfoldingLevels, mode=analysis_label
         )
@@ -242,11 +242,11 @@ def build_graph(df, dataset):
 
                 unfolding_tools.add_xnorm_histograms(
                     results,
-                    df,
+                    df_xnorm,
                     args,
                     dataset.name,
                     corr_helpers,
-                    qcdScaleByHelicity_helper,
+                    theory_helpers,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
                     base_name=level,
@@ -416,7 +416,7 @@ def build_graph(df, dataset):
 
         df = df.Define("exp_weight", "SFMC")
         df = theory_tools.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args
+            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
     else:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -442,7 +442,7 @@ def build_graph(df, dataset):
             df,
             results,
             dataset,
-            common.vprocs_lowpu,
+            common.vprocs,
             leps_uncorr,
             leps_corr,
             cols_fakerate=columns_fakerate,
@@ -517,14 +517,14 @@ def build_graph(df, dataset):
                 )
             )
 
-            if dataset.name in common.vprocs_lowpu:
+            if dataset.name in common.vprocs:
                 df = syst_tools.add_theory_hists(
                     results,
                     df,
                     args,
                     dataset.name,
                     corr_helpers,
-                    qcdScaleByHelicity_helper,
+                    theory_helpers,
                     a,
                     c,
                     base_name=n,
@@ -640,7 +640,7 @@ def build_graph(df, dataset):
             if not args.noRecoil and args.recoilUnc:
                 df = recoilHelper.add_recoil_unc_W(df, results, dataset, c, a, n)
 
-    if args.unfolding and args.poiAsNoi and dataset.name in sigProcs:
+    if args.unfolding and args.poiAsNoi and dataset.group == base_group:
         for level in args.unfoldingLevels:
             noiAsPoiHistName = Datagroups.histName(
                 "nominal", syst=f"{level}_yieldsUnfolding"
@@ -658,7 +658,7 @@ def build_graph(df, dataset):
                 )
             )
 
-    if dataset.name in sigProcs:
+    if dataset.group == base_group:
         # dummy lepton momentum scale
         netabins = 1
         nweights = 21

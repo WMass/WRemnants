@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 from matplotlib import ticker
 
 from utilities import parsing
@@ -24,41 +25,48 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-isW = "WMass" in args.reffile
-isWm = isW and "_Wm" in args.reffile
 basename = args.reffile
 
-postfix_names = [
-    "",
-    "_scetlib_dyturboN3p1LL",
-    "_scetlib_nnlojetN3p1LLN3LO",
-    "_scetlib_dyturboN4p0LL",  # "_dyturboN3LLp",
-    "_scetlib_nnlojetN4p0LLN3LO",
-    "_dataPtllRwgt",
-]
-labels = [
-    "N$^{3{+}0}$LL+NNLO",
-    "N$^{3{+}1}$LL+NNLO",
-    "N$^{3{+}1}LL+N^{{3}}LO$",
-    "N$^{4{+}0}$LL+NNLO",
-    "N$^{4{+}0}LL+N^{{3}}LO$",
-    r"$\mathit{p}_{T}^{\ell\ell}$ rwgt., N$^{3{+}0}$LL unc.",
-]
-
-if isW:
-    postfix_names.append("_CombinedPtll")
-    labels.append(
-        r"Combined $\mathit{p}_{T}^{\ell\ell}$ fit," + "\n N$^{3{+}0}$LL unc."
-    )
-
 dfs = rabbit_input.read_all_groupunc_df(
-    [args.reffile.format(postfix=p) for p in postfix_names],
-    names=labels,
-    uncs=["pTModeling"],
+    [
+        args.reffile.format(postfix=p)
+        for p in [
+            "",
+            "_scetlib_dyturboN3p1LL",
+            "_scetlib_dyturboN4p0LL",  # "_dyturboN3LLp",
+            "_dataPtllRwgt",
+        ]
+    ],
+    names=[
+        # "SCETlib+DYTurbo N$^{3{+}0}$LL+NNLO",
+        # "SCETlib+DYTurbo N$^{3{+}1}$LL+NNLO",
+        # "SCETlib+DYTurbo N$^{4{+}0}$LL+NNLO",
+        "N$^{3{+}0}$LL+NNLO",
+        "N$^{3{+}1}$LL+NNLO",
+        "N$^{4{+}0}$LL+NNLO",
+        r"$\mathit{p}_{T}^{\ell\ell}$ rwgt.," + "\n N$^{3{+}0}$LL unc.",
+    ],
+    uncs=["standard_pTModeling"],
 )
 
+isW = "WMass" in args.reffile
+
 if isW:
-    xlim = [80275, 80360] if isWm else [80331, 80372]
+    combdf = rabbit_input.read_all_groupunc_df(
+        [args.reffile.format(postfix="_CombinedPtll")],
+        names=(
+            [
+                r"Combined $\mathit{p}_{T}^{\ell\ell}$ fit," + "\n N$^{3{+}0}$LL unc.",
+            ]
+            if isW
+            else []
+        ),
+        uncs=["standard_pTModeling"],
+    )
+    dfs = pd.concat((dfs, combdf), ignore_index=True)
+
+if isW:
+    xlim = [80331, 80372]
 else:
     xlim = [91160, 91280] if "flipEvenOdd" not in basename else [91170, 91290]
 
@@ -68,9 +76,7 @@ if args.print:
 
 central = dfs.iloc[0, :]
 
-xlabel = "".join(
-    [r"$\mathit{m}_{", "W" if isW else "Z", "^{{-}}" if isWm else "", "}$ (MeV)"]
-)
+xlabel = r"$\mathit{m}_{" + ("W" if isW else "Z") + "}$ (MeV)"
 
 central_val = central["value"]
 if args.diffToCentral:
@@ -85,7 +91,7 @@ if args.diffToCentral:
 fig = plot_tools.make_summary_plot(
     central_val,
     central["err_total"],
-    central["err_pTModeling"],
+    central["err_standard_pTModeling"],
     "N$^{3{+}0}$LL+NNLO\n (nominal)",
     dfs.iloc[1:, :],
     colors="auto",
@@ -99,10 +105,9 @@ fig = plot_tools.make_summary_plot(
     padding=5,
 )
 ax = plt.gca()
-minor_tick = 10 if isWm else 5
-ax.yaxis.set_major_locator(ticker.MultipleLocator(2 * minor_tick))
-ax.xaxis.set_major_locator(ticker.MultipleLocator(2 * minor_tick))
-ax.xaxis.set_minor_locator(ticker.MultipleLocator(minor_tick))
+ax.yaxis.set_major_locator(ticker.MultipleLocator(10))
+ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
 ax.xaxis.grid(False, which="both")
 ax.yaxis.grid(False, which="both")
 

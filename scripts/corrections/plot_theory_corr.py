@@ -8,9 +8,9 @@ from matplotlib.colors import LogNorm
 
 from utilities import common, parsing
 from utilities.styles import styles
-from wremnants import plot_tools, theory_corrections
+from wremnants import theory_corrections
 from wums import boostHistHelpers as hh
-from wums import logging, output_tools
+from wums import logging, output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -31,7 +31,7 @@ parser.add_argument(
 parser.add_argument(
     "--datasets",
     nargs="*",
-    default=["ZmumuPostVFP"],
+    default=["Zmumu_2016PostVFP"],
     help="Apply corrections from indicated generator. First will be nominal correction.",
 )
 parser.add_argument(
@@ -54,20 +54,6 @@ parser.add_argument(
     nargs="*",
     default=None,
     help="Which axes to plot, if not specified plot all axes",
-)
-parser.add_argument(
-    "--xlim",
-    type=float,
-    nargs=2,
-    default=[None, None],
-    help="Min and max values for x axis (if not specified, range set automatically)",
-)
-parser.add_argument(
-    "--ylim",
-    type=float,
-    nargs=2,
-    default=[None, None],
-    help="Min and max values for y axis (if not specified, range set automatically)",
 )
 parser.add_argument(
     "--clim",
@@ -101,7 +87,7 @@ corr_dict = theory_corrections.load_corr_helpers(
 den_dict = {
     p: {
         g: theory_corrections.load_corr_hist(
-            f"{args.baseDir}/{g}Corr{p[0]}.pkl.lz4", p[0], f"{g}_den"
+            f"{args.baseDir}/{g}_Corr{p[0]}.pkl.lz4", p[0], f"minnlo_ref_hist"
         )
         for g in args.theoryCorr
     }
@@ -110,7 +96,7 @@ den_dict = {
 num_dict = {
     p: {
         g: theory_corrections.load_corr_hist(
-            f"{args.baseDir}/{g}Corr{p[0]}.pkl.lz4", p[0], f"{g}_num"
+            f"{args.baseDir}/{g}_Corr{p[0]}.pkl.lz4", p[0], f"{g}_hist"
         )
         for g in args.theoryCorr
     }
@@ -156,12 +142,12 @@ def make_plot_2d(
             )
         )
 
-    if args.xlim[0] is None:
+    if args.xlim and args.xlim[0] is None:
         xlim = (xedges[0], xedges[-1])
     else:
         xlim = args.xlim
 
-    if args.ylim[0] is None:
+    if args.ylim and args.ylim[0] is None:
         ylim = (yedges[0], yedges[-1])
     else:
         ylim = args.ylim
@@ -235,7 +221,7 @@ def make_plot_2d(
     if args.postfix:
         outfile += f"_{args.postfix}"
     plot_tools.save_pdf_and_png(outdir, outfile)
-    plot_tools.write_index_and_log(outdir, outfile, args=args)
+    output_tools.write_index_and_log(outdir, outfile, args=args)
 
 
 def make_plot_1d(
@@ -360,7 +346,7 @@ def make_plot_1d(
     if args.postfix:
         outfile += f"_{args.postfix}"
     plot_tools.save_pdf_and_png(outdir, outfile)
-    plot_tools.write_index_and_log(outdir, outfile, args=args)
+    output_tools.write_index_and_log(outdir, outfile, args=args)
 
 
 for dataset, corr_hists in corr_dict.items():
@@ -382,6 +368,10 @@ for dataset, corr_hists in corr_dict.items():
 
             corrh_den = den_dict[dataset][corr]
             corrh_num = num_dict[dataset][corr]
+
+            corrh_den, corrh_num = theory_corrections.rebin_corr_hists(
+                [corrh_den, corrh_num]
+            )
 
             charge_axis_names = [n for n in corrh.axes.name if n.startswith("charge")]
             if (
@@ -447,20 +437,28 @@ for dataset, corr_hists in corr_dict.items():
             # split hists into systematics
             corrh_systs = {idx: corrh[{**sel, syst_axis: idx}] for idx in idxs}
 
-            corrh_den_systs = (
-                {idx: corrh_den[{**sel, syst_axis: idx}] for idx in idxs}
-                if syst_axis in corrh_den
-                else {1: corrh_den}
-            )
-            corrh_num_systs = (
-                {idx: corrh_num[{**sel, syst_axis: idx}] for idx in idxs}
-                if syst_axis in corrh_num
-                else {1: corrh_num}
-            )
+            if syst_axis in corrh_den.axes.name:
+                corrh_den_systs = {
+                    idx: corrh_den[{**sel, syst_axis: idx}]
+                    for idx in idxs
+                    if idx < len(corrh_den.axes[syst_axis])
+                }
+            else:
+                corrh_den_systs = {1: corrh_den}
 
-            hists = [h for h in corrh_systs.values()]
-            hists_den = [h for h in corrh_den_systs.values()]
-            hists_num = [h for h in corrh_num_systs.values()]
+            if syst_axis in corrh_num.axes.name:
+                corrh_num_systs = {
+                    idx: corrh_num[{**sel, syst_axis: idx}]
+                    for idx in idxs
+                    if idx < len(corrh_num.axes[syst_axis])
+                }
+            else:
+                corrh_num_systs = {1: corrh_num}
+
+            hists = [hh.disableFlow(h) for h in corrh_systs.values()]
+            hists_den = [hh.disableFlow(h) for h in corrh_den_systs.values()]
+            hists_num = [hh.disableFlow(h) for h in corrh_num_systs.values()]
+
             all_hists += hists
             all_hists_den += hists_den
             all_hists_num += hists_num
@@ -477,8 +475,8 @@ for dataset, corr_hists in corr_dict.items():
             all_axes += axes
             if "2d" in args.plots and len(axes) >= 2:
                 for n, (idx, h) in zip(names, corrh_systs.items()):
-                    h_den = hists_den[idx]
-                    h_num = hists_num[idx]
+                    h_den = hists_den[idx] if len(hists_den) > idx else hists_den[0]
+                    h_num = hists_num[idx] if len(hists_num) > idx else hists_num[0]
                     if len(axes) == 2:
                         make_plot_2d(
                             h,
@@ -542,10 +540,10 @@ for dataset, corr_hists in corr_dict.items():
                     labels=all_labels,
                     flow=not args.noFlow,
                     corr="all",
-                    xmin=args.xlim[0],
-                    xmax=args.xlim[1],
-                    ymin=args.ylim[0],
-                    ymax=args.ylim[1],
+                    xmin=args.xlim[0] if args.xlim else None,
+                    xmax=args.xlim[1] if args.xlim else None,
+                    ymin=args.ylim[0] if args.ylim else None,
+                    ymax=args.ylim[1] if args.ylim else None,
                     uncertainty_bands=args.showUncertainties,
                 )
 

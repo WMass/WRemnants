@@ -151,7 +151,7 @@ def write_analysis_output(results, outfile, args):
 
     to_append = []
     if args.theoryCorr and not args.theoryCorrAltOnly:
-        to_append.append(args.theoryCorr[0] + "Corr")
+        to_append.append(args.theoryCorr[0] + "_Corr")
     if args.maxFiles is not None:
         to_append.append(f"maxFiles_{args.maxFiles}".replace("-", "m"))
     if len(args.pdfs) >= 1 and args.pdfs[0] != "ct18z":
@@ -192,7 +192,7 @@ def write_analysis_output(results, outfile, args):
     with h5py.File(outfile, open_as) as f:
         for k, v in results.items():
             logger.debug(f"Pickle and dump {k}")
-            ioutils.pickle_dump_h5py(k, v, f)
+            ioutils.pickle_dump_h5py(k, v, f, override=open_as != "w")
 
         if "meta_info" not in f.keys():
             ioutils.pickle_dump_h5py(
@@ -237,7 +237,7 @@ def make_quantile_helper(
     axes,
     dependent_axes=[],
     name="nominal",
-    processes=["ZmumuPostVFP"],
+    processes=["Zmumu_2016PostVFP"],
     n_quantiles=[],
 ):
     """
@@ -348,3 +348,25 @@ def make_muon_phi_axis(phi_bins, ax_name="phi", flows=False):
     )
 
     return phi_axis
+
+
+def define_norm_weight_nRecoVtx(
+    df, vtx_axis_edges, vtx_norm_weight, flows_to_unit=False
+):
+    df = df.DefinePerSample(
+        "nRecoVtxEdges",
+        "ROOT::VecOps::RVec<double> res = {"
+        + ",".join([str(x) for x in vtx_axis_edges])
+        + "}; return res;",
+    )
+    df = df.DefinePerSample(
+        "weightVals",
+        "ROOT::VecOps::RVec<double> res = {"
+        + ",".join([str(x) for x in vtx_norm_weight])
+        + "}; return res;",
+    )
+    df = df.Define(
+        "weight_nRecoVtx",
+        f"wrem::get_differential_norm_weight(PV_npvsGood, nRecoVtxEdges, weightVals, {flows_to_unit})",
+    )
+    return df

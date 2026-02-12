@@ -100,11 +100,23 @@ for key in keys:
         else:
             isplitsource = isplit
 
+        try:
+            nominal = res["output"]["nominal"].get()
+        except:
+            nominal = None
+            print(f"No nominal data found in results for sample {key}.")
+            print(res)
+
         with DeepCopyOverride(
             wums.ioutils.H5PickleProxy,
             lambda h5proxy, memo: copy_and_slice(h5proxy, args.axis, isplitsource),
         ):
             outres = copy.deepcopy(res)
+
+        if nominal and "sample_split" in nominal.axes.name:
+            outres["output"]["nominal_sample0"] = wums.ioutils.H5PickleProxy(
+                nominal[{"sample_split": 0}]
+            )
 
         outfile = args.input.replace(
             ".hdf5", f"{args.postfix}_{args.axis}_{isplit}.hdf5"

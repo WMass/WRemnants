@@ -61,29 +61,37 @@ def syst_transform_map(base_hist, hist_name):
             for pdf in pdfNames
         }
     )
+    transforms["nonpromptQCDNormUp"] = {
+        "action": lambda h: h.copy() * 1.11,
+        "procs": ["QCDmuEnrichPt15PostVFP"],
+    }
+    transforms["nonpromptQCDNormDown"] = {
+        "action": lambda h: h.copy() * 0.89,
+        "procs": ["QCDmuEnrichPt15PostVFP"],
+    }
     transforms["scetlib_dyturboMSHT20Up"] = {
         "action": lambda h: pdfUnc(h, "pdfMSHT20", "vars")[0],
-        "procs": common.vprocs_all,
+        "procs": common.vprocs,
     }
     transforms["scetlib_dyturboMSHT20Down"] = {
         "action": lambda h: pdfUnc(h, "pdfMSHT20", "vars")[1],
-        "procs": common.vprocs_all,
+        "procs": common.vprocs,
     }
     transforms["scetlib_dyturboCT18ZUp"] = {
         "action": lambda h: pdfUnc(h, "pdfCT18Z", "vars")[0],
-        "procs": common.vprocs_all,
+        "procs": common.vprocs,
     }
     transforms["scetlib_dyturboCT18ZDown"] = {
         "action": lambda h: pdfUnc(h, "pdfCT18Z", "vars")[1],
-        "procs": common.vprocs_all,
+        "procs": common.vprocs,
     }
     transforms["scetlib_dyturboMSHT20an3loUp"] = {
         "action": lambda h: pdfUnc(h, "pdfMSHT20", "vars")[0],
-        "procs": common.zprocs_all,
+        "procs": common.zprocs,
     }
     transforms["scetlib_dyturboMSHT20an3loDown"] = {
         "action": lambda h: pdfUnc(h, "pdfMSHT20", "vars")[1],
-        "procs": common.zprocs_all,
+        "procs": common.zprocs,
     }
     transforms["ewUp"] = {
         "action": lambda h, **args: (
@@ -1193,7 +1201,7 @@ def add_syst_hist(
 def define_mass_width_sin2theta_weights(df, proc):
 
     # TODO can these be parsed more automatically?
-    if proc in common.zprocs_all:
+    if proc in common.zprocs:
         m0 = 91.1876
         gamma0 = 2.4941343245745466
         massvals = [
@@ -1270,13 +1278,16 @@ def define_mass_width_sin2theta_weights(df, proc):
 
     if not "massWeight_tensor" in df.GetColumnNames():
         # from -100 to 100 MeV with 10 MeV increment
-        if "MEParamWeight" in df.GetColumnNames():
+        if df.HasColumn("MEParamWeight"):
             df = df.Alias("massWeight_col", "MEParamWeight")
-        else:
+        elif df.HasColumn("LHEReweightingWeight"):
             df = df.Define(
                 "massWeight_col",
                 f"wrem::slice_vec(LHEReweightingWeight,0, {nweights_mass})",
             )
+        else:
+            return df
+
         df = df.Define(
             "massWeight_tensor",
             f"wrem::vec_to_tensor_t<double, {nweights_mass}>(massWeight_col)",
@@ -1292,13 +1303,15 @@ def define_mass_width_sin2theta_weights(df, proc):
             m0, gamma0, massvals, widthvals
         )
 
-        if "MEParamWeightAltSet1" in df.GetColumnNames():
+        if df.HasColumn("MEParamWeightAltSet1"):
             df = df.Alias("widthWeight_col", "MEParamWeightAltSet1")
-        else:
+        elif df.HasColumn("LHEReweightingWeight"):
             df = df.Define(
                 "widthWeight_col",
                 f"wrem::slice_vec(LHEReweightingWeight,{nweights_mass}, {nweights_mass+nweights_width})",
             )
+        else:
+            return df
 
         df = df.Define(
             "massWeight_widthdecor_tensor",
@@ -1319,15 +1332,18 @@ def define_mass_width_sin2theta_weights(df, proc):
             "auto res = widthWeight_tensor; res = nominal_weight*res; return res;",
         )
 
-        if proc in common.zprocs_all:
-            if "MEParamWeightAltSet4" in df.GetColumnNames():
+        if proc in common.zprocs:
+            if df.HasColumn("MEParamWeightAltSet4"):
                 df = df.Alias("sin2thetaWeight_col", "MEParamWeightAltSet4")
-            else:
+            elif df.HasColumn("LHEReweightingWeight"):
                 logger.warning("sin2theta weights in new format to be defined")
                 df = df.Define(
                     "sin2thetaWeight_col",
-                    f"wrem::slice_vec(LHEReweightingWeight,{nweights_mass+nweights_width}, {nweights_mass+nweights_width+nweights_sin2theta})",
+                    f"wrem::slice_vec(LHEReweightingWeight, {nweights_mass+nweights_width}, {nweights_mass+nweights_width+nweights_sin2theta})",
                 )
+            else:
+                return df
+
             df = df.Define(
                 "sin2thetaWeight_tensor",
                 f"wrem::vec_to_tensor_t<double, {nweights_sin2theta}>(sin2thetaWeight_col)",
@@ -1353,16 +1369,17 @@ def add_massweights_hist(
     add_syst_hist(
         results, df, name, axes, cols, "massWeight_tensor_wnom", mass_axis, **kwargs
     )
-    add_syst_hist(
-        results,
-        df,
-        name_widthdecor,
-        axes,
-        cols,
-        "massWeight_widthdecor_tensor_wnom",
-        mass_axis,
-        **kwargs,
-    )
+    if df.HasColumn("massWeight_widthdecor_tensor_wnom"):
+        add_syst_hist(
+            results,
+            df,
+            name_widthdecor,
+            axes,
+            cols,
+            "massWeight_widthdecor_tensor_wnom",
+            mass_axis,
+            **kwargs,
+        )
 
 
 def massWeightNames(matches=None, proc="", exclude=[]):
@@ -1377,7 +1394,7 @@ def massWeightNames(matches=None, proc="", exclude=[]):
         for i in range(nweights)
         if int(abs(central - i) * 10) not in exclude
     ]
-    if proc and (proc in common.zprocs_all or proc == "Z") and 2.1 not in exclude:
+    if proc and (proc in common.zprocs or proc == "Z") and 2.1 not in exclude:
         # This is the PDG uncertainty (turned off for now since it doesn't seem to have been read into the nano)
         names.extend(["massShiftZ2p1MeVDown", "massShiftZ2p1MeVUp"])
 
@@ -1397,7 +1414,11 @@ def add_widthweights_hist(
     )
 
 
-def widthWeightNames(matches=None, proc=""):
+def widthWeightNames(matches=None, proc="", exclude=[]):
+    if isinstance(exclude, (int, float)):
+        exclude = [
+            exclude,
+        ]
     if proc[0] == "Z":
         widths = (2.49333, 2.49493, 2.4929, 2.4952, 2.4975)
     elif proc[0] == "W":
@@ -1406,7 +1427,11 @@ def widthWeightNames(matches=None, proc=""):
         raise RuntimeError(f"No width found for process {proc}")
     # 0 and 1 are Up, Down from mass uncertainty EW fit (already accounted for in mass variations)
     # 2, 3, and 4 are PDG width Down, Central, Up
-    names = [f"width{proc[0]}{str(width).replace('.','p')}GeV" for width in widths]
+    names = [
+        f"width{proc[0]}{str(width).replace('.','p')}GeV"
+        for width in widths
+        if width not in exclude
+    ]
 
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
 
@@ -1702,6 +1727,67 @@ def add_qcdScaleByHelicityUnc_hist(
     )
 
 
+def add_pdfUncertByHelicity_hist(
+    results, df, helper, pdf, pdf_name, axes, cols, base_name="nominal", **kwargs
+):
+    name = Datagroups.histName(base_name, syst=f"{pdf_name}ByHelicity")
+    tensorName = f"helicity{pdf_name}Weight_tensor"
+    if tensorName not in df.GetColumnNames():
+        # usually already defined when calculating central PDF weight
+        df = df.Define(
+            tensorName,
+            helper,
+            [
+                "massVgen",
+                "absYVgen",
+                "ptVgen",
+                "chargeVgen",
+                "csSineCosThetaPhigen",
+                "unity",
+            ],
+        )
+    safeTensorName = f"{tensorName}_clamped"
+    renorm = theory_tools.pdfMap.get(pdf, {}).get("renorm", False)
+    if renorm:
+        central_event_weight = "nominal_weight"
+    else:
+        central_event_weight = "nominal_weight_pdf_uncorr"
+    df = df.Define(
+        safeTensorName,
+        f"auto res = wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0); res = {central_event_weight}*res; return res;",
+    )
+    add_syst_hist(
+        results, df, name, axes, cols, safeTensorName, helper.tensor_axes, **kwargs
+    )
+
+
+def add_pdfAlphaSByHelicity_hist(
+    results, df, helper, axes, cols, name="pdfAlphaS", base_name="nominal", **kwargs
+):
+    name = Datagroups.histName(base_name, syst=f"{name}ByHelicity")
+    tensorName = f"{name}_helicityAlphaSWeight_tensor"
+    df = df.Define(
+        tensorName,
+        helper,
+        [
+            "massVgen",
+            "absYVgen",
+            "ptVgen",
+            "chargeVgen",
+            "csSineCosThetaPhigen",
+            "unity",
+        ],
+    )
+    safeTensorName = f"{tensorName}_clamped"
+    df = df.Define(
+        safeTensorName,
+        f"auto res = wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0); res = nominal_weight_uncorr*res; return res;",
+    )
+    add_syst_hist(
+        results, df, name, axes, cols, safeTensorName, helper.tensor_axes, **kwargs
+    )
+
+
 def add_QCDbkg_jetPt_hist(
     results, df, axes, cols, base_name="nominal", jet_pt=30, **kwargs
 ):
@@ -1755,7 +1841,7 @@ def add_theory_corr_hists(
 
         var_axis = helpers[generator].tensor_axes[-1]
 
-        name = Datagroups.histName(base_name, syst=f"{generator}Corr")
+        name = Datagroups.histName(base_name, syst=f"{generator}_Corr")
         weight_tensor_name = f"{generator}Weight_tensor"
         add_syst_hist(
             results, df, name, axes, cols, weight_tensor_name, var_axis, **kwargs
@@ -1768,6 +1854,15 @@ def add_theory_corr_hists(
                 or var_label.startswith("Lambda2")
                 or var_label.startswith("Delta_Lambda2")
                 or var_label.startswith("Lambda4")
+                or (
+                    var_label.startswith("lambda2")
+                    and not var_label.startswith("lambda2_nu")
+                )
+                or var_label.startswith("delta_lambda2")
+                or (
+                    var_label.startswith("lambda4")
+                    and not var_label.startswith("lambda4_nu")
+                )
             )
 
         # special treatment for Lambda2/Omega since they need to be decorrelated in charge and possibly rapidity
@@ -1783,7 +1878,7 @@ def add_theory_corr_hists(
             # include nominal as well
             omegaidxs = [0] + omegaidxs
 
-            tensor_name = f"{generator}FlavDepNP"
+            tensor_name = f"{generator}_FlavDepNP"
             if tensor_name not in df.GetColumnNames():
                 np_idx_helper = ROOT.wrem.index_taker[
                     df.GetColumnType(weight_tensor_name), len(omegaidxs)
@@ -1804,9 +1899,15 @@ def add_theory_corr_hists(
                     0, 1, name="chargeVgenNP", underflow=False, overflow=False
                 )
 
+            axis_absYVgen = hist.axis.Variable(
+                common.absYWgen_binning_corr if isW else common.absYZgen_binning_corr,
+                name="absYVgenNP",
+                underflow=False,
+            )
+
             # since the last column might be an additional weight, the extra columns and axes have to go at the appropriate place
             nax = len(axes)
-            axes_FlavDepNP = [*axes, theory_tools.axis_absYVgen, axis_chargegen]
+            axes_FlavDepNP = [*axes, axis_absYVgen, axis_chargegen]
             cols_FlavDepNP = cols[:nax] + ["absYVgen", "chargeVgen"] + cols[nax:]
             name = Datagroups.histName(base_name, syst=tensor_name)
             add_syst_hist(
@@ -1839,7 +1940,7 @@ def add_theory_corr_hists(
             # include nominal as well
             scaleidxs = [0] + scaleidxs
 
-            tensor_name = f"{generator}PtDepScales"
+            tensor_name = f"{generator}_PtDepScales"
             if tensor_name not in df.GetColumnNames():
                 scale_idx_helper = ROOT.wrem.index_taker[
                     df.GetColumnType(weight_tensor_name), len(scaleidxs)
@@ -2403,7 +2504,7 @@ def add_theory_hists(
     args,
     dataset_name,
     corr_helpers,
-    qcdScaleByHelicity_helper,
+    theory_helpers,
     axes,
     cols,
     base_name="nominal",
@@ -2429,16 +2530,13 @@ def add_theory_hists(
         scale_axes = axes
         scale_cols = cols
 
-    isZ = dataset_name in common.zprocs_all
+    isZ = dataset_name in common.zprocs
 
     df = theory_tools.define_scale_tensor(df)
 
-    if (
-        "MEParamWeight" not in df.GetColumnNames()
-        and "LHEReweightingWeight" not in df.GetColumnNames()
-    ):
+    if not df.HasColumn("MEParamWeight") and not df.HasColumn("LHEReweightingWeight"):
         logger.warning(
-            "MEParamWeight not in list of columns, mass, width, and sin2theta weight tensors can not be defined"
+            "'MEParamWeight' and 'LHEReweightingWeight' not in list of columns, mass, width, and sin2theta weight tensors can not be defined"
         )
     else:
         df = define_mass_width_sin2theta_weights(df, dataset_name)
@@ -2470,26 +2568,149 @@ def add_theory_hists(
         )
 
     if for_wmass or isZ:
-        logger.debug(f"Make QCD scale histograms for {dataset_name}")
-        # there is no W backgrounds for the Wlike, make QCD scale histograms only for Z
-        # should probably remove the charge here, because the Z only has a single charge and the pt distribution does not depend on which charged lepton is selected
 
-        if qcdScaleByHelicity_helper is not None:
+        if theory_helpers.get("qcdScale") is not None:
+            logger.debug(f"Make QCD scale histograms for {dataset_name}")
+            # there is no W backgrounds for the Wlike, make QCD scale histograms only for Z
+            # should probably remove the charge here, because the Z only has a single charge and the pt distribution does not depend on which charged lepton is selected
             add_qcdScaleByHelicityUnc_hist(
-                results, df, qcdScaleByHelicity_helper, scale_axes, scale_cols, **info
+                results,
+                df,
+                theory_helpers.get("qcdScale"),
+                scale_axes,
+                scale_cols,
+                **info,
             )
 
-        if "MEParamWeight" not in df.GetColumnNames():
-            return df
+        if theory_helpers.get("pdf") is not None:
+            pdf_helpers = theory_helpers.get("pdf")
+            for pdf in args.pdfs:
+                pdf_name = theory_tools.pdfMap[pdf]["name"]
+                if pdf_name not in pdf_helpers.keys():
+                    logger.warning(
+                        f"Did not find PDF uncertainty by helicity histograms for {dataset_name} and PDF set {pdf_name}"
+                    )
+                    continue
+                logger.debug(
+                    f"Make PDF uncertainty by helicity histograms for {dataset_name} and PDF set {pdf_name}"
+                )
+                add_pdfUncertByHelicity_hist(
+                    results,
+                    df,
+                    pdf_helpers[pdf_name],
+                    pdf,
+                    pdf_name,
+                    axes,
+                    cols,
+                    **info,
+                )
+        for pdf_name, pdf_from_corr_helper in theory_helpers.get(
+            "pdf_from_corr", {}
+        ).items():
+            logger.debug(
+                f"Make PDF (from correction file) uncertainty by helicity histograms for {dataset_name} and PDF from correction {pdf_name}"
+            )
+            add_pdfUncertByHelicity_hist(
+                results,
+                df,
+                pdf_from_corr_helper,
+                pdf_name,
+                pdf_name,
+                axes,
+                cols,
+                **info,
+            )
+
+        for k, v in theory_helpers.get("alphaS", {}).items():
+            logger.debug(
+                f"Make alphaS uncertainty by helicity histogram for {dataset_name} and alphaS from correction {k}"
+            )
+            add_pdfAlphaSByHelicity_hist(results, df, v, axes, cols, name=k, **info)
+
+        add_breit_wigner_mass_weights_hist(
+            results, df, axes, cols, proc=dataset_name, **info
+        )
+        add_breit_wigner_width_weights_hist(
+            results, df, axes, cols, proc=dataset_name, **info
+        )
+
         # TODO: Should have consistent order here with the scetlib correction function
-        add_massweights_hist(results, df, axes, cols, proc=dataset_name, **info)
-        add_widthweights_hist(results, df, axes, cols, proc=dataset_name, **info)
-        if isZ:
+        if df.HasColumn("massWeight_tensor_wnom"):
+            add_massweights_hist(results, df, axes, cols, proc=dataset_name, **info)
+        if df.HasColumn("widthWeight_tensor_wnom"):
+            add_widthweights_hist(results, df, axes, cols, proc=dataset_name, **info)
+        if isZ and df.HasColumn("sin2thetaWeight_tensor_wnom"):
             add_sin2thetaweights_hist(
                 results, df, axes, cols, proc=dataset_name, **info
             )
 
     return df
+
+
+def add_breit_wigner_mass_weights_hist(
+    results,
+    df,
+    axes,
+    cols,
+    proc="W",
+    base_name="nominal",
+    storage=hist.storage.Double(),
+    **kwargs,
+):
+    label = proc[0] if len(proc) else proc
+    tensorName = f"breitwigner_massWeight{label}_tensor"
+    bwHistName = Datagroups.histName(base_name, syst=f"breitwigner_massWeight{label}")
+    mass_axis = hist.axis.StrCategory(massWeightNames(proc=proc), name="massShift")
+
+    if tensorName not in df.GetColumnNames():
+        logger.warning(
+            f"Breit Wigner mass weights tensor was not found for sample {proc}. Skipping uncertainty hist!"
+        )
+        return
+
+    add_syst_hist(
+        results,
+        df,
+        bwHistName,
+        axes,
+        cols,
+        tensorName,
+        mass_axis,
+        **kwargs,
+    )
+
+
+def add_breit_wigner_width_weights_hist(
+    results,
+    df,
+    axes,
+    cols,
+    proc="W",
+    base_name="nominal",
+    storage=hist.storage.Double(),
+    **kwargs,
+):
+    label = proc[0] if len(proc) else proc
+    tensorName = f"breitwigner_widthWeight{label}_tensor"
+    bwHistName = Datagroups.histName(base_name, syst=f"breitwigner_widthWeight{label}")
+    axis_width = hist.axis.StrCategory(widthWeightNames(proc=proc), name="width")
+
+    if tensorName not in df.GetColumnNames():
+        logger.warning(
+            f"Breit Wigner width weights tensor was not found for sample {proc}. Skipping uncertainty hist!"
+        )
+        return
+
+    add_syst_hist(
+        results,
+        df,
+        bwHistName,
+        axes,
+        cols,
+        tensorName,
+        axis_width,
+        **kwargs,
+    )
 
 
 def add_helicity_hists(
@@ -2614,3 +2835,33 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
         [hDown.variances(flow=True), hUp.variances(flow=True)], axis=-1
     )
     return hVar
+
+
+def correct_bw_xsec(h, h_ref):
+    """
+    Normalize the Breit-Wigner mass variation histograms
+    to the cross section from the MiNNLO mass variation histograms.
+    Assumes that the histograms have been filled with the same mass variations, in the same order.
+    """
+
+    if "massShift" in h.axes.name:
+        var = "massShift"
+    elif "width" in h.axes.name:
+        var = "width"
+
+    h_axis_labels = [n for n in h.axes[var]]
+    h_ref_axis_labels = [n for n in h_ref.axes[var]]
+    if (
+        len(h_axis_labels) != len(h_ref_axis_labels)
+        or h_axis_labels != h_ref_axis_labels
+    ):
+        logger.warning(
+            f"Breit-Wigner variations do not match MiNNLO variations: {h_axis_labels} vs {h_ref_axis_labels}."
+            "Cannot apply correction."
+        )
+        return h
+
+    h_corr = hh.divideHists(h.project(var), h_ref.project(var))
+    h = hh.multiplyHists(h, h_corr)
+
+    return h

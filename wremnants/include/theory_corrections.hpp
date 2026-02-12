@@ -14,6 +14,11 @@
 
 namespace wrem {
 
+// Read the bin of a histogram and multiply it with a weight,
+// The bin has to be a tensor even if it just has rank 1 and 1 element
+// The weight can be either a scalar (double) or a tensor itself (tensor_t)
+// This is the base class, every derived class should implement the 'operator()'
+// function
 template <typename T> class TensorCorrectionsHelper {
 
 public:
@@ -26,16 +31,29 @@ public:
   template <typename... Xs> const tensor_t &get_tensor(const Xs &...xs) {
     return narf::get_value(*correctionHist_, xs...).data();
   }
-  tensor_t operator()(double x1, double x2, double x3, int x4,
-                      double nominal_weight) {
-    return nominal_weight * get_tensor(x1, x2, x3, x4);
-  }
 
 private:
   std::shared_ptr<const T> correctionHist_;
 };
 
-template <typename T>
+template <typename T, typename T1,
+          typename T0 = T::storage_type::value_type::tensor_t>
+class TensorCorrectionsHelper1D : public TensorCorrectionsHelper<T> {
+
+  using base_t = TensorCorrectionsHelper<T>;
+  using tensor_t = typename T::storage_type::value_type::tensor_t;
+
+public:
+  // inherit constructor
+  using base_t::base_t;
+
+  tensor_t operator()(T1 x1, T0 nominal_weight) {
+    return nominal_weight * base_t::get_tensor(x1);
+  }
+};
+
+template <typename T, typename T1, typename T2,
+          typename T0 = T::storage_type::value_type::tensor_t>
 class TensorCorrectionsHelper2D : public TensorCorrectionsHelper<T> {
 
   using base_t = TensorCorrectionsHelper<T>;
@@ -45,12 +63,13 @@ public:
   // inherit constructor
   using base_t::base_t;
 
-  tensor_t operator()(double x1, int charge, double nominal_weight) {
-    return nominal_weight * base_t::get_tensor(x1, charge);
+  tensor_t operator()(T1 x1, T2 x2, T0 nominal_weight) {
+    return nominal_weight * base_t::get_tensor(x1, x2);
   }
 };
 
-template <typename T>
+template <typename T, typename T1, typename T2, typename T3,
+          typename T0 = T::storage_type::value_type::tensor_t>
 class TensorCorrectionsHelper3D : public TensorCorrectionsHelper<T> {
 
   using base_t = TensorCorrectionsHelper<T>;
@@ -60,13 +79,14 @@ public:
   // inherit constructor
   using base_t::base_t;
 
-  tensor_t operator()(double x1, double x2, int charge, double nominal_weight) {
-    return nominal_weight * base_t::get_tensor(x1, x2, charge);
+  tensor_t operator()(T1 x1, T2 x2, T3 x3, T0 nominal_weight) {
+    return nominal_weight * base_t::get_tensor(x1, x2, x3);
   }
 };
 
-template <typename T>
-class TensorCorrectionsHelperWeighted4D : public TensorCorrectionsHelper<T> {
+template <typename T, typename T1, typename T2, typename T3, typename T4,
+          typename T0 = T::storage_type::value_type::tensor_t>
+class TensorCorrectionsHelper4D : public TensorCorrectionsHelper<T> {
 
   using base_t = TensorCorrectionsHelper<T>;
   using tensor_t = typename T::storage_type::value_type::tensor_t;
@@ -75,9 +95,8 @@ public:
   // inherit constructor
   using base_t::base_t;
 
-  tensor_t operator()(double x1, double x2, double x3, int charge,
-                      tensor_t nominal_weights) {
-    return nominal_weights * base_t::get_tensor(x1, x2, x3, charge);
+  tensor_t operator()(T1 x1, T2 x2, T3 x3, T4 x4, T0 nominal_weights) {
+    return nominal_weights * base_t::get_tensor(x1, x2, x3, x4);
   }
 };
 
@@ -170,7 +189,7 @@ public:
                                           uncorr_hel.sum(reduceddims) *
                                           nominal_weight;
 
-    return corr_weight_vars;
+    return corr_weight_vars; // dimensions: {nvars}
   }
 };
 

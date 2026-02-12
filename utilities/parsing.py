@@ -29,6 +29,17 @@ def str_to_complex_or_int(value):
             raise argparse.ArgumentTypeError(f"Invalid integer: '{value}'")
 
 
+def str_to_list_or_int(value):
+    # .strip() handles the "leading space" trick if you use it
+    value = value.strip()
+    if "," in value:
+        return [float(x) for x in value.split(",")]
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid integer: '{value}'")
+
+
 def set_parser_attribute(parser, argument, attribute, newValue):
     # change an argument of the parser, must be called before parse_arguments
     logger = logging.child_logger(__name__)
@@ -157,9 +168,9 @@ def common_parser(analysis_label=""):
         type=str,
         action=NoneFilterAction,
         default=[
-            "scetlib_dyturbo",
-            "scetlib_dyturboCT18ZVars",
-            "scetlib_dyturboCT18Z_pdfas",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars",
+            "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas",
         ],
         choices=theory_corrections.valid_theory_corrections(),
         help="Apply corrections from indicated generator. First will be nominal correction.",
@@ -190,7 +201,7 @@ def common_parser(analysis_label=""):
         help="Skip the qcdScaleByHelicity histogram (it can be huge)",
     )
     parser.add_argument(
-        "--noRecoil", action="store_true", help="Don't apply recoild correction"
+        "--noRecoil", action="store_true", help="Don't apply recoil correction"
     )
     parser.add_argument(
         "--recoilHists",
@@ -257,17 +268,7 @@ def common_parser(analysis_label=""):
         "-e",
         "--era",
         type=str,
-        choices=[
-            "2016PreVFP",
-            "2016PostVFP",
-            "2017",
-            "2017H",
-            "2018",
-            "2023_PUAVE1",
-            "2023_PUAVE2",
-            "2023_PUAVE5",
-            "2023_PUAVE10",
-        ],
+        choices=common.supported_eras,
         help="Data set to process",
         default="2016PostVFP",
     )
@@ -501,6 +502,30 @@ def common_parser(analysis_label=""):
             type=float,
             help="Lower threshold for muon pt in the veto definition",
         )
+        parser.add_argument(
+            "--vetoRecoStaPt",
+            default=15,
+            type=float,
+            help="Lower threshold for muon standalone pt in the veto definition (should typically match vetoRecoPt, but not necessary)",
+        )
+        parser.add_argument(
+            "--vetoRecoEta",
+            default=2.4,
+            type=float,
+            help="Upper threshold for muon absolute eta in the veto definition",
+        )
+        parser.add_argument(
+            "--dxybs",
+            default=0.05,
+            type=float,
+            help="Upper threshold for muon absolute dxy with respect to beamspot",
+        )
+        parser.add_argument(
+            "--oneMCfileEveryN",
+            type=int,
+            default=None,
+            help="Use 1 MC file every N, where N is given by this option. Mainly for tests",
+        )
         # Options to test splitting of data into subsets
         parser.add_argument(
             "--addRunAxis",
@@ -531,6 +556,27 @@ def common_parser(analysis_label=""):
             Specify a positive number of bins (default does nothing), which will be uniformly spaced,
             or a list of bin edges (the number of bins is inferred accordingly.
             Phi is defined between -pi and +pi
+            """,
+        )
+        parser.add_argument(
+            "--addNvtxAxis",
+            type=float,
+            default=None,
+            nargs="+",
+            help="""
+            Add another fit axis with the number of reconstructed vertices.
+            Specify a list of bin edges
+            """,
+        )
+        parser.add_argument(
+            "--normWeightNvtx",
+            type=float,
+            default=None,
+            nargs="+",
+            help="""
+            Additional normalization weight differential in number of reconstructed vertices.
+            To be used together with --addNvtxAxis, if desired.
+            Specify a list of weights (one less item than --addNvtxAxis)
             """,
         )
 
@@ -567,7 +613,7 @@ def common_parser(analysis_label=""):
                     )
                 sfFile = "muonSF/2017/allSmooth_2017_vtxAgnIso.root"
             else:
-                raise NotImplementedError(f"Era {commonargs.era} is not yet supported")
+                sfFile = ""
 
         sfFile = f"{common.data_dir}/{sfFile}"
     else:
@@ -594,8 +640,9 @@ def common_parser(analysis_label=""):
         )
         parser.add_argument(
             "--fitresult",
+            nargs="+",
             type=str,
-            help="Fitresult to be used to reweight the gen distribution (e.g. for iterative POI as NOI fit)",
+            help="Fitresult to be used to reweight the gen distribution (e.g. for iterative POI as NOI fit) if two are given use first for numerator and second for denominator",
         )
         parser.add_argument(
             "--poiAsNoi",
@@ -869,6 +916,11 @@ def plot_parser():
         type=float,
         default=None,
         help="Use a custom figure width, otherwise chosen automatic",
+    )
+    parser.add_argument(
+        "--noBinWidthNorm",
+        action="store_true",
+        help="Do not normalize bin yields by bin width",
     )
 
     return parser

@@ -5,6 +5,7 @@ from scipy import ndimage
 
 import narf.clingutils
 from utilities import common
+from wremnants import theory_tools
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -19,31 +20,6 @@ axis_muFfact = hist.axis.Variable(
     [0.25, 0.75, 1.25, 2.75], name="muFfact", underflow=False, overflow=False
 )
 
-axis_absYVgen = hist.axis.Variable(
-    # [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 10],
-    [
-        0.0,
-        0.25,
-        0.5,
-        0.75,
-        1.0,
-        1.25,
-        1.5,
-        1.75,
-        2.0,
-        2.25,
-        2.5,
-        2.75,
-        3.0,
-        3.25,
-        3.5,
-        4.0,
-        5.0,
-    ],  # this is the same binning as hists from theory corrections
-    name="absYVgenNP",
-    underflow=False,
-)
-
 scale_tensor_axes = (axis_muRfact, axis_muFfact)
 
 pdfMap = {
@@ -54,7 +30,8 @@ pdfMap = {
         "entries": 101,
         "alphas": ["LHEPdfWeight[0]", "LHEPdfWeight[101]", "LHEPdfWeight[102]"],
         "alphasRange": "002",
-        "inflationFactor": 2.5,
+        "inflation_factor_wmass": 3.0,
+        "inflation_factor_alphaS": 3.0,
     },
     "ct18": {
         "name": "pdfCT18",
@@ -68,7 +45,8 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "scale": 1 / 1.645,  # Convert from 90% CL to 68%
-        "inflationFactor": 1.0,
+        "inflation_factor_wmass": 1.0,
+        "inflation_factor_alphaS": 1.2,
     },
     "nnpdf30": {
         "name": "pdfNNPDF30",
@@ -81,7 +59,8 @@ pdfMap = {
             "LHEPdfWeightAltSet16[0]",
         ],
         "alphasRange": "001",
-        "inflationFactor": 1.0,  # not determined
+        "inflation_factor_wmass": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.0,  # not determined
     },
     "nnpdf40": {
         "name": "pdfNNPDF40",
@@ -94,7 +73,8 @@ pdfMap = {
             "LHEPdfWeightAltSet3[52]",
         ],
         "alphasRange": "001",
-        "inflationFactor": 4.0,
+        "inflation_factor_wmass": 5.0,
+        "inflation_factor_alphaS": 5.0,
     },
     "pdf4lhc21": {
         "name": "pdfPDF4LHC21",
@@ -107,7 +87,8 @@ pdfMap = {
             "LHEPdfWeightAltSet10[42]",
         ],
         "alphasRange": "001",
-        "inflationFactor": 1.0,
+        "inflation_factor_wmass": 1.0,
+        "inflation_factor_alphaS": 1.5,
     },
     "msht20": {
         "name": "pdfMSHT20",
@@ -120,7 +101,8 @@ pdfMap = {
             "LHEPdfWeightAltSet12[70]",
         ],
         "alphasRange": "002",
-        "inflationFactor": 1.5,
+        "inflation_factor_wmass": 1.5,
+        "inflation_factor_alphaS": 2.0,
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
@@ -163,7 +145,8 @@ pdfMap = {
             "LHEPdfWeightAltSet24[111]",
         ],
         "alphasRange": "002",
-        "inflationFactor": 1.5,
+        "inflation_factor_wmass": 1.5,
+        "inflation_factor_alphaS": 1.0,  # not determined
     },
     "ct18z": {
         "name": "pdfCT18Z",
@@ -178,7 +161,8 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "scale": 1 / 1.645,  # Convert from 90% CL to 68%
-        "inflationFactor": 1.0,
+        "inflation_factor_wmass": 1.0,
+        "inflation_factor_alphaS": 1.0,
     },
     "atlasWZj20": {
         "name": "pdfATLASWZJ20",
@@ -187,7 +171,8 @@ pdfMap = {
         "entries": 60,
         "alphas": ["LHEPdfWeight[0]", "LHEPdfWeight[41]", "LHEPdfWeight[42]"],
         "alphasRange": "002",
-        "inflationFactor": 1.0,  # not determined
+        "inflation_factor_wmass": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.0,  # not determined
     },
     "herapdf20": {
         "name": "pdfHERAPDF20",
@@ -200,12 +185,13 @@ pdfMap = {
             "LHEPdfWeightAltSet23[0]",
         ],  # alphas 116-120
         "alphasRange": "002",
-        "inflationFactor": 4.0,
+        "inflation_factor_wmass": 4.0,
+        "inflation_factor_alphaS": 3.5,
     },
     "herapdf20ext": {
         "name": "pdfHERAPDF20ext",
         "branch": "LHEPdfWeightAltSet21",
-        "combine": "symHessian",
+        "combine": "asymHessian",
         "entries": 14,
         "alphas": [
             "LHEPdfWeightAltSet20[0]",
@@ -213,7 +199,8 @@ pdfMap = {
             "LHEPdfWeightAltSet23[0]",
         ],  # dummy AS
         "alphasRange": "002",
-        "inflationFactor": 4.0,
+        "inflation_factor_wmass": 4.0,
+        "inflation_factor_alphaS": 3.0,
     },
 }
 
@@ -226,22 +213,23 @@ only_central_pdf_datasets = [
 ]
 
 extended_pdf_datasets = [
-    x for x in common.vprocs_all if not any(y in x for y in ["NNLOPS", "MiNLO"])
+    x for x in common.vprocs if not any(y in x for y in ["NNLOPS", "MiNLO"])
 ]
 
 
 def expand_pdf_entries(pdf, alphas=False, renorm=False):
     info = pdfMap[pdf]
+    first_entry = info.get("first_entry", 0)
+    pdfBranch = info["branch"]
     if alphas:
         vals = info["alphas"]
     else:
-        first_entry = info.get("first_entry", 0)
         last_entry = first_entry + info["entries"]
         vals = [info["branch"] + f"[{i}]" for i in range(first_entry, last_entry)]
 
     if renorm:
         vals = [
-            f"std::clamp<float>({x}/{vals[0]}*central_pdf_weight, -theory_weight_truncate, theory_weight_truncate)"
+            f"std::clamp<float>({x}/{vals[0]}*{pdfBranch}[{first_entry}], -theory_weight_truncate, theory_weight_truncate)"
             for x in vals
         ]
     else:
@@ -270,12 +258,36 @@ def define_scale_tensor(df):
 
 
 theory_corr_weight_map = {
-    "scetlib_dyturboMSHT20_pdfas": expand_pdf_entries("msht20", alphas=True),
-    "scetlib_dyturboMSHT20Vars": expand_pdf_entries("msht20"),
-    "scetlib_dyturboCT18ZVars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturboCT18Z_pdfas": expand_pdf_entries("ct18z", alphas=True, renorm=True),
-    "scetlib_dyturboMSHT20an3lo_pdfas": expand_pdf_entries("msht20an3lo", alphas=True),
-    "scetlib_dyturboMSHT20an3loVars": expand_pdf_entries("msht20an3lo"),
+    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "msht20", alphas=True
+    ),
+    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfvars": expand_pdf_entries("msht20"),
+    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_CT18Z_N3p1LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_CT18Z_N4p0LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_nnlojet_CT18Z_N3p1LL_N3LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_nnlojet_CT18Z_N4p0LLN3LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "msht20an3lo", alphas=True
+    ),
+    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "msht20an3lo"
+    ),
     # Tested this, better not to treat this way unless using MSHT20nnlo as central set
     # "scetlib_dyturboMSHT20mbrange" : expand_pdf_entries("msht20mbrange", renorm=True),
     # "scetlib_dyturboMSHT20mcrange" : expand_pdf_entries("msht20mcrange", renorm=True),
@@ -401,19 +413,29 @@ def define_lhe_vars(df):
 
     logger.info("Defining LHE variables")
 
+    # SM leptons (11-16) or BSM neutrino (9900012)
     df = df.Define(
         "lheLeps",
-        "LHEPart_status == 1 && abs(LHEPart_pdgId) >= 11 && abs(LHEPart_pdgId) <= 16",
+        "LHEPart_status == 1 && LHEPart_pdgId >= 11 && LHEPart_pdgId <= 16",
     )
-    df = df.Define("lheLep", "lheLeps && LHEPart_pdgId>0")
-    df = df.Define("lheAntiLep", "lheLeps && LHEPart_pdgId<0")
+    df = df.Define(
+        "lheAntiLeps",
+        "LHEPart_status == 1 && LHEPart_pdgId <= -11 && LHEPart_pdgId >= -16",
+    )
+    df = df.Define(
+        "lheBSM",
+        "LHEPart_pdgId == 9900012 && LHEPart_status == 1",
+    )
+
+    df = df.Define("lheLep", "Sum(lheLeps) == 1 ? lheLeps : lheBSM")
+    df = df.Define("lheAntiLep", "Sum(lheAntiLeps) == 1 ? lheAntiLeps : lheBSM")
     df = df.Define(
         "lheLep_idx",
-        'if (Sum(lheLep) != 1) throw std::runtime_error("lhe lepton not found."); return ROOT::VecOps::ArgMax(lheLep);',
+        'if (Sum(lheLep) != 1) throw std::runtime_error("lhe lepton not found, sum = " + std::to_string(Sum(lheAntiLep))); return ROOT::VecOps::ArgMax(lheLep);',
     )
     df = df.Define(
         "lheAntiLep_idx",
-        'if (Sum(lheAntiLep) != 1) throw std::runtime_error("lhe anti-lepton not found."); return ROOT::VecOps::ArgMax(lheAntiLep);',
+        'if (Sum(lheAntiLep) != 1) throw std::runtime_error("lhe anti-lepton not found, sum = " + std::to_string(Sum(lheAntiLep))); return ROOT::VecOps::ArgMax(lheAntiLep);',
     )
 
     df = df.Define("lheVs", "abs(LHEPart_pdgId) >=23 && abs(LHEPart_pdgId)<=24")
@@ -494,7 +516,8 @@ def define_prefsr_vars(df):
     df = df.Define("phiVgen", "genV.Phi()")
     df = df.Define("absYVgen", "std::fabs(yVgen)")
     df = df.Define(
-        "chargeVgen", "GenPart_pdgId[prefsrLeps[0]] + GenPart_pdgId[prefsrLeps[1]]"
+        "chargeVgen",
+        "-1 * (GenPart_pdgId[prefsrLeps[0]] % 2 + GenPart_pdgId[prefsrLeps[1]] % 2)",
     )
     df = df.Define("csSineCosThetaPhigen", "wrem::csSineCosThetaPhi(genlanti, genl)")
     df = df.Define("csCosThetagen", "csSineCosThetaPhigen.costheta")
@@ -619,7 +642,7 @@ def define_postfsr_vars(df, mode=None):
             )
             df = df.Define(
                 "postfsrOtherLep_mass",
-                "isEvenEvent ? wrem::get_pdgid_mass(GenPart_pdgId[postfsrLep][postfsrLep_idx]) : wrem::get_pdgid_mass(GenPart_pdgId[postfsrAntiLep][postfsrAntiLep_idx])",
+                "isEvenEvent ? wrem::get_pdgid_mass(GenPart_pdgId[postfsrAntiLep][postfsrAntiLep_idx]) : wrem::get_pdgid_mass(GenPart_pdgId[postfsrLep][postfsrLep_idx])",
             )
 
             df = df.Define(
@@ -772,10 +795,28 @@ def pdf_info_map(dataset, pdfset):
     return infoMap[pdfset]
 
 
+def pdf_inflation_factor(infoMap, nois):
+    """Return the PDF uncertainty inflation factor for given nuisance parameters."""
+
+    if nois == ["wmass"] or nois == ["wmass", "wwidth"]:
+        return infoMap.get("inflation_factor_wmass", 1)
+    elif nois == ["alphaS"]:
+        return infoMap.get("inflation_factor_alphaS", 1)
+    else:
+        logger.debug(
+            f"No inflation factor defined for nuisance parameters {nois}, returning 1."
+        )
+        return 1
+
+
 def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
+    df = df.Define(
+        f"nominal_weight_pdf_uncorr",
+        build_weight_expr(df, exclude_weights=["central_pdf_weight"]),
+    )
     if (
         len(pdfs) == 0
-        or dataset_name not in common.vprocs_all
+        or dataset_name not in common.vprocs
         or "horace" in dataset_name
         or "winhac" in dataset_name
         or "LHEPdfWeight" not in df.GetColumnNames()
@@ -790,6 +831,8 @@ def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
             pdfInfo = pdf_info_map(dataset_name, pdf)
         except ValueError:
             return df
+
+        logger.info(f"Defining PDF weights for PDF set {pdf}")
 
         pdfName = pdfInfo["name"]
         pdfBranch = pdfInfo["branch"]
@@ -832,7 +875,35 @@ def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
     return df
 
 
+def define_central_pdf_weight_from_helicities(df, dataset_name, pdf, theory_helpers):
+
+    logger.info("Using PDF weights from helicities for the central PDF weight")
+    pdf_name = theory_tools.pdfMap[pdf]["name"]
+
+    tensorName = f"helicity{pdf_name}CentralWeight_tensor"
+    if "unity" not in df.GetColumnNames():
+        df = df.DefinePerSample("unity", "1.")
+    df = df.Define(
+        tensorName,
+        theory_helpers["pdf_central"],
+        [
+            "massVgen",
+            "absYVgen",
+            "ptVgen",
+            "chargeVgen",
+            "csSineCosThetaPhigen",
+            "unity",
+        ],
+    )
+    return df.Define(
+        "central_pdf_weight",
+        f"wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0)[0]",
+    )
+
+
 def define_central_pdf_weight(df, dataset_name, pdf):
+
+    logger.info("Using event PDF weights for the central PDF weight")
     try:
         pdfInfo = pdf_info_map(dataset_name, pdf)
     except ValueError:
@@ -854,24 +925,35 @@ def define_central_pdf_weight(df, dataset_name, pdf):
     )
 
 
-def define_theory_weights_and_corrs(df, dataset_name, helpers, args):
+def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_helpers={}):
     if "LHEPart_status" in df.GetColumnNames():
         df = define_lhe_vars(df)
 
-    if not "powheg" in dataset_name:
+    if "powheg" not in dataset_name:
         # no preFSR particles in powheg samples
         df = define_prefsr_vars(df)
-        df = define_intermediate_gen_vars(df, "hardProcess", 21, 29)
-        df = define_intermediate_gen_vars(df, "postShower", 21, 59)
-        df = define_intermediate_gen_vars(df, "postBeamRemnants", 21, 69)
+        if not dataset_name.startswith("WtoNMu_MN"):
+            # no intermediate bosons in some events in madgraph samples
+            logger.debug(f"Define intermediate gen variables for {dataset_name}")
+            df = define_intermediate_gen_vars(df, "hardProcess", 21, 29)
+            df = define_intermediate_gen_vars(df, "postShower", 21, 59)
+            df = define_intermediate_gen_vars(df, "postBeamRemnants", 21, 69)
 
     if "GenPart_status" in df.GetColumnNames():
         df = define_ew_vars(df)
 
     df = df.DefinePerSample("theory_weight_truncate", "10.")
-    df = define_central_pdf_weight(
-        df, dataset_name, args.pdfs[0] if len(args.pdfs) >= 1 else None
-    )
+    if theory_helpers and "pdf_central" in theory_helpers.keys():
+        df = define_central_pdf_weight_from_helicities(
+            df,
+            dataset_name,
+            args.pdfs[0] if len(args.pdfs) >= 1 else None,
+            theory_helpers,
+        )
+    else:  # if no boson-parametrized weights are available
+        df = define_central_pdf_weight(
+            df, dataset_name, args.pdfs[0] if len(args.pdfs) >= 1 else None
+        )
     df = define_theory_corr(
         df,
         dataset_name,
@@ -891,6 +973,7 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args):
         df = df.Define("extra_weight", "MEParamWeightAltSet3[0]")
     df = define_nominal_weight(df)
     df = define_pdf_columns(df, dataset_name, args.pdfs, args.altPdfOnlyCentral)
+    df = define_breit_wigner_weights(df, dataset_name)
 
     return df
 
@@ -918,6 +1001,10 @@ def build_weight_expr(df, exclude_weights=[]):
         logger.info("Adding additional weight '{extra_weight}'")
         found_weights.append("extra_weight")
 
+    if "central_weight" in valid_cols:
+        logger.info("Adding additional central weight 'central_weight'")
+        found_weights.append("central_weight")
+
     weight_expr = "*".join(found_weights)
 
     logger.debug(f"Weight is {weight_expr}")
@@ -927,10 +1014,33 @@ def build_weight_expr(df, exclude_weights=[]):
 
 def define_nominal_weight(df):
     logger.debug("Defining nominal weight")
-    if "central_weight" in df.GetColumnNames():
-        return df.Define(f"nominal_weight", build_weight_expr(df) + " * central_weight")
-    else:
-        return df.Define(f"nominal_weight", build_weight_expr(df))
+    return df.Define(f"nominal_weight", build_weight_expr(df))
+
+
+def define_breit_wigner_weights(df, proc):
+
+    logger.debug("Defining Breit-Wigner weights")
+    if "massVgen" not in df.GetColumnNames():
+        logger.warning("Did not find massVgen, cannot define Breit-Wigner weights")
+        return df.DefinePerSample("bw_weight", "1.0")
+
+    type = 1 if "W" in proc else 0
+    entries = 21 if "W" in proc else 23
+    df = df.Define(
+        f"breitwigner_massWeight{proc[0]}_tensor",
+        f"auto res = wrem::vec_to_tensor_t<double, {entries}>(wrem::breitWignerMassWeights<{type}>(massVgen));"
+        "res = res * nominal_weight;"
+        "return res;",
+    )
+
+    entries = 5
+    df = df.Define(
+        f"breitwigner_widthWeight{proc[0]}_tensor",
+        f"auto res = wrem::vec_to_tensor_t<double, {entries}>(wrem::breitWignerWidthWeights<{type}>(massVgen));"
+        "res = res * nominal_weight;"
+        "return res;",
+    )
+    return df
 
 
 def define_ew_theory_corr(
@@ -985,6 +1095,7 @@ def define_ew_theory_corr(
             )
 
     if "ew_theory_corr_weight" not in df.GetColumnNames():
+        logger.debug("Define 'ew_theory_corr_weight'=1.0")
         df = df.DefinePerSample("ew_theory_corr_weight", "1.0")
 
     return df
@@ -1004,6 +1115,7 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
         or not generators
         or generators[0] not in dataset_helpers
     ):
+        logger.debug("Define 'theory_corr_weight'=1.0")
         df = df.DefinePerSample("theory_corr_weight", "1.0")
 
     for i, generator in enumerate(generators):
@@ -1156,12 +1268,18 @@ def pdfNames(cardTool, pdf, skipFirst=True):
 
 def pdfNamesAsymHessian(entries, pdfset=""):
     pdfNames = ["pdf0" + pdfset.replace("pdf", "")]
+    if pdfset == "pdfHERAPDF20ext":
+        entries -= 3
     pdfNames.extend(
         [
             f"pdf{int((j+2)/2)}{pdfset.replace('pdf', '')}{'Up' if j % 2 else 'Down'}"
             for j in range(entries - 1)
         ]
     )
+    if pdfset == "pdfHERAPDF20ext":
+        pdfNames.extend(
+            [f"pdf{entries//2 + j}{pdfset.replace('pdf', '')}" for j in range(1, 4)]
+        )
     return pdfNames
 
 

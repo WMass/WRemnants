@@ -14,7 +14,11 @@ from wremnants import (
 )
 from wremnants.datasets.datagroups import Datagroups
 from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.histmaker_tools import (
+    aggregate_groups,
+    scale_to_data,
+    write_analysis_output,
+)
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -42,6 +46,11 @@ parser.add_argument(
     help="Use unfolding binning to produce the gen results",
 )
 parser.add_argument(
+    "--genPtBinningAsReco",
+    action="store_true",
+    help="Use unfolding binning to produce the gen results",
+)
+parser.add_argument(
     "--singleLeptonHists",
     action="store_true",
     help="Also store single lepton kinematics",
@@ -57,6 +66,7 @@ parser.add_argument(
 parser.add_argument("--signedY", action="store_true", help="use signed Y")
 parser.add_argument(
     "--fiducial",
+    default=None,
     choices=["masswindow", "dilepton", "singlelep"],
     help="Apply selection on leptons (No argument for inclusive)",
 )
@@ -85,14 +95,27 @@ parser.add_argument(
     action="store_true",
     help="Add axis to store info if the event has an outgoing charm quark",
 )
+parser.add_argument(
+    "--finePtVBinning",
+    action="store_true",
+    help="Use 0.5 GeV binning for ptVgen (e.g., for theory corrections)",
+)
+parser.add_argument(
+    "--centralBosonPDFWeight",
+    action="store_true",
+    help="Apply PDF reweighting using boson parameterized corrections",
+)
 
 parser = parsing.set_parser_default(parser, "filterProcs", common.vprocs)
+parser = parsing.set_parser_default(parser, "era", "13TeVGen")
+parser = parsing.set_parser_default(parser, "aggregateGroups", [])
 args = parser.parse_args()
 
 if not args.theoryCorrections:
     parser = parsing.set_parser_default(parser, "theoryCorr", [])
     parser = parsing.set_parser_default(parser, "ewTheoryCorr", [])
 args = parser.parse_args()
+
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -103,10 +126,10 @@ datasets = getDatasets(
     extended="msht20an3lo" not in args.pdfs,
     nanoVersion="v9",
     base_path=args.dataPath,
-    mode=analysis_label,
+    era=args.era,
 )
 
-logger.debug(f"Will process samples {[d.name for d in datasets]}")
+logger.info(f"Will process samples {[d.name for d in datasets]}")
 
 axis_ygen = hist.axis.Regular(10, -5.0, 5.0, name="y")
 col_rapidity = "yVgen" if args.signedY else "absYVgen"
@@ -129,12 +152,46 @@ axis_chargeZgen = hist.axis.Integer(
 
 axis_absetal_gen = hist.axis.Regular(24, 0, 2.4, name="absEtaGen")
 axis_ptl_gen = hist.axis.Regular(34, 26.0, 60.0, name="ptGen")
+axis_mt_gen = hist.axis.Regular(10, 0, 100, name="mtGen")
 axis_chargel_gen = hist.axis.Regular(
-    2, -2.0, 2.0, underflow=False, overflow=False, name=f"qGen"
+    2,
+    -2.0,
+    2.0,
+    name=f"qGen",
+    underflow=False,
+    overflow=False,
 )
 
+# fine mass bins for studies
+# axis_massZgen = hist.axis.Variable(
+#     [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 13000],
+#     name="massVgen",
+#     underflow=False,
+#     overflow=False,
+# )
+
+# axis_massWgen = hist.axis.Variable([4.0, 13000.0], name="massVgen")
+axis_massWgen = hist.axis.Variable([0, 75, 80, 85, 120.0, 13000], name="massVgen")
+axis_massZgen = hist.axis.Variable([60.0, 120.0, 13000], name="massVgen")
+
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
-corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, theory_corrs)
+procsWithTheoryCorr = [d.name for d in datasets if d.name in common.vprocs]
+if len(procsWithTheoryCorr) and len(theory_corrs):
+    corr_helpers = theory_corrections.load_corr_helpers(
+        procsWithTheoryCorr, theory_corrs
+    )
+else:
+    corr_helpers = {}
+
+
+corrs = []
+if args.helicity and args.propagatePDFstoHelicity:
+    corrs.append("qcdScale")
+if args.centralBosonPDFWeight:
+    corrs.append("pdf_central")
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr, procs=["Z", "W"], corrs=corrs
+)
 
 
 def build_graph(df, dataset):
@@ -154,16 +211,10 @@ def build_graph(df, dataset):
         "Z",
     ]  # in common.zprocs
 
-    if args.addCharmAxis:
-        axis_massWgen = hist.axis.Variable(
-            [4.0, 13000.0], name="massVgen", underflow=True, overflow=False
-        )
+    if isW or isZ:
+        theory_helpers = theory_helpers_procs[dataset.name[0]]
     else:
-        axis_massWgen = hist.axis.Regular(
-            120, 0, 120.0, name="massVgen", underflow=True, overflow=True
-        )
-
-    axis_massZgen = hist.axis.Regular(12, 60.0, 120.0, name="massVgen")
+        theory_helpers = {}
 
     theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
@@ -171,16 +222,17 @@ def build_graph(df, dataset):
     axis_ptV_thag = theoryAgnostic_axes[0]
     axis_yV_thag = theoryAgnostic_axes[1]
 
-    if args.useUnfoldingBinning:
+    if args.useUnfoldingBinning and "Z" in dataset.name:
         unfolding_axes, unfolding_cols, unfolding_selections = (
             differential.get_dilepton_axes(
                 ["ptVGen", "absYVGen"],
                 {
-                    "ptll": common.get_dilepton_ptV_binning(fine=False),
-                    "yll": common.yll_10quantiles_binning,
+                    "ptll": common.ptZ_binning,
+                    "yll": common.yll_20quantiles_binning,
                 },
                 "prefsr",
                 add_out_of_acceptance_axis=False,
+                rebin_pt=None if args.genPtBinningAsReco else unfolding_tools.rebin_pt,
             )
         )
         axis_absYVgen = hist.axis.Variable(
@@ -193,9 +245,6 @@ def build_graph(df, dataset):
             name="ptVgen",
             underflow=False,
         )
-
-        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
-
     elif args.useTheoryAgnosticBinning:
         axis_absYVgen = hist.axis.Variable(
             axis_yV_thag.edges,  # same axis as theory agnostic norms
@@ -204,36 +253,27 @@ def build_graph(df, dataset):
         )
         axis_ptVgen = hist.axis.Variable(
             axis_ptV_thag.edges,  # same axis as theory agnostic norms,
-            # common.ptV_binning,
             name="ptVgen",
             underflow=False,
         )
     else:
+        if args.finePtVBinning:
+            edges_ptV = np.append(np.arange(0, 100.5, 0.5), 13000.0)
+        else:
+            edges_ptV = (
+                common.ptZgen_binning_corr if isZ else common.ptWgen_binning_corr
+            )
+        edges_absYV = (
+            common.absYZgen_binning_corr if isZ else common.absYWgen_binning_corr
+        )
+
         axis_absYVgen = hist.axis.Variable(
-            [
-                0.0,
-                0.25,
-                0.5,
-                0.75,
-                1.0,
-                1.25,
-                1.5,
-                1.75,
-                2.0,
-                2.25,
-                2.5,
-                2.75,
-                3.0,
-                3.25,
-                3.5,
-                4.0,
-                5.0,
-            ],  # this is the same binning as hists from theory corrections
+            edges_absYV,
             name="absYVgen",
             underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            (*common.get_dilepton_ptV_binning(fine=False), 13000.0),
+            edges_ptV,
             name="ptVgen",
             underflow=False,
         )
@@ -254,10 +294,12 @@ def build_graph(df, dataset):
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     df = theory_tools.define_theory_weights_and_corrs(
-        df, dataset.name, corr_helpers, args
+        df, dataset.name, corr_helpers, args, theory_helpers
     )
 
-    if isZ:
+    if isZ or dataset.group in [
+        "DYlowMass",
+    ]:
         nominal_axes = [
             axis_massZgen,
             axis_rapidity,
@@ -325,25 +367,32 @@ def build_graph(df, dataset):
         )
 
     if args.singleLeptonHists and (isW or isZ):
+        gen_levels = ["prefsr", "postfsr"]
         df = unfolding_tools.define_gen_level(
-            df, dataset.name, ["prefsr"], mode="w_mass" if isW else "z_wlike"
+            df, dataset.name, gen_levels, mode="w_mass" if isW else "z_wlike"
         )
 
-        lep_cols = ["prefsrLep_absEta", "prefsrLep_pt", "prefsrLep_charge"]
-        lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_chargel_gen]
+        for level in gen_levels:
+            lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
+            lep_cols = [
+                f"{level}Lep_absEta",
+                f"{level}Lep_pt",
+                f"{level}V_mT",
+                f"{level}Lep_charge",
+            ]
 
-        if args.addCharmAxis:
-            lep_axes = [*lep_axes, axis_charm]
-            lep_cols = [*lep_cols, "charm"]
+            if args.addCharmAxis:
+                lep_axes = [*lep_axes, axis_charm]
+                lep_cols = [*lep_cols, "charm"]
 
-        results.append(
-            df.HistoBoost(
-                "prefsr_lep",
-                lep_axes,
-                [*lep_cols, "nominal_weight"],
-                storage=hist.storage.Weight(),
+            results.append(
+                df.HistoBoost(
+                    f"{level}_lep",
+                    lep_axes,
+                    [*lep_cols, "nominal_weight"],
+                    storage=hist.storage.Weight(),
+                )
             )
-        )
 
     if not args.skipEWHists and (isW or isZ) and "Zmumu_powheg-weak" in dataset.name:
         if isZ:
@@ -835,45 +884,38 @@ def build_graph(df, dataset):
         and "winhac" not in dataset.name
         and "LHEScaleWeight" in df.GetColumnNames()
         and "LHEPdfWeight" in df.GetColumnNames()
+        and not args.onlyMainHistograms
     ):
-
-        qcdScaleByHelicity_helper = (
-            theory_corrections.make_qcd_uncertainty_helper_by_helicity(
-                is_z=dataset.name[0] != "W"
-            )
-            if args.helicity
-            else None
-        )
-
         df = syst_tools.add_theory_hists(
             results,
             df,
             args,
             dataset.name,
             corr_helpers,
-            qcdScaleByHelicity_helper,
+            theory_helpers,
             nominal_axes,
             nominal_cols,
             base_name="nominal_gen",
             propagateToHelicity=args.propagatePDFstoHelicity,
         )
 
-        helicity_axes = nominal_axes[:-1] if args.addHelicityAxis else nominal_axes
-        helicity_cols = nominal_cols[:-2] if args.addHelicityAxis else nominal_cols
+        if not dataset.name.startswith("WtoNMu_MN"):
+            helicity_axes = nominal_axes[:-1] if args.addHelicityAxis else nominal_axes
+            helicity_cols = nominal_cols[:-2] if args.addHelicityAxis else nominal_cols
 
-        if args.addCharmAxis:
-            helicity_axes = helicity_axes[:-1]
-            helicity_cols = helicity_cols[:-1]
+            if args.addCharmAxis:
+                helicity_axes = helicity_axes[:-1]
+                helicity_cols = helicity_cols[:-1]
 
-        df = syst_tools.add_helicity_hists(
-            results,
-            df,
-            dataset.name,
-            helicity_axes,
-            helicity_cols,
-            base_name="nominal_gen",
-            storage=hist.storage.Weight(),
-        )
+            df = syst_tools.add_helicity_hists(
+                results,
+                df,
+                dataset.name,
+                helicity_axes,
+                helicity_cols,
+                base_name="nominal_gen",
+                storage=hist.storage.Weight(),
+            )
 
     nominal_gen = df.HistoBoost(
         "nominal_gen",
@@ -881,13 +923,34 @@ def build_graph(df, dataset):
         [*nominal_cols, "nominal_weight"],
         storage=hist.storage.Weight(),
     )
-
     results.append(nominal_gen)
+
+    nominal_gen_pdf_uncorr = df.HistoBoost(
+        "nominal_gen_pdf_uncorr",
+        nominal_axes,
+        [*nominal_cols, "nominal_weight_pdf_uncorr"],
+        storage=hist.storage.Weight(),
+    )
+    results.append(nominal_gen_pdf_uncorr)
+
+    nominal_gen_theory_uncorr = df.HistoBoost(
+        "nominal_gen_theory_uncorr",
+        nominal_axes,
+        [*nominal_cols, "nominal_weight_uncorr"],
+        storage=hist.storage.Weight(),
+    )
+    results.append(nominal_gen_theory_uncorr)
 
     return results, weightsum
 
 
 resultdict = narf.build_and_run(datasets, build_graph)
+if len(args.aggregateGroups) > 0:
+    if not args.noScaleToData:
+        scale_to_data(
+            resultdict
+        )  # weight to cross section / sum(weights) * lumi with lumi=1 w/o data
+    aggregate_groups(datasets, resultdict, args.aggregateGroups)
 write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
@@ -900,29 +963,20 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
     helicity_xsecs_out = {}
     for dataset in datasets:
         name = dataset.name
-        if "nominal_gen_helicity_xsecs_scale" not in resultdict[name]["output"]:
-            logger.warning(
-                f"Failed to find nominal_gen_helicity_xsecs_scale hist for proc {name}. Skipping!"
-            )
-            continue
         for var in ["", "lhe", "hardProcess", "postShower", "postBeamRemnants"]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             if var == "":
                 suffix = ""
             else:
                 suffix = f"_{var}"
 
-            helicity_xsecs = resultdict[name]["output"][
-                f"nominal_gen_helicity_xsecs_scale{suffix}"
-            ].get()
+            histname = f"nominal_gen_helicity_xsecs_scale{suffix}"
+            if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
+                continue
+
+            helicity_xsecs = resultdict[name]["output"][histname].get()
 
             key = f"{name[0]}{suffix}"
 
@@ -945,17 +999,11 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
             "CT18alphaS002",
             "NNPDF40alphaS001",
         ]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             histname = f"nominal_gen_helicity_nominal_gen_pdf{var}"
             if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
                 continue
 
             helicity_xsecs = resultdict[name]["output"][histname].get()

@@ -54,8 +54,12 @@ prefsrLeptons(const ROOT::VecOps::RVec<int> &status,
 
     const int absPdgId = std::abs(ipdgId);
 
-    const bool is_lepton = absPdgId >= 11 && absPdgId <= 16;
+    // SM leptons or BSM neutrino (9900012)
+    const bool is_heavy_neutrino = absPdgId == 9900012;
+    const bool is_lepton =
+        (absPdgId >= 11 && absPdgId <= 16) || is_heavy_neutrino;
     const bool is_status746 = istatus == 746;
+    const bool is_status22 = istatus == 22;
     const bool is_status23 = istatus == 23;
     const int &motherPdgId = pdgId[imotherIdx];
     const bool is_motherV = motherPdgId == 23 || std::abs(motherPdgId) == 24;
@@ -66,7 +70,9 @@ prefsrLeptons(const ROOT::VecOps::RVec<int> &status,
 
     // TODO: Is there a way to relax the fromHardProcess condition?
     const bool is_other =
-        is_lepton && (is_motherV || is_status23) && is_fromHardProcess;
+        is_lepton &&
+        (is_motherV || is_status23 || (is_heavy_neutrino && is_status22)) &&
+        is_fromHardProcess;
 
     // If there are status = 746 leptons, they came from photos and are pre-FSR
     // (but still need to check the mother in case photos was applied to other
@@ -100,12 +106,15 @@ prefsrLeptons(const ROOT::VecOps::RVec<int> &status,
                            std::to_string(nphotos));
   }
 
+  // output - index 0: lepton, index 1: anti-lepton
   std::array<int, 2> selected_pdgids = {pdgId[selected_idxs[0]],
                                         pdgId[selected_idxs[1]]};
-  const bool partIdx = selected_pdgids[0] > 0;
+  const bool partIdx =
+      selected_pdgids[0] < 0 ||
+      (selected_pdgids[0] == 9900012 && selected_pdgids[1] > 0);
   Eigen::TensorFixedSize<int, Eigen::Sizes<2>> out;
-  out(0) = selected_idxs[!partIdx];
-  out(1) = selected_idxs[partIdx];
+  out(0) = selected_idxs[partIdx];
+  out(1) = selected_idxs[!partIdx];
   return out;
 }
 
@@ -301,7 +310,9 @@ ewLeptons(const ROOT::VecOps::RVec<int> &status,
 
     const int absPdgId = std::abs(ipdgId);
 
-    const bool is_lepton = absPdgId >= 11 && absPdgId <= 16;
+    // SM leptons (11-16) or BSM neutrino (9900012)
+    const bool is_lepton =
+        (absPdgId >= 11 && absPdgId <= 16) || absPdgId == 9900012;
     const bool is_status1 = istatus == 1;
     const bool is_status2 = istatus == 2;
     const bool is_tau = is_status2 && absPdgId == 15;

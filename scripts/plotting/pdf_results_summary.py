@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import ticker
 
-import rabbit.io_tools
 from utilities import parsing
-from utilities.io_tools import hepdata_tools, output_tools
-from wremnants import plot_tools, theory_tools
+from utilities.io_tools import hepdata_tools, rabbit_input
+from wremnants import theory_tools
+from wums import output_tools, plot_tools
 
 parser = parsing.plot_parser()
 parser.add_argument(
@@ -57,6 +57,17 @@ parser.add_argument(
 )
 parser.add_argument("--print", action="store_true", help="Print results")
 parser.add_argument(
+    "--printAssym",
+    action="store_true",
+    help="Print results with asymmetric uncertainties",
+)
+parser.add_argument(
+    "--impactType",
+    choices=["traditional", "nonprofiled", "global"],
+    default="traditional",
+    help="Type of impacts to use for PDF group",
+)
+parser.add_argument(
     "--saveForHepdata",
     action="store_true",
     help="Save output as ROOT to prepare HEPData",
@@ -75,23 +86,51 @@ ref_unc = 6.0 if isW else 2.0
 
 pdf_name = lambda p: theory_tools.pdfMap[p]["name"]
 
-dfs = rabbit.io_tools.read_all_groupunc_df(
+rename = {
+    f"err_{pdf_name(pdf)}{suffix}": f"err_pdf{suffix}"
+    for pdf in args.pdfs
+    for suffix in ["", "_up", "_down"]
+}
+
+dfs = rabbit_input.read_all_groupunc_df(
     [args.reffile.format(pdf=pdf) for pdf in args.pdfs],
-    rename_cols={f"err_{pdf_name(pdf)}": "err_pdf" for pdf in args.pdfs},
+    rename_cols=rename,
     uncs=[pdf_name(pdf) for pdf in args.pdfs],
     names=[pdf_name(pdf)[3:] for pdf in args.pdfs],
+    impact_type=args.impactType,
 )
-# pdf_infdfs = {pdf_name(pdf)[3:] : rabbit.io_tools.read_groupunc_df(args.reffileinf.format(pdf=pdf), pdf_name(pdf)) for pdf in args.pdfs}
 
 if args.print:
+    if args.printAssym:
+        print(
+            "PDF           Mass PDF_unc_up PDF_unc_down  Prof. unc  Total_unc_up Total_unc_down"
+        )
+    else:
+        print("PDF           Mass PDF_unc Total_unc")
+    to_print = (
+        ["value", "err_pdf", "err_Total"]
+        if not args.printAssym
+        else [
+            "value",
+            "err_pdf_up",
+            "err_pdf_down",
+            "err_Profiled",
+            "err_Total_up",
+            "err_Total_down",
+        ]
+    )
     for k, v in dfs.iterrows():
-        print(round(v.iloc[1], 1), round(v.iloc[3], 1), round(v.iloc[2], 1))
+        print(v.loc["Name"].ljust(12), *(round(v.loc[x], 1) for x in to_print))
 
 central = dfs.iloc[0, :]
 
 xlabel = r"$\mathit{m}_{" + ("W" if isW else "Z") + "}$ (MeV)"
 
-xlim = [91160, 91220] if not isW else [80329, 80374]
+xlim = (
+    args.xlim
+    if args.xlim is not None
+    else ([91160, 91220] if not isW else [80329, 80374])
+)
 
 central_val = central["value"]
 if args.diffToCentral:
@@ -107,9 +146,11 @@ dfs["Name"] = dfs["Name"].replace("MSHT20an3lo", "MSHT20aN3LO")
 dfs["Name"] = dfs["Name"].replace("NNPDF31", "NNPDF3.1")
 dfs["Name"] = dfs["Name"].replace("NNPDF40", "NNPDF4.0")
 
+dfs = dfs[["Name", "value", "err_pdf", "err_Total"]]
+
 fig = plot_tools.make_summary_plot(
     central_val,
-    central["err_total"],
+    central["err_Total"],
     central["err_pdf"],
     "CT18Z (nominal)",
     dfs.iloc[1:, :],
@@ -125,9 +166,9 @@ fig = plot_tools.make_summary_plot(
     padding=5,
 )
 ax = plt.gca()
-ax.yaxis.set_major_locator(ticker.MultipleLocator(10))
-ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
-ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
+minor_loc = 5 if xlim[1] - xlim[0] < 100 else 10
+ax.yaxis.set_major_locator(ticker.MultipleLocator(minor_loc * 2))
+ax.xaxis.set_minor_locator(ticker.MultipleLocator(minor_loc))
 ax.xaxis.grid(False, which="both")
 ax.yaxis.grid(False, which="both")
 
@@ -139,7 +180,7 @@ if args.postfix:
     outname += f"_{args.postfix}"
 
 plot_tools.save_pdf_and_png(outdir, outname, fig)
-plot_tools.write_index_and_log(outdir, outname)
+output_tools.write_index_and_log(outdir, outname)
 
 if args.saveForHepdata:
     column_labels = [xlabel, "Total uncertainty", "PDF uncertainty"]
