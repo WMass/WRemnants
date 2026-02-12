@@ -2,6 +2,7 @@
 import os
 import pickle
 import sys
+import numpy as np
 from array import array
 
 import hist
@@ -9,13 +10,17 @@ import lz4.frame
 import ROOT
 import tensorflow as tf
 
+from functools import partial
+
 # from narf import histutils
 import narf
 import wums.output_tools
+import wums.fitutils
 from utilities import common
 from wremnants.datasets.datagroups import Datagroups
 from wums import boostHistHelpers as hh
 from wums import logging
+
 
 args = sys.argv[:]
 sys.argv = ["-b"]
@@ -34,6 +39,37 @@ from scripts.analysisTools.plotUtils.utility import (
     safeOpenFile,
 )
 
+
+def polN_root(xvals, parms, xLowVal=0.0, xFitRange=1.0, xCut=47.84):
+    xScaled = (xvals[0] - xLowVal) / xFitRange
+    xCutScaled = (xCut - xLowVal) / xFitRange
+
+    polN = tf.exp(
+            parms[0]
+            + parms[1] * xScaled
+            + parms[2] * xScaled**2
+            + parms[3] * xScaled**3
+            + parms[4] * xScaled**4)
+    
+    polN_cut = tf.exp(
+            parms[0]
+            + parms[1] * xCutScaled
+            + parms[2] * xCutScaled**2
+            + parms[3] * xCutScaled**3
+            + parms[4] * xCutScaled**4)
+    
+    der_polN_cut = (
+        parms[1] 
+        + 2*parms[2]*xCutScaled
+        + 3*parms[3]*xCutScaled**2
+        + 4*parms[4]*xCutScaled**3
+        ) * polN_cut
+
+    return tf.where(
+        xScaled < xCutScaled,
+        polN,
+        polN_cut + der_polN_cut * (xScaled - xCutScaled)
+    )
 
 def pol4_root(xvals, parms, xLowVal=0.0, xFitRange=1.0):
     xscaled = (xvals[0] - xLowVal) / xFitRange
@@ -115,12 +151,20 @@ parser.add_argument(
     help="Make templates with QCD instead of nonprompt contribution",
 )
 parser.add_argument(
+    "--noSmoothing",
+    action="store_true",
+    default=False,
+    help="Save binned TF instead of smoothed one"
+)
+parser.add_argument(
     "--plotdir", type=str, default=None, help="Output directory for plots"
 )
 args = parser.parse_args()
 
 logger = logging.setup_logger(os.path.basename(__file__), 4)
 ROOT.TH1.SetDefaultSumw2()
+
+proc = "Data" if not args.doQCD else "QCD"
 
 groupsToConsider = (
     [
@@ -187,8 +231,10 @@ nEtaBins = hnomi.axes["eta"].size
 etaEdges = hnomi.axes["eta"].edges
 nChargeBins = hnomi.axes["charge"].size
 chargeEdges = hnomi.axes["charge"].edges
+ptBinCenters = [round((ptEdges[i+1]+ptEdges[i])/2, 1) for i in range(nPtBins)]
 
 eta_genBinning = array("d", [round(x, 1) for x in etaEdges])
+pt_genBinning  = array("d", [round(x, 0) for x in ptEdges])
 charge_genBinning = array("d", chargeEdges)
 
 delta_eta = (eta_genBinning[-1] - eta_genBinning[0]) / args.nEtaBins
@@ -213,15 +259,22 @@ logger.info(f"Decorrelating in the eta bins: {decorrBins_eta}")
 logger.info(f"Decorrelating in the charge bins: {decorrBins_ch}")
 
 out_hist = ROOT.TH3D(
-    f"fakeRatio_utAngleSign_{'Data' if not args.doQCD else 'QCD'}",
+    f"fakeRatio_utAngleSign_{proc}",
     "",
-    len(eta_genBinning) - 1,
-    eta_genBinning,
-    nPtBins,
-    array("d", [round(x, 1) for x in ptEdges]),
-    len(charge_genBinning) - 1,
-    charge_genBinning,
+    nEtaBins, eta_genBinning,
+    nPtBins, pt_genBinning,
+    nChargeBins, charge_genBinning,
 )
+
+out_hist_varSeparate = ROOT.THnD(
+    f"fakeRatio_utAngleSign_{proc}_variations",
+    "",
+    4,
+    array("i", [nEtaBins,      nPtBins,    nChargeBins,      5]),
+    array("d", [etaEdges[0],  ptEdges[0],  chargeEdges[0],  -0.5]),
+    array("d", [etaEdges[-1], ptEdges[-1], chargeEdges[-1],  5.5])
+)
+out_hist_varAll = out_hist.Clone(f"fakeRatio_utAngleSign_{proc}_variations_all")
 
 for ch_edges in decorrBins_ch:
     for eta_edges in decorrBins_eta:
@@ -242,23 +295,23 @@ for ch_edges in decorrBins_ch:
 
         logger.info(f"Processing charge bin [{ch_edges}] and eta bin [{eta_edges}]")
 
-        boost_h_utMinus = histInfo["Data"].copy("Data_utMinus").hists["nominal"]
+        boost_h_utMinus = histInfo[proc].copy(f"{proc}_utMinus").hists["nominal"]
         boost_h_utMinus = boost_h_utMinus[select_utMinus]
         boost_h_utMinus = hh.projectNoFlow(boost_h_utMinus, ["pt"], ["relIso", "mt"])
         root_h_utMinus = narf.hist_to_root(boost_h_utMinus)
 
-        boost_h_utPlus = histInfo["Data"].copy("Data_utPlus").hists["nominal"]
+        boost_h_utPlus = histInfo[proc].copy(f"{proc}_utMinus").hists["nominal"]
         boost_h_utPlus = boost_h_utPlus[select_utPlus]
         boost_h_utPlus = hh.projectNoFlow(boost_h_utPlus, ["pt"], ["relIso", "mt"])
         root_h_utPlus = narf.hist_to_root(boost_h_utPlus)
 
-        logger.info(f"Integrals BEFORE prompt subraction (uT < 0, uT > 0)")
-        logger.info(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
+        logger.debug(f"Integrals BEFORE prompt subraction (uT < 0, uT > 0)")
+        logger.debug(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
         for mcName in prednames:
             if args.doQCD:
                 continue
-            logger.info(f"Subtracting {mcName} from data")
+            logger.debug(f"Subtracting {mcName} from data")
             boost_h_mc_utMinus = (
                 histInfo[mcName].copy(f"{mcName}_utMinus").hists["nominal"]
             )
@@ -279,17 +332,65 @@ for ch_edges in decorrBins_ch:
             root_h_mc_utPlus = narf.hist_to_root(boost_h_mc_utPlus)
             root_h_utPlus.Add(root_h_mc_utPlus, -1)
 
-        logger.info(f"Integrals AFTER prompt subraction (uT < 0, uT > 0)")
-        logger.info(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
+        logger.debug(f"Integrals AFTER prompt subraction (uT < 0, uT > 0)")
+        logger.debug(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
         ratio_h = root_h_utMinus.Clone(f"fakeRatio_utAngleSign")
         ratio_h.Sumw2()
         ratio_h.Divide(root_h_utPlus)
 
+        if args.noSmoothing is False:
+
+            for iBin in range(1, nPtBins):
+                ratio_h.SetBinError(iBin, ratio_h.GetBinError(iBin) * (9.78**0.5))
+
+            ratio_h_boost = narf.root_to_hist(ratio_h)
+            pars = np.array([1.0, 0.0, 0.0, 0.0, 0.0]) # Initial parameters for polN_root
+            fitFunc = partial(polN_root, xLowVal=26.0, xFitRange=30.0)
+            fitRes = wums.fitutils.fit_hist(
+                ratio_h_boost,
+                fitFunc,
+                pars,
+                )
+            tf1_fit = ROOT.TF1("tf1_fit", fitFunc, ptEdges[0], ptEdges[-1], len(pars))
+            tf1_fit.SetParameters(np.array(fitRes["x"], dtype=np.float64))
+
+            npar = tf1_fit.GetNpar()
+            altPars = np.array([np.zeros(npar, dtype=np.float64)] * (npar*2), dtype=np.float64)
+
+            e, v = np.linalg.eigh(fitRes["cov"])
+            for ivar in range(npar):
+                shift = np.sqrt(e[ivar]) * v[:, ivar] * 4.0
+                altPars[ivar] = fitRes["x"] + shift
+                altPars[ivar + npar] = fitRes["x"] - shift
+
+            altValPoints = [np.zeros(nPtBins)]*npar
+
+            ratio_alt = ROOT.TH2D("fakeRatio_utAngleSign_variations_separate", "",
+                                  nPtBins, ptEdges[0], ptEdges[-1],
+                                  npar, -0.5, -0.5+npar)
+            ratio_alt.Sumw2()
+            ratio_alt_all = ROOT.TH1D("fakeRatio_utAngleSign_variations_all", "",
+                                      nPtBins, ptEdges[0], ptEdges[-1])
+            ratio_alt_all.Sumw2()
+
+            for iBin in range(1, nPtBins):
+                pt = ptBinCenters[iBin-1]
+                ratio_h.SetBinContent(iBin, max(0.001, tf1_fit.Eval(pt)))
+
+                for ivar in range(npar):
+                    tf1_alt = ROOT.TF1()
+                    tf1_alt.SetName(f"tf1_alt_{ivar}")
+                    tf1_fit.Copy(tf1_alt)
+
+                    # set parameters for a given hessian
+                    tf1_alt.SetParameters(altPars[ivar])
+                    altValPoints[ivar][iBin-1] = max(0.001, tf1_alt.Eval(pt))
+
         for idx_ch in range(ch_low_idx + 1, ch_high_idx + 1):
             for idx_eta in range(eta_low_idx + 1, eta_high_idx + 1):
                 # logger.debug(f"Setting weights for chBin={idx_ch}, etaBin={idx_eta}")
-                for idx_pt in range(1, 1 + nPtBins):
+                for idx_pt in range(1, nPtBins+1):
                     out_hist.SetBinContent(
                         idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt)
                     )
@@ -297,13 +398,31 @@ for ch_edges in decorrBins_ch:
                         idx_eta, idx_pt, idx_ch, ratio_h.GetBinError(idx_pt)
                     )
                     if ratio_h.GetBinContent(idx_pt) <= 0.0:
-                        logger.info(
-                            "WARNING - found negative value in bin: ({idx_eta}, {idx_pt}, {idx_ch})"
+                        logger.warning(f"Found negative value in bin: ({idx_eta}, {idx_pt}, {idx_ch})")
+
+                    if args.noSmoothing is False:
+                        totVar = 0.0
+                        for ivar in range(npar):
+                            altVal = altValPoints[ivar][idx_pt-1]
+                            glBin = out_hist_varSeparate.GetBin(array("i", [idx_eta, idx_pt, idx_ch, ivar+1]))
+                            out_hist_varSeparate.SetBinContent(glBin, altVal)
+                            diff = altVal - ratio_h.GetBinContent(idx_pt)
+                            totVar += diff * diff
+
+                        out_hist_varAll.SetBinContent(
+                            idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt) + np.sqrt(totVar)
                         )
 
 
 boost_out_hist = narf.root_to_hist(out_hist)
 resultDict = {"fakeCorr": boost_out_hist}
+if args.noSmoothing is False:
+    resultDict.update({
+        "fakeCorr_variations" : narf.root_to_hist(out_hist_varSeparate),
+        "fakeCorr_varAll" : narf.root_to_hist(out_hist_varAll)
+    })
+
+
 base_dir = common.base_dir
 resultDict.update(
     {"meta_info": wums.output_tools.make_meta_info_dict(args=args, wd=base_dir)}
@@ -319,23 +438,21 @@ if args.plotdir is not None:
     # for 1D plots
     canvas1D = ROOT.TCanvas("canvas1D", "", 800, 900)
     adjustSettings_CMS_lumi()
-    integrateCharge = True
-    for ieta in [1, 24, 48]:
+    idxs_ch  = [0] if args.nChargeBins==1 else [1, 2]
+    idxs_eta = [0] if args.nEtaBins==1    else [int(48*i/args.nEtaBins) for i in range(args.nEtaBins+1)]
+    for ieta in idxs_eta:
         etamu = "#eta^{#mu}"
-        etaleg = f"{decorrBins_eta[etaID][0]} < {etamu} < {decorrBins_eta[etaID][1]}"
-        etaID += 1
-        for icharge in [1] if integrateCharge else [1, 2]:
+        etaleg = f"{decorrBins_eta[etaID][0]} < {etamu} < {decorrBins_eta[etaID][1]}," if len(idxs_eta)!=1 else ""
+        etaID += (1 if len(idxs_eta)!=1 else 0)
+        for icharge in idxs_ch:
+            chargeleg = "#it{q}^{#mu} = " + ("-1" if icharge == 1 else "+1") if len(idxs_ch)!=1 else ""
             hists_corr.append(
                 out_hist.ProjectionY(
                     f"projPt_{ieta}_{icharge}", ieta, ieta, icharge, icharge
                 )
             )
-            if integrateCharge:
-                chargeleg = ""
-                legEntries.append(f"{etaleg}")
-            else:
-                chargeleg = "#it{q}^{#mu} = " + ("-1" if icharge == 1 else "+1")
-                legEntries.append(f"{etaleg}, {chargeleg}")
+            legInfo = f"{etaleg} {chargeleg}".lstrip()
+            legEntries.append(legInfo if legInfo!="" else "TF integrated on #eta and #it{q}")
 
     miny, maxy = getMinMaxMultiHisto(hists_corr)
     if miny < 0:
@@ -351,7 +468,7 @@ if args.plotdir is not None:
         plotdir,
         lowerPanelHeight=0.4,
         legendCoords=(
-            "0.4,0.98,0.74,0.92" if integrateCharge else "0.16,0.98,0.74,0.92;2"
+            "0.4,0.98,0.74,0.92" if len(idxs_ch)==1 else "0.16,0.98,0.74,0.92;2"
         ),
         labelRatioTmp="Ratio to first::0.2,1.8",
         topMargin=0.06,
@@ -375,52 +492,17 @@ if args.doQCD:
 pklfileName = f"{args.outdir}/{outfileName}.pkl.lz4"
 with lz4.frame.open(pklfileName, "wb") as fout:
     pickle.dump(resultDict, fout, protocol=pickle.HIGHEST_PROTOCOL)
-logger.warning(f"Created file {pklfileName}")
+logger.info(f"Created file {pklfileName}")
 
 rootfileName = f"{args.outdir}/{outfileName}.root"
 fout = safeOpenFile(rootfileName, mode="RECREATE")
 out_hist.Write()
+if args.noSmoothing is False:
+    out_hist_varSeparate.Write()
+    out_hist_varAll.Write()
 fout.Close()
-logger.warning(f"Created file {rootfileName}")
+logger.info(f"Created file {rootfileName}")
 
-
-"""
-x_axis = hist.axis.Regular(30, 26, 56, name="pt", flow=False)
-
-tr_hist = hist.Hist(x_axis, storage=hist.storage.Weight())
-
-for i in range(30):
-    tr_hist[i] = (arr_val[i], arr_var[i])
-
-
-params = np.array([1.0, 0.0, 0.0, 0.0, 0.0])  # Initial parameters for pol4_root
-
-res = fit_hist(
-    tr_hist,
-    partial(pol4_root, xLowVal=26.0, xFitRange=30.0),
-    params,
-)
-
-tr_func = []
-for i in range(len(bincenters)):
-    tr_func.append(
-        float(
-            pol4_root(
-                [bincenters[i]],
-                res["x"],
-                xLowVal=26.0,
-                xFitRange=30.0,
-    )))
-logger.info(tr_func)
-logger.info("Params:", res["x"])
-
-chi2 = res["loss_val"]
-ndof = len(bincenters) - len(res["x"])
-chi2Prob = ROOT.TMath.Prob(chi2, ndof)
-
-logger.info(chi2, ndof, chi2Prob)
-
-"""
 
 
 fout.Close()
