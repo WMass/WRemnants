@@ -607,7 +607,7 @@ impact_labels = {
     "pdfCT18ZNoAlphaS": "PDF",
     "pTModeling": "<i>p</i><sub>T</sub><sup>V</sup> modelling",
     "resum": "Resummation",
-    "resumTNP": "Non pert. trans.",
+    "resumTNP": "TNP",
     "resumNonpert": "Non pert.",
     "muonCalibration": "Muon calibration",
     "muonScale": "Muon scale",

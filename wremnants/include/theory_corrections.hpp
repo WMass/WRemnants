@@ -12,6 +12,8 @@
 #include "histutils.hpp"
 #include "traits.hpp"
 
+#include "TFile.h"
+
 namespace wrem {
 
 // Read the bin of a histogram and multiply it with a weight,

@@ -278,7 +278,7 @@ template <typename T> std::array<T, 2> envelopHists(std::vector<T> &hists) {
   T hup = *static_cast<T *>(hists.at(0).Clone(name + "Up"));
   T hdown = *static_cast<T *>(hup.Clone(name + "Down"));
 
-  for (size_t i = 0; i <= hup.GetNcells(); i++) {
+  for (size_t i = 0; i < hup.GetNcells(); i++) {
 
     double minc = hup.GetBinContent(i);
     double mine = hup.GetBinError(i);

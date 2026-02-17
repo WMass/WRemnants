@@ -56,6 +56,7 @@ datasets = getDatasets(
             else [f"SingleMuon_{args.era}"]
         )
     ),
+    aux=args.auxiliaryProcs,
     base_path=args.dataPath,
     era=args.era,
     nanoVersion="v12",

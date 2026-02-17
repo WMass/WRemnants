@@ -4,10 +4,18 @@ import os
 import hist
 import numpy as np
 import ROOT
-import tensorflow as tf
 
 from utilities import common as common
 from utilities.io_tools import input_tools
+
+# prefer newer package if available
+# (This avoids the requirement to rebuild the tensorflow python library to fix the symbol collisions)
+try:
+    from ai_edge_litert.interpreter import Interpreter
+except:
+    import tensorflow as tf
+
+    Interpreter = tf.lite.Interpreter
 
 ROOT.gInterpreter.Declare('#include "recoil_tools.hpp"')
 ROOT.gInterpreter.Declare('#include "recoil_helper.hpp"')
@@ -21,7 +29,7 @@ def RecoilCalibrationHelper(fIn, args):
         return None, None
     with open(fIn, "rb") as f:
         model = f.read()
-        interpreter = tf.lite.Interpreter(model_content=model)
+        interpreter = Interpreter(model_content=model)
         meta = interpreter.get_signature_runner("meta")()["output_00000_00000"]
         nstat = int(meta[0])
 

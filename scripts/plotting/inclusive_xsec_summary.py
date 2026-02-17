@@ -17,7 +17,6 @@ from utilities.io_tools import tex_tools
 
 from wums import logging, output_tools, plot_tools  # isort: skip
 
-
 parser = parsing.plot_parser()
 parser.add_argument("infile", type=str, help="Rabbit fitresult file")
 parser.add_argument(

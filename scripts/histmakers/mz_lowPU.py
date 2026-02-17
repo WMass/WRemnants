@@ -63,6 +63,7 @@ datasets = getDatasets(
             else [f"HighEGJet_{args.era}"]
         )
     ),
+    aux=args.auxiliaryProcs,
     base_path=args.dataPath,
     era=args.era,
     nanoVersion="v12",

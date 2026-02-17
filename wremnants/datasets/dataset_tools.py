@@ -200,6 +200,7 @@ def getDatasets(
     maxFiles=default_nfiles,
     filt=None,
     excl=None,
+    aux=None,
     base_path=None,
     nanoVersion="v9",
     data_tags=[
@@ -240,9 +241,15 @@ def getDatasets(
 
     narf_datasets = []
     for sample, info in dataDict.items():
-        if filt not in [None, []] and not (info["group"] in filt or sample in filt):
-            continue
         if excl not in [None, []] and (info["group"] in excl or sample in excl):
+            continue
+        if filter not in [None, []] and (info["group"] in filt or sample in filt):
+            # keep the sample if it is explicitly filtered
+            pass
+        elif info.get("auxiliary") and (
+            aux in [None, []] or (info["group"] not in aux and sample not in aux)
+        ):
+            # skip if it is not explicitly filtered, auxiliary, and not specified by aux
             continue
 
         if sample in dataDict_NanoGen:
