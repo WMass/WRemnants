@@ -5,6 +5,7 @@ if not hasattr(np, "int"):
     np.int = int
 import argparse
 import os
+import sys
 
 import lhapdf
 from mc2hlib import lh
@@ -43,6 +44,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "-l", "--fit-label", type=str, default="cmsmw", help="Label in the output PDF grids"
+)
+parser.add_argument(
+    "-i", "--lhaid", type=str, required=True, help="LHAPDF ID to give the new set"
 )
 parser.add_argument(
     "--noColorLogger", action="store_true", help="Disable colored logging output."
@@ -110,8 +114,10 @@ def write_new_grids(
     for l in inn.readlines():
         if l.find("SetDesc:") >= 0:
             out.write(
-                f'SetDesc: "{pdf.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {pdf_scale}"\n'
+                f'SetDesc: "{pdf.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {pdf_scale}. Produced by the command {''.join(sys.argv)}"\n'
             )
+        elif l.find("SetIndex:") >= 0:
+            out.write(f"SetIndex: {args.lhaid}\n")
         elif l.find("NumMembers:") >= 0:
             out.write(f"NumMembers: {nhess + 1}\n")
         elif l.find("ErrorType") >= 0:

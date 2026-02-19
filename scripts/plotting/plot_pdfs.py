@@ -4,9 +4,10 @@ import lhapdf
 import matplotlib.pyplot as plt
 import numpy as np
 
+from wremnants import theory_tools
 from wums import output_tools, plot_tools
 
-FLAVOR_NAMES = {
+PARTON_FLAVOR_NAMES = {
     "uv": "u_{V}",
     "1": "d",
     "-1": r"\bar{d}",
@@ -17,47 +18,6 @@ FLAVOR_NAMES = {
     "dv": "d_{v}",
     "rs": "r_{s}",
 }
-
-
-# A subset of the options (can be extended) taken from
-# https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
-def eval_pdf(pdf, flav, x, q):
-    # Try to convert string digits to int for PDG IDs
-    try:
-        if (
-            isinstance(flav, int)
-            or flav.isdigit()
-            or (flav.startswith("-") and flav[1:].isdigit())
-        ):
-            return pdf.xfxQ(int(flav), x, q)
-    except AttributeError:
-        pass
-
-    if flav == "uv":
-        return pdf.xfxQ(2, x, q) - pdf.xfxQ(-2, x, q)
-    elif flav == "dv":
-        return pdf.xfxQ(1, x, q) - pdf.xfxQ(-1, x, q)
-    elif flav == "rs":
-        denom = pdf.xfxQ(-1, x, q) + pdf.xfxQ(-2, x, q)
-        return (pdf.xfxQ(3, x, q) + pdf.xfxQ(-3, x, q)) / denom if denom != 0 else 0
-    else:
-        raise NotImplementedError(f"Flavor type {flav} is unsupported")
-
-
-def get_pdf_data(pdf_name, flavor, Q, x_range):
-    pdf_set = lhapdf.getPDFSet(pdf_name)
-    members = pdf_set.mkPDFs()
-    # Calculate values for all members (exclude alpha_s members if present)
-    all_vals = np.array(
-        [
-            [eval_pdf(m, flavor, x, Q) for x in x_range]
-            for m in members[: pdf_set.errorInfo.nmemCore + 1]
-        ]
-    )
-    central = all_vals[0]
-    # Hessian uncertainty
-    delta_f = np.sqrt(np.sum((all_vals[1:] - central) ** 2, axis=0))
-    return central, delta_f
 
 
 def make_pdf_plot(flavor, Q_scale, pdf_sets, labels, colors, outdir, args):
@@ -73,7 +33,11 @@ def make_pdf_plot(flavor, Q_scale, pdf_sets, labels, colors, outdir, args):
     reference_central = None
 
     for i, name in enumerate(pdf_sets):
-        central, err = get_pdf_data(name, flavor, Q_scale, x_range)
+        vals = theory_tools.get_pdf_data(name, flavor, Q_scale, x_range)
+        central = vals[0]
+        # Hessian uncertainty
+        err = np.sqrt(np.sum((vals[1:] - central) ** 2, axis=0))
+
         if i == 0:
             reference_central = central
 
@@ -96,7 +60,7 @@ def make_pdf_plot(flavor, Q_scale, pdf_sets, labels, colors, outdir, args):
         )
 
     # Formatting
-    flav_label = FLAVOR_NAMES.get(str(flavor), flavor)
+    flav_label = PARTON_FLAVOR_NAMES.get(str(flavor), flavor)
     ax1.set_ylabel(f"$x {flav_label}(x, Q^2)$", fontsize=16)
     ax1.set_title(f"PDF at $Q = {Q_scale}$ GeV", fontsize=14)
     ax1.legend(loc="upper left")

@@ -1,4 +1,5 @@
 import hist
+import lhapdf
 import numpy as np
 import ROOT
 from scipy import ndimage
@@ -1368,3 +1369,41 @@ def pdfBugfixMSHT20(df, tensorPDFName):
         f"res(15) = {tensorPDFName}(0) - ({tensorPDFName}(15) - {tensorPDFName}(0));"
         "return res",
     )
+
+
+# A subset of the options (can be extended) taken from
+# https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
+def eval_pdf(pdf, flav, x, q):
+    # Try to convert string digits to int for PDG IDs
+    try:
+        if (
+            isinstance(flav, int)
+            or flav.isdigit()
+            or (flav.startswith("-") and flav[1:].isdigit())
+        ):
+            return pdf.xfxQ(int(flav), x, q)
+    except AttributeError:
+        pass
+
+    if flav == "uv":
+        return pdf.xfxQ(2, x, q) - pdf.xfxQ(-2, x, q)
+    elif flav == "dv":
+        return pdf.xfxQ(1, x, q) - pdf.xfxQ(-1, x, q)
+    elif flav == "rs":
+        denom = pdf.xfxQ(-1, x, q) + pdf.xfxQ(-2, x, q)
+        return (pdf.xfxQ(3, x, q) + pdf.xfxQ(-3, x, q)) / denom if denom != 0 else 0
+    else:
+        raise NotImplementedError(f"Flavor type {flav} is unsupported")
+
+
+def get_pdf_data(pdf_name, flavor, Q, x_range):
+    pdf_set = lhapdf.getPDFSet(pdf_name)
+    members = pdf_set.mkPDFs()
+    # Calculate values for all members (exclude alpha_s members if present)
+    all_vals = np.array(
+        [
+            [eval_pdf(m, flavor, x, Q) for x in x_range]
+            for m in members[: pdf_set.errorInfo.nmemCore + 1]
+        ]
+    )
+    return all_vals
