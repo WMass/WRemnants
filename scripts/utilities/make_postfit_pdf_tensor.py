@@ -5,6 +5,7 @@ import numpy as np
 
 from rabbit import inputdata, tensorwriter
 from wremnants import theory_tools
+from wums import output_tools
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-o", "--output", default="./", help="output directory")
@@ -83,4 +84,5 @@ filename = args.outname
 if args.postfix:
     filename += f"_{args.postfix}"
 
-writer.write(outfolder=directory, outfilename=filename)
+meta_data = output_tools.make_meta_info_dict()
+writer.write(outfolder=directory, outfilename=filename, meta_data_dict=meta_data)
