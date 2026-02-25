@@ -1,6 +1,7 @@
 #ifndef WREMNANTS_LOWPU_EFFICIENCIES_H
 #define WREMNANTS_LOWPU_EFFICIENCIES_H
 
+#include "TFile.h"
 #include "defines.hpp"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/unsupported/Eigen/CXX11/Tensor>

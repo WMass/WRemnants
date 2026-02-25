@@ -298,7 +298,7 @@ def reweight_to_fitresult(filename, result=None, mapping=None, channel=None):
         if var == "q":
             var = "charge"
 
-        ax._ax.metadata["name"] = f"{level}{suffix}_{var}"
+        ax._raw_metadata["name"] = f"{level}{suffix}_{var}"
 
         # enable flow everywhere to allow generic indexing, add slices of 1 where flow was False
         if ax.traits.underflow == False:
@@ -415,13 +415,11 @@ class UnfolderZ:
                     ]
 
                     if any(ax.edges != wbh_axis.edges):
-                        raise RuntimeError(
-                            f"""
+                        raise RuntimeError(f"""
                             Unfolding axes must be consistent with axes from weightsByHelicity_helper.\n
                             Found unfolding axis {ax}\n
                             And weightsByHelicity_helper axis {wbh_axis}
-                            """
-                        )
+                            """)
 
         self.unfolding_corr_helper = (
             reweight_to_fitresult(

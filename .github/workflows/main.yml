@@ -108,11 +108,12 @@ jobs:
 
       - name: check C++ Files
         run: |
+          export ROOTINCLUDEPATH=`scripts/ci/run_with_singularity.sh python3 -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'`/ROOT/include
           # Find all C++ files and check their syntax in parallel
           find . \( -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/* -not -path '*/wums/*'' | \
           xargs -P 16 -I {} bash -c '
             echo "Checking {}"
-            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -std=c++20 -fsyntax-only "{}" || \
+            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -I ${ROOTINCLUDEPATH} -std=c++20 -fsyntax-only "{}" || \
             { echo "Syntax error in {}"; exit 1; }
           '
 
@@ -215,7 +216,7 @@ jobs:
       - name: wmass analysis
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass5_2016PostVFP
 
   w-fit:
     # The type of runner that the job will run on

@@ -1215,7 +1215,7 @@ def helicity_xsec_to_angular_coeffs(
 
     hist_coeffs_scales = hist.Hist(
         *hist_helicity_xsec_scales.axes,
-        storage=hist_helicity_xsec_scales._storage_type(),
+        storage=hist_helicity_xsec_scales.storage_type(),
         name="hist_coeffs_scales",
         data=coeffs,
     )

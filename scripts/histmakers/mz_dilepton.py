@@ -115,13 +115,10 @@ parser.add_argument(
 parser = parsing.set_parser_default(
     parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu"]
 )
-parser = parsing.set_parser_default(
-    parser, "excludeProcs", ["QCD", "WtoNMu", "DYlowMass"]
-)
+parser = parsing.set_parser_default(parser, "excludeProcs", ["QCD", "DYlowMass"])
 parser = parsing.set_parser_default(
     parser, "pt", common.get_default_ptbins(analysis_label)
 )
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -138,6 +135,7 @@ datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
+    aux=args.auxiliaryProcs,
     nanoVersion="v9",
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,

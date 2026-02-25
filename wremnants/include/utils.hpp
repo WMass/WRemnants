@@ -762,7 +762,7 @@ template <int Type> Vec_f breitWignerMassWeights(const double massVgen) {
   constexpr int N = (Type == 0) ? 23 : 21;
   Vec_f res(N, 1);
   double offset = -100;
-  for (int i = 0; i <= 21; i++) {
+  for (int i = 0; i < 21; i++) {
     offset = -100 + i * 10;
     res[i] = computeBreitWignerWeight<Type>(massVgen, offset, 0.0);
   }
@@ -780,12 +780,14 @@ template <int Type> Vec_f breitWignerWidthWeights(const double massVgen) {
   // Z -> type=0
   // W -> type=1
 
-  constexpr std::array<float, 5> offsets =
-      (Type == 0) ? std::array<float, 5>{-0.77f, 0.83f, -1.2f, 1.1f, 3.4f}
-                  : std::array<float, 5>{-0.57f, 0.63f, -48.1f, -6.1f, 35.9f};
+  constexpr std::size_t N = 5;
 
-  Vec_f res(5, 1);
-  for (int i = 0; i <= 5; i++) {
+  constexpr std::array<float, N> offsets =
+      (Type == 0) ? std::array<float, N>{-0.77f, 0.83f, -1.2f, 1.1f, 3.4f}
+                  : std::array<float, N>{-0.57f, 0.63f, -48.1f, -6.1f, 35.9f};
+
+  Vec_f res(N, 1);
+  for (std::size_t i = 0; i < N; ++i) {
     res[i] = computeBreitWignerWeight<Type>(massVgen, 0.0, offsets[i]);
   }
 

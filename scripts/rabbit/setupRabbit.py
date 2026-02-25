@@ -1765,7 +1765,7 @@ def setup(
                 datagroups.addSystematic(
                     histname=widthWeightName,
                     processes=signal_samples_forMass,
-                    name=f"{widthVarTag}Decorr{suffix}{label}",
+                    name=f"widthDecorr{suffix}{label}",
                     groups=[f"widthDecorr{label}", "theory"],
                     skipEntries=[
                         (x, *[-1] * len(args.fitWidthDecorr))

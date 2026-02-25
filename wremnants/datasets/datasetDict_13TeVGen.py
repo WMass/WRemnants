@@ -90,6 +90,7 @@ dataDict_nanoGen = {
         ],
         "xsec": 1863.0,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "ZmumuNNLOPS": {
         "filepaths": [
@@ -97,6 +98,7 @@ dataDict_nanoGen = {
         ],
         "xsec": 1863.0,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_horace-lo-photos": {
         "filepaths": [
@@ -104,6 +106,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_ZToMuMu_LO,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_horace-lo-photos-mecoff": {
         "filepaths": [
@@ -111,6 +114,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_ZToMuMu_LO,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_horace-lo-photos-isroff": {
         "filepaths": [
@@ -118,21 +122,25 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_ZToMuMu_LO,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_horace-qed": {
         "filepaths": ["{BASE_PATH}/DYJetsJetsToMuMu_LO_TuneCP5_13TeV-horace-pythia8"],
         "xsec": xsec_powheg_ZToMuMu_LO,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_horace-nlo": {
         "filepaths": ["{BASE_PATH}/DYJetsToMuMu_NLOEW_TuneCP5_13TeV-horace-pythia8"],
         "xsec": xsec_powheg_ZToMuMu_NLOEW,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_powheg-lo": {
         "filepaths": ["{BASE_PATH}/DYJetsToMuMu_NOEW_TuneCP5_13TeV-powheg-pythia8"],
         "xsec": xsec_powheg_ZToMuMu_LO,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_powheg-nloew-qedveto": {
         "filepaths": [
@@ -140,11 +148,13 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_ZToMuMu_NLOEW,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_powheg-nloew": {
         "filepaths": ["{BASE_PATH}//DYJetsToMuMu_NLOEW_TuneCP5_13TeV-powheg-pythia8"],
         "xsec": xsec_powheg_ZToMuMu_NLOEW,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Zmumu_MiNNLO-noqedisr": {
         "filepaths": [
@@ -152,6 +162,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_DYJetsToLL,
         "group": "Zmumu",
+        "auxiliary": True,
     },
     "Wplusmunu_horace-lo-photos": {
         "filepaths": [
@@ -159,6 +170,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_horace-lo-photos-mecoff": {
         "filepaths": [
@@ -166,6 +178,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_horace-lo-photos-isroff": {
         "filepaths": [
@@ -173,16 +186,19 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_horace-qed": {
         "filepaths": ["{BASE_PATH}/WplusJetsToMuNu_LO_TuneCP5_13TeV-horace-pythia8"],
         "xsec": xsec_powheg_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_horace-nlo": {
         "filepaths": ["{BASE_PATH}/WplusJetsToMuNu_NLOEW_TuneCP5_13TeV-horace-pythia8"],
         "xsec": xsec_powheg_WplusToMuNu_NLOEW,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_winhac-lo-photos": {
         "filepaths": [
@@ -190,16 +206,19 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_winhac_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_winhac-lo": {
         "filepaths": ["{BASE_PATH}/WplusJetsToMuNu_LO_TuneCP5_13TeV-winhac-pythia8"],
         "xsec": xsec_winhac_WplusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_winhac-nlo": {
         "filepaths": ["{BASE_PATH}/WplusJetsToMuNu_NLOEW_TuneCP5_13TeV-winhac-pythia8"],
         "xsec": xsec_winhac_WplusToMuNu_NLOEW,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wplusmunu_MiNNLO-noqedisr": {
         "filepaths": [
@@ -207,6 +226,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_WplusJetsToLNu,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "WplusCharmToMuNu": {
         "filepaths": [
@@ -214,6 +234,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_WplusCharmToMuNu,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_horace-lo-photos": {
         "filepaths": [
@@ -221,6 +242,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_horace-lo-photos-mecoff": {
         "filepaths": [
@@ -228,6 +250,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_horace-lo-photos-isroff": {
         "filepaths": [
@@ -235,11 +258,13 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_horace-qed": {
         "filepaths": ["{BASE_PATH}/WminusJetsToMuNu_LO_TuneCP5_13TeV-horace-pythia8"],
         "xsec": xsec_powheg_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_horace-nlo": {
         "filepaths": [
@@ -247,6 +272,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_powheg_WminusToMuNu_NLOEW,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_winhac-lo-photos": {
         "filepaths": [
@@ -254,11 +280,13 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_winhac_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_winhac-lo": {
         "filepaths": ["{BASE_PATH}/WminusJetsToMuNu_LO_TuneCP5_13TeV-winhac-pythia8"],
         "xsec": xsec_winhac_WminusToMuNu_LO,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_winhac-nlo": {
         "filepaths": [
@@ -266,6 +294,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_winhac_WminusToMuNu_NLOEW,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "Wminusmunu_MiNNLO-noqedisr": {
         "filepaths": [
@@ -273,6 +302,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_WminusJetsToLNu,
         "group": "Wmunu",
+        "auxiliary": True,
     },
     "WminusCharmToMuNu": {
         "filepaths": [
@@ -280,6 +310,7 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_WminusCharmToMuNu,
         "group": "Wmunu",
+        "auxiliary": True,
     },
 }
 
@@ -292,6 +323,7 @@ dataDict_nanoGen.update(
             ],
             "xsec": xsec_powheg_ZToMuMu_LO,
             "group": "Zmumu",
+            "auxiliary": True,
         },
         "Zmumu_renesance-nlo": {
             "filepaths": [
@@ -299,6 +331,7 @@ dataDict_nanoGen.update(
             ],
             "xsec": xsec_powheg_ZToMuMu_NLOEW,
             "group": "Zmumu",
+            "auxiliary": True,
         },
     }
 )
@@ -312,16 +345,19 @@ dataDict_nanoGen.update(
             "filepaths": ["{BASE_PATH}/svn4049/46mll80"],
             "xsec": 1,
             "group": "Zmumu",
+            "auxiliary": True,
         },
         "Zmumu_powheg-weak-peak": {
             "filepaths": ["{BASE_PATH}/svn4049/80mll100"],
             "xsec": 1,
             "group": "Zmumu",
+            "auxiliary": True,
         },
         "Zmumu_powheg-weak-high": {
             "filepaths": ["{BASE_PATH}/svn4049/100mll150"],
             "xsec": 1,
             "group": "Zmumu",
+            "auxiliary": True,
         },
     }
 )
@@ -335,6 +371,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-born-fsr-photos-isr-pythia": {
                 "filepaths": [
@@ -342,6 +379,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-born-fsr-photoslow-isr-pythia": {
                 "filepaths": [
@@ -349,6 +387,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-lo-photos": {
                 "filepaths": [
@@ -356,6 +395,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_LO,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-born-fsr-pythia-isr-pythia": {
                 "filepaths": [
@@ -363,6 +403,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-nlo": {
                 "filepaths": [
@@ -370,6 +411,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_NLOEW,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v1-qed": {
                 "filepaths": [
@@ -377,6 +419,7 @@ if horace_v1:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
         }
     )
@@ -390,6 +433,7 @@ if horace_v2:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_LO,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v2-nlo": {
                 "filepaths": [
@@ -397,6 +441,7 @@ if horace_v2:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_NLOEW,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v2-qed": {
                 "filepaths": [
@@ -404,6 +449,7 @@ if horace_v2:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
         }
     )
@@ -417,6 +463,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_LO,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v3-qed": {
                 "filepaths": [
@@ -424,6 +471,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v3-nlo": {
                 "filepaths": [
@@ -431,6 +479,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_NLOEW,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Wplusmunu_horace-v3-lo-photos": {
                 "filepaths": [
@@ -438,6 +487,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_WplusToMuNu_LO,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
             "Wplusmunu_horace-v3-qed": {
                 "filepaths": [
@@ -445,6 +495,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_WplusJetsToLNu,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
             "Wplusmunu_horace-v3-nlo": {
                 "filepaths": [
@@ -452,6 +503,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_WplusToMuNu_NLOEW,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
             "Wminusmunu_horace-v3-lo-photos": {
                 "filepaths": [
@@ -459,6 +511,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_WminusToMuNu_LO,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
             "Wminusmunu_horace-v3-qed": {
                 "filepaths": [
@@ -466,6 +519,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_WminusJetsToLNu,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
             "Wminusmunu_horace-v3-nlo": {
                 "filepaths": [
@@ -473,6 +527,7 @@ if horace_v3:
                 ],
                 "xsec": xsec_powheg_WminusToMuNu_NLOEW,
                 "group": "Wmunu",
+                "auxiliary": True,
             },
         }
     )
@@ -486,6 +541,7 @@ if horace_v5:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v5-alpha-old-fsr-off-isr-off": {
                 "filepaths": [
@@ -493,6 +549,7 @@ if horace_v5:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v5-alpha-old-fsr-off-isr-pythia": {
                 "filepaths": [
@@ -500,6 +557,7 @@ if horace_v5:
                 ],
                 "xsec": xsec_DYJetsToLL,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
             "Zmumu_horace-v5-nlo": {
                 "filepaths": [
@@ -507,6 +565,7 @@ if horace_v5:
                 ],
                 "xsec": xsec_powheg_ZToMuMu_NLOEW,
                 "group": "Zmumu",
+                "auxiliary": True,
             },
         }
     )
