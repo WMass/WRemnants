@@ -12,7 +12,7 @@ from mc2hlib import lh
 from mc2hlib.common import load_pdf
 
 from rabbit import io_tools
-from wremnants import theory_tools
+from wremnants import combine_helpers, theory_tools
 from wums import logging
 
 parser = argparse.ArgumentParser()
@@ -72,26 +72,9 @@ def postfit_eignvectors(cov_pdf):
     return V * np.sqrt(np.maximum(eigv, 0))
 
 
-# TODO: Integrate with rabbit to avoid code duplication
-def quadratic_symmetrization(matrix, labels):
-    symm_avg = 0.5 * (matrix.values[:, ::2] + matrix.values[:, 1::2])
-    symm_diff = 0.5 * np.sqrt(3) * (matrix.values[:, ::2] - matrix.values[:, 1::2])
-    avg_idx = np.char.find(labels, "Avg") != -1
-
-    if np.count_nonzero(avg_idx) != symm_avg.shape[1]:
-        raise ValueError(
-            "Found inconsistent number of Avg nuisances for quadratic symmetrization."
-        )
-
-    matrix.iloc[:, avg_idx] = symm_avg
-    matrix.iloc[:, ~avg_idx] = symm_diff
-
-    return matrix
-
-
 def apply_symmetrization(matrix, symm, labels):
     if symm == "quadratic":
-        return quadratic_symmetrization(matrix, labels)
+        return combine_helpers.quadratic_symmetrization(matrix, labels)
 
 
 def write_new_grids(
@@ -165,15 +148,20 @@ else:
             f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_input}."
         )
 
-pdf_name = theory_tools.pdfMap[pdf_input]["lha_name"]
+pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
+pdf_name = pdfInfo["lha_name"]
 pdf_scale = input_meta["meta_info"]["args"]["scalePdf"]
 pdf_symm = input_meta["meta_info"]["args"]["symmetrizePdfUnc"]
 
 if pdf_scale == -1:
     pdf_scale = theory_tools.pdf_inflation_factor(
-        theory_tools.pdfMap[pdf_input], input_meta["meta_info"]["args"]["noi"]
+        pdfInfo, input_meta["meta_info"]["args"]["noi"]
     )
     logger.info(f"Using default inflation factor from theory_tools: {pdf_scale}")
+
+pdf_scale *= pdfInfo["scale"]
+logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
+# TODO: Need to scale back at the end to get 95% CL for consistency?
 
 pdf_lha = lhapdf.getPDFSet(pdf_name)
 errors = pdf_lha.errorInfo

@@ -1374,6 +1374,20 @@ def pdfBugfixMSHT20(df, tensorPDFName):
 # A subset of the options (can be extended) taken from
 # https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
 def eval_pdf(pdf, flav, x, q):
+    flav_map = {
+        "d": 1,
+        "dbar": -1,
+        "u": 2,
+        "ubar": -2,
+        "c": 3,
+        "cbar": -3,
+        "s": 4,
+        "sbar": -4,
+        "b": 5,
+        "bbar": -5,
+    }
+    if flav in flav_map:
+        flav = flav_map[flav]
     # Try to convert string digits to int for PDG IDs
     try:
         if (
