@@ -332,7 +332,7 @@ def make_parser(parser=None):
             "massdiffZ",
         ],
         default=["wmass"],
-        help="Select which nuisance(s) of interest to fit. Default: (%default)s",
+        help="Select which nuisance(s) of interest to fit. Default: (%%default)s",
     )
     parser.add_argument(
         "--massDiffWVar",
@@ -2228,6 +2228,7 @@ def setup(
                 for idx, mag in [
                     (1, 0.1),
                     (2, 0.1),
+                    #(3, 0.1)
                 ]:
                     subgroup = f"{datagroups.fakeName}Param{idx}"
                     datagroups.addSystematic(
@@ -2286,13 +2287,13 @@ def setup(
                     hvar = (1 + variation_size) * hnom
                     if keepConstantAxisBin:
                         ax_names = [n for n in hvar.axes.name]
+                        idxs = [slice(None)] * hvar.ndim
                         for name in keepConstantAxisBin.keys():
                             if name not in ax_names:
                                 raise ValueError(
                                     f"In fake_nonclosure_byAxis(): axis '{name}' not found in hvar, valid names are {ax_names}"
                                 )
                             ax_index = ax_names.index(name)
-                            idxs = [slice(None)] * hvar.ndim
                             idxs[ax_index] = keepConstantAxisBin[name]
                         hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
 
@@ -2318,6 +2319,111 @@ def setup(
                     ),
                     systAxes=["eta_decorr"],
                 )
+
+                def fake_TF_ptSyst(
+                    h,
+                    axesToDecorrNames=[],
+                    altHistName="fakeCorr_altStat",
+                    varIdxs = [0],               
+                    *args,
+                    **kwargs,
+                ):
+                    hnom = fakeselector.get_hist(h, *args, **kwargs)
+
+                    ax_names = [n for n in hnom.axes.name]
+                    sel_var = [slice(None)] * hnom.ndim
+                    sel_const = [slice(None)] * hnom.ndim
+                    sel_var[ax_names.index(datagroups.fakeTransferAxis)] = 0
+                    sel_const[ax_names.index(datagroups.fakeTransferAxis)] = 1
+
+                    '''
+                    hvar_utMinus = scale_hist_up_down_corr_from_file(
+                        hnom.copy()[tuple(Iidxs_var)], 
+                        f"{common.data_dir}/fakesWmass/{fakeselector.fakeTransferCorrFileName}.pkl.lz4",
+                        "fakeCorr_varAll" if doUniqueVariation else "fakeCorr_variations",
+                        flow=False
+                    )
+                    '''
+                    
+                    hvar = syst_tools.add_TF_variations(
+                        hnom.copy(), 
+                        f"{common.data_dir}/fakesWmass/{fakeselector.fakeTransferCorrFileName}.pkl.lz4",
+                        altHistName,
+                        sel_var,
+                        varIdxs=varIdxs,
+                        )
+
+                    hvar_utPlus = hnom.copy()[tuple(sel_const)]
+
+                    if varIdxs[0]!=-1:
+                        hvar.values()[tuple([*sel_const, slice(None), slice(None)])]  = hvar_utPlus.values()[..., None, None]
+                    else:
+                        hvar.values()[tuple([*sel_const, slice(None)])]  = hvar_utPlus.values()[..., None]
+
+                    if len(axesToDecorrNames)>0:
+                        hvar = syst_tools.decorrelateByAxes(hvar, hnom, axesToDecorrNames, newDecorrAxesNames=["eta_decorr"])
+
+                    return hvar
+    
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib"],
+                    name=f"{datagroups.fakeName}TransferFactorStat",
+                    baseName=f"{datagroups.fakeName}TransferFactorStat",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_TF_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_altStat",
+                        varIdxs = [0], 
+                    ),
+                    systAxes=["varTF", "downUpVar"],
+                    labelsByAxis=["varTF", "downUpVar"],
+                )
+                '''
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib"],
+                    name=f"{datagroups.fakeName}TransferFactorClosQCD",
+                    baseName=f"{datagroups.fakeName}TransferFactorClosQCD",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_TF_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_closQCDsv",
+                        varIdxs = [], 
+                    ),
+                    systAxes=["downUpVar"],
+                    labelsByAxis=["downUpVar"],
+                )
+                '''
+                
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib"],
+                    name=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    baseName=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_TF_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_closQCDsignal",
+                        varIdxs = [], 
+                    ),
+                    systAxes=["downUpVar"],
+                    labelsByAxis=["downUpVar"],
+                )
+                
+
 
     if not args.noEfficiencyUnc:
 

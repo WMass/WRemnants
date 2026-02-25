@@ -2814,14 +2814,17 @@ def scale_hist_up_down(h, scale):
     return hVar
 
 
-def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
+def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None, varIdx=-1, flow=True):
     # FIXME: this might not be thread safe, but it is a test for now
     with lz4.frame.open(corr_file) as f:
         corrs = pickle.load(f)
     boost_corr = corrs[corr_hist]
 
-    hUp = hh.multiplyHists(h, boost_corr)
-    hDown = hh.divideHists(h, boost_corr)
+    if varIdx!=-1:
+        boost_corr = boost_corr[..., varIdx]  # Choosing the variation by selecting an index of the last axis of the tensor
+
+    hUp = hh.multiplyHists(h, boost_corr, flow=flow)
+    hDown = hh.divideHists(h, boost_corr, flow=flow)
 
     hVar = hist.Hist(
         *[a for a in h.axes],
@@ -2834,6 +2837,49 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
     hVar.variances(flow=True)[...] = np.stack(
         [hDown.variances(flow=True), hUp.variances(flow=True)], axis=-1
     )
+    return hVar
+
+def add_TF_variations(h, corr_file, corr_histName, selection, varIdxs=[0]):
+
+    with lz4.frame.open(corr_file) as f:
+        corrs = pickle.load(f)
+    boost_corr = corrs[corr_histName]
+
+    if len(varIdxs) > 0:
+        varIDaxis = hist.axis.Regular(len(varIdxs), -0.5, -0.5+len(varIdxs),
+                                      flow=False, name="varTF"
+                                      )
+        axes = [*h.axes, varIDaxis, common.down_up_axis]
+        selVar = selection + [slice(None), slice(None)]
+    else:
+        axes = [*h.axes, common.down_up_axis]
+        varIdxs.append(-1)
+        selVar = selection + [slice(None)]
+
+    hVar = hist.Hist(
+        *axes,
+        storage=hist.storage.Weight(),
+    )
+
+    for iv in varIdxs:
+
+        if iv!=-1:
+            boost_corr_slice = boost_corr[..., iv]
+            selVar[-2] = iv
+        else:
+            boost_corr_slice = boost_corr
+
+        hUp = hh.multiplyHists(h[tuple(selection)], boost_corr_slice, flow=False, allowBroadcast=False)
+        hDown = hh.addHists(h[tuple(selection)], hUp, scale1=2.0, scale2=-1.0, flow=False, allowBroadcast=False)
+        #hDown = hh.divideHists(h, boost_corr_slice, flow=False)
+
+        hVar.values()[tuple(selVar)] = np.stack(
+            [hDown.values(flow=False), hUp.values(flow=False)], axis=-1
+        )
+        hVar.variances()[tuple(selVar)] = np.stack(
+            [hDown.variances(flow=False), hUp.variances(flow=False)], axis=-1
+    )
+
     return hVar
 
 
