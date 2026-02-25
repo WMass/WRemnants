@@ -2,6 +2,7 @@
 import os
 import pickle
 import sys
+import math
 import numpy as np
 from array import array
 
@@ -39,8 +40,12 @@ from scripts.analysisTools.plotUtils.utility import (
     safeOpenFile,
 )
 
+INFLATION_ERRORS = 9.78 ** 0.5
+INFLATION_FIT_SIGMA = 0
 
-def polN_root(xvals, parms, xLowVal=0.0, xFitRange=1.0, xCut=47.84):
+inflation = np.sqrt(INFLATION_ERRORS**2 + INFLATION_FIT_SIGMA**2)
+
+def pol4_withCut_root(xvals, parms, xLowVal=0.0, xFitRange=1.0, xCut=47.84):
     xScaled = (xvals[0] - xLowVal) / xFitRange
     xCutScaled = (xCut - xLowVal) / xFitRange
 
@@ -73,14 +78,13 @@ def polN_root(xvals, parms, xLowVal=0.0, xFitRange=1.0, xCut=47.84):
 
 def pol4_root(xvals, parms, xLowVal=0.0, xFitRange=1.0):
     xscaled = (xvals[0] - xLowVal) / xFitRange
-    return (
+    return tf.exp(
         parms[0]
         + parms[1] * xscaled
         + parms[2] * xscaled**2
         + parms[3] * xscaled**3
         + parms[4] * xscaled**4
     )
-
 
 def crystal_ball_right_tf(xvals, parms):
     # parms: [A, MPV, sigma, alpha, n]
@@ -104,7 +108,6 @@ def crystal_ball_right_tf(xvals, parms):
 
     return tf.where(t > alpha, tail, gauss)
 
-
 def convert_binEdges_idx(ed_list, binning):
     low, high = 0, 0
     for binEdge in binning:
@@ -113,6 +116,57 @@ def convert_binEdges_idx(ed_list, binning):
         if binEdge + 0.01 < ed_list[1]:
             high += 1
     return (low, high)
+
+
+def smoothTF(ratio_boost, x_bins):
+
+    pars = np.array([1.0, 0.0, 0.0, 0.0, 0.0]) # Initial parameters for polN_root
+    fitFunc = partial(pol4_root, xLowVal=26.0, xFitRange=30.0)
+    fitRes = wums.fitutils.fit_hist(
+        ratio_boost,
+        fitFunc,
+        pars,
+        )
+    tf1_fit = ROOT.TF1("tf1_fit", fitFunc, ptEdges[0], ptEdges[-1], len(pars))
+    tf1_fit.SetParameters(np.array(fitRes["x"], dtype=np.float64))
+
+    npar = tf1_fit.GetNpar()
+    altPars = np.array([np.zeros(npar, dtype=np.float64)] * (npar*2), dtype=np.float64)
+
+    e, v = np.linalg.eigh(fitRes["cov"])
+    for ivar in range(npar):
+        shift = np.sqrt(e[ivar]) * v[:, ivar] * inflation
+        altPars[ivar] = fitRes["x"] + shift
+        altPars[ivar + npar] = fitRes["x"] - shift
+
+    nomiVals = np.zeros(len(x_bins))
+    altVals_sep = [np.zeros(len(x_bins))]*npar
+    altVals_all = np.zeros(len(x_bins))
+
+    for iBin in range(1, len(x_bins)+1):
+        pt = ptBinCenters[iBin-1]
+        fitVal = max(0.00001, tf1_fit.Eval(pt))
+        #ratio_h.SetBinContent(iBin, fitVal)
+        nomiVals[iBin-1] = fitVal
+
+        err=0
+        for ivar in range(npar):
+            tf1_alt = ROOT.TF1()
+            tf1_alt.SetName(f"tf1_alt_{ivar}")
+            tf1_fit.Copy(tf1_alt)
+
+            # set parameters for a given hessian
+            tf1_alt.SetParameters(altPars[ivar])
+            altFuncVal = max(0.001, tf1_alt.Eval(pt))
+            altVals_sep[ivar][iBin-1] = altFuncVal
+            diff = altFuncVal - fitVal
+            err += diff * diff
+
+        altVals_all[iBin-1] = fitVal + math.sqrt(err)
+        print(altVals_all[iBin-1]/fitVal)
+
+            
+    return fitRes, nomiVals, altVals_all, altVals_sep
 
 
 parser = common_plot_parser()
@@ -149,6 +203,11 @@ parser.add_argument(
     "--doQCD",
     action="store_true",
     help="Make templates with QCD instead of nonprompt contribution",
+)
+parser.add_argument(
+    "--addClosure",
+    action="store_true",
+    help="Save variations related to closure with QCD MC and with signal region"
 )
 parser.add_argument(
     "--noSmoothing",
@@ -205,7 +264,7 @@ logger.info(f"Stacked processes are {prednames}")
 histInfo = groups.groups
 
 select_utMinus = {"utAngleSign": hist.tag.Slicer()[0 : 1 : hist.sum]}
-select_utPlus = {"utAngleSign": hist.tag.Slicer()[1 : 2 : hist.sum]}
+select_utPlus  = {"utAngleSign": hist.tag.Slicer()[1 : 2 : hist.sum]}
 
 groups.set_histselectors(
     datasets,
@@ -258,23 +317,36 @@ decorrBins_ch = [
 logger.info(f"Decorrelating in the eta bins: {decorrBins_eta}")
 logger.info(f"Decorrelating in the charge bins: {decorrBins_ch}")
 
-out_hist = ROOT.TH3D(
-    f"fakeRatio_utAngleSign_{proc}",
-    "",
-    nEtaBins, eta_genBinning,
-    nPtBins, pt_genBinning,
-    nChargeBins, charge_genBinning,
-)
 
-out_hist_varSeparate = ROOT.THnD(
-    f"fakeRatio_utAngleSign_{proc}_variations",
-    "",
-    4,
-    array("i", [nEtaBins,      nPtBins,    nChargeBins,      5]),
-    array("d", [etaEdges[0],  ptEdges[0],  chargeEdges[0],  -0.5]),
-    array("d", [etaEdges[-1], ptEdges[-1], chargeEdges[-1],  5.5])
+out_hist_nomi = hist.Hist(
+    hist.axis.Regular(48, -2.4, 2.4, name="eta", flow=False),
+    hist.axis.Regular(30, 26.0, 56.0, name="pt", flow=False),
+    hist.axis.Regular(2, -2.0, 2.0, name="charge", flow=False),
+    #hist.axis.Regular(2, -2.0, 2.0, name="utAngleSign")
+    storage=hist.storage.Weight()
 )
-out_hist_varAll = out_hist.Clone(f"fakeRatio_utAngleSign_{proc}_variations_all")
+outNomi = out_hist_nomi.view()
+
+out_hist_altStat = hist.Hist(
+    *out_hist_nomi.axes,
+    hist.axis.Regular(6, -1.5, 4.5, name="varTF"),  # 1 inclusive variation (first bin), plus the other 5
+    storage=hist.storage.Weight()
+)
+outAltStat = out_hist_altStat.view()
+
+if args.addClosure:
+    out_hist_closQCDsv = hist.Hist(
+        *out_hist_nomi.axes,
+        storage=hist.storage.Weight()
+    )
+    out_hist_closQCDsignal = hist.Hist(
+        *out_hist_nomi.axes,
+        storage=hist.storage.Weight()
+    )
+else:
+    out_hist_closQCDsv, out_hist_closQCDsignal = None, None
+
+out_info = {}
 
 for ch_edges in decorrBins_ch:
     for eta_edges in decorrBins_eta:
@@ -285,9 +357,7 @@ for ch_edges in decorrBins_ch:
         logger.info(f"{ch_low_idx}, {ch_high_idx}")
         logger.info(f"{eta_low_idx}, {eta_high_idx}")
 
-        select_utMinus["charge"] = hist.tag.Slicer()[
-            ch_low_idx : ch_high_idx : hist.sum
-        ]
+        select_utMinus["charge"] = hist.tag.Slicer()[ch_low_idx : ch_high_idx : hist.sum]
         select_utMinus["eta"] = hist.tag.Slicer()[eta_low_idx : eta_high_idx : hist.sum]
 
         select_utPlus["charge"] = hist.tag.Slicer()[ch_low_idx : ch_high_idx : hist.sum]
@@ -335,100 +405,95 @@ for ch_edges in decorrBins_ch:
         logger.debug(f"Integrals AFTER prompt subraction (uT < 0, uT > 0)")
         logger.debug(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
-        ratio_h = root_h_utMinus.Clone(f"fakeRatio_utAngleSign")
+        ratio_h = root_h_utMinus.Clone(f"fakeRatio_utAngleSign_TH1")
         ratio_h.Sumw2()
         ratio_h.Divide(root_h_utPlus)
 
-        if args.noSmoothing is False:
+        ratio_h_boost = narf.root_to_hist(ratio_h)
 
-            for iBin in range(1, nPtBins):
-                ratio_h.SetBinError(iBin, ratio_h.GetBinError(iBin) * (9.78**0.5))
+        sel = (slice(eta_low_idx,eta_high_idx), slice(None), slice(ch_low_idx,ch_high_idx),)
 
-            ratio_h_boost = narf.root_to_hist(ratio_h)
-            pars = np.array([1.0, 0.0, 0.0, 0.0, 0.0]) # Initial parameters for polN_root
-            fitFunc = partial(polN_root, xLowVal=26.0, xFitRange=30.0)
-            fitRes = wums.fitutils.fit_hist(
-                ratio_h_boost,
-                fitFunc,
-                pars,
-                )
-            tf1_fit = ROOT.TF1("tf1_fit", fitFunc, ptEdges[0], ptEdges[-1], len(pars))
-            tf1_fit.SetParameters(np.array(fitRes["x"], dtype=np.float64))
+        if args.noSmoothing:
+            outNomi.value[sel] = np.broadcast_to(
+                ratio_h_boost.values()[None, :, None],
+                (eta_high_idx-eta_low_idx, nPtBins, ch_high_idx-ch_low_idx)
+            )
+            outNomi.variance[sel] = np.broadcast_to(
+                ratio_h_boost.variances()[None, :, None],
+                (eta_high_idx-eta_low_idx, nPtBins, ch_high_idx-ch_low_idx)
+            )
 
-            npar = tf1_fit.GetNpar()
-            altPars = np.array([np.zeros(npar, dtype=np.float64)] * (npar*2), dtype=np.float64)
+        else:
+            fitRes, nomiVals, altVals_all, altVals_sep = smoothTF(ratio_h_boost, ptBinCenters)
 
-            e, v = np.linalg.eigh(fitRes["cov"])
-            for ivar in range(npar):
-                shift = np.sqrt(e[ivar]) * v[:, ivar] * 4.0
-                altPars[ivar] = fitRes["x"] + shift
-                altPars[ivar + npar] = fitRes["x"] - shift
+            outNomi.value[sel] = np.broadcast_to(
+                nomiVals[None, :, None],
+                (eta_high_idx-eta_low_idx, nPtBins, ch_high_idx-ch_low_idx)
+            )
 
-            altValPoints = [np.zeros(nPtBins)]*npar
+            outAltStat.value[sel + (0,)] = np.broadcast_to(
+                altVals_all[None, :, None],
+                (eta_high_idx-eta_low_idx, nPtBins, ch_high_idx-ch_low_idx)
+            ) / outNomi.value[sel]
 
-            ratio_alt = ROOT.TH2D("fakeRatio_utAngleSign_variations_separate", "",
-                                  nPtBins, ptEdges[0], ptEdges[-1],
-                                  npar, -0.5, -0.5+npar)
-            ratio_alt.Sumw2()
-            ratio_alt_all = ROOT.TH1D("fakeRatio_utAngleSign_variations_all", "",
-                                      nPtBins, ptEdges[0], ptEdges[-1])
-            ratio_alt_all.Sumw2()
+            for iv in range(1, 6):
+                outAltStat.value[sel + (iv,)] = np.broadcast_to(
+                    altVals_sep[iv-1][None, :, None],
+                    (eta_high_idx-eta_low_idx, nPtBins, ch_high_idx-ch_low_idx)
+                ) / outNomi.value[sel]
+            
 
-            for iBin in range(1, nPtBins):
-                pt = ptBinCenters[iBin-1]
-                ratio_h.SetBinContent(iBin, max(0.001, tf1_fit.Eval(pt)))
+            if args.addClosure:
 
-                for ivar in range(npar):
-                    tf1_alt = ROOT.TF1()
-                    tf1_alt.SetName(f"tf1_alt_{ivar}")
-                    tf1_fit.Copy(tf1_alt)
+                logger.debug("Elaborating corrections evaluated on QCD... ")
+                logger.debug("... be sure that the files are present and the TF have been already smoothed!")
 
-                    # set parameters for a given hessian
-                    tf1_alt.SetParameters(altPars[ivar])
-                    altValPoints[ivar][iBin-1] = max(0.001, tf1_alt.Eval(pt))
+                path_corr_QCD_sv = f"{common.data_dir}/fakesWmass/test/fakeTransferTemplates_QCD.pkl.lz4"
+                path_corr_QCD_signal = f"{common.data_dir}/fakesWmass/test/fakeTransferTemplates_signalRegion_QCD.pkl.lz4"
 
-        for idx_ch in range(ch_low_idx + 1, ch_high_idx + 1):
-            for idx_eta in range(eta_low_idx + 1, eta_high_idx + 1):
-                # logger.debug(f"Setting weights for chBin={idx_ch}, etaBin={idx_eta}")
-                for idx_pt in range(1, nPtBins+1):
-                    out_hist.SetBinContent(
-                        idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt)
-                    )
-                    out_hist.SetBinError(
-                        idx_eta, idx_pt, idx_ch, ratio_h.GetBinError(idx_pt)
-                    )
-                    if ratio_h.GetBinContent(idx_pt) <= 0.0:
-                        logger.warning(f"Found negative value in bin: ({idx_eta}, {idx_pt}, {idx_ch})")
+                if os.path.exists(path_corr_QCD_sv):
+                    with lz4.frame.open(path_corr_QCD_sv) as fTens:
+                        hist_corr_QCDsv = pickle.load(fTens)["fakeCorr"]
+                    out_hist_closQCDsv.values()[sel] = hist_corr_QCDsv[sel].values() / outNomi.value[sel]
+                else:
+                    logger.warning("File with TF correction on QCD (SV region) not found! Skipping...")
+                    out_hist_closQCDsv = None
+                
 
-                    if args.noSmoothing is False:
-                        totVar = 0.0
-                        for ivar in range(npar):
-                            altVal = altValPoints[ivar][idx_pt-1]
-                            glBin = out_hist_varSeparate.GetBin(array("i", [idx_eta, idx_pt, idx_ch, ivar+1]))
-                            out_hist_varSeparate.SetBinContent(glBin, altVal)
-                            diff = altVal - ratio_h.GetBinContent(idx_pt)
-                            totVar += diff * diff
-
-                        out_hist_varAll.SetBinContent(
-                            idx_eta, idx_pt, idx_ch, ratio_h.GetBinContent(idx_pt) + np.sqrt(totVar)
-                        )
+                if os.path.exists(path_corr_QCD_signal) and out_hist_closQCDsv:
+                    with lz4.frame.open(path_corr_QCD_signal) as fTens:
+                        hist_corr_QCDsignal = pickle.load(fTens)["fakeCorr"]
+                    out_hist_closQCDsignal.values()[sel] = hist_corr_QCDsignal[sel].values() / hist_corr_QCDsv[sel].values()
+                else:
+                    logger.warning("File with TF correction on QCD (signal region) not found! Skipping...")
+                    out_hist_closQCDsignal = None
 
 
-boost_out_hist = narf.root_to_hist(out_hist)
-resultDict = {"fakeCorr": boost_out_hist}
+resultDict = {
+    "fakeCorr" : out_hist_nomi,
+}
+
 if args.noSmoothing is False:
-    resultDict.update({
-        "fakeCorr_variations" : narf.root_to_hist(out_hist_varSeparate),
-        "fakeCorr_varAll" : narf.root_to_hist(out_hist_varAll)
-    })
+    resultDict.update(
+        {"fakeCorr_altStat" : out_hist_altStat}
+    )
 
+if out_hist_closQCDsv:
+    resultDict.update(
+        {"fakeCorr_closQCDsv" : out_hist_closQCDsv}
+    )
+if out_hist_closQCDsignal:
+    resultDict.update(
+        {"fakeCorr_closQCDsignal" : out_hist_closQCDsignal}
+    )
 
-base_dir = common.base_dir
 resultDict.update(
-    {"meta_info": wums.output_tools.make_meta_info_dict(args=args, wd=base_dir)}
+    {"meta_info": wums.output_tools.make_meta_info_dict(args=args, wd=common.base_dir)}
 )
 
 if args.plotdir is not None:
+
+    outRootNomi = narf.hist_to_root(out_hist_nomi.copy())
 
     plotdir_original = args.plotdir
     plotdir = createPlotDirAndCopyPhp(plotdir_original, eoscp=args.eoscp)
@@ -447,7 +512,7 @@ if args.plotdir is not None:
         for icharge in idxs_ch:
             chargeleg = "#it{q}^{#mu} = " + ("-1" if icharge == 1 else "+1") if len(idxs_ch)!=1 else ""
             hists_corr.append(
-                out_hist.ProjectionY(
+                outRootNomi.ProjectionY(
                     f"projPt_{ieta}_{icharge}", ieta, ieta, icharge, icharge
                 )
             )
@@ -494,15 +559,34 @@ with lz4.frame.open(pklfileName, "wb") as fout:
     pickle.dump(resultDict, fout, protocol=pickle.HIGHEST_PROTOCOL)
 logger.info(f"Created file {pklfileName}")
 
+
 rootfileName = f"{args.outdir}/{outfileName}.root"
 fout = safeOpenFile(rootfileName, mode="RECREATE")
+
+'''
 out_hist.Write()
 if args.noSmoothing is False:
     out_hist_varSeparate.Write()
     out_hist_varAll.Write()
+ratio_h.Write()
 fout.Close()
 logger.info(f"Created file {rootfileName}")
 
+fout.Close()
+'''
 
+outRootNomi = narf.hist_to_root(out_hist_nomi.copy()[(1, slice(None), 1)])
+outRootNomi.SetName("fakeCorr_Nominal")
+outRootAltStat_all = narf.hist_to_root(out_hist_altStat.copy()[(0, slice(None), 0, 0)])
+outRootAltStat_all.SetName("fakeCorr_altStat_all")
+outRootNomi.Write()
+outRootAltStat_all.Write()
+if args.addClosure:
+    outClosSV = narf.hist_to_root(out_hist_closQCDsv.copy()[(0, slice(None), 0)])
+    outClosSignal = narf.hist_to_root(out_hist_closQCDsignal.copy()[(0, slice(None), 0)])
+    outClosSV.SetName("fakeCorr_closure_QCDsv")
+    outClosSignal.SetName("fakeCorr_closure_QCDsignal")
+    outClosSV.Write()
+    outClosSignal.Write()
 
 fout.Close()
