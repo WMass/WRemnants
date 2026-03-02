@@ -12,7 +12,7 @@ PDF_SETS = [
     "msht20mbrange_renorm",
     "nnpdf31",
     "ct18",
-    "nnpdf30",
+    "nnpdf31",
     "nnpdf40",
     "pdf4lhc21",
     "msht20",
@@ -27,7 +27,10 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--pdf", nargs="+", help="List of PDFs to process", default=PDF_SETS
+        "--pdf",
+        nargs="+",
+        help="List of PDFs to process (default: %(default)s)",
+        default=PDF_SETS,
     )
     parser.add_argument(
         "-o",
