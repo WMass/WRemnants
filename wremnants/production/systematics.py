@@ -1394,7 +1394,11 @@ def add_theory_hists(
     add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, **info)
     add_qcdScale_hist(results, df, scale_axes, scale_cols, **info)
 
-    theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
+    theory_corrs = [
+        *args.theoryCorr,
+        *args.ewTheoryCorr,
+        *getattr(args, "quarkMassCorr", []),
+    ]
     if theory_corrs and dataset_name in corr_helpers:
         add_theory_corr_hists(
             results,

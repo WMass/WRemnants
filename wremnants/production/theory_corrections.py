@@ -445,6 +445,12 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
     df = define_nominal_weight(df)
     df = define_pdf_columns(df, dataset_name, args.pdfs, args.altPdfOnlyCentral)
     df = define_breit_wigner_weights(df, dataset_name)
+    df = define_quark_mass_theory_corr(
+        df,
+        dataset_name,
+        helpers,
+        generators=getattr(args, "quarkMassCorr", []),
+    )
 
     return df
 
@@ -568,6 +574,30 @@ def define_ew_theory_corr(
     if "ew_theory_corr_weight" not in df.GetColumnNames():
         logger.debug("Define 'ew_theory_corr_weight'=1.0")
         df = df.DefinePerSample("ew_theory_corr_weight", "1.0")
+
+    return df
+
+
+def define_quark_mass_theory_corr(df, dataset_name, helpers, generators):
+    logger.debug("Define quark mass theory corr")
+    dataset_helpers = helpers.get(dataset_name, [])
+
+    for generator in generators:
+        if generator not in dataset_helpers:
+            continue
+
+        helper = dataset_helpers[generator]
+        df = df.Define(
+            f"{generator}Weight_tensor",
+            helper,
+            [
+                "massVgen",
+                "absYVgen",
+                "ptVgen",
+                "chargeVgen",
+                "nominal_weight",
+            ],
+        )
 
     return df
 

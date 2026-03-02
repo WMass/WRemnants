@@ -95,6 +95,11 @@ parser.add_argument(
     help="Add axis to store info if the event has an outgoing charm quark",
 )
 parser.add_argument(
+    "--addBottomAxis",
+    action="store_true",
+    help="Add axis to store info if the event has outgoing bottom quarks at LHE level",
+)
+parser.add_argument(
     "--finePtVBinning",
     action="store_true",
     help="Use 0.5 GeV binning for ptVgen (e.g., for theory corrections)",
@@ -104,7 +109,6 @@ parser.add_argument(
     action="store_true",
     help="Apply PDF reweighting using boson parameterized corrections",
 )
-
 parser = parsing.set_parser_default(parser, "filterProcs", samples.vprocs)
 parser = parsing.set_parser_default(parser, "era", "13TeVGen")
 parser = parsing.set_parser_default(parser, "aggregateGroups", [])
@@ -286,6 +290,23 @@ def build_graph(df, dataset):
     elif "NNLOPS" in dataset.name:
         weight_expr = f"{weight_expr}*LHEScaleWeightAltSet1[4]"
 
+    is_zbb_sample = dataset.name.startswith("Zbb")
+    has_unknown_altset1 = "UnknownWeightAltSet1" in [str(c) for c in df.GetColumnNames()]
+    if is_zbb_sample and has_unknown_altset1:
+        df = df.Define("unknown_weight0", "UnknownWeightAltSet1[0]")
+    else:
+        df = df.Define("unknown_weight0", "1.0f")
+        if is_zbb_sample:
+            logger.warning(
+                f"Dataset {dataset.name} is missing UnknownWeightAltSet1, leaving extra study weight at 1"
+            )
+
+    # Keep generator normalization (weight_sum) independent of this study weight.
+    if not is_zbb_sample:
+        df = df.DefinePerSample("extra_weight", "1.0")
+    else:
+        df = df.Define("extra_weight", "unknown_weight0")
+
     df = df.Define("weight", weight_expr)
     df = df.DefinePerSample("unity", "1.")
     # This sum should happen before any change of the weight
@@ -330,6 +351,46 @@ def build_graph(df, dataset):
         df = df.Define(
             "charm",
             "Sum(abs(LHEPart_pdgId[LHEPart_status==1])==4) == 1 && Sum(abs(LHEPart_pdgId[LHEPart_status==1])==5) != 1",
+        )
+
+    if args.addBottomAxis:
+        axis_bottom = hist.axis.Regular(
+            2, -0.5, 1.5, underflow=False, overflow=False, name="bottom_sel"
+        )
+        nominal_axes = [*nominal_axes, axis_bottom]
+        nominal_cols = [*nominal_cols, "bottom_sel"]
+
+        df = df.Define(
+            "n_lhe_fin_bottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==1]==5)",
+        )
+        df = df.Define(
+            "n_lhe_fin_antibottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==1]==-5)",
+        )
+        df = df.Define(
+            "n_lhe_fin_bbbar",
+            "n_lhe_fin_bottom + n_lhe_fin_antibottom",
+        )
+        df = df.Define(
+            "n_lhe_init_bottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==-1]==5)",
+        )
+        df = df.Define(
+            "n_lhe_init_antibottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==-1]==-5)",
+        )
+        df = df.Define(
+            "n_lhe_init_bbbar",
+            "n_lhe_init_bottom + n_lhe_init_antibottom",
+        )
+        df = df.Define(
+            "n_lhe_bbbar",
+            "n_lhe_init_bbbar + n_lhe_fin_bbbar",
+        )
+        df = df.Define(
+            "bottom_sel",
+            "(n_lhe_bbbar > 0)",
         )
 
     if args.addHelicityAxis:
@@ -383,6 +444,9 @@ def build_graph(df, dataset):
             if args.addCharmAxis:
                 lep_axes = [*lep_axes, axis_charm]
                 lep_cols = [*lep_cols, "charm"]
+            if args.addBottomAxis:
+                lep_axes = [*lep_axes, axis_bottom]
+                lep_cols = [*lep_cols, "bottom_sel"]
 
             results.append(
                 df.HistoBoost(
@@ -923,6 +987,16 @@ def build_graph(df, dataset):
         storage=hist.storage.Weight(),
     )
     results.append(nominal_gen)
+
+    if dataset.name.startswith("Zbb"):
+        results.append(
+            df.HistoBoost(
+                "unknown_weight0",
+                [hist.axis.Regular(120, 0.0, 3.0, name="unknown_weight0")],
+                ["unknown_weight0", "unity"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
     nominal_gen_pdf_uncorr = df.HistoBoost(
         "nominal_gen_pdf_uncorr",
