@@ -115,7 +115,9 @@ def add_dummy_axes(h2d):
 def scale_to_integral(h, target, label):
     current = h.sum().value
     if current <= 0:
-        raise ValueError(f"Cannot scale '{label}' to target integral: current integral is <= 0")
+        raise ValueError(
+            f"Cannot scale '{label}' to target integral: current integral is <= 0"
+        )
     return hh.scaleHist(h, target / current, createNew=True)
 
 

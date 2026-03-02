@@ -291,7 +291,9 @@ def build_graph(df, dataset):
         weight_expr = f"{weight_expr}*LHEScaleWeightAltSet1[4]"
 
     is_zbb_sample = dataset.name.startswith("Zbb")
-    has_unknown_altset1 = "UnknownWeightAltSet1" in [str(c) for c in df.GetColumnNames()]
+    has_unknown_altset1 = "UnknownWeightAltSet1" in [
+        str(c) for c in df.GetColumnNames()
+    ]
     if is_zbb_sample and has_unknown_altset1:
         df = df.Define("unknown_weight0", "UnknownWeightAltSet1[0]")
     else:
