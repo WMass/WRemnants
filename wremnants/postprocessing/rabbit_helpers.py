@@ -289,6 +289,25 @@ def add_nominal_with_correlated_BinByBinStat(
         )
 
 
+def add_mb_fo_uncertainty(
+    datagroups,
+    processes="signal_samples",
+    passToFakes=True,
+):
+    # b-quark mass uncertainty from dedicated MiNNLO_Zbb correction histogram
+    datagroups.addSystematic(
+        "MiNNLO_Zbb_Corr",
+        name="mb_fo",
+        processes=processes,
+        mirror=True,
+        scale=1.0,
+        systAxes=["vars"],
+        skipEntries=[{"vars": ["nominal"]}],
+        passToFakes=passToFakes,
+        groups=["bcQuarkMass", "theory"],
+    )
+
+
 def add_electroweak_uncertainty(
     card_tool,
     ewUncs,

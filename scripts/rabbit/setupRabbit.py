@@ -1783,6 +1783,12 @@ def setup(
                 passSystToFakes=passSystToFakes,
             )
 
+        rabbit_helpers.add_mb_fo_uncertainty(
+            datagroups,
+            processes=["z_samples"],
+            passToFakes=passSystToFakes,
+        )
+
     if datagroups.xnorm or genfit:
         return datagroups
 
