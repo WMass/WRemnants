@@ -60,7 +60,7 @@ pdfMap = {
         ],
         "alphasRange": "001",
         "inflation_factor_wmass": 1.0,  # not determined
-        "inflation_factor_alphaS": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.0,
     },
     "nnpdf40": {
         "name": "pdfNNPDF40",
@@ -88,7 +88,7 @@ pdfMap = {
         ],
         "alphasRange": "001",
         "inflation_factor_wmass": 1.0,
-        "inflation_factor_alphaS": 1.5,
+        "inflation_factor_alphaS": 2.0,
     },
     "msht20": {
         "name": "pdfMSHT20",
@@ -102,7 +102,7 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "inflation_factor_wmass": 1.5,
-        "inflation_factor_alphaS": 2.0,
+        "inflation_factor_alphaS": 2.2,
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
@@ -146,7 +146,7 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "inflation_factor_wmass": 1.5,
-        "inflation_factor_alphaS": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.5,
     },
     "ct18z": {
         "name": "pdfCT18Z",
@@ -200,7 +200,7 @@ pdfMap = {
         ],  # dummy AS
         "alphasRange": "002",
         "inflation_factor_wmass": 4.0,
-        "inflation_factor_alphaS": 3.0,
+        "inflation_factor_alphaS": 3.5,
     },
 }
 
@@ -858,8 +858,8 @@ def pdf_inflation_factor(infoMap, nois):
     elif nois == ["alphaS"]:
         return infoMap.get("inflation_factor_alphaS", 1)
     else:
-        logger.debug(
-            f"No inflation factor defined for nuisance parameters {nois}, returning 1."
+        logger.warning(
+            f"No PDF inflation factor defined for nuisance parameters {nois}, returning 1."
         )
         return 1
 
@@ -932,7 +932,9 @@ def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
 
 def define_central_pdf_weight_from_helicities(df, dataset_name, pdf, theory_helpers):
 
-    logger.info("Using PDF weights from helicities for the central PDF weight")
+    logger.info(
+        f"Using weights from helicities for the central PDF weight for set {pdf}"
+    )
     pdf_name = theory_tools.pdfMap[pdf]["name"]
 
     tensorName = f"helicity{pdf_name}CentralWeight_tensor"
@@ -958,7 +960,7 @@ def define_central_pdf_weight_from_helicities(df, dataset_name, pdf, theory_help
 
 def define_central_pdf_weight(df, dataset_name, pdf):
 
-    logger.info("Using event PDF weights for the central PDF weight")
+    logger.info(f"Using event weights for the central PDF weight for set {pdf}")
     try:
         pdfInfo = pdf_info_map(dataset_name, pdf)
     except ValueError:
@@ -998,7 +1000,11 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
         df = define_ew_vars(df)
 
     df = df.DefinePerSample("theory_weight_truncate", "10.")
-    if theory_helpers and "pdf_central" in theory_helpers.keys():
+    if (
+        theory_helpers
+        and "pdf_central" in theory_helpers.keys()
+        and theory_helpers["pdf_central"] is not None
+    ):
         df = define_central_pdf_weight_from_helicities(
             df,
             dataset_name,
