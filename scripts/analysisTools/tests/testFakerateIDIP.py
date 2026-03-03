@@ -7,8 +7,8 @@ import os
 import sys
 
 import narf
-from utilities import common
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.postprocessing.datagroups.datagroups2016 import make_datagroups_2016
+from wremnants.utilities import common
 
 args = sys.argv[:]
 sys.argv = ["-b"]

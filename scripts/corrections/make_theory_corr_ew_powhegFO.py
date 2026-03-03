@@ -4,8 +4,8 @@ import os
 import hist
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools
+from wremnants.utilities import binning
+from wremnants.utilities.io_tools import base_io, input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
@@ -48,7 +48,7 @@ s = hist.tag.Slicer()
 if args.debug:
     import matplotlib.pyplot as plt
 
-    from wremnants import plot_tools
+    from wums import plot_tools
 
     hnum = h[{"weak": "weak_default"}].project("massVlhe")
     hden = h[{"weak": "weak_no_ew"}].project("massVlhe")
@@ -81,7 +81,7 @@ if args.debug:
 
 # integrate over pt and phistar
 h = h[{"ptVlhe": hist.sum, "phiStarlhe": hist.sum}]
-h = hh.rebinHist(h, "absYVlhe", common.absYZgen_binning_corr)
+h = hh.rebinHist(h, "absYVlhe", binning.absYZgen_binning_corr)
 
 hcorr = hist.Hist(*h.axes)
 # safe default
@@ -118,7 +118,7 @@ meta_dict = {}
 for f in [args.input]:
     label = os.path.basename(f)
     try:
-        meta = input_tools.get_metadata(f)
+        meta = base_io.get_metadata(f)
         meta_dict[label] = meta
     except ValueError as e:
         logger.warning(f"No meta data found for file {f}")

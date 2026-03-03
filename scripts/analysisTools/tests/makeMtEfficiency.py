@@ -11,7 +11,7 @@ import sys
 
 import hist
 
-from wremnants.datasets.datagroups2016 import make_datagroups_2016
+from wremnants.postprocessing.datagroups.datagroups2016 import make_datagroups_2016
 
 args = sys.argv[:]
 sys.argv = ["-b"]

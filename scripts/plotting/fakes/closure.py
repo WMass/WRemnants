@@ -3,13 +3,12 @@ import matplotlib as mpl
 import mplhep as hep
 import numpy as np
 
-from utilities import parsing
-from utilities.styles import styles
-from wremnants import histselections as sel
-from wremnants import plot_tools
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing import histselections as sel
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.utilities import parsing
+from wremnants.utilities.styles import styles
 from wums import boostHistHelpers as hh
-from wums import logging, output_tools
+from wums import logging, output_tools, plot_tools
 
 
 def plot_closure(

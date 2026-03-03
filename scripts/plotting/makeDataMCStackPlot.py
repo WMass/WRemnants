@@ -1,12 +1,14 @@
 import hist
 from matplotlib import colormaps
 
-from utilities import parsing
-from utilities.styles import styles
-from wremnants import syst_tools
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.histselections import FakeSelectorSimpleABCD
-from wremnants.regression import Regressor
+from wremnants.postprocessing import syst_tools
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.postprocessing.histselections import (
+    FakeSelectorSimpleABCD,
+)
+from wremnants.postprocessing.regression import Regressor
+from wremnants.utilities import parsing
+from wremnants.utilities.styles import styles
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 

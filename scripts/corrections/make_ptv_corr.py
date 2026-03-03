@@ -1,9 +1,9 @@
 import hist
 import numpy as np
 
-from utilities import common, parsing
-from utilities.io_tools import input_tools, output_tools
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.utilities import common, parsing
+from wremnants.utilities.io_tools import base_io, output_tools
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -96,7 +96,7 @@ output_dict = {
     "MC_sum_hist": groups["MC_sum"].hists[hist_name],
 }
 
-meta_dict = input_tools.get_metadata(args.inputFile)
+meta_dict = base_io.get_metadata(args.inputFile)
 outfile = f"{args.outpath}/dataRecoPtllCorr{args.proc}.pkl.lz4"
 output_tools.write_lz4_pkl_output(
     outfile, args.proc.upper(), output_dict, args, meta_dict

@@ -2,9 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import ticker
 
-from utilities import parsing
-from utilities.io_tools import hepdata_tools, rabbit_input
-from wremnants import theory_tools
+from wremnants.utilities import parsing, theory_utils
+from wremnants.utilities.io_tools import hepdata_tools, rabbit_input
 from wums import output_tools, plot_tools
 
 parser = parsing.plot_parser()
@@ -84,7 +83,7 @@ isW = "WMass" in args.reffile
 ref_mass = 80355 if isW else 91188
 ref_unc = 6.0 if isW else 2.0
 
-pdf_name = lambda p: theory_tools.pdfMap[p]["name"]
+pdf_name = lambda p: theory_utils.pdfMap[p]["name"]
 
 rename = {
     f"err_{pdf_name(pdf)}{suffix}": f"err_pdf{suffix}"

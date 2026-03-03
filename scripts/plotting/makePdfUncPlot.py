@@ -7,12 +7,13 @@ import hist
 import numpy as np
 from matplotlib import cm
 
-import wums.ioutils
-from utilities.differential import get_theoryAgnostic_axes
-from utilities.io_tools import input_tools, output_tools
-from wremnants import plot_tools, theory_tools
-from wremnants.helicity_utils import axis_helicity_multidim
+from wremnants.postprocessing import pdf_tools
+from wremnants.utilities import theory_utils
+from wremnants.utilities.binning import get_theoryAgnostic_axes
+from wremnants.utilities.common import axis_helicity_multidim
+from wremnants.utilities.io_tools import input_tools, output_tools
 from wums import boostHistHelpers as hh
+from wums import ioutils, plot_tools
 
 xlabels = {
     "pt": r"p$_{T}^{\ell}$ (GeV)",
@@ -36,7 +37,7 @@ parser.add_argument(
     type=str,
     nargs="+",
     help="List of histograms to plot",
-    choices=theory_tools.pdfMap.keys(),
+    choices=theory_utils.pdfMap.keys(),
     required=True,
 )
 parser.add_argument(
@@ -86,9 +87,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 for pdf in args.pdfs:
-    if pdf not in theory_tools.pdfMap:
+    if pdf not in theory_utils.pdfMap:
         raise ValueError(
-            f"pdf {pdf} is not a valid hist (not defined in theory_tools.pdfMap)"
+            f"pdf {pdf} is not a valid hist (not defined in theory_utils.pdfMap)"
         )
     print(pdf)
 # args.pdf.append("herapdf20ext")
@@ -101,7 +102,7 @@ for dataset in args.datasets:
         xlabels["unrolled_gen"] = xlabels["unrolled_gen"].replace("Z", "W")
         xlabels["unrolled_gen_hel"] = xlabels["unrolled_gen_hel"].replace("Z", "W")
 
-    pdfInfo = theory_tools.pdfMap
+    pdfInfo = theory_utils.pdfMap
     pdfNames = [pdfInfo[pdf]["name"] for pdf in args.pdfs]
 
     axis_label = "pdfVar"
@@ -147,7 +148,7 @@ for dataset in args.datasets:
             coeffs_pdf.append(hel_pdf)
 
         uncHists = [
-            [h[{axis_label: 0}], *theory_tools.hessianPdfUnc(h, axis_label, unc, scale)]
+            [h[{axis_label: 0}], *pdf_tools.hessianPdfUnc(h, axis_label, unc, scale)]
             for h, unc, scale in zip(coeffs_pdf, uncType, uncScale)
         ]
 
@@ -171,7 +172,7 @@ for dataset in args.datasets:
             )
         ]
         uncHists_hera = [
-            [h[{axis_label: 0}], *theory_tools.hessianPdfUnc(h, axis_label, unc, scale)]
+            [h[{axis_label: 0}], *pdf_tools.hessianPdfUnc(h, axis_label, unc, scale)]
             for h, unc, scale in zip(coeffs_heraext, uncType_hera, uncScale_hera)
         ]
 
@@ -417,4 +418,4 @@ for dataset in args.datasets:
 
 outfile = "theoryband_variations_corr.hdf5"
 with h5py.File(outfile, "w") as f:
-    wums.ioutils.pickle_dump_h5py("theorybands", band_hists, f)
+    ioutils.pickle_dump_h5py("theorybands", band_hists, f)

@@ -7,9 +7,9 @@ import pandas as pd
 
 import narf
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import input_tools
-from wremnants import syst_tools
+from wremnants.postprocessing import syst_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import input_tools, root_io
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 
@@ -405,7 +405,7 @@ if args.cmsDecor == "Preliminary":
 if args.saveForHepdata:
     # open root file
     outfile_root = f"{outdir}/{name}.root"
-    rf = input_tools.safeOpenRootFile(outfile_root, mode="recreate")
+    rf = root_io.safeOpenRootFile(outfile_root, mode="recreate")
     logger.warning(f"Saving histograms for HEPData in {outfile_root}")
     for ih, h in enumerate(hists_nom):
         hroot = narf.hist_to_root(h)

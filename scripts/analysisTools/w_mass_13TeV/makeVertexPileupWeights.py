@@ -25,7 +25,7 @@ from scripts.analysisTools.plotUtils.utility import (
     safeGetObject,
     safeOpenFile,
 )
-from utilities import common
+from wremnants.utilities import common
 
 ROOT.gStyle.SetOptStat(0)
 ROOT.TH1.SetDefaultSumw2()

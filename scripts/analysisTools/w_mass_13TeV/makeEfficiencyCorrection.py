@@ -12,9 +12,9 @@ import numpy as np
 
 import narf
 import wums.output_tools
-from utilities import common
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.muon_efficiencies_smooth import cloneAxis
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.production.muon_efficiencies_smooth import cloneAxis
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 from wums import logging
 

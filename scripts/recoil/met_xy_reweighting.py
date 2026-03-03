@@ -9,7 +9,7 @@ ROOT.gStyle.SetOptTitle(0)
 import functions
 import plotter
 
-from wremnants.datasets import datagroups
+from wremnants.postprocessing.datagroups import datagroups
 
 
 def makePlot(hist_data, hist_mc, fOut, xLabel, npv, outDir_):

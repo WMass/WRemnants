@@ -3,8 +3,8 @@ import argparse
 import hist
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools
+from wremnants.utilities import common
+from wremnants.utilities.io_tools import input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 

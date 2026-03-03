@@ -6,7 +6,7 @@ import os
 ## safe batch mode
 import sys
 
-from utilities import common
+from wremnants.utilities import common
 
 args = sys.argv[:]
 sys.argv = ["-b"]

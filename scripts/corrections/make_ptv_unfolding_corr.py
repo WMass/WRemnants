@@ -5,9 +5,9 @@ import hist
 import lz4.frame
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools
-from wremnants import theory_corrections
+from wremnants.production import theory_corrections
+from wremnants.utilities import common
+from wremnants.utilities.io_tools import base_io, input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
@@ -137,8 +137,8 @@ output_dict = {
 }
 
 meta_dict = {
-    "unfolding": input_tools.get_metadata(args.unfoldingFile),
-    "gen": input_tools.get_metadata(args.genFile),
+    "unfolding": base_io.get_metadata(args.unfoldingFile),
+    "gen": base_io.get_metadata(args.genFile),
 }
 
 fname = "data"

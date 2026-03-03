@@ -14,7 +14,7 @@ import ROOT
 
 # sys.path.append(os.getcwd() + "/plotUtils/")
 from scripts.analysisTools.plotUtils.CMS_lumi import CMS_lumi, setTDRStyle
-from utilities import parsing
+from wremnants.utilities import parsing
 from wums import logging, output_tools
 
 logger = logging.child_logger(__name__)

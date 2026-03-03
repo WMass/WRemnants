@@ -216,7 +216,7 @@ jobs:
       - name: wmass analysis
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass5_2016PostVFP
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass50_2016PostVFP
 
   w-fit:
     # The type of runner that the job will run on
@@ -279,7 +279,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5 --title CMS --subtitle Preliminary
-          --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping max 
+          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix theoryAgnosticNormVar --scaleImpacts 100
 
   w-bsm:
@@ -315,7 +315,7 @@ jobs:
       - name: bsm rabbit setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
-          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass5 0.001 --breitwignerWMassWeights
+          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass50 0.001 --breitwignerWMassWeights
           --postfix bsm -o $WREMNANTS_OUTDIR
 
       - name: bsm rabbit fit
@@ -330,31 +330,31 @@ jobs:
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_limit.py
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/WMass.hdf5 -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/ 
-          -t -1 --asymptoticLimits WtoNMuMass5_mixing --modes gaussian
+          -t -1 --asymptoticLimits WtoNMuMass50_mixing --modes gaussian
           
       - name: bsm plot postfit variations
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
           -o $WEB_DIR/$PLOT_DIR/BSM -m Project -m Normalize --title CMS --subtitle Preliminary --titlePos 0 --yscale '1.3' 
           --result asimov --lowerLegCols 3 --rrange 0.98 1.02
-          --varNames massShiftW100MeV 'WtoNMuMass5_mixing' --varColors red blue
+          --varNames massShiftW100MeV 'WtoNMuMass50_mixing' --varColors red blue
 
       # - name: bsm plot parameter correlations
       #   run: >- 
       #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
-      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass5' massShiftW100MeV 
-      #     --title CMS --subtitle Preliminary --titlePos 0 --config 'utilities/styles/styles.py' --correlation --showNumbers
+      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' massShiftW100MeV 
+      #     --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py' --correlation --showNumbers
 
       # - name: bsm plot pulls and impacts
       #   run: >- 
       #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5'
-      #     -o $WEB_DIR/$PLOT_DIR/BSM --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' 
+      #     -o $WEB_DIR/$PLOT_DIR/BSM --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' 
       #     --oneSidedImpacts --otherExtensions pdf png -n 50 -m Difference --showNumbers --globalImpacts
 
       # - name: bsm likelihood scan
       #   run: >- 
       #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_likelihood_scan.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
-      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass5' --title CMS --subtitle Preliminary --titlePos 0 --config 'utilities/styles/styles.py'
+      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py'
 
   w-plotting:
     # The type of runner that the job will run on
@@ -464,28 +464,28 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
+          --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
+          --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary --postfix poiAsNoi
-          -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config utilities/styles/styles.py
+          -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary  --postfix poiAsNoi
-          -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config utilities/styles/styles.py --correlation
+          -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
@@ -505,7 +505,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/WMass_absEtaGen_ptGen_qGen_theoryfit/fitresults.hdf5
-          --grouping max --config 'utilities/styles/styles.py' --postfix poiAsNoi
+          --grouping max --config 'wremnants/utilities/styles/styles.py' --postfix poiAsNoi
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scaleImpacts 1.5
 
   lowpu-w:
@@ -715,13 +715,13 @@ jobs:
 
       - name: lowpu rabbit unfolded xsec plots W
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $RABBIT_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR/lowPU
           --rrange 0.0 2.0 --unfoldedXsec --noUncertainty --chisq none --legCols 1 --noSciy --titlePos 0 --title CMS --subtitle Preliminary -m Project
 
       - name: lowpu rabbit unfolded xsec plots Z
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $RABBIT_DIR/Combination_WMass_lowPUZMass_lowPU_ptll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR/lowPU
           --rrange 0.0 2.0 --unfoldedXsec --noUncertainty --chisq none --legCols 1 --noSciy --titlePos 0 --title CMS --subtitle Preliminary -m Select
 
@@ -781,13 +781,13 @@ jobs:
 
       - name: wlike prefit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --result uncorr --title CMS --titlePos 1 --subtitle Preliminary
           -o $WEB_DIR/$PLOT_DIR --legCols 6 --yscale 1.2  --prefit --legCol 6 --legSize large -m BaseMapping
 
       - name: wlike postfit plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --result uncorr --title CMS --titlePos 1 --subtitle Preliminary
           -o $WEB_DIR/$PLOT_DIR --legCols 6 --yscale 1.2 --rrange 1.03 0.97 --binSeparationLines -2.2 -2.1 1.2 1.3 -m BaseMapping
 
@@ -796,7 +796,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --result uncorr --title CMS --subtitle Preliminary
           -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 --refName asimov --refResult asimov --postfix Wlike
-          --showNumbers --diffPullAsym --pullrange '2.1' --config utilities/styles/styles.py
+          --showNumbers --diffPullAsym --pullrange '2.1' --config wremnants/utilities/styles/styles.py
           --oneSidedImpacts --grouping max -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --scaleImpacts 100
 
 
@@ -889,13 +889,13 @@ jobs:
 
       - name: dilepton postfit mll-etaAbsEta plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 -o $WEB_DIR/$PLOT_DIR -m BaseMapping
           --yscale 1.4 --binSeparationLines -0.6 0.0 --titlePos 1 --title CMS --subtitle Preliminary
 
       - name: dilepton postfit mll plot
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py
           $WREMNANTS_OUTDIR/ZMassDilepton_etaAbsEta_mll/fitresults.hdf5 --title CMS --subtitle Preliminary
           --rrange 0.99 1.02 --legCols 1 -o $WEB_DIR/$PLOT_DIR --yscale 1.05 -m Project ch0 mll
           --varName massShiftZ100MeV --extraTextLoc '0.05' '0.7' --varLabel '$\mathit{m}_\mathrm{Z}{\pm}1\sigma$'
@@ -955,7 +955,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/ZMassDilepton_ptll_yll/fitresults.hdf5 --title CMS --subtitle Preliminary 
-          --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping min 
+          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping min 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --scaleImpacts 2.0
 
       - name: setup
@@ -976,28 +976,28 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
+          --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix poiAsNoi --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
+          --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
-          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py
+          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
-          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py --correlation
+          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
@@ -1017,7 +1017,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/ZMassDilepton_ptVGen_absYVGen_theoryfit/fitresults.hdf5
-          --grouping max --config 'utilities/styles/styles.py' --postfix poiAsNoi
+          --grouping max --config 'wremnants/utilities/styles/styles.py' --postfix poiAsNoi
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scaleImpacts 1.5
 
   dilepton-unfolding:
@@ -1083,28 +1083,28 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config 'utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
+          --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: plot xsec uncertainties
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --extraTextLoc '0.05' '0.7' --legCols 1 -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --yscale '1.2'
-          --title CMS --subtitle Preliminary --config utilities/styles/styles.py --grouping max --legCols 2
+          --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
       - name: plot xsec covariance
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary
-          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py
+          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary 
-          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config utilities/styles/styles.py --correlation
+          -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
       
       - name: setup theory-fit tensor
         run: >-
@@ -1124,7 +1124,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/ZMassDilepton_ptVGen_absYVGen_theoryfit/fitresults.hdf5
-          --grouping max --config 'utilities/styles/styles.py' --postfix unfolding
+          --grouping max --config 'wremnants/utilities/styles/styles.py' --postfix unfolding
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton -n 50 --otherExtensions pdf png --showNumbers --oneSidedImpacts -s absimpact --scaleImpacts 1.5
 
 
@@ -1156,12 +1156,12 @@ jobs:
       - name: dilepton prefit plot
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
-          --config utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --prefit --title CMS --subtitle Preliminary -m BaseMapping
+          --config wremnants/utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --prefit --title CMS --subtitle Preliminary -m BaseMapping
 
       - name: dilepton postfit plot
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
-          --config utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --title CMS --subtitle Preliminary -m BaseMapping
+          --config wremnants/utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --title CMS --subtitle Preliminary -m BaseMapping
 
       - name: dilepton plotting ptll
         run: >-
@@ -1199,7 +1199,7 @@ jobs:
 
       - name: dilepton ptll from wlike postfit
         run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config utilities/styles/styles.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py --config wremnants/utilities/styles/styles.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll/fitresults_from_ZMassWLike_eta_pt_charge.hdf5 --result asimov_uncorr --postfix uncorr_fromWLike 
           -o $WEB_DIR/$PLOT_DIR --legCols 1 --yscale 1.2 --rrange 1.03 0.97 --title CMS --subtitle Preliminary -m BaseMapping
 
@@ -1235,7 +1235,9 @@ jobs:
       - name: gen analysis
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/w_z_gen_dists.py --dataPath $DATAPATH 
-          -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES --filterProcs WplusmunuPostVFP WminusmunuPostVFP WplustaunuPostVFP WminustaunuPostVFP ZmumuPostVFP ZtautauPostVFP WplusToMuNu_horace-nlo WplusToMuNu_winhac-lo-photos ZToMuMu_horace-lo-photos
+          -o $WREMNANTS_OUTDIR -j $NTHREADS --maxFiles $MAX_FILES 
+          --filterProcs Wplusmunu_13TeVGen Wminusmunu_13TeVGen Wplustaunu_13TeVGen Wminustaunu_13TeVGen Zmumu_13TeVGen Ztautau_13TeVGen 
+          Wplusmunu_horace-nlo Wplusmunu_winhac-lo-photos Zmumu_horace-lo-photos
 
 
   combined-fit:
@@ -1276,7 +1278,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/Combination_WMassZMassDilepton/fitresults.hdf5 --title CMS --subtitle Preliminary
-          --showNumbers --pullrange '2.1' --config utilities/styles/styles.py --oneSidedImpacts --grouping max 
+          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix withZ --scaleImpacts 100
 
   copy-clean:
