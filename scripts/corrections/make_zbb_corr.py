@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument(
         "--massless-proc",
         type=str,
-        default="Zmumu_13TeVGen",
+        default="Zmumu_MiNNLO",
         help="Process name for the massless sample.",
     )
     parser.add_argument(
@@ -61,17 +61,6 @@ def parse_args():
         type=str,
         default=None,
         help="Explicit output filename (overrides generator/outpath).",
-    )
-    parser.add_argument(
-        "--norm-mode",
-        choices=["default", "sigma-difference"],
-        default="default",
-        help=(
-            "Normalization mode for corrected template. "
-            "'default': corrected = 5FS(bottom_sel=0) + 4FS(bottom_sel=1). "
-            "'sigma-difference': rescale 5FS(bottom_sel=0) to "
-            "sigma(5FS_total)-sigma(4FS_total) and 4FS(bottom_sel=1) to sigma(4FS_total)."
-        ),
     )
     return parser.parse_args()
 
@@ -143,24 +132,7 @@ def main():
     nominal = h_massless.project(*vars_2d)
     nominal_nobottom = h_massless[{"bottom_sel": 0}].project(*vars_2d)
     massive = h_massive[{"bottom_sel": 1}].project(*vars_2d)
-    if args.norm_mode == "sigma-difference":
-        massive_total = h_massive.project(*vars_2d)
-        target_massive = massive_total.sum().value
-        target_nobottom = nominal.sum().value - target_massive
-        if target_nobottom < 0:
-            raise ValueError(
-                f"sigma-difference target for 5FS_bveto is negative ({target_nobottom})"
-            )
-        nominal_nobottom = scale_to_integral(
-            nominal_nobottom, target_nobottom, "nominal_nobottom"
-        )
-        massive = scale_to_integral(massive, target_massive, "massive_selected")
-        logger.info(
-            "sigma-difference normalization: target_massive=%s, target_5FS_bveto=%s, total_5FS=%s",
-            f"{target_massive:.6e}",
-            f"{target_nobottom:.6e}",
-            f"{nominal.sum().value:.6e}",
-        )
+
     corrected = hh.addHists(nominal_nobottom, massive)
     h2_ratio = hh.divideHists(corrected, nominal)
 
