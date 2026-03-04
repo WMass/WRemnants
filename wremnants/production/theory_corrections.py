@@ -414,7 +414,11 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
         df = generator_level_definitions.define_ew_vars(df)
 
     df = df.DefinePerSample("theory_weight_truncate", "10.")
-    if theory_helpers and "pdf_central" in theory_helpers.keys():
+    if (
+        theory_helpers
+        and "pdf_central" in theory_helpers.keys()
+        and theory_helpers["pdf_central"] is not None
+    ):
         df = define_central_pdf_weight_from_helicities(
             df,
             dataset_name,
