@@ -304,6 +304,61 @@ theory_corr_weight_map = {
     "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
         "msht20an3lo"
     ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "ct18", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "herapdf20", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "msht20", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "msht20an3lo", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2L0_pdfas": expand_pdf_entries(
+        "nnpdf31", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "nnpdf31", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "nnpdf40", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+        "pdf4lhc21", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
+    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18"),
+    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "herapdf20"
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "msht20"
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "msht20an3lo"
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "nnpdf31"
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "nnpdf40"
+    ),
+    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+        "pdf4lhc21"
+    ),
     # Tested this, better not to treat this way unless using MSHT20nnlo as central set
     # "scetlib_dyturboMSHT20mbrange" : expand_pdf_entries("msht20mbrange", renorm=True),
     # "scetlib_dyturboMSHT20mcrange" : expand_pdf_entries("msht20mcrange", renorm=True),
@@ -1231,7 +1286,7 @@ def helicity_xsec_to_angular_coeffs(
 
     hist_coeffs_scales = hist.Hist(
         *hist_helicity_xsec_scales.axes,
-        storage=hist_helicity_xsec_scales._storage_type(),
+        storage=hist_helicity_xsec_scales.storage_type(),
         name="hist_coeffs_scales",
         data=coeffs,
     )
@@ -1375,6 +1430,7 @@ def pdfBugfixMSHT20(df, tensorPDFName):
 # https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
 def eval_pdf(pdf, flav, x, q):
     flav_map = {
+        "g": 21,
         "d": 1,
         "dbar": -1,
         "u": 2,

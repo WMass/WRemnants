@@ -97,7 +97,7 @@ def write_new_grids(
     for l in inn.readlines():
         if l.find("SetDesc:") >= 0:
             out.write(
-                f'SetDesc: "{pdf.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {pdf_scale}. Produced by the command {''.join(sys.argv)}"\n'
+                f'SetDesc: "{pdf.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {pdf_scale}. Produced by the command {' '.join(sys.argv)}"\n'
             )
         elif l.find("SetIndex:") >= 0:
             out.write(f"SetIndex: {args.lhaid}\n")
@@ -159,7 +159,7 @@ if pdf_scale == -1:
     )
     logger.info(f"Using default inflation factor from theory_tools: {pdf_scale}")
 
-pdf_scale *= pdfInfo["scale"]
+pdf_scale *= pdfInfo["scale"] if "scale" in pdfInfo else 1
 logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
 # TODO: Need to scale back at the end to get 95% CL for consistency?
 

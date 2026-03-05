@@ -405,7 +405,7 @@ def get_scalemap(datagroups, axes, gen_level, select={}, rename_axes={}):
     hScale = hScale.project(*axes)
     hScale = hh.disableFlow(hScale, ["absYVGen", "absEtaGen"])
     for o, n in rename_axes.items():
-        hScale.axes[o]._ax.metadata["name"] = n
+        hScale.axes[o]._raw_metadata["name"] = n
     # scalemap with preserving normalization
     hScale.values(flow=True)[...] = (
         1.0

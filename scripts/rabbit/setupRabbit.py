@@ -1226,7 +1226,7 @@ def setup(
         and not (datagroups.xnorm or args.skipSignalSystOnFakes)
         and datagroups.fakeName != "QCD"
         and (excludeGroup != None and datagroups.fakeName not in excludeGroup)
-        and (filterGroup == None or datagroups.fakeName in filterGroup)
+        and (filterGroup is None or datagroups.fakeName in filterGroup)
     )
 
     dibosonMatch = ["WW", "WZ", "ZZ"]

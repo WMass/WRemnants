@@ -108,11 +108,12 @@ jobs:
 
       - name: check C++ Files
         run: |
+          export ROOTINCLUDEPATH=`scripts/ci/run_with_singularity.sh python3 -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'`/ROOT/include
           # Find all C++ files and check their syntax in parallel
           find . \( -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/* -not -path '*/wums/*'' | \
           xargs -P 16 -I {} bash -c '
             echo "Checking {}"
-            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -std=c++20 -fsyntax-only "{}" || \
+            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -I ${ROOTINCLUDEPATH} -std=c++20 -fsyntax-only "{}" || \
             { echo "Syntax error in {}"; exit 1; }
           '
 
@@ -215,7 +216,7 @@ jobs:
       - name: wmass analysis
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass5_2016PostVFP
 
   w-fit:
     # The type of runner that the job will run on
@@ -314,7 +315,7 @@ jobs:
       - name: bsm rabbit setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
-          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass5 0.01 --breitwignerWMassWeights
+          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass5 0.001 --breitwignerWMassWeights
           --postfix bsm -o $WREMNANTS_OUTDIR
 
       - name: bsm rabbit fit
@@ -794,7 +795,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --result uncorr --title CMS --subtitle Preliminary
-          -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 --refName asimov --postfix Wlike
+          -r $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults.hdf5 --refName asimov --refResult asimov --postfix Wlike
           --showNumbers --diffPullAsym --pullrange '2.1' --config utilities/styles/styles.py
           --oneSidedImpacts --grouping max -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --scaleImpacts 100
 

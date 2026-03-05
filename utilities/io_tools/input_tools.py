@@ -648,7 +648,7 @@ def read_matched_scetlib_hist(
 
             return slice(start, stop, s.step)
 
-        qt_slice = translate_slice(hnonsing.axes[ax], zero_nons_bins)
+        qt_slice = translate_slice(hnonsing.axes["qT"], zero_nons_bins)
         logger.info(f"Zeroing bins with slices {qt_slice}")
         slices = tuple(
             qt_slice if ax == "qT" else slice(None) for ax in hnonsing.axes.name
@@ -719,7 +719,7 @@ def safeGetRootObject(
     fileObject, objectName, quitOnFail=True, silent=False, detach=True
 ):
     obj = fileObject.Get(objectName)
-    if obj == None:
+    if obj is None:
         error_msg = f"Error getting {objectName} from file {fileObject.GetName()}"
         if not silent:
             logger.error(error_msg)

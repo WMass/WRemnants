@@ -50,7 +50,7 @@ xsec_GGtoMuMu = 5.619
 xsec_WtoNMu = 100
 
 ## eras
-eras_run2 = ["2016PreVFP", "2016PostVFP", "2017", "2018"]
+eras_run2 = ["2016PreVFP", "2016PostVFP", "2017", "2018", "13TeVGen"]
 
 supported_eras = eras_run2 + [
     "2016PostVFP",
@@ -141,6 +141,7 @@ wprocs_alt = [
 ]
 zprocs_alt = [
     "Zmumu_MiNNLO",
+    "Zmumu_13TeVGen",
     "ZmumuMiNLO",
     "ZmumuNNLOPS",
     "Zmumu_MiNNLO-noqedisr",

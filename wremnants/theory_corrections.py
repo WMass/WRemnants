@@ -319,9 +319,7 @@ def postprocess_corr_hist(corrh, numh=None):
     vars_out = list(corrh.axes["vars"]) + list(additional_var_hists.keys())
 
     vars_out_axis = hist.axis.StrCategory(vars_out, name="vars")
-    corrh_tmp = hist.Hist(
-        *corrh.axes[:-1], vars_out_axis, storage=corrh._storage_type()
-    )
+    corrh_tmp = hist.Hist(*corrh.axes[:-1], vars_out_axis, storage=corrh.storage_type())
 
     for i, var in enumerate(vars_out_axis):
         if var in corrh.axes["vars"]:

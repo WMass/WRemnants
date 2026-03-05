@@ -1,6 +1,7 @@
 #ifndef WREMNANTS_LOWPU_PREFIRE_H
 #define WREMNANTS_LOWPU_PREFIRE_H
 
+#include "TFile.h"
 #include "defines.hpp"
 #include "utils.hpp"
 #include <eigen3/Eigen/Dense>

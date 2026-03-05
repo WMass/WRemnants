@@ -25,6 +25,7 @@ class TheoryHelper(object):
         "Delta_Omega",
         "binned_Omega",
         "LatticeEigvars",
+        "LatticeNoConstraints",
         "none",
     ]
 
@@ -613,10 +614,9 @@ class TheoryHelper(object):
         var_name = var_name.replace("binned_", "")
         var_name = var_name.replace("_Correlated", "")
 
-        if (
-            not any(var_name in x for x in self.np_hist.axes[self.syst_ax])
-            and model != "LatticeEigvars"
-        ):
+        if not any(
+            var_name in x for x in self.np_hist.axes[self.syst_ax]
+        ) and model not in ["LatticeEigvars", "LatticeNoConstraints"]:
             raise ValueError(
                 f"NP model choice was '{model}' but did not find corresponding variations in the histogram"
             )
@@ -651,6 +651,32 @@ class TheoryHelper(object):
                 for direction in ["Up", "Down"]
             ]
             var_vals = lattice_vals
+        elif self.np_model == "LatticeNoConstraints":
+            # New NP model using lattice central values and NO lattice constraints on the gamma parameters
+            lattice_vals = [
+                "lambda2_nu0.0538",
+                "lambda2_nu0.1202",
+                "lambda4_nu0.0008",
+                "lambda4_nu0.014",
+                "lambda_inf_nu1.1784",
+                "lambda_inf_nu2.1922",
+            ]
+            if not all([x in self.corr_hist.axes[self.syst_ax] for x in lattice_vals]):
+                raise ValueError(
+                    f"Using the lattice NP model without constraints on gamma parameters, but could not find the 3 Eigenvariations for gamma in hist {self.corr_hist_name}"
+                )
+
+            gamma_nuisance_names = [
+                "scetlibNPgammaLambda2",
+                "scetlibNPgammaLambda4",
+                "scetlibNPgammaLambdaInf",
+            ]
+            var_names = [
+                f"{name}{direction}"
+                for name in gamma_nuisance_names
+                for direction in ["Up", "Down"]
+            ]
+            var_vals = lattice_vals
         else:
             # Since "c_nu = 0.1 is the central value, it doesn't show up in the name"
             gamma_vals = list(
@@ -676,6 +702,10 @@ class TheoryHelper(object):
         processesW = ["single_v_samples"]
         processes = processesW if self.label == "W" else processesZ
 
+        scale = 1.0
+        if self.np_model == "LatticeNoConstraints":
+            scale = 10.0
+
         self.datagroups.addSystematic(
             self.corr_hist_name,
             processes=processes,
@@ -684,6 +714,7 @@ class TheoryHelper(object):
             preOp=lambda h: h[{self.syst_ax: var_vals}],
             outNames=var_names,
             groups=["resumNonpert", "resum", "pTModeling", "theory", "theory_qcd"],
+            scale=scale,
             name="scetlibNP",
         )
 
@@ -761,7 +792,7 @@ class TheoryHelper(object):
         )
 
     def add_correlated_np_uncertainties(self):
-        if self.np_model == "LatticeEigvars":
+        if self.np_model in ["LatticeEigvars", "LatticeNoConstraints"]:
             np_map = {
                 "lambda2": ["0.0", "0.5"],
                 "delta_lambda2": ["0.105", "0.145"],
@@ -785,7 +816,10 @@ class TheoryHelper(object):
                 "Delta_Omega": ["-0.02", "0.02"],
             }
 
-        if "Delta" not in self.np_model and self.np_model != "LatticeEigvars":
+        if "Delta" not in self.np_model and self.np_model not in [
+            "LatticeEigvars",
+            "LatticeNoConstraints",
+        ]:
             to_remove = list(filter(lambda x: "Delta" in x, np_map.keys())) + list(
                 filter(lambda x: "delta" in x, np_map.keys())
             )
@@ -812,7 +846,7 @@ class TheoryHelper(object):
             )
 
     def add_uncorrelated_np_uncertainties(self):
-        if self.np_model == "LatticeEigvars":
+        if self.np_model in ["LatticeEigvars", "LatticeNoConstraints"]:
             np_map = {
                 "lambda2": ["0.0", "0.5"],
                 "delta_lambda2": ["0.105", "0.145"],
@@ -836,7 +870,10 @@ class TheoryHelper(object):
                 "Delta_Omega": ["-0.02", "0.02"],
             }
 
-        if "Delta" not in self.np_model and self.np_model != "LatticeEigvars":
+        if "Delta" not in self.np_model and self.np_model not in [
+            "LatticeEigvars",
+            "LatticeNoConstraints",
+        ]:
             to_remove = list(filter(lambda x: "Delta" in x, np_map.keys())) + list(
                 filter(lambda x: "delta" in x, np_map.keys())
             )

@@ -1077,7 +1077,7 @@ def hist_to_variations(
 
     variation_hist = hist.Hist(
         *hist_in.axes,
-        storage=hist_in._storage_type(),
+        storage=hist_in.storage_type(),
         name=out_name,
         data=variation_data,
     )
@@ -1092,7 +1092,7 @@ def uncertainty_hist_from_envelope(h, proj_ax, entries):
     hup = hh.syst_min_or_max_env_hist(
         h, proj_ax, "vars", entries, no_flow=["ptVgen"], do_min=False
     )
-    hnew = hist.Hist(*h.axes[:-1], common.down_up_axis, storage=h._storage_type())
+    hnew = hist.Hist(*h.axes[:-1], common.down_up_axis, storage=h.storage_type())
     hnew[..., 0] = hdown.view(flow=True)
     hnew[..., 1] = hup.view(flow=True)
     return hnew
@@ -2467,7 +2467,7 @@ def scetlib_scale_unc_hist(h, obs, syst_ax="vars"):
     hnew = hist.Hist(
         *h.axes[:-1],
         hist.axis.StrCategory(["central"] + scetlib_scale_vars(), name=syst_ax),
-        storage=h._storage_type(),
+        storage=h.storage_type(),
     )
 
     hnew[..., "central"] = h[..., "central"].view(flow=True)

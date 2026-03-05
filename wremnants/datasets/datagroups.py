@@ -51,7 +51,7 @@ class Datagroups(object):
         else:
             raise ValueError(f"{infile} has unsupported file type")
 
-        if mode == None:
+        if mode is None:
             analysis_script = os.path.basename(self.getScriptCommand().split()[0])
             self.mode = Datagroups.analysisLabel(analysis_script)
         else:
@@ -794,7 +794,7 @@ class Datagroups(object):
         self.groups[rename].hists[histname] = hh.sumHists(tosum)
 
     def setSelectOp(self, op, processes=None):
-        if processes == None:
+        if processes is None:
             procs = self.groups
         else:
             procs = [processes] if isinstance(processes, str) else processes

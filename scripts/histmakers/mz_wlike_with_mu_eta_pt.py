@@ -146,6 +146,7 @@ datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
+    aux=args.auxiliaryProcs,
     nanoVersion="v9",
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,

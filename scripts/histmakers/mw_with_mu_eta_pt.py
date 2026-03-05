@@ -154,7 +154,6 @@ parser.add_argument(
     action="store_true",
     help="When not applying muon scale corrections (--muonCorrData none / --muonCorrMC none), require at list that the CVH corrected variables are valid",
 )
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -227,6 +226,7 @@ datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
+    aux=args.auxiliaryProcs,
     nanoVersion="v9",
     base_path=args.dataPath,
     oneMCfileEveryN=args.oneMCfileEveryN,

@@ -223,6 +223,7 @@ dataDict = {
         ],
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
+        "auxiliary": True,
     },
     "WtoNMuMass10_2016PostVFP": {
         "filepaths": [
@@ -230,6 +231,7 @@ dataDict = {
         ],
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
+        "auxiliary": True,
     },
     "WtoNMuMass30_2016PostVFP": {
         "filepaths": [
@@ -237,6 +239,7 @@ dataDict = {
         ],
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
+        "auxiliary": True,
     },
     "WtoNMuMass50_2016PostVFP": {
         "filepaths": [
@@ -244,6 +247,7 @@ dataDict = {
         ],
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
+        "auxiliary": True,
     },
     "WtoMuNuSMEFT_2016PostVFP": {
         "filepaths": [
@@ -251,6 +255,7 @@ dataDict = {
         ],
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
+        "auxiliary": True,
     },
 }
 

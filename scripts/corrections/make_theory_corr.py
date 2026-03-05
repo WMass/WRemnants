@@ -126,7 +126,7 @@ def parse_args():
         nargs="+",
         choices=common.supported_eras,
         help="Data set to process",
-        default=["2016PostVFP", "2017", "2018"],
+        default=["13TeVGen"],
     )
     args = parser.parse_args()
 
@@ -283,7 +283,7 @@ def main():
     # Rename minnlo axes to match corr, needed for the broadcast now
     for ax in minnloh.axes:
         if ax.name in ax_map:
-            ax._ax.metadata["name"] = ax_map[ax.name]
+            hh.renameAxis(minnloh, ax.name, ax_map[ax.name])
 
     numh = hh.sumHists(
         [

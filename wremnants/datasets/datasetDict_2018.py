@@ -1,3 +1,5 @@
+import copy
+
 from utilities import common
 
 lumicsv = f"{common.data_dir}/bylsoutput_2018.csv"
@@ -42,7 +44,6 @@ dataDict = {
     },
     "Zmumu_2018": {
         "filepaths": [
-            "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
             "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
         ],
         "xsec": common.xsec_DYJetsToLL,
@@ -55,7 +56,7 @@ dataDict = {
         ],
         "xsec": common.xsec_DYJetsToLLMass10to50,
         "group": "DYlowMass",
-        "das_name": "/DYJetsToMuMu_M-10to50_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL18NanoAODv9-106X_upgrade2018_realistic_v16_L1v1*v1/NANOAODSIM",
+        "das_name": "/DYJetsToMuMu_M-10to50_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL18NanoAODv9-106X_upgrade2018_realistic_v16_L1v1*v1/NANOAODSIM",
     },
     "Ztautau_2018": {
         "filepaths": [
@@ -68,7 +69,6 @@ dataDict = {
     },
     "Wplusmunu_2018": {
         "filepaths": [
-            "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
             "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
         ],
         "xsec": common.xsec_WplusJetsToLNu,
@@ -77,7 +77,6 @@ dataDict = {
     },
     "Wminusmunu_2018": {
         "filepaths": [
-            "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
             "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
         ],
         "xsec": common.xsec_WminusJetsToLNu,
@@ -86,7 +85,6 @@ dataDict = {
     },
     "Wplustaunu_2018": {
         "filepaths": [
-            "{BASE_PATH}/WplusJetsToTauNu_TauToMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
             "{BASE_PATH}/WplusJetsToTauNu_TauToMu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
         ],
         "xsec": common.BR_TAUToMU * common.xsec_WplusJetsToLNu,
@@ -95,7 +93,6 @@ dataDict = {
     },
     "Wminustaunu_2018": {
         "filepaths": [
-            "{BASE_PATH}/WminusJetsToTauNu_TauToMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
             "{BASE_PATH}/WminusJetsToTauNu_TauToMu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2018_{NANO_PROD_TAG}",
         ],
         "xsec": common.BR_TAUToMU * common.xsec_WminusJetsToLNu,
@@ -237,3 +234,42 @@ dataDict = {
         "das_name": "/QCD_Pt-20_MuEnrichedPt15_TuneCP5_13TeV-pythia8/RunIISummer20UL18NanoAODv9-106X_upgrade2018_realistic_v16_L1v1-v2/NANOAODSIM",
     },
 }
+
+# extended version with additional samples (but missing some pdf sets)
+dataDict_extended = copy.deepcopy(dataDict)
+
+dataDict_extended["Zmumu_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)
+
+dataDict_extended["Ztautau_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)
+
+dataDict_extended["Wplusmunu_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)
+
+dataDict_extended["Wminusmunu_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)
+
+dataDict_extended["Wplustaunu_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/WplusJetsToTauNu_TauToMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)
+
+dataDict_extended["Wminustaunu_2018"]["filepaths"].extend(
+    [
+        "{BASE_PATH}/WminusJetsToTauNu_TauToMu_H2ErratumFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+    ]
+)

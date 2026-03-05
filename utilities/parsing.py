@@ -153,7 +153,14 @@ def common_parser(analysis_label=""):
         nargs="*",
         help="Exclude processes matched by group name or (subset) of name",
         default=[],
-    )  # no need to exclude QCD MC here, histograms can always be made, they are fast and light, so they are always available for tests
+    )
+    parser.add_argument(
+        "--auxiliaryProcs",
+        type=str,
+        nargs="*",
+        help="Specify additional processes that are excluded by default (Those with 'auxiliary=True' in the datasetDict)",
+        default=[],
+    )
     parser.add_argument(
         "-p", "--postfix", type=str, help="Postfix for output file name", default=None
     )
