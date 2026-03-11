@@ -12,8 +12,8 @@ import tensorflow as tf
 # from narf import histutils
 import narf
 import wums.output_tools
-from utilities import common
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing.datagroups import Datagroups
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 from wums import logging
 
