@@ -361,7 +361,7 @@ nuisance_grouping = {
         "binByBinStatWtoNMu_10",
         "binByBinStatWtoNMu_30",
         "binByBinStatWtoNMu_50",
-    ],    
+    ],
     "alphaS": common_groups
     + [
         "pdfCT18ZNoAlphaS",
