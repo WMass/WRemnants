@@ -541,8 +541,7 @@ if __name__ == "__main__":
             sigsub = ("sig", r"&sigma;")
             highlight = "<b>%s</b>"
             morelight = "<strong>%s</strong>"
-            txtfile.write(
-                """
+            txtfile.write("""
         <html><head><title>Comparison of nuisances</title>
         <style type="text/css">
             td, th { border-bottom: 1px solid black; padding: 1px 1em; }
@@ -551,8 +550,7 @@ if __name__ == "__main__":
         </style>
         </head><body style="font-family: 'Verdana', sans-serif; font-size: 10pt;"><h1>Comparison of nuisances</h1>
         <table>
-        """
-            )
+        """)
 
             if args.absolute_values:
                 what = "x, &sigma;<sub>fit</sub>"
