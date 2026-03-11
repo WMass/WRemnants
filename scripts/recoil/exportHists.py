@@ -3,7 +3,7 @@ import pickle
 
 import functions
 
-import wremnants.datasets.datagroups as datagroups
+import wremnants.postprocessing.datagroups.datagroups as datagroups
 
 
 def readProc(groups, hName, procs):

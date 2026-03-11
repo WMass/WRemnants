@@ -34,7 +34,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 import narf
 import wums.fitutils
-from utilities import common
+from wremnants.utilities import common
 
 utilities = utilitiesCMG.util()
 

@@ -3,7 +3,7 @@ import pickle
 
 import lz4.frame
 
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
 from wums import logging
 
 parser = argparse.ArgumentParser()

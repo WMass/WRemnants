@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 
-from utilities import parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.utilities import parsing
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 

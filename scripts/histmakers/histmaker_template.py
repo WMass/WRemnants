@@ -1,10 +1,9 @@
 import os
 
-from utilities import parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.utilities import common, parsing
 from wums import logging
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 args = parser.parse_args()
@@ -14,8 +13,8 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 import hist
 
 import narf
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import write_analysis_output
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,

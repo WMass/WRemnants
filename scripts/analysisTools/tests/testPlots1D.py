@@ -7,9 +7,9 @@ import hist
 import ROOT
 
 import narf
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
 
-# from wremnants import plot_tools,theory_tools,syst_tools
+# from wremnants.postprocessing import plot_tools,theory_tools,syst_tools
 from wums import logging
 
 ## safe batch mode

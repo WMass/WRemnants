@@ -5,7 +5,7 @@ import hist
 import numpy as np
 import pandas as pd
 
-from utilities import common
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 

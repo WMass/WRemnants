@@ -8,7 +8,7 @@ ROOT.gStyle.SetOptTitle(0)
 
 import functions
 
-from wremnants.datasets import datagroups
+from wremnants.postprocessing.datagroups import datagroups
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

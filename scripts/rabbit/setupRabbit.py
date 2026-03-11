@@ -5,28 +5,24 @@ import math
 import hist
 import numpy as np
 
-import rabbit.debugdata
 import rabbit.io_tools
 from rabbit import tensorwriter
-from utilities import common, parsing
-from wremnants import (
-    combine_helpers,
-    combine_theory_helper,
-    combine_theoryAgnostic_helper,
-    syst_tools,
-    theory_corrections,
-    theory_tools,
+from wremnants.postprocessing import (
+    rabbit_helpers,
+    rabbit_theory_helper,
+    rabbit_theoryAgnostic_helper,
 )
-from wremnants.datasets import datagroups
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.histselections import FakeSelectorSimpleABCD
-from wremnants.regression import Regressor
-from wremnants.syst_tools import (
-    massWeightNames,
+from wremnants.postprocessing.datagroups import datagroups
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
+from wremnants.postprocessing.histselections import FakeSelectorSimpleABCD
+from wremnants.postprocessing.regression import Regressor
+from wremnants.postprocessing.syst_tools import (
+    add_nonprompt_transfer_factor_variations,
     scale_hist_up_down,
     scale_hist_up_down_corr_from_file,
-    widthWeightNames,
 )
+from wremnants.production import helicity_utils
+from wremnants.utilities import binning, common, parsing, theory_utils
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
@@ -332,7 +328,7 @@ def make_parser(parser=None):
             "massdiffZ",
         ],
         default=["wmass"],
-        help="Select which nuisance(s) of interest to fit. Default: (%default)s",
+        help="Select which nuisance(s) of interest to fit. Default: (%%default)s",
     )
     parser.add_argument(
         "--massDiffWVar",
@@ -355,6 +351,9 @@ def make_parser(parser=None):
         default=None,
         choices=[
             "charge",
+            "utAngleSign",
+            "eta-sign",
+            "eta-range",
         ],
         help="For use with --noi widthDiffW, select the variable to define the different mass differences",
     )
@@ -586,7 +585,7 @@ def make_parser(parser=None):
         "--npUnc",
         default="Delta_Lambda",
         type=str,
-        choices=combine_theory_helper.TheoryHelper.valid_np_models,
+        choices=rabbit_theory_helper.TheoryHelper.valid_np_models,
         help="Nonperturbative uncertainty model",
     )
     parser.add_argument(
@@ -651,7 +650,7 @@ def make_parser(parser=None):
         help="Include EW uncertainty (other than pure ISR or FSR)",
         choices=[
             x
-            for x in theory_corrections.valid_theory_corrections()
+            for x in theory_utils.valid_theory_corrections()
             if ("ew" in x or "EW" in x) and "ISR" not in x and "FSR" not in x
         ],
     )
@@ -665,7 +664,7 @@ def make_parser(parser=None):
         help="Include ISR uncertainty",
         choices=[
             x
-            for x in theory_corrections.valid_theory_corrections()
+            for x in theory_utils.valid_theory_corrections()
             if "ew" in x and "ISR" in x
         ],
     )
@@ -677,7 +676,7 @@ def make_parser(parser=None):
         help="Include FSR uncertainty",
         choices=[
             x
-            for x in theory_corrections.valid_theory_corrections()
+            for x in theory_utils.valid_theory_corrections()
             if "ew" in x and "FSR" in x
         ],
     )
@@ -1010,7 +1009,7 @@ def setup(
 
     bsm_signals = []
     if args.addBSMProcess:
-        combine_helpers.add_bsm_process(datagroups, args.addBSMProcess)
+        rabbit_helpers.add_bsm_process(datagroups, args.addBSMProcess)
         bsm_signals.append(args.addBSMProcess)
 
     datagroups.fit_axes = fitvar
@@ -1031,7 +1030,7 @@ def setup(
 
     if args.angularCoeffs:
         datagroups.setGlobalAction(
-            lambda h: theory_tools.helicity_xsec_to_angular_coeffs(
+            lambda h: helicity_utils.helicity_xsec_to_angular_coeffs(
                 h, helicity_axis_name="helicitygen"
             )
         )
@@ -1105,8 +1104,8 @@ def setup(
     if dilepton and "run" in fitvar:
         # in case fit is split by runs/ cumulated lumi
         # run axis only exists for data, add it for MC, and scale the MC according to the luminosity fractions
-        run_edges = common.run_edges
-        run_edges_lumi = common.run_edges_lumi
+        run_edges = binning.run_edges
+        run_edges_lumi = binning.run_edges_lumi
         lumis = np.diff(run_edges_lumi) / run_edges_lumi[-1]
 
         datagroups.setGlobalAction(
@@ -1285,7 +1284,7 @@ def setup(
         and not (datagroups.xnorm or args.skipSignalSystOnFakes)
         and datagroups.fakeName != "QCD"
         and (excludeGroup != None and datagroups.fakeName not in excludeGroup)
-        and (filterGroup == None or datagroups.fakeName in filterGroup)
+        and (filterGroup is None or datagroups.fakeName in filterGroup)
     )
 
     dibosonMatch = ["WW", "WZ", "ZZ"]
@@ -1417,6 +1416,8 @@ def setup(
 
     if args.pseudoData and not datagroups.xnorm:
         if args.pseudoDataFitInputFile:
+            import rabbit.debugdata
+
             indata = rabbit.debugdata.FitInputData(args.pseudoDataFitInputFile)
             debugdata = rabbit.debugdata.FitDebugData(indata)
             datagroups.addPseudodataHistogramsFitInput(
@@ -1458,7 +1459,7 @@ def setup(
             if (datagroups.xnorm and isUnfolding and args.unfoldingWithFlow)
             else []
         )
-        combine_helpers.add_nominal_with_correlated_BinByBinStat(
+        rabbit_helpers.add_nominal_with_correlated_BinByBinStat(
             datagroups,
             wmass,
             base_name=inputBaseName,
@@ -1514,7 +1515,7 @@ def setup(
             processes=signal_samples_forMass,
             group=f"massShift",
             noi=not constrainMass,
-            skipEntries=massWeightNames(proc=label, exclude=massVariation),
+            skipEntries=theory_utils.massWeightNames(proc=label, exclude=massVariation),
             mirror=False,
             noConstraint=not constrainMass,
             systAxes=["massShift"],
@@ -1531,7 +1532,7 @@ def setup(
                         datagroups.nominalName, member, massWeightName
                     )
                     preOpMap[member.name] = (
-                        lambda h, h_ref=h_ref: syst_tools.correct_bw_xsec(h, h_ref)
+                        lambda h, h_ref=h_ref: rabbit_helpers.correct_bw_xsec(h, h_ref)
                     )
 
             datagroups.addSystematic(
@@ -1557,7 +1558,9 @@ def setup(
                     # systNameReplace=[("Shift",f"Diff{suffix}")],
                     skipEntries=[
                         (x, *[-1] * len(args.fitMassDecorr))
-                        for x in massWeightNames(proc=label, exclude=args.massVariation)
+                        for x in theory_utils.massWeightNames(
+                            proc=label, exclude=args.massVariation
+                        )
                     ],
                     noi=not constrainMass,
                     noConstraint=not constrainMass,
@@ -1567,7 +1570,7 @@ def setup(
                     # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
                     isPoiHistDecorr=len(args.fitMassDecorr),
                     actionRequiresNomi=True,
-                    action=syst_tools.decorrelateByAxes,
+                    action=rabbit_helpers.decorrelateByAxes,
                     actionArgs=dict(
                         axesToDecorrNames=args.fitMassDecorr,
                         newDecorrAxesNames=new_names,
@@ -1579,7 +1582,7 @@ def setup(
 
             if "massdiffW" in args.noi:
                 suffix = "".join([a.capitalize() for a in args.massDiffWVar.split("-")])
-                combine_helpers.add_mass_diff_variations(
+                rabbit_helpers.add_mass_diff_variations(
                     datagroups,
                     args.massDiffWVar,
                     name=massWeightName,
@@ -1593,7 +1596,7 @@ def setup(
     # this appears within doStatOnly because technically these nuisances should be part of it
     if isPoiAsNoi:
         if isTheoryAgnostic:
-            theoryAgnostic_helper = combine_theoryAgnostic_helper.TheoryAgnosticHelper(
+            theoryAgnostic_helper = rabbit_theoryAgnostic_helper.TheoryAgnosticHelper(
                 datagroups, externalArgs=args
             )
             if isTheoryAgnosticPolVar:
@@ -1611,7 +1614,7 @@ def setup(
             theoryAgnostic_helper.add_theoryAgnostic_uncertainty()
 
         elif isUnfolding:
-            combine_helpers.add_noi_unfolding_variations(
+            rabbit_helpers.add_noi_unfolding_variations(
                 datagroups,
                 label,
                 passSystToFakes,
@@ -1624,7 +1627,7 @@ def setup(
             )
 
     if args.muRmuFPolVar and not isTheoryAgnosticPolVar:
-        muRmuFPolVar_helper = combine_theoryAgnostic_helper.TheoryAgnosticHelper(
+        muRmuFPolVar_helper = rabbit_theoryAgnostic_helper.TheoryAgnosticHelper(
             datagroups, externalArgs=args
         )
         muRmuFPolVar_helper.configure_polVar(
@@ -1648,7 +1651,7 @@ def setup(
         }
         recovar = [gen2reco[v] for v in fitvar]
 
-        combine_helpers.add_explicit_BinByBinStat(
+        rabbit_helpers.add_explicit_BinByBinStat(
             datagroups,
             recovar,
             samples="signal_samples",
@@ -1659,7 +1662,7 @@ def setup(
 
     if args.addBSMMixing is not None and wmass:
         # add BSM sample as variation on top of SM W
-        combine_helpers.add_bsm_mixing(
+        rabbit_helpers.add_bsm_mixing(
             datagroups,
             inputBaseName,
             args.addBSMMixing[0],
@@ -1677,7 +1680,9 @@ def setup(
             "widthWeightZ",
             name="WidthZ0p8MeV",
             processes=["single_v_nonsig_samples"] if wmass else signal_samples_forMass,
-            skipEntries=widthWeightNames(proc="Z", exclude=(2.49333, 2.49493)),
+            skipEntries=theory_utils.widthWeightNames(
+                proc="Z", exclude=(2.49333, 2.49493)
+            ),
             groups=["ZmassAndWidth" if wmass else "widthZ", "theory"],
             mirror=False,
             noi="wwidth" in args.noi if not wmass else False,
@@ -1696,7 +1701,9 @@ def setup(
             widthVarTag = "WidthW0p6MeV"
             width_info = dict(
                 name=widthVarTag,
-                skipEntries=widthWeightNames(proc="W", exclude=(2.09053, 2.09173)),
+                skipEntries=theory_utils.widthWeightNames(
+                    proc="W", exclude=(2.09053, 2.09173)
+                ),
                 systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
             )
         else:
@@ -1718,7 +1725,7 @@ def setup(
             whvStr = whv.replace(".", "p") + "GeV"
             width_info = dict(
                 name=widthVarTag,
-                skipEntries=widthWeightNames(
+                skipEntries=theory_utils.widthWeightNames(
                     proc="W", exclude=(float(wlv), float(whv))
                 ),
                 systNameReplace=[[wlvStr, "Down"], [whvStr, "Up"]],
@@ -1746,7 +1753,7 @@ def setup(
                         datagroups.nominalName, member, widthWeightName
                     )
                     preOpMap[member.name] = (
-                        lambda h, h_ref=h_ref: syst_tools.correct_bw_xsec(h, h_ref)
+                        lambda h, h_ref=h_ref: rabbit_helpers.correct_bw_xsec(h, h_ref)
                     )
             datagroups.addSystematic(
                 histname=f"breitwigner_{widthWeightName}",
@@ -1780,7 +1787,7 @@ def setup(
                     # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
                     isPoiHistDecorr=len(args.fitWidthDecorr),
                     actionRequiresNomi=True,
-                    action=syst_tools.decorrelateByAxes,
+                    action=rabbit_helpers.decorrelateByAxes,
                     actionArgs=dict(
                         axesToDecorrNames=args.fitWidthDecorr,
                         newDecorrAxesNames=new_names,
@@ -1794,12 +1801,12 @@ def setup(
                 suffix = "".join(
                     [a.capitalize() for a in args.widthDiffWVar.split("-")]
                 )
-                combine_helpers.add_mass_diff_variations(
+                rabbit_helpers.add_width_diff_variations(
                     datagroups,
                     args.widthDiffWVar,
                     name=widthWeightName,
                     processes=signal_samples_forMass,
-                    constrain=constrainMass,
+                    constrain="wwidth" not in args.noi,
                     suffix=suffix,
                     label=label,
                     passSystToFakes=passSystToFakes,
@@ -1834,7 +1841,7 @@ def setup(
         if datagroups.xnorm:
             theorySystSamples = ["signal_samples"]
 
-        theory_helper = combine_theory_helper.TheoryHelper(
+        theory_helper = rabbit_theory_helper.TheoryHelper(
             label, datagroups, args, hasNonsigSamples=(wmass and not datagroups.xnorm)
         )
         theory_helper.configure(
@@ -1888,7 +1895,9 @@ def setup(
                 f"massWeightZ",
                 processes=["single_v_nonsig_samples"],
                 groups=["ZmassAndWidth", "theory"],
-                skipEntries=massWeightNames(proc="Z", exclude=massVariationZ),
+                skipEntries=theory_utils.massWeightNames(
+                    proc="Z", exclude=massVariationZ
+                ),
                 mirror=False,
                 noi=not constrainMassZ,
                 noConstraint=not constrainMassZ,
@@ -1898,7 +1907,7 @@ def setup(
 
             if "massDiffZ" in args.noi:
                 suffix = "".join([a.capitalize() for a in args.massDiffZVar.split("-")])
-                combine_helpers.add_mass_diff_variations(
+                rabbit_helpers.add_mass_diff_variations(
                     datagroups,
                     args.massDiffZVar,
                     name=f"{massWeightName}Z",
@@ -1911,7 +1920,7 @@ def setup(
 
         if inputBaseName != "prefsr":
             # make prefsr ane EW free definition
-            combine_helpers.add_electroweak_uncertainty(
+            rabbit_helpers.add_electroweak_uncertainty(
                 datagroups,
                 [*args.ewUnc, *args.fsrUnc, *args.isrUnc],
                 samples="single_v_samples",
@@ -1936,7 +1945,7 @@ def setup(
                 systAxes=[f"{decorr_syst_var}_", "downUpVar"],
                 labelsByAxis=[decorr_syst_var, "downUpVar"],
                 actionRequiresNomi=True,
-                action=syst_tools.decorrelateByAxes,
+                action=rabbit_helpers.decorrelateByAxes,
                 actionArgs=dict(
                     axesToDecorrNames=[decorr_syst_var],
                     newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -1997,7 +2006,7 @@ def setup(
             systAxes=[f"{decorr_syst_var}_", "downUpVar"],
             labelsByAxis=[decorr_syst_var, "downUpVar"],
             actionRequiresNomi=True,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(
                 axesToDecorrNames=[decorr_syst_var],
                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2062,7 +2071,7 @@ def setup(
                     systAxes=[f"{decorr_syst_var}_", "downUpVar"],
                     labelsByAxis=[decorr_syst_var, "downUpVar"],
                     actionRequiresNomi=True,
-                    action=syst_tools.decorrelateByAxes,
+                    action=rabbit_helpers.decorrelateByAxes,
                     actionArgs=dict(
                         axesToDecorrNames=[decorr_syst_var],
                         newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2213,7 +2222,9 @@ def setup(
                         data=hvar.values(flow=True)[..., np.newaxis],
                     )
                 else:
-                    hvar = syst_tools.decorrelateByAxes(hvar, hnom, axesToDecorrNames)
+                    hvar = rabbit_helpers.decorrelateByAxes(
+                        hvar, hnom, axesToDecorrNames
+                    )
 
                 return hvar
 
@@ -2264,9 +2275,17 @@ def setup(
                         ),
                     )
 
-            # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2'
-            if "utAngleSign" in fitvar:
+            # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2' or --select 'utAngleSign 0 1'
+            # is there a better way to check whether the negative uT bi
+            if "utAngleSign" in fitvar and (
+                args.selection is None
+                or not any(
+                    sel in args.selection
+                    for sel in ["utAngleSign 1 2", "utAngleSign 0 1"]
+                )
+            ):
                 # TODO: extend and use previous function fake_nonclosure(...)
+                # TODO: move function elsewhere
                 def fake_nonclosure_byAxis(
                     h,
                     axesToDecorrNames=["eta"],
@@ -2286,23 +2305,25 @@ def setup(
                     hvar = (1 + variation_size) * hnom
                     if keepConstantAxisBin:
                         ax_names = [n for n in hvar.axes.name]
+                        idxs = [slice(None)] * hvar.ndim
                         for name in keepConstantAxisBin.keys():
                             if name not in ax_names:
                                 raise ValueError(
                                     f"In fake_nonclosure_byAxis(): axis '{name}' not found in hvar, valid names are {ax_names}"
                                 )
                             ax_index = ax_names.index(name)
-                            idxs = [slice(None)] * hvar.ndim
                             idxs[ax_index] = keepConstantAxisBin[name]
                         hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
 
-                    hvar = syst_tools.decorrelateByAxes(hvar, hnom, axesToDecorrNames)
+                    hvar = rabbit_helpers.decorrelateByAxes(
+                        hvar, hnom, axesToDecorrNames
+                    )
 
                     return hvar
 
                 datagroups.addSystematic(
                     inputBaseName,
-                    groups=[subgroup, "Fake", "experiment", "expNoCalib"],
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
                     name=f"{datagroups.fakeName}EtaClos_eta",
                     baseName=f"{datagroups.fakeName}EtaClos",
                     processes=datagroups.fakeName,
@@ -2317,6 +2338,118 @@ def setup(
                         keepConstantAxisBin={"utAngleSign": 1},
                     ),
                     systAxes=["eta_decorr"],
+                )
+
+                # TODO: move function elsewhere
+                def fake_transferFactor_ptSyst(
+                    h,
+                    axesToDecorrNames=[],
+                    altHistName="fakeCorr_altStat",
+                    varIdxs=[0],
+                    correctionFile="",
+                    *args,
+                    **kwargs,
+                ):
+                    hnom = fakeselector.get_hist(h, *args, **kwargs)
+
+                    ax_names = [n for n in hnom.axes.name]
+                    sel_var = [slice(None)] * hnom.ndim
+                    sel_const = [slice(None)] * hnom.ndim
+                    sel_var[ax_names.index(datagroups.fakeTransferAxis)] = 0
+                    sel_const[ax_names.index(datagroups.fakeTransferAxis)] = 1
+
+                    hvar = add_nonprompt_transfer_factor_variations(
+                        hnom.copy(),
+                        correctionFile,
+                        altHistName,
+                        sel_var,
+                        varIdxs=varIdxs,
+                    )
+
+                    hvar_utPlus = hnom.copy()[tuple(sel_const)]
+
+                    if varIdxs[0] != -1:
+                        hvar.values()[
+                            tuple([*sel_const, slice(None), slice(None)])
+                        ] = hvar_utPlus.values()[..., None, None]
+                    else:
+                        hvar.values()[
+                            tuple([*sel_const, slice(None)])
+                        ] = hvar_utPlus.values()[..., None]
+
+                    if len(axesToDecorrNames) > 0:
+                        hvar = rabbit_helpers.decorrelateByAxes(
+                            hvar,
+                            hnom,
+                            axesToDecorrNames,
+                            newDecorrAxesNames=[
+                                f"{x}_decorr" for x in axesToDecorrNames
+                            ],
+                        )
+
+                    return hvar
+
+                ## TODO: move the following systematics in an imported file, once this is finalized
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                    name=f"{datagroups.fakeName}TransferFactorStat",
+                    baseName=f"{datagroups.fakeName}TransferFactorStat",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_transferFactor_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_altStat",
+                        varIdxs=[0],
+                        correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                    ),
+                    systAxes=["varTF", "downUpVar"],
+                    labelsByAxis=["varTF", "downUpVar"],
+                )
+
+                ## syst for transfer factor difference between data and QCD MC in control region
+                # datagroups.addSystematic(
+                #     inputBaseName,
+                #     groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                #     name=f"{datagroups.fakeName}TransferFactorClosQCD",
+                #     baseName=f"{datagroups.fakeName}TransferFactorClosQCD",
+                #     processes=datagroups.fakeName,
+                #     noConstraint=False,
+                #     mirror=False,
+                #     scale=1,
+                #     applySelection=False,  # don't apply selection, external parameters need to be added
+                #     action=fake_transferFactor_ptSyst,
+                #     actionArgs=dict(
+                #         altHistName="fakeCorr_closQCDsv",
+                #         varIdxs = [],
+                #         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                #     ),
+                #     systAxes=["downUpVar"],
+                #     labelsByAxis=["downUpVar"],
+                # )
+
+                # syst for transfer factor difference between control and signal regions from MC
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                    name=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    baseName=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_transferFactor_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_closQCDsignal",
+                        varIdxs=[],
+                        correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                    ),
+                    systAxes=["downUpVar"],
+                    labelsByAxis=["downUpVar"],
                 )
 
     if not args.noEfficiencyUnc:
@@ -2418,7 +2551,7 @@ def setup(
                                 systAxes=[*axes, f"{decorr_syst_var}_"],
                                 labelsByAxis=[*axlabels, decorr_syst_var],
                                 actionRequiresNomi=True,
-                                action=syst_tools.decorrelateByAxes,
+                                action=rabbit_helpers.decorrelateByAxes,
                                 actionArgs=dict(
                                     axesToDecorrNames=[decorr_syst_var],
                                     newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2439,7 +2572,7 @@ def setup(
                                 f"{decorr_syst_var}_",
                             ]
                             axlabels = ["WPSYST", "_etaDecorr", decorr_syst_var]
-                            actionSF = syst_tools.decorrelateByAxes
+                            actionSF = rabbit_helpers.decorrelateByAxes
                             effActionArgs = dict(
                                 axesToDecorrNames=[decorr_syst_var],
                                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2502,7 +2635,7 @@ def setup(
                             f"{decorr_syst_var}_",
                         ]
                         axlabels = ["eta", "pt", "q", decorr_syst_var]
-                        actionSF = syst_tools.decorrelateByAxes
+                        actionSF = rabbit_helpers.decorrelateByAxes
                         effActionArgs = dict(
                             axesToDecorrNames=[decorr_syst_var],
                             newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2695,7 +2828,7 @@ def setup(
                 )
 
     if (wmass or wlike) and datagroups.args_from_metadata("recoilUnc"):
-        combine_helpers.add_recoil_uncertainty(
+        rabbit_helpers.add_recoil_uncertainty(
             datagroups,
             ["signal_samples"],
             passSystToFakes=passSystToFakes,
@@ -2744,7 +2877,7 @@ def setup(
             passToFakes=passSystToFakes,
             preOp=preOpCorrAction,
             preOpArgs=preOpCorrActionArgs,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(
                 axesToDecorrNames=["eta", decorr_syst_var],
                 newDecorrAxesNames=["eta_", f"{decorr_syst_var}_"],
@@ -2766,7 +2899,7 @@ def setup(
             passToFakes=passSystToFakes,
             preOp=preOpCorrAction,
             preOpArgs=preOpCorrActionArgs,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(
                 axesToDecorrNames=[decorr_syst_var],
                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2812,7 +2945,7 @@ def setup(
     if "prefire" in args.decorrSystByVar and decorr_syst_var in fitvar:
         prefireSystAxes = [f"{decorr_syst_var}_"] + prefireSystAxes
         prefireSystLabels = [decorr_syst_var] + prefireSystLabels
-        prefireSystAction = syst_tools.decorrelateByAxes
+        prefireSystAction = rabbit_helpers.decorrelateByAxes
         prefireSystActionArgs = dict(
             axesToDecorrNames=[decorr_syst_var],
             newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2841,7 +2974,7 @@ def setup(
     if "prefire" in args.decorrSystByVar and decorr_syst_var in fitvar:
         prefireStatAxes = [f"{decorr_syst_var}_"] + prefireStatAxes
         prefireStatLabels = [decorr_syst_var] + prefireStatLabels
-        prefireStatAction = syst_tools.decorrelateByAxes
+        prefireStatAction = rabbit_helpers.decorrelateByAxes
         prefireStatActionArgs = dict(
             axesToDecorrNames=[decorr_syst_var],
             newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2881,7 +3014,7 @@ def setup(
             passToFakes=passSystToFakes,
             scale=args.calibrationStatScaling,
             actionRequiresNomi=True,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(
                 axesToDecorrNames=[decorr_syst_var],
                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2897,7 +3030,7 @@ def setup(
             systAxes=["unc", f"{decorr_syst_var}_", "downUpVar"],
             passToFakes=passSystToFakes,
             actionRequiresNomi=True,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(
                 axesToDecorrNames=[decorr_syst_var],
                 newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -2973,7 +3106,7 @@ def setup(
                 passToFakes=passSystToFakes,
                 scale=args.resolutionStatScaling,
                 actionRequiresNomi=True,
-                action=syst_tools.decorrelateByAxes,
+                action=rabbit_helpers.decorrelateByAxes,
                 actionArgs=dict(
                     axesToDecorrNames=[decorr_syst_var],
                     newDecorrAxesNames=[f"{decorr_syst_var}_"],
@@ -3049,7 +3182,7 @@ def setup(
             passToFakes=passSystToFakes,
             scale=args.calibrationStatScaling,
             actionRequiresNomi=True,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
         )
 
@@ -3062,7 +3195,7 @@ def setup(
             systAxes=["unc", "run_", "downUpVar"],
             passToFakes=passSystToFakes,
             actionRequiresNomi=True,
-            action=syst_tools.decorrelateByAxes,
+            action=rabbit_helpers.decorrelateByAxes,
             actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
         )
 
@@ -3083,11 +3216,11 @@ def setup(
                 passToFakes=passSystToFakes,
                 scale=args.resolutionStatScaling,
                 actionRequiresNomi=True,
-                action=syst_tools.decorrelateByAxes,
+                action=rabbit_helpers.decorrelateByAxes,
                 actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
             )
 
-    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupRabbitWMass.py#L359
+    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupCombineWMass.py#L359
 
     return datagroups
 
@@ -3321,13 +3454,13 @@ if __name__ == "__main__":
                 poi_axes = ["ptVGen", "absYVGen", "helicitySig"]
 
                 # we have to use the same scalemap as in the Z channel
-                scalemap = combine_helpers.get_scalemap(
+                scalemap = rabbit_helpers.get_scalemap(
                     dgs["z_dilepton"],
                     poi_axes,
                     gen_level=args.unfoldingLevel,
                 )
 
-                combine_helpers.add_noi_unfolding_variations(
+                rabbit_helpers.add_noi_unfolding_variations(
                     datagroups,
                     "Z",
                     True,

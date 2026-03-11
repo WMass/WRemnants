@@ -2,9 +2,9 @@ import argparse
 
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools, output_tools
-from wremnants import theory_corrections
+from wremnants.production import theory_corrections
+from wremnants.utilities import binning, common
+from wremnants.utilities.io_tools import input_tools, output_tools
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -103,7 +103,7 @@ processes = (
 
 binning = {
     "qT": (
-        common.ptZgen_binning_corr if args.proc == "z" else common.ptWgen_binning_corr
+        binning.ptZgen_binning_corr if args.proc == "z" else binning.ptWgen_binning_corr
     ),
     "absY": [0 + 0.5 * i for i in range(9)] + [5.0],
 }
@@ -122,10 +122,10 @@ minnloh = hh.makeAbsHist(minnloh, "y")
 minnloh = hh.rebinHistMultiAx(minnloh, binning)
 minnloh = minnloh[{"muRfact": 1.0j, "muFfact": 1.0j}]
 
-sigma_ulh = theory_corrections.read_combined_corrs(
+sigma_ulh = input_tools.read_combined_corrs(
     processes, args.generator, args.corr_ul, axes=args.axes, rebin=binning
 )
-sigma4h = theory_corrections.read_combined_corrs(
+sigma4h = input_tools.read_combined_corrs(
     processes, args.generator, args.corr_a4, axes=args.axes, rebin=binning
 )
 if sigma4h:

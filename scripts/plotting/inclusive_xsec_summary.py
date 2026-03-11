@@ -12,8 +12,8 @@ import pandas as pd
 from matplotlib.patches import Ellipse, Polygon
 
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import tex_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import tex_tools
 
 from wums import logging, output_tools, plot_tools  # isort: skip
 

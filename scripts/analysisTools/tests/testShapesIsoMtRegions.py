@@ -6,11 +6,11 @@ import os
 import sys
 
 import narf
+from wremnants.postprocessing import histselections as sel
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
 
-# from wremnants import plot_tools,theory_tools,syst_tools
-from utilities import common
-from wremnants import histselections as sel
-from wremnants.datasets.datagroups import Datagroups
+# from wremnants.postprocessing import plot_tools,theory_tools,syst_tools
+from wremnants.utilities import binning
 from wums import logging
 
 args = sys.argv[:]
@@ -41,6 +41,11 @@ from scripts.analysisTools.w_mass_13TeV.plotPrefitTemplatesWRemnants import (
 )
 
 sys.path.append(os.getcwd())
+
+
+def getIsoMtRegionFromID(regionID):
+    return {binning.passIsoName: regionID & 1, binning.passMTName: regionID & 2}
+
 
 if __name__ == "__main__":
     parser = common_plot_parser()
@@ -80,7 +85,7 @@ if __name__ == "__main__":
         nargs="+",
         default=[0, 1, 2, 3],
         choices=[0, 1, 2, 3],
-        help="Integer index for iso-Mt regions to plot (conversion is index = passIso * 1 + passMT * 2 as in common.getIsoMtRegionFromID)",
+        help="Integer index for iso-Mt regions to plot (conversion is index = passIso * 1 + passMT * 2 as in getIsoMtRegionFromID)",
     )
     parser.add_argument(
         "--useQCDMC",
@@ -113,7 +118,7 @@ if __name__ == "__main__":
 
     for isoMtID in args.isoMtRegion:
 
-        ret = common.getIsoMtRegionFromID(isoMtID)
+        ret = getIsoMtRegionFromID(isoMtID)
         passMT = ret["passMT"]
         passIso = ret["passIso"]
         passMT_str = "passMT" if passMT else "failMT"

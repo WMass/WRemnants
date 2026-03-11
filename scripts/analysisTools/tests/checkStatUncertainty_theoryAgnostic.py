@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 
-# from wremnants import plot_tools,theory_tools,syst_tools
+# from wremnants.postprocessing import plot_tools,theory_tools,syst_tools
 
 args = sys.argv[:]
 sys.argv = ["-b"]

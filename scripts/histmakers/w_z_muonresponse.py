@@ -1,4 +1,4 @@
-from utilities import common, parsing
+from wremnants.utilities import binning, common, parsing, samples
 from wums import logging
 
 parser, initargs = parsing.common_parser("w_mass")
@@ -9,8 +9,14 @@ import hist
 import ROOT
 
 import narf
-from wremnants import muon_calibration, muon_selections, pileup, vertex
-from wremnants.datasets.dataset_tools import getDatasets, write_analysis_output
+from wremnants.production import (
+    muon_calibration,
+    muon_selections,
+    pileup,
+    vertex,
+)
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import write_analysis_output
 
 parser.add_argument(
     "--testHelpers", action="store_true", help="Test the smearing weights helper"
@@ -40,7 +46,7 @@ axis_genCharge = hist.axis.Regular(
 axis_qopr = hist.axis.Regular(1001, 0.0, 2.0, name="qopr")
 
 axis_eta = hist.axis.Regular(args.eta[0], args.eta[1], args.eta[2], name="eta")
-axis_charge = common.axis_charge
+axis_charge = binning.axis_charge
 axis_nvalidpixel = hist.axis.Integer(0, 10, name="nvalidpixel")
 
 response_axes = [axis_genPt, axis_genEta, axis_genCharge, axis_qopr]
@@ -91,8 +97,8 @@ if args.testHelpers:
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
-    isW = dataset.name in common.wprocs
-    isZ = dataset.name in common.zprocs
+    isW = dataset.name in samples.wprocs
+    isZ = dataset.name in samples.zprocs
     isTop = dataset.group == "Top"
     isQCDMC = dataset.group == "QCD"
 

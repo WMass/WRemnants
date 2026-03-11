@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-from utilities import parsing
-from utilities.io_tools import rabbit_input
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import rabbit_input
 from wums import output_tools, plot_tools
 
 parser = parsing.plot_parser()

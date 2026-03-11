@@ -5,7 +5,7 @@ import numpy as np
 import ROOT
 
 import narf
-from utilities import common
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 from wums import output_tools
 

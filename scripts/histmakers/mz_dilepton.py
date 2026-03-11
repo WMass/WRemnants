@@ -1,9 +1,8 @@
 import os
 
-from utilities import common, differential, parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.utilities import binning, common, parsing, samples
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 import math
@@ -13,23 +12,21 @@ import numpy as np
 import ROOT
 
 import narf
-from wremnants import (
-    helicity_utils,
+from wremnants.production import (
     muon_calibration,
     muon_efficiencies_binned,
     muon_efficiencies_smooth,
     muon_prefiring,
     muon_selections,
     pileup,
-    syst_tools,
+    systematics,
     theory_corrections,
-    theory_tools,
     theoryAgnostic_tools,
     unfolding_tools,
     vertex,
 )
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import (
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
     aggregate_groups,
     make_quantile_helper,
     scale_to_data,
@@ -117,7 +114,7 @@ parser = parsing.set_parser_default(
 )
 parser = parsing.set_parser_default(parser, "excludeProcs", ["QCD", "DYlowMass"])
 parser = parsing.set_parser_default(
-    parser, "pt", common.get_default_ptbins(analysis_label)
+    parser, "pt", binning.get_default_ptbins(analysis_label)
 )
 args = parser.parse_args()
 
@@ -144,22 +141,22 @@ datasets = getDatasets(
 )
 
 # dilepton invariant mass cuts
-mass_min, mass_max = common.get_default_mz_window()
+mass_min, mass_max = binning.get_default_mz_window()
 
-ewMassBins = theory_tools.make_ew_binning(mass=91.1535, width=2.4932, initialStep=0.010)
+ewMassBins = binning.make_bw_binning(mass=91.1535, width=2.4932, initialStep=0.010)
 
 if args.useTheoryAgnosticBinning:
-    theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
+    theoryAgnostic_axes, _ = binning.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike=True
     )
     axis_ptV_thag = theoryAgnostic_axes[0]
     dilepton_ptV_binning = axis_ptV_thag.edges
 else:
-    dilepton_ptV_binning = common.ptZ_binning if not args.finePtBinning else range(200)
+    dilepton_ptV_binning = binning.ptZ_binning if not args.finePtBinning else range(200)
 
 if "yll" in args.axes:
     # use 20 quantiles in case "yll" is used as nominal axis
-    edges_yll = common.yll_20quantiles_binning
+    edges_yll = binning.yll_20quantiles_binning
     edges_absYll = edges_yll[len(edges_yll) // 2 :]
     axis_yll = hist.axis.Variable(edges_yll, name="yll")
     axis_absYll = hist.axis.Variable(edges_absYll, name="absYll", underflow=False)
@@ -358,7 +355,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
 )
 procs = [
     p
-    for p, grp in (("W", common.wprocs), ("Z", common.zprocs))
+    for p, grp in (("W", samples.wprocs), ("Z", samples.zprocs))
     if any(d.name in grp for d in datasets)
 ]
 theory_helpers_procs = theory_corrections.make_theory_helpers(
@@ -502,15 +499,15 @@ if args.jackknifeN > 0:
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs], theory_corrs
+    [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
 )
 
 
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
-    isW = dataset.name in common.wprocs
-    isZ = dataset.name in common.zprocs
+    isW = dataset.name in samples.wprocs
+    isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
     theory_helpers = {}
@@ -547,7 +544,7 @@ def build_graph(df, dataset):
     cols = nominal_cols
 
     if args.addRunAxis and dataset.is_data:
-        run_edges = common.run_edges
+        run_edges = binning.run_edges
         axes = [
             *axes,
             hist.axis.Variable(
@@ -578,7 +575,7 @@ def build_graph(df, dataset):
         # gen level variables before selection
         df_gen = df
         df_gen = df_gen.DefinePerSample("exp_weight", "1.0")
-        df_gen = theory_tools.define_theory_weights_and_corrs(
+        df_gen = theory_corrections.define_theory_weights_and_corrs(
             df_gen, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
 
@@ -588,7 +585,7 @@ def build_graph(df, dataset):
                     f"gen_{obs}", [all_axes[obs]], [obs, "nominal_weight"]
                 )
             )
-            syst_tools.add_theory_hists(
+            systematics.add_theory_hists(
                 results,
                 df_gen,
                 args,
@@ -767,7 +764,7 @@ def build_graph(df, dataset):
 
     axis_eta = hist.axis.Regular(int(args.eta[0]), args.eta[1], args.eta[2], name="eta")
     axis_pt = hist.axis.Regular(int(args.pt[0]), args.pt[1], args.pt[2], name="pt")
-    axis_charge = common.axis_charge
+    axis_charge = binning.axis_charge
     axis_nvalidpixel = hist.axis.Integer(0, 10, name="nvalidpixel")
 
     df = df.Define(
@@ -901,7 +898,7 @@ def build_graph(df, dataset):
 
         logger.debug(f"Experimental weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
-        df = theory_tools.define_theory_weights_and_corrs(
+        df = theory_corrections.define_theory_weights_and_corrs(
             df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
 
@@ -932,23 +929,19 @@ def build_graph(df, dataset):
 
         if isZ:
             # theory agnostic stuff
-            theoryAgnostic_axes, theoryAgnostic_cols = (
-                differential.get_theoryAgnostic_axes(
-                    ptV_bins=[],
-                    absYV_bins=[],
-                    ptV_flow=True,
-                    absYV_flow=True,
-                    wlike=True,
-                )
+            theoryAgnostic_axes, theoryAgnostic_cols = binning.get_theoryAgnostic_axes(
+                ptV_bins=[],
+                absYV_bins=[],
+                ptV_flow=True,
+                absYV_flow=True,
+                wlike=True,
             )
-            axis_helicity = helicity_utils.axis_helicity_multidim
+            axis_helicity = binning.axis_helicity_multidim
 
             df_theory_agnostic = theoryAgnostic_tools.define_helicity_weights(
                 df, is_z=True
             )
-            noiAsPoiHistName = Datagroups.histName(
-                "nominal", syst="yieldsTheoryAgnostic"
-            )
+            noiAsPoiHistName = common.hist_name("nominal", syst="yieldsTheoryAgnostic")
             logger.debug(
                 f"Creating special histogram '{noiAsPoiHistName}' for theory agnostic to treat POIs as NOIs"
             )
@@ -1038,7 +1031,7 @@ def build_graph(df, dataset):
                     df.HistoBoost(obs_name, obs_axes, [*obs, "nominal_weight"])
                 )
                 if isWorZ and not args.onlyMainHistograms:
-                    df = syst_tools.add_theory_hists(
+                    df = systematics.add_theory_hists(
                         results,
                         df,
                         args,
@@ -1060,7 +1053,7 @@ def build_graph(df, dataset):
                 )
             )
             if not args.onlyMainHistograms:
-                df = syst_tools.add_theory_hists(
+                df = systematics.add_theory_hists(
                     results,
                     df,
                     args,
@@ -1229,7 +1222,7 @@ def build_graph(df, dataset):
 
     if not dataset.is_data and not args.onlyMainHistograms:
 
-        df = syst_tools.add_muon_efficiency_unc_hists(
+        df = systematics.add_muon_efficiency_unc_hists(
             results,
             df,
             muon_efficiency_helper_stat,
@@ -1240,7 +1233,7 @@ def build_graph(df, dataset):
             smooth3D=args.smooth3dsf,
         )
         for es in common.muonEfficiency_altBkgSyst_effSteps:
-            df = syst_tools.add_muon_efficiency_unc_hists_altBkg(
+            df = systematics.add_muon_efficiency_unc_hists_altBkg(
                 results,
                 df,
                 muon_efficiency_helper_syst_altBkg[es],
@@ -1250,7 +1243,7 @@ def build_graph(df, dataset):
                 step=es,
             )
 
-        df = syst_tools.add_L1Prefire_unc_hists(
+        df = systematics.add_L1Prefire_unc_hists(
             results,
             df,
             axes,
@@ -1261,7 +1254,7 @@ def build_graph(df, dataset):
 
         if isWorZ:
 
-            df = syst_tools.add_theory_hists(
+            df = systematics.add_theory_hists(
                 results,
                 df,
                 args,
@@ -1459,7 +1452,7 @@ def build_graph(df, dataset):
 
             # Don't think it makes sense to apply the mass weights to scale leptons from tau decays
             if not "tau" in dataset.name:
-                syst_tools.add_muonscale_hist(
+                systematics.add_muonscale_hist(
                     results,
                     df,
                     args.muonCorrEtaBins,
