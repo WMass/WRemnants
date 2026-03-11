@@ -284,8 +284,6 @@ groups = Datagroups(
     excludeGroups=args.excludeProcs,
 )
 
-logger.debug(f"groups: {groups}")
-
 if not args.fineGroups:
     if groups.mode in styles.process_supergroups:
         for new_name, old_groups in styles.process_supergroups[groups.mode].items():
@@ -545,7 +543,7 @@ for h in args.hists:
         base_action = lambda x: hh.projectNoFlow(
             collapseSyst(x[select]), h, overflow_ax
         )
-        # base_action  = lambda x: collapseSyst(x[select])
+        base_action = lambda x: collapseSyst(x[select])
         action = base_action
         href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
 

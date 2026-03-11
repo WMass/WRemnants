@@ -66,6 +66,7 @@ calib_filepaths = {
     "data_resofile": f"{calib_dir}/sigmaDATA_LBL_JYZ.root",
     "tflite_file": f"{calib_dir}/muon_response.tflite",
     # 'tflite_file': f"{calib_dir}/muon_response_nosmearing.tflite"
+    "kaon_tflite_file": f"{calib_dir}/kaon_response.tflite",
 }
 closure_filepaths = {
     "parametrized": f"{closure_dir}/parametrizedClosureZ_ORkinweight_binsel_MCstat_fullres.root",

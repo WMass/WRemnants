@@ -7,6 +7,15 @@ import math
 import hist
 
 all_butojpsik_axes = {
+    # random
+    "bkmm_kaon_shit_response_weights": hist.axis.Regular(
+        1000,
+        -1000,
+        1000,
+        name="bkmm_kaon_response_weights",
+        underflow=True,
+        overflow=True,
+    ),
     # Muon variables
     "Muon_eta": hist.axis.Regular(
         50, -2.7, 2.7, name="Muon_eta", underflow=False, overflow=False
@@ -19,10 +28,19 @@ all_butojpsik_axes = {
     ),
     # Kaon kinematic variables (no jpsimc)
     "bkmm_kaon_eta": hist.axis.Regular(
-        50, -2.7, 2.7, name="bkmm_kaon_eta", underflow=False, overflow=False
+        28, -1.4, 1.4, name="bkmm_kaon_eta", underflow=False, overflow=False
     ),
-    "bkmm_kaon_pt": hist.axis.Regular(
-        100, 0.0, 20.0, name="bkmm_kaon_pt", underflow=False, overflow=False
+    "bkmm_kaon_pt": hist.axis.Variable(
+        [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False
+    ),
+    "bkmm_kaon_curvature": hist.axis.Regular(
+        5, 0, 1, name="bkmm_kaon_curvature", underflow=False, overflow=False
+    ),
+    "bkmm_kaon_shit_recoPt": hist.axis.Variable(
+        [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False
+    ),
+    "bkmm_kaon_shit_genPt": hist.axis.Variable(
+        [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False
     ),
     "bkmm_kaon_phi": hist.axis.Regular(
         50, -math.pi, math.pi, name="bkmm_kaon_phi", underflow=False, overflow=False
@@ -54,14 +72,14 @@ all_butojpsik_axes = {
         50, -math.pi, math.pi, name="bkmm_jpsimc_phi", underflow=False, overflow=False
     ),
     "bkmm_jpsimc_mass": hist.axis.Regular(
-        500, 5.2, 5.4, name="bkmm_jpsimc_mass", underflow=False, overflow=False
+        100, 5.2, 5.4, name="bkmm_jpsimc_mass", underflow=False, overflow=False
     ),
     "bkmm_jpsimc_massErr": hist.axis.Regular(
         30, 0.0, 0.15, name="bkmm_jpsimc_massErr", underflow=False, overflow=False
     ),
     # kaon of bkmm jpsimc candidate kinematic variables
     "bkmm_jpsimc_kaon1eta": hist.axis.Regular(
-        50, -2.7, 2.7, name="bkmm_jpsimc_kaon1eta", underflow=False, overflow=False
+        28, -1.4, 1.4, name="bkmm_jpsimc_kaon1eta", underflow=False, overflow=False
     ),
     "bkmm_jpsimc_kaon1phi": hist.axis.Regular(
         50,
@@ -72,8 +90,11 @@ all_butojpsik_axes = {
         overflow=False,
     ),
     "bkmm_jpsimc_kaon1pt": hist.axis.Regular(
-        100, 0.0, 20.0, name="bkmm_jpsimc_kaon1pt", underflow=False, overflow=False
+        80, 0.0, 8.0, name="bkmm_jpsimc_kaon1pt", underflow=False, overflow=False
     ),
+    # "bkmm_jpsimc_kaon1pt": hist.axis.Variable(
+    #    [1,2,3,8], name="bkmm_jpsimc_kaon1pt", underflow=False, overflow=False
+    # ),
     # bkmm jpimc vtx
     "bkmm_jpsimc_vtx_chi2dof": hist.axis.Regular(
         50, 0.0, 5.0, name="bkmm_jpsimc_vtx_chi2dof", underflow=False, overflow=False
@@ -193,7 +214,7 @@ all_butojpsik_axes = {
         50, -math.pi, math.pi, name="bkmm_nomc_phi", underflow=False, overflow=False
     ),
     "bkmm_nomc_mass": hist.axis.Regular(
-        100, 4.8, 6.0, name="bkmm_nomc_mass", underflow=False, overflow=False
+        100, 5.2, 5.4, name="bkmm_nomc_mass", underflow=False, overflow=False
     ),
     "bkmm_nomc_massErr": hist.axis.Regular(
         30, 0.0, 0.15, name="bkmm_nomc_massErr", underflow=False, overflow=False
