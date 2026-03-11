@@ -6,9 +6,9 @@ from matplotlib.patches import Polygon
 from scipy.stats import chi2
 
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import rabbit_input
-from utilities.styles import styles
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import rabbit_input
+from wremnants.utilities.styles import styles
 from wums import logging, output_tools, plot_tools
 
 

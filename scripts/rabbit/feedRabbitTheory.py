@@ -9,10 +9,9 @@ import numpy as np
 import rabbit
 import rabbit.io_tools
 from rabbit.tensorwriter import TensorWriter
-from utilities import common, parsing
-from utilities.io_tools import input_tools
-from wremnants import theory_corrections, theory_tools
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.production import theory_corrections
+from wremnants.utilities import binning, common, parsing, theory_utils
+from wremnants.utilities.io_tools import base_io
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -466,7 +465,7 @@ def apply_coarse_correction(fine_hist, coarse_corr, check_align=True):
     return corrected
 
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 parser.add_argument(
@@ -655,7 +654,7 @@ if not args.noFitSigmaUL:
 # if set, load in the helicity cross sections predictions from MINNLO
 if args.fitAngularCoeffs:
     with h5py.File(args.predAiFile, "r") as ff:
-        inputs = input_tools.load_results_h5py(ff)
+        inputs = base_io.load_results_h5py(ff)
         h_sig_hels = inputs["Z"]
     h_sig_hels = h_sig_hels[
         {"muRfact": 1.0j, "muFfact": 1.0j}
@@ -671,7 +670,7 @@ if args.fitW:
     with h5py.File(predWFiducialFile, "r") as h5file:
 
         lumi = 16800
-        inputs = input_tools.load_results_h5py(h5file)
+        inputs = base_io.load_results_h5py(h5file)
 
         weight_sum = inputs["Wplusmunu_2016PostVFP"]["weight_sum"]
         xsec = inputs["Wplusmunu_2016PostVFP"]["dataset"]["xsec"]
@@ -745,7 +744,7 @@ if not args.noFitSigmaUL:
 logger.info("Now at variations for AlphaS")
 symmetrize = "quadratic" if "alphaS" not in args.nois else "average"
 if not args.noFitSigmaUL:
-    pdf_name = theory_tools.pdfMap[args.pdfs[0]]["name"]
+    pdf_name = theory_utils.pdfMap[args.pdfs[0]]["name"]
     alphas_var_name = f"{args.predGenerator}{args.pdfs[0].upper()}_pdfas"
     alphas_vars = theory_corrections.load_corr_helpers(
         bosons,
@@ -782,7 +781,7 @@ if args.fitW or args.fitAngularCoeffs:
                 f"/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
                 "r",
             ) as h5file:
-                results = input_tools.load_results_h5py(h5file)
+                results = base_io.load_results_h5py(h5file)
                 lumi = 16800
                 h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
                     "prefsr_pdfAlphaSByHelicity"
@@ -824,7 +823,7 @@ if args.fitW or args.fitAngularCoeffs:
             with h5py.File(
                 args.predAiFile.replace("w_z_helicity_xsecs", "w_z_gen_dists"), "r"
             ) as ff:
-                inputs = input_tools.load_results_h5py(ff)
+                inputs = base_io.load_results_h5py(ff)
                 alpha_vars_hels = inputs["Zmumu_2016PostVFP"]["output"][
                     "nominal_gen_helicity_nominal_gen_pdfCT18ZalphaS002"
                 ].get()
@@ -860,7 +859,7 @@ if args.fitW:
         "/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250718_mW_variations/prefsr_massWeightW_MiNNLO.hdf5",
         "r",
     ) as ff:
-        inputs = input_tools.load_results_h5py(ff)
+        inputs = base_io.load_results_h5py(ff)
         mass_vars_Wp = inputs["Wplusmunu_2016PostVFP"]["prefsr_massWeightW"].get()
         mass_vars_Wm = inputs["Wminusmunu_2016PostVFP"]["prefsr_massWeightW"].get()
 
@@ -922,7 +921,7 @@ if args.fitW:
         "/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
         "r",
     ) as h5file:
-        results = input_tools.load_results_h5py(h5file)
+        results = base_io.load_results_h5py(h5file)
         lumi = 16800
 
         h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
@@ -1140,7 +1139,7 @@ if args.fitAngularCoeffs:
         "/ceph/submit/data/group/cms/store/user/lavezzo/alphaS//250627_angularCoefficients/w_z_gen_dists.cash_scetlib_dyturboCorr_maxFiles_1000_alphaSunfoldingBinning_helicity_WZ.hdf5",
         "r",
     ) as ff:
-        inputs = input_tools.load_results_h5py(ff)
+        inputs = base_io.load_results_h5py(ff)
         pdf_vars = inputs["Zmumu_2016PostVFP"]["output"][
             "nominal_gen_helicity_pdfCT18Z"
         ].get()
@@ -1234,7 +1233,7 @@ else:
             "/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
             "r",
         ) as h5file:
-            results = input_tools.load_results_h5py(h5file)
+            results = base_io.load_results_h5py(h5file)
             lumi = 16800
             h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
                 "prefsr_pdfCT18ZUncertByHelicity"
@@ -1376,7 +1375,7 @@ if args.fitW:
         "/ceph/submit/data/group/cms/store/user/lavezzo/alphaS/250815_debug/mw_with_mu_eta_pt_scetlib_dyturboCorr_maxFiles_m1_oldQCDscales.hdf5",
         "r",
     ) as h5file:
-        results = input_tools.load_results_h5py(h5file)
+        results = base_io.load_results_h5py(h5file)
         lumi = 16800
         h_Wp = results["Wplusmunu_2016PostVFP"]["output"][
             "prefsr_qcdScaleByHelicity"
@@ -1407,17 +1406,17 @@ if args.fitW:
     logger.info("Now at QCD scales (W)")
 
     # prepare fine binning hists
-    from utilities import common
+    from wremnants.utilities import common
 
-    fine_pt_binning = common.ptV_binning[::2]
+    fine_pt_binning = binning.ptV_binning[::2]
     inclusive_pt_binning = [
-        common.ptV_binning[0],
-        common.ptV_binning[-1],
+        binning.ptV_binning[0],
+        binning.ptV_binning[-1],
     ]
     nptfine = len(fine_pt_binning) - 1
     scale_inclusive = np.sqrt((nptfine - 1) / nptfine)
 
-    from wremnants import syst_tools
+    from wremnants.postprocessing import syst_tools
 
     h_W_new = syst_tools.hist_to_variations(
         copy.deepcopy(h_W),

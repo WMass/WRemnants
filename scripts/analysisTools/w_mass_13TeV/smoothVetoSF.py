@@ -20,7 +20,7 @@ from scipy.interpolate import RegularGridInterpolator
 import narf
 import wums.fitutils
 import wums.ioutils
-from utilities import common
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 
 utilities = utilitiesCMG.util()

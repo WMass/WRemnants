@@ -4,7 +4,7 @@ import os
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from utilities.io_tools import input_tools
+from wremnants.utilities.io_tools import input_tools
 from wums import logging
 
 mpl.rcParams.update(

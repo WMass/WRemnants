@@ -5,9 +5,9 @@ import hist
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utilities import common, parsing
-from utilities.io_tools import input_tools
-from wremnants import theory_corrections
+from wremnants.production import theory_corrections
+from wremnants.utilities import common, parsing, samples
+from wremnants.utilities.io_tools import base_io, input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 
@@ -124,7 +124,7 @@ def parse_args():
         "--eras",
         type=str,
         nargs="+",
-        choices=common.supported_eras,
+        choices=samples.supported_eras,
         help="Data set to process",
         default=["13TeVGen"],
     )
@@ -382,7 +382,7 @@ def main():
     for f in [args.minnloFile] + args.corrFiles:
         label = os.path.basename(f)
         try:
-            meta = input_tools.get_metadata(f)
+            meta = base_io.get_metadata(f)
             meta_dict[label] = meta
             if "scetlib" in args.generator and f.endswith("pkl"):
                 meta["config"] = input_tools.get_scetlib_config(f)

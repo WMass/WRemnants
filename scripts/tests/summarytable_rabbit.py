@@ -2,7 +2,7 @@ import pandas as pd
 from scipy.stats import chi2
 
 import rabbit.io_tools
-from utilities import parsing
+from wremnants.utilities import parsing
 from wums import logging, output_tools, tex_tools
 
 translate = {

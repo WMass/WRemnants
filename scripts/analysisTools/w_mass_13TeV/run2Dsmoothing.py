@@ -23,7 +23,7 @@ import narf
 import wums.fitutils
 import wums.ioutils
 import wums.output_tools
-from utilities import common
+from wremnants.utilities import common
 from wums import boostHistHelpers as hh
 from wums import logging
 

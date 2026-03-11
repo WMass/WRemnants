@@ -21,8 +21,8 @@ import tensorflow as tf
 
 import narf
 import wums.fitutils
-from wremnants import legacy_functions as sel
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.postprocessing import legacy_functions as sel
+from wremnants.postprocessing.datagroups.datagroups import Datagroups
 from wums import boostHistHelpers as hh
 from wums import logging
 

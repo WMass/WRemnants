@@ -2,7 +2,7 @@ import pandas as pd
 import ROOT
 from scipy.stats import chi2
 
-from utilities import parsing
+from wremnants.utilities import parsing
 from wums import logging, output_tools, tex_tools
 
 translate = {}

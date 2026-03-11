@@ -20,9 +20,9 @@ import h5py
 import hist
 
 import narf
-from utilities.io_tools import input_tools
+from wremnants.utilities.io_tools import base_io
 
-# from wremnants import plot_tools,theory_tools,syst_tools
+# from wremnants.postprocessing import plot_tools,theory_tools,syst_tools
 from wums import ioutils, logging
 
 args = sys.argv[:]
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     yAxisName = "Muon p_{T} (GeV)"
 
     h5file = h5py.File(fname, "r")
-    results = input_tools.load_results_h5py(h5file)
+    results = base_io.load_results_h5py(h5file)
 
     s = hist.tag.Slicer()
 

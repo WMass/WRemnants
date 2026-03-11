@@ -15,6 +15,10 @@ sys.argv = args
 ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 
+import narf
+
+narf.clingutils.Declare('#include "EtaPtCorrelatedEfficiency.hpp"')
+
 sys.path.append(os.getcwd() + "/plotUtils/")
 from utility import (
     createPlotDirAndCopyPhp,
