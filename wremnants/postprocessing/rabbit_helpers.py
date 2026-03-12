@@ -752,3 +752,5 @@ def correct_bw_xsec(h, h_ref):
 
     h_corr = hh.divideHists(h.project(var), h_ref.project(var))
     h = hh.multiplyHists(h, h_corr)
+
+    return h
