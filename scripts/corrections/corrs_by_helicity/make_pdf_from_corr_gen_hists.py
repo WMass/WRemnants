@@ -25,6 +25,12 @@ THEORY_PREDS = {
     "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfvars": {"pdf": "nnpdf40"},
     "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfvars": {"pdf": "pdf4lhc21"},
     "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfvars": {"pdf": "nnpdf31"},
+    "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars": {
+        "pdf": "msht20mbrange"
+    },
+    "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars": {
+        "pdf": "msht20mcrange"
+    },
 }
 
 
@@ -102,7 +108,7 @@ def main():
             )
             output_file = input_file.replace(f"{pdf_replace}.hdf5", "_skimmed.hdf5")
             skim_command = (
-                f"python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py "
+                f"python {os.environ['WREM_BASE']}/scripts/inspect/open_narf_h5py.py "
                 f"{input_file} "
                 f"--filterHistsRegex '^(.*pdfvars_Corr.*|nominal_gen_pdf_uncorr)$' "
                 f"--outfile {output_file}"

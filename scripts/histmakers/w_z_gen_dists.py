@@ -898,7 +898,7 @@ def build_graph(df, dataset):
             propagateToHelicity=args.propagatePDFstoHelicity,
         )
 
-        if not dataset.name.startswith("WtoNMu_MN"):
+        if not dataset.name.startswith(("WtoNMuMass", "WtoMuNuSMEFT")):
             helicity_axes = nominal_axes[:-1] if args.addHelicityAxis else nominal_axes
             helicity_cols = nominal_cols[:-2] if args.addHelicityAxis else nominal_cols
 
