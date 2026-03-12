@@ -102,7 +102,7 @@ def main():
             )
             output_file = input_file.replace(f"{pdf_replace}.hdf5", "_skimmed.hdf5")
             skim_command = (
-                f"python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py "
+                f"python {os.environ['WREM_BASE']}/scripts/inspect/open_narf_h5py.py "
                 f"{input_file} "
                 f"--filterHistsRegex '^(.*pdfvars_Corr.*|nominal_gen_pdf_uncorr)$' "
                 f"--outfile {output_file}"
