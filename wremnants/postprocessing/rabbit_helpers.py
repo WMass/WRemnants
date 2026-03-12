@@ -1,5 +1,6 @@
 import hist
 import numpy as np
+import pandas as pd
 
 from wremnants.postprocessing import histselections
 from wremnants.postprocessing.datagroups.datagroup import Datagroup_member
@@ -627,6 +628,34 @@ def add_bsm_process(
     # scale BSM cross section to SM cross section
     for m in datagroups.groups[bsm_name].members:
         m.xsec = xsec
+
+
+# TODO: Integrate with rabbit to avoid code duplication
+def quadratic_symmetrization(matrix, labels):
+    if type(matrix) == pd.DataFrame:
+        values = matrix.values
+    elif type(matrix) == hist.Hist:
+        values = matrix.values()
+    else:
+        values = matrix
+
+    symm_avg = 0.5 * (matrix[:, ::2] + matrix[:, 1::2])
+    symm_diff = 0.5 * np.sqrt(3) * (matrix[:, ::2] - matrix[:, 1::2])
+    avg_idx = np.char.find(labels, "Avg") != -1
+
+    if np.count_nonzero(avg_idx) != symm_avg.shape[1]:
+        raise ValueError(
+            f"Found inconsistent number of Avg nuisances (Avg: {np.count_nonzero(avg_idx)}, Symm: {symm_avg.shape[1]}, Diff {symm_diff.shape[1]}) for quadratic symmetrization."
+        )
+
+    if type(matrix) == pd.DataFrame:
+        matrix.iloc[:, avg_idx] = symm_avg
+        matrix.iloc[:, ~avg_idx] = symm_diff
+    else:
+        matrix[:, avg_idx] = symm_avg
+        matrix[:, ~avg_idx] = symm_diff
+
+    return matrix
 
 
 def decorrelateByAxis(
