@@ -547,6 +547,10 @@ class Datagroups(object):
                     )
                     h = preOpMap[member.name](h, **preOpArgs)
 
+                if self.globalAction:
+                    logger.debug("Applying global action")
+                    h = self.globalAction(h)
+
                 sum_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
                 if len(sum_axes) > 0:
                     # sum over remaining axes (avoid integrating over fit axes & fakerate axes)
@@ -557,10 +561,6 @@ class Datagroups(object):
                 if h_id == id(h):
                     logger.debug(f"Make explicit copy")
                     h = h.copy()
-
-                if self.globalAction:
-                    logger.debug("Applying global action")
-                    h = self.globalAction(h)
 
                 if forceNonzero:
                     logger.debug("force non zero")

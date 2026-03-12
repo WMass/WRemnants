@@ -966,14 +966,20 @@ def setup(
 
     if args.selection:
         for sel in args.selection:
-            sel_ax, sel_lb, sel_ub = sel.split()
+            parts = sel.split()
+            sel_ax, sel_lb, sel_ub = parts[0], parts[1], parts[2]
+            do_sum = len(parts) > 3 and parts[3] == "sum"
             sel_lb = parsing.str_to_complex_or_int(sel_lb)
             sel_ub = parsing.str_to_complex_or_int(sel_ub)
+            # By default only restrict the axis range (slice); pass 'sum' as a 4th
+            # argument to also collapse the axis.  Axes not in fitvar are projected
+            # out anyway by sum_gen_axes, so the default (no 'sum') is correct for
+            # both cases: axes kept in the fit (slice stays) and gen-level axes that
+            # are not fit variables (removed by the downstream sum_gen_axes projection).
+            action = hist.sum if do_sum else None
             datagroups.setGlobalAction(
-                lambda h: (
-                    h[{sel_ax: slice(sel_lb, sel_ub, hist.sum)}]
-                    if sel_ax in h.axes.name
-                    else h
+                lambda h, _ax=sel_ax, _lb=sel_lb, _ub=sel_ub, _act=action: (
+                    h[{_ax: slice(_lb, _ub, _act)}] if _ax in h.axes.name else h
                 ),
             )
 
@@ -1066,7 +1072,7 @@ def setup(
                         ),
                         add_trailing=False,
                     ),
-                    lumis[:, *[np.newaxis for a in h.axes]],
+                    lumis[(slice(None),) + (np.newaxis,) * len(h.axes)],
                 )
             )
         )
@@ -3038,7 +3044,6 @@ if __name__ == "__main__":
                     datagroups,
                     "Z",
                     True,
-                    False,
                     poi_axes=poi_axes,
                     prior_norm=args.priorNormXsec,
                     scale_norm=args.scaleNormXsecHistYields,
