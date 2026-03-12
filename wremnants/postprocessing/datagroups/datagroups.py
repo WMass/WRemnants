@@ -79,6 +79,15 @@ class Datagroups(object):
         self.gen_axes = {}
         self.fit_axes = []
         self.fakerate_axes = ["pt", "eta", "charge"]
+        self.fakeTransferAxis = "utAngleSign"
+        self.fakeTransferCorrFileName = "fakeTransferTemplates"
+        # in case some fit axes are integrated out, to make full smoothing work,
+        # we need to warn the class that these don't belong to fit axes nor fakerate axes,
+        # but are also not "integration axes" because they are removed before entering
+        # the fake estimate, this can happen for example
+        # with option --select in setupRabbit.py or --presel in makeDataMCStackPlot.py,
+        # which slice and remove the axis
+        self.histAxesRemovedBeforeFakes = []
 
         self.setGenAxes()
 
@@ -650,7 +659,6 @@ class Datagroups(object):
             if self.rebinOp and self.rebinBeforeSelection:
                 logger.debug(f"Apply rebin operation for process {procName}")
                 group.hists[label] = self.rebinOp(group.hists[label])
-
             if group.histselector is not None:
                 if not applySelection:
                     logger.warning(
@@ -1298,12 +1306,17 @@ class Datagroups(object):
         action=None,
         actionArgs={},
         actionRequiresNomi=False,
+        lastAction=None,
+        lastActionArgs={},
+        lastActionRequiresNomi=False,
         **kwargs,
     ):
         """
         'preOp': Operation that is applied on each member before members are summed up to groups and before the selection is performed
         'action': Operation that is applied after everything else
         """
+
+        s = hist.tag.Slicer()
 
         if group is not None:
             groups = [*groups, group]
@@ -1384,9 +1397,11 @@ class Datagroups(object):
         )
 
         for proc in procs_to_add:
-            logger.debug(f"Now at proc {proc}!")
+            logger.debug(f"Now doing syst {name} for proc {proc}!")
 
             hvar = self.groups[proc].hists["syst"]
+            logger.debug(f"Actions: {action}, args: {actionArgs}")
+            logger.debug(f"hvar shape: {hvar.values().shape}")
 
             if action is not None:
                 if actionRequiresNomi:
@@ -1417,6 +1432,21 @@ class Datagroups(object):
                         ]
 
                 logger.debug(f"Add systematic {var_name}")
+
+                if lastAction is not None:
+                    if lastActionRequiresNomi:
+                        hnom = self.groups[proc].hists[self.nominalName]
+                        apply_last_action = lambda h: lastAction(
+                            h, hnom, **lastActionArgs
+                        )
+                    else:
+                        apply_last_action = lambda h: lastAction(h, **lastActionArgs)
+
+                    if isinstance(hists, hist.Hist):
+                        hists = apply_last_action(hists)
+                    else:
+                        hists = tuple(apply_last_action(h) for h in hists)
+
                 self.writer.add_systematic(
                     hists,
                     var_name,

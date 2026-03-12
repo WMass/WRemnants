@@ -4,7 +4,6 @@ import numpy as np
 from wremnants.postprocessing import histselections
 from wremnants.postprocessing.datagroups.datagroup import Datagroup_member
 from wremnants.utilities import theory_utils
-from wremnants.utilities.io_tools import input_tools
 from wums import boostHistHelpers as hh
 from wums import logging
 
@@ -36,14 +35,14 @@ def add_mass_diff_variations(
     )
     # mass difference by swapping the +50MeV with the -50MeV variations for half of the bins
     args = ["massShift", f"massShift{label}50MeVUp", f"massShift{label}50MeVDown"]
-    if mass_diff_var == "charge":
+    if any(mass_diff_var == var for var in ["charge", "utAngleSign"]):
         datagroups.addSystematic(
             **mass_diff_args,
             # # on gen level based on the sample, only possible for mW
             # preOpMap={m.name: (lambda h, swap=swap_bins: swap(h, "massShift", f"massShift{label}50MeVUp", f"massShift{label}50MeVDown"))
             #     for p in processes for g in datagroups.procGroups[p] for m in datagroups.groups[g].members if "minus" in m.name},
             # on reco level based on reco charge
-            preOp=lambda h: hh.swap_histogram_bins(h, *args, "charge", 0),
+            preOp=lambda h: hh.swap_histogram_bins(h, *args, mass_diff_var, 0),
         )
 
     elif mass_diff_var == "cosThetaStarll":
@@ -89,28 +88,80 @@ def add_mass_diff_variations(
         )
 
 
+def add_width_diff_variations(
+    datagroups,
+    width_diff_var,
+    name,
+    processes,
+    constrain=False,
+    suffix="",
+    label="W",
+    passSystToFakes=True,
+):
+    width_diff_args = dict(
+        histname=name,
+        name=f"widthDiff{suffix}{label}",
+        processes=processes,
+        group=f"widthDiff{label}",
+        systNameReplace=[(f"width{label}", f"width{label}Diff{suffix}")],
+        skipEntries=theory_utils.widthWeightNames(
+            proc=label, exclude=(2.09053, 2.09173)
+        ),  # use 0.6 MeV variation, it is the only symmetric one we have
+        noi=not constrain,
+        noConstraint=not constrain,
+        mirror=False,
+        systAxes=["width"],
+        passToFakes=passSystToFakes,
+    )
+    # width difference by swapping the +0.6 MeV with the -0.6 MeV variations for half of the bins
+    args = ["width", f"width{label}0p6MeVUp", f"width{label}0p6MeVDown"]
+    if any(width_diff_var == var for var in ["charge", "utAngleSign"]):
+        datagroups.addSystematic(
+            **width_diff_args,
+            preOp=lambda h: hh.swap_histogram_bins(h, *args, width_diff_var, 0),
+        )
+
+    elif width_diff_var == "eta-sign":
+        datagroups.addSystematic(
+            **width_diff_args,
+            preOp=lambda h: hh.swap_histogram_bins(
+                h, *args, "eta", hist.tag.Slicer()[0 : complex(0, 0) :]
+            ),
+        )
+
+    elif width_diff_var == "eta-range":
+        datagroups.addSystematic(
+            **width_diff_args,
+            preOp=lambda h: hh.swap_histogram_bins(
+                h, *args, "eta", hist.tag.Slicer()[complex(0, -0.9) : complex(0, 0.9) :]
+            ),
+        )
+
+
 def add_recoil_uncertainty(
-    card_tool,
+    datagroups,
     samples,
     passSystToFakes=False,
     pu_type="highPU",
     flavor="",
     group_compact=True,
 ):
-    met = input_tools.args_from_metadata(card_tool, "met")
+    met = datagroups.args_from_metadata("met")
     if flavor == "":
-        flavor = input_tools.args_from_metadata(card_tool, "flavor")
+        flavor = datagroups.args_from_metadata("flavor")
     if pu_type == "highPU" and (
         met in ["RawPFMET", "DeepMETReso", "DeepMETPVRobust", "DeepMETPVRobustNoPUPPI"]
     ):
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
             groups=[
-                "recoil" if group_compact else "recoil_stat",
+                "recoil",
+                "recoil_stat",
                 "experiment",
                 "expNoCalib",
+                "expNoLumi",
             ],
             systAxes=["recoil_unc"],
             passToFakes=passSystToFakes,
@@ -118,7 +169,7 @@ def add_recoil_uncertainty(
 
     if pu_type == "lowPU":
         group_compact = False
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_syst",
             processes=samples,
             mirror=True,
@@ -126,12 +177,13 @@ def add_recoil_uncertainty(
                 "recoil" if group_compact else "recoil_syst",
                 "experiment",
                 "expNoCalib",
+                "expNoLumi",
             ],
             systAxes=["recoil_unc"],
             passToFakes=passSystToFakes,
         )
 
-        card_tool.addSystematic(
+        datagroups.addSystematic(
             "recoil_stat",
             processes=samples,
             mirror=True,
@@ -139,6 +191,7 @@ def add_recoil_uncertainty(
                 "recoil" if group_compact else "recoil_stat",
                 "experiment",
                 "expNoCalib",
+                "expNoLumi",
             ],
             systAxes=["recoil_unc"],
             passToFakes=passSystToFakes,
@@ -290,7 +343,7 @@ def add_nominal_with_correlated_BinByBinStat(
 
 
 def add_electroweak_uncertainty(
-    card_tool,
+    datagroups,
     ewUncs,
     flavor="mu",
     samples="single_v_samples",
@@ -298,7 +351,7 @@ def add_electroweak_uncertainty(
     wlike=False,
 ):
     # different uncertainty for W and Z samples
-    all_samples = card_tool.procGroups[samples]
+    all_samples = datagroups.procGroups[samples]
     z_samples = [p for p in all_samples if p[0] == "Z"]
     w_samples = [p for p in all_samples if p[0] == "W"]
 
@@ -306,7 +359,7 @@ def add_electroweak_uncertainty(
         if "renesanceEW" in ewUnc:
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
@@ -319,7 +372,7 @@ def add_electroweak_uncertainty(
                 )
         elif ewUnc == "powhegFOEW":
             if z_samples:
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
@@ -331,7 +384,7 @@ def add_electroweak_uncertainty(
                     passToFakes=passSystToFakes,
                     name="ewScheme",
                 )
-                card_tool.addSystematic(
+                datagroups.addSystematic(
                     f"{ewUnc}_Corr",
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
@@ -376,7 +429,7 @@ def add_electroweak_uncertainty(
             else:
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
-            card_tool.addSystematic(
+            datagroups.addSystematic(
                 f"{ewUnc}_Corr",
                 systAxes=["systIdx"],
                 mirror=True,

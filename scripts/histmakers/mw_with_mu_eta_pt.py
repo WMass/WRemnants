@@ -152,6 +152,12 @@ parser.add_argument(
     action="store_true",
     help="When not applying muon scale corrections (--muonCorrData none / --muonCorrMC none), require at list that the CVH corrected variables are valid",
 )
+parser.add_argument(
+    "--muRmuFPolVar",
+    action="store_true",
+    help="Store additional histograms using polynomial variations for muR and muF (standard binned variations are still produced).",
+)
+
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -460,7 +466,6 @@ if args.theoryAgnostic:
         args.theoryAgnosticPolVar and args.theoryAgnosticSplitOOA
     ):  # this splitting is not needed for the normVar version of the theory agnostic
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Wmunu")
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
         groups_to_aggregate.append("WmunuOOA")
 
 # axes for study of fakes
@@ -637,24 +642,25 @@ if args.theoryAgnosticPolVar:
     )
 
 # Helper for muR and muF as polynomial variations
-muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
-    genVcharge=-1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
-    genVcharge=1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
-    genVcharge=0,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
+if args.muRmuFPolVar:
+    muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
+        genVcharge=-1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
+        genVcharge=1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
+        genVcharge=0,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
 
 # recoil initialization
 if not args.noRecoil:
@@ -960,6 +966,8 @@ def build_graph(df, dataset):
         nMuons=1,
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
+        staPtCut=args.vetoRecoStaPt,
+        dxybsCut=args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
     df = muon_selections.select_good_muons(
@@ -1079,7 +1087,7 @@ def build_graph(df, dataset):
         if args.selectVetoEventsMC:
             # in principle a gen muon with eta = 2.401 might still be matched to a reco muon with eta < 2.4, same for pt, so this condition is potentially fragile, but it is just for test plots
             df = df.Filter("Sum(postfsrMuons_inAcc) >= 2")
-        if not args.noVetoSF:
+        if not args.noVetoSF or args.scaleDYvetoFraction > 0.0:
             df = df.Define(
                 "hasMatchDR2idx",
                 "wrem::hasMatchDR2idx_closest(goodMuons_eta0,goodMuons_phi0,GenPart_eta[postfsrMuons_inAcc],GenPart_phi[postfsrMuons_inAcc],0.09)",
@@ -1342,7 +1350,7 @@ def build_graph(df, dataset):
         df = df.Alias("MET_corr_rec_phi", f"{met}_phi")
 
     df = df.Define(
-        "goodMuons_utReco",
+        "goodMuons_utReco0",
         "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
     )
     df = df.Define(
@@ -1369,8 +1377,10 @@ def build_graph(df, dataset):
 
     df = df.Define("hasCleanJet", "Sum(goodCleanJetsNoPt && Jet_pt > 30) >= 1")
     df = df.Define(
-        "deltaPhiMuonMet", "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))"
+        "goodMuons_dphiMuMet0",
+        "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))",
     )
+    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
         # would move the following in a function but there are too many dependencies on axes defined in the main loop
@@ -1451,7 +1461,7 @@ def build_graph(df, dataset):
                     "passIso",
                     "nJetsClean",
                     "leadjetPt",
-                    "deltaPhiMuonMet",
+                    "goodMuons_dphiMuMet0",
                     "nominal_weight",
                 ],
             )
@@ -1645,7 +1655,7 @@ def build_graph(df, dataset):
                 "transverseMass",
                 "passIso",
                 "hasCleanJet",
-                "deltaPhiMuonMet",
+                "goodMuons_dphiMuMet0",
                 "nominal_weight",
             ],
         )
@@ -1655,10 +1665,8 @@ def build_graph(df, dataset):
     if args.dphiMuonMetCut > 0.0 and not args.makeMCefficiency:
         dphiMuonMetCut = args.dphiMuonMetCut * np.pi
         df = df.Filter(
-            f"deltaPhiMuonMet > {dphiMuonMetCut}"
+            f"goodMuons_dphiMuMet0 > {dphiMuonMetCut}"
         )  # pi/4 was found to be a good threshold for signal with mT > 40 GeV
-
-    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
 
@@ -1688,7 +1696,7 @@ def build_graph(df, dataset):
             df.HistoBoost(
                 "deltaPhiMuonMet",
                 [axis_phi, *axes_fakerate],
-                ["deltaPhiMuonMet", *columns_fakerate, "nominal_weight"],
+                ["goodMuons_dphiMuMet0", *columns_fakerate, "nominal_weight"],
             )
         )
         results.append(
@@ -1835,7 +1843,7 @@ def build_graph(df, dataset):
                     nominal_cols,
                 )
 
-    if isWorZ and not hasattr(dataset, "out_of_acceptance"):
+    if args.muRmuFPolVar and isWorZ and not hasattr(dataset, "out_of_acceptance"):
         theoryAgnostic_helpers_cols = [
             "qtOverQ",
             "absYVgen",
@@ -1889,7 +1897,7 @@ def build_graph(df, dataset):
     nominal_withUt = df.HistoBoost(
         "nominal_withUt",
         [*axes, axis_ut_fine],
-        [*cols, "goodMuons_utReco", "nominal_weight"],
+        [*cols, "goodMuons_utReco0", "nominal_weight"],
     )
     results.append(nominal_withUt)
     nominal_withUtAngleCosine = df.HistoBoost(

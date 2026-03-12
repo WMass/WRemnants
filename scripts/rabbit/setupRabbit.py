@@ -17,6 +17,7 @@ from wremnants.postprocessing.datagroups.datagroups import Datagroups
 from wremnants.postprocessing.histselections import FakeSelectorSimpleABCD
 from wremnants.postprocessing.regression import Regressor
 from wremnants.postprocessing.syst_tools import (
+    add_nonprompt_transfer_factor_variations,
     scale_hist_up_down,
     scale_hist_up_down_corr_from_file,
 )
@@ -62,7 +63,7 @@ def make_subparsers(parser):
         "--priorNormXsec",
         type=float,
         default=1,
-        help=r"Prior for shape uncertainties on cross sections for theory agnostic or unfolding analysis with POIs as NOIs (1 means 100%). If negative, it will use shapeNoConstraint in the fit",
+        help=r"Prior for shape uncertainties on cross sections for theory agnostic or unfolding analysis with POIs as NOIs (1 means 100%%). If negative, it will use shapeNoConstraint in the fit",
     )
     parser.add_argument(
         "--scaleNormXsecHistYields",
@@ -281,7 +282,7 @@ def make_parser(parser=None):
     parser.add_argument(
         "--lumiUncertainty",
         type=float,
-        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%); automatic by default",
+        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default",
         default=None,
     )
     parser.add_argument(
@@ -323,10 +324,11 @@ def make_parser(parser=None):
             "wwidth",
             "xsec",
             "massdiffW",
+            "widthdiffW",
             "massdiffZ",
         ],
         default=["wmass"],
-        help="Select which nuisance(s) of interest to fit. Default: (%default)s",
+        help="Select which nuisance(s) of interest to fit. Default: (%%default)s",
     )
     parser.add_argument(
         "--massDiffWVar",
@@ -342,6 +344,18 @@ def make_parser(parser=None):
             "etaRegionRange",
         ],
         help="For use with --noi massDiffW, select the variable to define the different mass differences",
+    )
+    parser.add_argument(
+        "--widthDiffWVar",
+        type=str,
+        default=None,
+        choices=[
+            "charge",
+            "utAngleSign",
+            "eta-sign",
+            "eta-range",
+        ],
+        help="For use with --noi widthDiffW, select the variable to define the different mass differences",
     )
     parser.add_argument(
         "--massDiffZVar",
@@ -360,6 +374,13 @@ def make_parser(parser=None):
     )
     parser.add_argument(
         "--fitMassDecorr",
+        type=str,
+        default=[],
+        nargs="*",
+        help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
+    )
+    parser.add_argument(
+        "--fitWidthDecorr",
         type=str,
         default=[],
         nargs="*",
@@ -394,12 +415,15 @@ def make_parser(parser=None):
         choices=[
             "run",
             "phi",
+            "utAngleSign",
             "nRecoVtx",
+            # variables above, systematics below
             "prefire",
             "effi",
             "lumi",
             "fakenorm",
             "effisyst",
+            "effisystTrigIso",
             "decornorm",
             "ptscale",
         ],
@@ -475,6 +499,16 @@ def make_parser(parser=None):
         default="chebyshev",
         choices=Regressor.polynomials,
         help="Type of polynomial for the smoothing of the application region or full prediction, depending on the smoothing mode",
+    )
+    parser.add_argument(
+        "--fakeTransferCorrFileName",
+        type=str,
+        default="fakeTransferTemplates",
+        help="""
+        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
+        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
+        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
+        """,
     )
     parser.add_argument(
         "--ABCDedgesByAxis",
@@ -598,6 +632,17 @@ def make_parser(parser=None):
         "--massVariation", type=float, default=100, help="Variation of boson mass"
     )
     parser.add_argument(
+        "--widthVariationW",
+        type=str,
+        nargs=2,
+        default=["0.6", "0.6"],
+        choices=["0.6", "6", "36", "48"],
+        # [["0.6", "0.6"], ["6", "0.6"], ["48", "0.6"], ["0.6", "36"], ["6", "36"], ["48", "36"]],
+        help="""Variation of W boson width (as string), specifying Down/Up variations.
+        If using --noi wwidth, the default is changed to ["48", "36"].
+        """,
+    )
+    parser.add_argument(
         "--ewUnc",
         type=str,
         nargs="*",
@@ -703,6 +748,12 @@ def make_parser(parser=None):
         help="Rescale equivalent luminosity for efficiency stat uncertainty by this value (e.g. 10 means ten times more data from tag and probe)",
     )
     parser.add_argument(
+        "--effSystScale",
+        type=float,
+        default=1.0,
+        help="Rescale efficiency systematic uncertainty by this value",
+    )
+    parser.add_argument(
         "--binnedScaleFactors",
         action="store_true",
         help="Use binned scale factors (different helpers and nuisances)",
@@ -722,7 +773,7 @@ def make_parser(parser=None):
         default=0,
         type=float,
         help=r"""Add normalization uncertainty for W signal. 
-            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1% of the nominal is varied). 
+            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1%% of the nominal is varied). 
             If 0 nothing is added""",
     )
     parser.add_argument(
@@ -730,7 +781,7 @@ def make_parser(parser=None):
         default=0,
         type=float,
         help=r"""Add normalization uncertainty for W->tau,nu process. 
-            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1% of the nominal is varied). 
+            If negative, treat as free floating with the absolute being the size of the variation (e.g. -1.01 means +/-1%% of the nominal is varied). 
             If 0 nothing is added""",
     )
     parser.add_argument(
@@ -890,7 +941,7 @@ def make_parser(parser=None):
     parser.add_argument(
         "--breitwignerWMassWeights",
         action="store_true",
-        help="Use the Breit-Wigner mass wights for mW.",
+        help="Use the Breit-Wigner mass weights for mW.",
     )
     parser = make_subparsers(parser)
 
@@ -1014,7 +1065,10 @@ def setup(
 
     if massConstraintMode == "automatic":
         constrainMass = (
-            "xsec" in args.noi or (dilepton and not "mll" in fitvar) or genfit
+            "xsec" in args.noi
+            or (dilepton and not "mll" in fitvar)
+            or genfit
+            or (wmass and "wmass" not in args.noi)
         )
     else:
         constrainMass = True if massConstraintMode == "constrained" else False
@@ -1175,6 +1229,8 @@ def setup(
 
     if wmass and not datagroups.xnorm:
         datagroups.fakerate_axes = args.fakerateAxes
+        # datagroups.fakeTransferAxis = "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+        # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
         histselector_kwargs = dict(
             mode=args.fakeEstimation,
             smoothing_mode=args.fakeSmoothingMode,
@@ -1184,6 +1240,13 @@ def setup(
             integrate_x="mt" not in fitvar,
             forceGlobalScaleFakes=args.forceGlobalScaleFakes,
             abcdExplicitAxisEdges=abcdExplicitAxisEdges,
+            fakeTransferAxis=(
+                "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+            ),
+            fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+            histAxesRemovedBeforeFakes=(
+                [str(x.split()[0]) for x in args.selection] if args.selection else []
+            ),
         )
         datagroups.set_histselectors(
             datagroups.getNames(), inputBaseName, **histselector_kwargs
@@ -1350,6 +1413,7 @@ def setup(
             pseudodataGroups.fakerate_axes = args.fakerateAxes
 
         datagroups.addPseudodataHistogramFakes(pseudodata, pseudodataGroups)
+
     if args.pseudoData and not datagroups.xnorm:
         if args.pseudoDataFitInputFile:
             import rabbit.debugdata
@@ -1520,7 +1584,7 @@ def setup(
                 suffix = "".join([a.capitalize() for a in args.massDiffWVar.split("-")])
                 rabbit_helpers.add_mass_diff_variations(
                     datagroups,
-                    args.massDiffWVa,
+                    args.massDiffWVar,
                     name=massWeightName,
                     processes=signal_samples_forMass,
                     constrain=constrainMass,
@@ -1629,19 +1693,54 @@ def setup(
         )
 
     if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
-        width_info = dict(
-            name="WidthW0p6MeV",
-            processes=signal_samples_forMass,
-            groups=["widthW", "theory"],
-            mirror=False,
-            noi="wwidth" in args.noi,
-            noConstraint="wwidth" in args.noi,
-            skipEntries=theory_utils.widthWeightNames(
-                proc="W", exclude=(2.09053, 2.09173)
-            ),
-            systAxes=["width"],
-            systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
-            passToFakes=passSystToFakes,
+        widthVarTag = ""
+        if (
+            args.widthVariationW[0] == args.widthVariationW[1]
+            and args.widthVariationW[0] == "0.6"
+        ):
+            widthVarTag = "WidthW0p6MeV"
+            width_info = dict(
+                name=widthVarTag,
+                skipEntries=theory_utils.widthWeightNames(
+                    proc="W", exclude=(2.09053, 2.09173)
+                ),
+                systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+            )
+        else:
+            widthLowValues = {
+                "0.6": "2.09053",
+                "6": "2.085",
+                "48": "2.043",
+            }
+            widthHighValues = {
+                "0.6": "2.09173",
+                "36": "2.127",
+            }
+            widthVarDown = args.widthVariationW[0].replace(".", "p")
+            widthVarUp = args.widthVariationW[1].replace(".", "p")
+            widthVarTag = f"WidthWm{widthVarDown}p{widthVarUp}MeV"
+            wlv = widthLowValues[args.widthVariationW[0]]
+            whv = widthHighValues[args.widthVariationW[1]]
+            wlvStr = wlv.replace(".", "p") + "GeV"
+            whvStr = whv.replace(".", "p") + "GeV"
+            width_info = dict(
+                name=widthVarTag,
+                skipEntries=theory_utils.widthWeightNames(
+                    proc="W", exclude=(float(wlv), float(whv))
+                ),
+                systNameReplace=[[wlvStr, "Down"], [whvStr, "Up"]],
+            )
+
+        width_info.update(
+            dict(
+                processes=signal_samples_forMass,
+                groups=["widthW", "theory"],
+                mirror=False,
+                noi="wwidth" in args.noi,
+                noConstraint="wwidth" in args.noi,
+                systAxes=["width"],
+                passToFakes=passSystToFakes,
+            )
         )
         widthWeightName = f"widthWeight{label}"
         if args.breitwignerWMassWeights:
@@ -1662,10 +1761,56 @@ def setup(
                 **width_info,
             )
         else:
-            datagroups.addSystematic(
-                widthWeightName,
-                **width_info,
-            )
+            if len(args.fitWidthDecorr) == 0:
+                datagroups.addSystematic(
+                    widthWeightName,
+                    **width_info,
+                )
+            else:
+                suffix = "".join([a.capitalize() for a in args.fitWidthDecorr])
+                new_names = [f"{a}_decorr" for a in args.fitWidthDecorr]
+                datagroups.addSystematic(
+                    histname=widthWeightName,
+                    processes=signal_samples_forMass,
+                    name=f"widthDecorr{suffix}{label}",
+                    groups=[f"widthDecorr{label}", "theory"],
+                    skipEntries=[
+                        (x, *[-1] * len(args.fitWidthDecorr))
+                        for x in width_info["skipEntries"]
+                    ],
+                    noi="wwidth" in args.noi,
+                    noConstraint="wwidth" in args.noi,
+                    mirror=False,
+                    systAxes=["width", *new_names],
+                    systNameReplace=width_info["systNameReplace"],
+                    passToFakes=passSystToFakes,
+                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                    isPoiHistDecorr=len(args.fitWidthDecorr),
+                    actionRequiresNomi=True,
+                    action=rabbit_helpers.decorrelateByAxes,
+                    actionArgs=dict(
+                        axesToDecorrNames=args.fitWidthDecorr,
+                        newDecorrAxesNames=new_names,
+                        axlim=args.decorrAxlim,
+                        rebin=args.decorrRebin,
+                        absval=args.decorrAbsval,
+                    ),
+                )
+
+            if "widthdiffW" in args.noi:
+                suffix = "".join(
+                    [a.capitalize() for a in args.widthDiffWVar.split("-")]
+                )
+                rabbit_helpers.add_width_diff_variations(
+                    datagroups,
+                    args.widthDiffWVar,
+                    name=widthWeightName,
+                    processes=signal_samples_forMass,
+                    constrain="wwidth" not in args.noi,
+                    suffix=suffix,
+                    label=label,
+                    passSystToFakes=passSystToFakes,
+                )
 
     if "sin2thetaW" in args.noi or (not stat_only and not args.noTheoryUnc):
         datagroups.addSystematic(
@@ -2083,8 +2228,13 @@ def setup(
 
                 return hvar
 
+            fakeParamDecorrAxes = (
+                [datagroups.fakeTransferAxis]
+                if (datagroups.fakeTransferAxis != "" and "utAngleSign" in fitvar)
+                else []
+            )
             for axesToDecorrNames in [
-                [],
+                fakeParamDecorrAxes,
             ]:
                 for idx, mag in [
                     (1, 0.1),
@@ -2125,12 +2275,190 @@ def setup(
                         ),
                     )
 
+            # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2' or --select 'utAngleSign 0 1'
+            # is there a better way to check whether the negative uT bi
+            if "utAngleSign" in fitvar and (
+                args.selection is None
+                or not any(
+                    sel in args.selection
+                    for sel in ["utAngleSign 1 2", "utAngleSign 0 1"]
+                )
+            ):
+                # TODO: extend and use previous function fake_nonclosure(...)
+                # TODO: move function elsewhere
+                def fake_nonclosure_byAxis(
+                    h,
+                    axesToDecorrNames=["eta"],
+                    variation_size=0.1,
+                    keepConstantAxisBin={},
+                    *args,
+                    **kwargs,
+                ):
+
+                    # with keepConstantAxisBin one can keep a range of bins untouched by passing slice(start, stop)
+                    # e.g. keepConstantAxisBin={"utAngleSign": slice(1, 2)}, maybe also by values with complex numbers
+
+                    logger.info(
+                        f"Doing decorr nonclosure with keepConstantAxisBin={keepConstantAxisBin}"
+                    )
+                    hnom = fakeselector.get_hist(h, *args, **kwargs)
+                    hvar = (1 + variation_size) * hnom
+                    if keepConstantAxisBin:
+                        ax_names = [n for n in hvar.axes.name]
+                        idxs = [slice(None)] * hvar.ndim
+                        for name in keepConstantAxisBin.keys():
+                            if name not in ax_names:
+                                raise ValueError(
+                                    f"In fake_nonclosure_byAxis(): axis '{name}' not found in hvar, valid names are {ax_names}"
+                                )
+                            ax_index = ax_names.index(name)
+                            idxs[ax_index] = keepConstantAxisBin[name]
+                        hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
+
+                    hvar = rabbit_helpers.decorrelateByAxes(
+                        hvar, hnom, axesToDecorrNames
+                    )
+
+                    return hvar
+
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                    name=f"{datagroups.fakeName}EtaClos_eta",
+                    baseName=f"{datagroups.fakeName}EtaClos",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=True,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_nonclosure_byAxis,
+                    actionArgs=dict(
+                        axesToDecorrNames=["eta"],
+                        variation_size=0.1,
+                        keepConstantAxisBin={"utAngleSign": 1},
+                    ),
+                    systAxes=["eta_decorr"],
+                )
+
+                # TODO: move function elsewhere
+                def fake_transferFactor_ptSyst(
+                    h,
+                    axesToDecorrNames=[],
+                    altHistName="fakeCorr_altStat",
+                    varIdxs=[0],
+                    correctionFile="",
+                    *args,
+                    **kwargs,
+                ):
+                    hnom = fakeselector.get_hist(h, *args, **kwargs)
+
+                    ax_names = [n for n in hnom.axes.name]
+                    sel_var = [slice(None)] * hnom.ndim
+                    sel_const = [slice(None)] * hnom.ndim
+                    sel_var[ax_names.index(datagroups.fakeTransferAxis)] = 0
+                    sel_const[ax_names.index(datagroups.fakeTransferAxis)] = 1
+
+                    hvar = add_nonprompt_transfer_factor_variations(
+                        hnom.copy(),
+                        correctionFile,
+                        altHistName,
+                        sel_var,
+                        varIdxs=varIdxs,
+                    )
+
+                    hvar_utPlus = hnom.copy()[tuple(sel_const)]
+
+                    if varIdxs[0] != -1:
+                        hvar.values()[
+                            tuple([*sel_const, slice(None), slice(None)])
+                        ] = hvar_utPlus.values()[..., None, None]
+                    else:
+                        hvar.values()[
+                            tuple([*sel_const, slice(None)])
+                        ] = hvar_utPlus.values()[..., None]
+
+                    if len(axesToDecorrNames) > 0:
+                        hvar = rabbit_helpers.decorrelateByAxes(
+                            hvar,
+                            hnom,
+                            axesToDecorrNames,
+                            newDecorrAxesNames=[
+                                f"{x}_decorr" for x in axesToDecorrNames
+                            ],
+                        )
+
+                    return hvar
+
+                ## TODO: move the following systematics in an imported file, once this is finalized
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                    name=f"{datagroups.fakeName}TransferFactorStat",
+                    baseName=f"{datagroups.fakeName}TransferFactorStat",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_transferFactor_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_altStat",
+                        varIdxs=[0],
+                        correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                    ),
+                    systAxes=["varTF", "downUpVar"],
+                    labelsByAxis=["varTF", "downUpVar"],
+                )
+
+                ## syst for transfer factor difference between data and QCD MC in control region
+                # datagroups.addSystematic(
+                #     inputBaseName,
+                #     groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                #     name=f"{datagroups.fakeName}TransferFactorClosQCD",
+                #     baseName=f"{datagroups.fakeName}TransferFactorClosQCD",
+                #     processes=datagroups.fakeName,
+                #     noConstraint=False,
+                #     mirror=False,
+                #     scale=1,
+                #     applySelection=False,  # don't apply selection, external parameters need to be added
+                #     action=fake_transferFactor_ptSyst,
+                #     actionArgs=dict(
+                #         altHistName="fakeCorr_closQCDsv",
+                #         varIdxs = [],
+                #         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                #     ),
+                #     systAxes=["downUpVar"],
+                #     labelsByAxis=["downUpVar"],
+                # )
+
+                # syst for transfer factor difference between control and signal regions from MC
+                datagroups.addSystematic(
+                    inputBaseName,
+                    groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
+                    name=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    baseName=f"{datagroups.fakeName}TransferFactorClosQCDsignal",
+                    processes=datagroups.fakeName,
+                    noConstraint=False,
+                    mirror=False,
+                    scale=1,
+                    applySelection=False,  # don't apply selection, external parameters need to be added
+                    action=fake_transferFactor_ptSyst,
+                    actionArgs=dict(
+                        altHistName="fakeCorr_closQCDsignal",
+                        varIdxs=[],
+                        correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                    ),
+                    systAxes=["downUpVar"],
+                    labelsByAxis=["downUpVar"],
+                )
+
     if not args.noEfficiencyUnc:
 
         if not lowPU:
 
             chargeDependentSteps = common.muonEfficiency_chargeDependentSteps
-            effTypesNoIso = ["reco", "tracking", "idip", "trigger"]
+            effTypesNoUt = ["reco", "tracking", "idip"]
+            effTypesNoIso = [*effTypesNoUt, "trigger"]
             effStatTypes = [x for x in effTypesNoIso]
             if args.binnedScaleFactors or not args.isoEfficiencySmoothing:
                 effStatTypes.extend(["iso"])
@@ -2138,6 +2466,14 @@ def setup(
                 effStatTypes.extend(["iso_effData", "iso_effMC"])
             allEffTnP = [f"effStatTnP_sf_{eff}" for eff in effStatTypes] + [
                 "effSystTnP"
+            ]
+            effTypesUt = [x for x in effStatTypes if x not in effTypesNoUt]
+            effSystTypes = [*effTypesNoIso, "iso"]
+            effCommonGroups = [
+                "muon_eff_all",
+                "experiment",
+                "expNoLumi",
+                "expNoCalib",
             ]
             for name in allEffTnP:
                 if "Syst" in name:
@@ -2152,29 +2488,124 @@ def setup(
                         ("effSystTnP", "effSyst"),
                         ("etaDecorr0", "fullyCorr"),
                     ]
-                    scale = 1
                     mirror = True
                     groupName = "muon_eff_syst"
+                    scale = args.effSystScale
                     splitGroupDict = {
                         f"{groupName}_{x}": f".*effSyst.*{x}"
-                        for x in list(effTypesNoIso + ["iso"])
+                        for x in list(effSystTypes)
                     }
                     actionSF = None
                     effActionArgs = {}
-                    if (
-                        any(x in args.decorrSystByVar for x in ["effi", "effisyst"])
-                        and decorr_syst_var in fitvar
+                    if any(
+                        x in args.decorrSystByVar
+                        for x in ["effi", "effisyst", "effisystTrigIso"]
                     ):
-                        axes = [
-                            "reco-tracking-idip-trigger-iso",
-                            "n_syst_variations",
-                            f"{decorr_syst_var}_",
-                        ]
-                        axlabels = ["WPSYST", "_etaDecorr", decorr_syst_var]
-                        actionSF = rabbit_helpers.decorrelateByAxes
-                        effActionArgs = dict(
-                            axesToDecorrNames=[decorr_syst_var],
-                            newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                        if (
+                            "effisystTrigIso" in args.decorrSystByVar
+                            and "utAngleSign" in fitvar
+                            and decorr_syst_var == "utAngleSign"
+                        ):
+                            # if "utAngleSign" in fitvar and decorr_syst_var == "utAngleSign":
+                            # then decorrelate only for trigger and iso
+                            # This also includes an additional inflation by sqrt(2) for trigger/isolation
+                            #
+                            logger.warning(
+                                "'utAngleSign' is a fit axis, effSyst will be decorrelated by it"
+                            )
+                            logger.warning(
+                                "but only for trigger/isolation steps (others are kept correlated)"
+                            )
+                            logger.warning(
+                                "with an additional scaling of their magnitude by sqrt(2)"
+                            )
+                            # reco-tracking-idip
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup={
+                                    f"{groupName}_{x}": f".*effSyst.*{x}"
+                                    for x in list(effTypesNoUt)
+                                },
+                                systAxes=axes,
+                                labelsByAxis=axlabels,
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale,
+                                skipEntries=[
+                                    {"reco-tracking-idip-trigger-iso": [3, 4]}
+                                ],
+                            )
+                            # trigger-isolation
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup={
+                                    f"{groupName}_{x}": f".*effSyst.*{x}"
+                                    for x in list(effTypesUt)
+                                },
+                                systAxes=[*axes, f"{decorr_syst_var}_"],
+                                labelsByAxis=[*axlabels, decorr_syst_var],
+                                actionRequiresNomi=True,
+                                action=rabbit_helpers.decorrelateByAxes,
+                                actionArgs=dict(
+                                    axesToDecorrNames=[decorr_syst_var],
+                                    newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                                ),
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale * np.sqrt(2),
+                                skipEntries=[
+                                    {"reco-tracking-idip-trigger-iso": [0, 1, 2]}
+                                ],
+                            )
+                        else:
+                            axes = [
+                                "reco-tracking-idip-trigger-iso",
+                                "n_syst_variations",
+                                f"{decorr_syst_var}_",
+                            ]
+                            axlabels = ["WPSYST", "_etaDecorr", decorr_syst_var]
+                            actionSF = rabbit_helpers.decorrelateByAxes
+                            effActionArgs = dict(
+                                axesToDecorrNames=[decorr_syst_var],
+                                newDecorrAxesNames=[f"{decorr_syst_var}_"],
+                            )
+                            datagroups.addSystematic(
+                                name,
+                                mirror=mirror,
+                                groups=[groupName, *effCommonGroups],
+                                splitGroup=splitGroupDict,
+                                systAxes=axes,
+                                labelsByAxis=axlabels,
+                                actionRequiresNomi=True,
+                                action=actionSF,
+                                actionArgs=effActionArgs,
+                                baseName=name + "_",
+                                processes=["MCnoQCD"],
+                                passToFakes=passSystToFakes,
+                                systNameReplace=nameReplace,
+                                scale=scale,
+                            )
+                    else:
+                        datagroups.addSystematic(
+                            name,
+                            mirror=mirror,
+                            groups=[groupName, *effCommonGroups],
+                            splitGroup=splitGroupDict,
+                            systAxes=axes,
+                            labelsByAxis=axlabels,
+                            baseName=name + "_",
+                            processes=["MCnoQCD"],
+                            passToFakes=passSystToFakes,
+                            systNameReplace=nameReplace,
+                            scale=scale,
                         )
                 else:
                     nameReplace = (
@@ -2209,31 +2640,25 @@ def setup(
                             axesToDecorrNames=[decorr_syst_var],
                             newDecorrAxesNames=[f"{decorr_syst_var}_"],
                         )
-                if args.effStatLumiScale and "Syst" not in name:
-                    scale /= math.sqrt(args.effStatLumiScale)
+                    if args.effStatLumiScale and "Syst" not in name:
+                        scale /= math.sqrt(args.effStatLumiScale)
 
-                datagroups.addSystematic(
-                    name,
-                    mirror=mirror,
-                    groups=[
-                        groupName,
-                        "muon_eff_all",
-                        "experiment",
-                        "expNoLumi",
-                        "expNoCalib",
-                    ],
-                    splitGroup=splitGroupDict,
-                    systAxes=axes,
-                    labelsByAxis=axlabels,
-                    actionRequiresNomi=True,
-                    action=actionSF,
-                    actionArgs=effActionArgs,
-                    baseName=name + "_",
-                    processes=["MCnoQCD"],
-                    passToFakes=passSystToFakes,
-                    systNameReplace=nameReplace,
-                    scale=scale,
-                )
+                    datagroups.addSystematic(
+                        name,
+                        mirror=mirror,
+                        groups=[groupName, *effCommonGroups],
+                        splitGroup=splitGroupDict,
+                        systAxes=axes,
+                        labelsByAxis=axlabels,
+                        actionRequiresNomi=True,
+                        action=actionSF,
+                        actionArgs=effActionArgs,
+                        baseName=name + "_",
+                        processes=["MCnoQCD"],
+                        passToFakes=passSystToFakes,
+                        systNameReplace=nameReplace,
+                        scale=scale,
+                    )
                 # now add other systematics if present
                 if name == "effSystTnP":
                     for es in common.muonEfficiency_altBkgSyst_effSteps:
@@ -2243,10 +2668,7 @@ def setup(
                             groups=[
                                 f"muon_eff_syst_{es}_altBkg",
                                 groupName,
-                                "muon_eff_all",
-                                "experiment",
-                                "expNoLumi",
-                                "expNoCalib",
+                                *effCommonGroups,
                             ],
                             systAxes=["n_syst_variations"],
                             labelsByAxis=[f"{es}_altBkg_etaDecorr"],
@@ -2798,7 +3220,7 @@ def setup(
                 actionArgs=dict(axesToDecorrNames=["run"], newDecorrAxesNames=["run_"]),
             )
 
-    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupRabbitWMass.py#L359
+    # Previously we had a QCD uncertainty for the mt dependence on the fakes, see: https://github.com/WMass/WRemnants/blob/f757c2c8137a720403b64d4c83b5463a2b27e80f/scripts/combine/setupCombineWMass.py#L359
 
     return datagroups
 
@@ -2842,6 +3264,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+    if "wwidth" in args.noi:
+        parser = parsing.set_parser_default(parser, "widthVariationW", ["48", "36"])
+        args = parser.parse_args()
 
     isUnfolding = args.analysisMode == "unfolding"
     isTheoryAgnostic = args.analysisMode in [

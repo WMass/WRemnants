@@ -969,3 +969,50 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
         [hDown.variances(flow=True), hUp.variances(flow=True)], axis=-1
     )
     return hVar
+
+
+def add_nonprompt_transfer_factor_variations(
+    h, corr_file, corr_histName, selection, varIdxs=[0]
+):
+
+    with lz4.frame.open(corr_file) as f:
+        corrs = pickle.load(f)
+    boost_corr = corrs[corr_histName]
+
+    if len(varIdxs) > 0:
+        varIDaxis = hist.axis.Regular(
+            len(varIdxs), -0.5, -0.5 + len(varIdxs), flow=False, name="varTF"
+        )
+        axes = [*h.axes, varIDaxis, binning.down_up_axis]
+        selVar = selection[slice(None), slice(None)]
+    else:
+        axes = [*h.axes, binning.down_up_axis]
+        varIdxs.append(-1)
+        selVar = selection + [slice(None)]
+
+    hVar = hist.Hist(
+        *axes,
+        storage=hist.storage.Weight(),
+    )
+
+    for iv in varIdxs:
+
+        if iv != -1:
+            boost_corr_slice = boost_corr[..., iv]
+            selVar[-2] = iv
+        else:
+            boost_corr_slice = boost_corr
+
+        hUp = hh.multiplyHists(
+            h[tuple(selection)], boost_corr_slice, flow=False, allowBroadcast=False
+        )
+        hDown = hh.mirrorHist(hUp, h[tuple(selection)])
+
+        hVar.values()[tuple(selVar)] = np.stack(
+            [hDown.values(flow=False), hUp.values(flow=False)], axis=-1
+        )
+        hVar.variances()[tuple(selVar)] = np.stack(
+            [hDown.variances(flow=False), hUp.variances(flow=False)], axis=-1
+        )
+
+    return hVar
