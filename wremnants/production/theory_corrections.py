@@ -397,7 +397,7 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
     if "powheg" not in dataset_name:
         # no preFSR particles in powheg samples
         df = generator_level_definitions.define_prefsr_vars(df)
-        if not dataset_name.startswith("WtoNMu_MN"):
+        if not dataset_name.startswith(("WtoNMuMass", "WtoMuNuSMEFT")):
             # no intermediate bosons in some events in madgraph samples
             logger.debug(f"Define intermediate gen variables for {dataset_name}")
             df = generator_level_definitions.define_intermediate_gen_vars(
