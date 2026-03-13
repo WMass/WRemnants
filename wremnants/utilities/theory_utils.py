@@ -2,11 +2,15 @@ import glob
 import os
 import re
 
+import lhapdf
+import numpy as np
+
 from wremnants.utilities import common, samples
 
 pdfMap = {
     "nnpdf31": {
         "name": "pdfNNPDF31",
+        "lha_name": "NNPDF31_nnlo_hessian_pdfas",
         "branch": "LHEPdfWeight",
         "combine": "symHessian",
         "entries": 101,
@@ -17,6 +21,7 @@ pdfMap = {
     },
     "ct18": {
         "name": "pdfCT18",
+        "lha_name": "CT18NNLO",
         "branch": "LHEPdfWeightAltSet11",
         "combine": "asymHessian",
         "entries": 59,
@@ -32,6 +37,7 @@ pdfMap = {
     },
     "nnpdf30": {
         "name": "pdfNNPDF30",
+        "lha_name": "NNPDF30_nnlo_as_0118_hessian",
         "branch": "LHEPdfWeightAltSet7",
         "combine": "symHessian",
         "entries": 101,
@@ -46,6 +52,7 @@ pdfMap = {
     },
     "nnpdf40": {
         "name": "pdfNNPDF40",
+        "lha_name": "NNPDF40_nnlo_hessian_pdfas",
         "branch": "LHEPdfWeightAltSet3",
         "combine": "symHessian",
         "entries": 51,
@@ -60,6 +67,7 @@ pdfMap = {
     },
     "pdf4lhc21": {
         "name": "pdfPDF4LHC21",
+        "lha_name": "PDF4LHC21_40_pdfas",
         "branch": "LHEPdfWeightAltSet10",
         "combine": "symHessian",
         "entries": 41,
@@ -74,6 +82,7 @@ pdfMap = {
     },
     "msht20": {
         "name": "pdfMSHT20",
+        "lha_name": "MSHT20nnlo_as118",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 65,
@@ -88,6 +97,7 @@ pdfMap = {
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
+        "lha_name": "MSHT20nnlo_mcrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 9,
@@ -95,6 +105,7 @@ pdfMap = {
     },
     "msht20mbrange": {
         "name": "pdfMSHT20mbrange",
+        "lha_name": "MSHT20nnlo_mbrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 7,
@@ -102,6 +113,7 @@ pdfMap = {
     },
     "msht20mcrange_renorm": {
         "name": "pdfMSHT20mcrange",
+        "lha_name": "MSHT20nnlo_mcrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 9,
@@ -110,6 +122,7 @@ pdfMap = {
     },
     "msht20mbrange_renorm": {
         "name": "pdfMSHT20mbrange",
+        "lha_name": "MSHT20nnlo_mbrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 7,
@@ -118,6 +131,7 @@ pdfMap = {
     },
     "msht20an3lo": {
         "name": "pdfMSHT20an3lo",
+        "lha_name": "MSHT20an3lo_as118",
         "branch": "LHEPdfWeightAltSet24",
         "combine": "asymHessian",
         "entries": 105,
@@ -132,6 +146,7 @@ pdfMap = {
     },
     "ct18z": {
         "name": "pdfCT18Z",
+        "lha_name": "CT18ZNNLO",
         "branch": "LHEPdfWeightAltSet11",
         "combine": "asymHessian",
         "entries": 59,
@@ -148,6 +163,7 @@ pdfMap = {
     },
     "atlasWZj20": {
         "name": "pdfATLASWZJ20",
+        "lha_name": "ATLASepWZVjet20-EIG",
         "branch": "LHEPdfWeightAltSet19",
         "combine": "asymHessian",
         "entries": 60,
@@ -158,6 +174,7 @@ pdfMap = {
     },
     "herapdf20": {
         "name": "pdfHERAPDF20",
+        "lha_name": "HERAPDF20_NNLO_EIG",
         "branch": "LHEPdfWeightAltSet20",
         "combine": "asymHessian",
         "entries": 29,
@@ -172,6 +189,7 @@ pdfMap = {
     },
     "herapdf20ext": {
         "name": "pdfHERAPDF20ext",
+        "lha_name": "HERAPDF20_NNLO_VAR",
         "branch": "LHEPdfWeightAltSet21",
         "combine": "asymHessian",
         "entries": 14,
@@ -318,3 +336,56 @@ def sin2thetaWeightNames(matches=None, proc=""):
     ]
 
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
+
+
+# A subset of the options (can be extended) taken from
+# https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
+def eval_pdf(pdf, flav, x, q):
+    flav_map = {
+        "g": 21,
+        "d": 1,
+        "dbar": -1,
+        "u": 2,
+        "ubar": -2,
+        "c": 3,
+        "cbar": -3,
+        "s": 4,
+        "sbar": -4,
+        "b": 5,
+        "bbar": -5,
+    }
+    if flav in flav_map:
+        flav = flav_map[flav]
+    # Try to convert string digits to int for PDG IDs
+    try:
+        if (
+            isinstance(flav, int)
+            or flav.isdigit()
+            or (flav.startswith("-") and flav[1:].isdigit())
+        ):
+            return pdf.xfxQ(int(flav), x, q)
+    except AttributeError:
+        pass
+
+    if flav == "uv":
+        return pdf.xfxQ(2, x, q) - pdf.xfxQ(-2, x, q)
+    elif flav == "dv":
+        return pdf.xfxQ(1, x, q) - pdf.xfxQ(-1, x, q)
+    elif flav == "rs":
+        denom = pdf.xfxQ(-1, x, q) + pdf.xfxQ(-2, x, q)
+        return (pdf.xfxQ(3, x, q) + pdf.xfxQ(-3, x, q)) / denom if denom != 0 else 0
+    else:
+        raise NotImplementedError(f"Flavor type {flav} is unsupported")
+
+
+def get_pdf_data(pdf_name, flavor, Q, x_range):
+    pdf_set = lhapdf.getPDFSet(pdf_name)
+    members = pdf_set.mkPDFs()
+    # Calculate values for all members (exclude alpha_s members if present)
+    all_vals = np.array(
+        [
+            [eval_pdf(m, flavor, x, Q) for x in x_range]
+            for m in members[: pdf_set.errorInfo.nmemCore + 1]
+        ]
+    )
+    return all_vals

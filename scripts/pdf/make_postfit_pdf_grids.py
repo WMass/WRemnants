@@ -12,7 +12,8 @@ from mc2hlib import lh
 from mc2hlib.common import load_pdf
 
 from rabbit import io_tools
-from wremnants import combine_helpers, theory_tools
+from wremnants.postprocessing import syst_tools
+from wremnants.utilities import theory_utils
 from wums import logging
 
 parser = argparse.ArgumentParser()
@@ -35,7 +36,7 @@ parser.add_argument(
     "--pdf-name",
     type=str,
     required=False,
-    choices=["auto", *theory_tools.pdfMap.keys()],
+    choices=["auto", *theory_utils.pdfMap.keys()],
     default="auto",
     help="Name of the PDF set to use. If 'auto', will use the PDF from the fit result metadata.",
 )
@@ -72,11 +73,6 @@ def postfit_eignvectors(cov_pdf):
     return V * np.sqrt(np.maximum(eigv, 0))
 
 
-def apply_symmetrization(matrix, symm, labels):
-    if symm == "quadratic":
-        return combine_helpers.quadratic_symmetrization(matrix, labels)
-
-
 def write_new_grids(
     base_name, outfolder, fitlabel, postfit_matrix, central_grid, pdf_scale
 ):
@@ -102,7 +98,7 @@ def write_new_grids(
         elif l.find("SetIndex:") >= 0:
             out.write(f"SetIndex: {args.lhaid}\n")
         elif l.find("NumMembers:") >= 0:
-            out.write(f"NumMembers: {nhess + 1}\n")
+            out.write(f"NumMembers: {postfit_matrix.shape[-1] + 1}\n")
         elif l.find("ErrorType") >= 0:
             out.write(f"ErrorType: symmhessian\n")
         else:
@@ -148,16 +144,16 @@ else:
             f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_input}."
         )
 
-pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
+pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
 pdf_name = pdfInfo["lha_name"]
 pdf_scale = input_meta["meta_info"]["args"]["scalePdf"]
 pdf_symm = input_meta["meta_info"]["args"]["symmetrizePdfUnc"]
 
 if pdf_scale == -1:
-    pdf_scale = theory_tools.pdf_inflation_factor(
+    pdf_scale = theory_utils.pdf_inflation_factor(
         pdfInfo, input_meta["meta_info"]["args"]["noi"]
     )
-    logger.info(f"Using default inflation factor from theory_tools: {pdf_scale}")
+    logger.info(f"Using default inflation factor from theory_utils: {pdf_scale}")
 
 pdf_scale *= pdfInfo["scale"] if "scale" in pdfInfo else 1
 logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
@@ -208,7 +204,7 @@ matrix = lh.big_matrix(grids[: nhess + 1]) * pdf_scale
 
 if not symm_errors:
     logger.info(f"Applying symmetrization {pdf_symm} to PDF uncertainties.")
-    matrix = apply_symmetrization(matrix, pdf_symm, labels)
+    matrix = syst_tools.symmetrize_unc_matrix(matrix, grids[0].values, labels, pdf_symm)
 
 new_central = grids[0] + np.sum(pulls * matrix, axis=1)
 

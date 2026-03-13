@@ -42,7 +42,7 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        self.corr_hist_name = (corr_hists[0] + "_Corr") if corr_hists else None
+        self.corr_hist_name = (corr_hists[0] + "Corr") if corr_hists else None
 
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -948,9 +948,9 @@ class TheoryHelper(object):
         pdf_hist = pdfName
 
         if self.pdf_from_corr:
-            pdf_corr_hist = f"{self.corr_hist_name.replace("Corr", "pdfvars_Corr")}"
+            pdf_corr_hist = f"{self.corr_hist_name.replace("Corr", "pdfvarsCorr")}"
             if pdf_corr_hist.replace(
-                "_Corr", ""
+                "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
                 raise RuntimeError(
                     f"PDF correction histogram {pdf_corr_hist} not found in metadata. "
@@ -1018,14 +1018,15 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            asname = f"{self.corr_hist_name.replace("Corr", "pdfas_Corr")}"
+            asname = f"{self.corr_hist_name.replace("Corr", "pdfasCorr")}"
             # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
-            if asname.replace("_Corr", "") not in self.datagroups.args_from_metadata(
+            if asname.replace("Corr", "") not in self.datagroups.args_from_metadata(
                 "theoryCorr"
             ):
-                asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                if asname.replace("_Corr", "") in self.datagroups.args_from_metadata(
+                # asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
+                asname = "scetlib_dyturboCT18Z_pdfas_Corr"
+                if asname.replace("Corr", "") in self.datagroups.args_from_metadata(
                     "theoryCorr"
                 ):
                     logger.warning(

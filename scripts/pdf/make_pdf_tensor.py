@@ -4,7 +4,7 @@ import hist
 import numpy as np
 
 from rabbit import inputdata, tensorwriter
-from wremnants import theory_tools
+from wremnants.utilities import theory_utils
 from wums import logging, output_tools
 
 parser = argparse.ArgumentParser()
@@ -60,20 +60,21 @@ metadata = indata.metadata
 pdf_input = indata.metadata["meta_info_input"]["args"]["pdfs"][0]
 pdf_scale = metadata["meta_info"]["args"]["scalePdf"]
 
-pdfInfo = theory_tools.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
+pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
 pdf_name = pdfInfo["lha_name"]
 
 if pdf_scale == -1:
-    pdf_scale = theory_tools.pdf_inflation_factor(
-        theory_tools.pdfMap[pdf_input], metadata["meta_info"]["args"]["noi"]
+    pdf_scale = theory_utils.pdf_inflation_factor(
+        theory_utils.pdfMap[pdf_input], metadata["meta_info"]["args"]["noi"]
     )
-    logger.info(f"Using default inflation factor from theory_tools: {pdf_scale}")
+    logger.info(f"Using default inflation factor: {pdf_scale}")
 
 pdf_scale *= pdfInfo["scale"] if "scale" in pdfInfo else 1.0
 logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
 
 symHessian = pdfInfo["combine"] == "symHessian"
 symmetrize = indata.metadata["meta_info"]["args"]["symmetrizePdfUnc"]
+print(f"PDF symmetrization procedure: {symmetrize}")
 
 if not symHessian:
     logger.info(f"Applying {symmetrize} symmetrization procedure")
@@ -87,21 +88,24 @@ labels = np.array(
     ],
     dtype=str,
 )
-if not symHessian:
+
+if symmetrize == "quadratic":
     labels[::2] = [
         s.replace("SymAvg", "Down").replace("SymDiff", "Down") for s in labels[::2]
     ]
     labels[1::2] = [
         s.replace("SymAvg", "Up").replace("SymDiff", "Up") for s in labels[1::2]
     ]
+elif symmetrize == "average":
+    labels = [f"{l}{shift}" for l in labels for shift in ("Down", "Up")]
 
 x_range = np.logspace(-4, -0.01, 201)
 
 for chan in ["u", "ubar", "d", "dbar", "s", "sbar", "g", "uv", "dv"]:
-    pdf_data = theory_tools.get_pdf_data(pdf_name, chan, 80.360, x_range[:-1])
+    pdf_data = theory_utils.get_pdf_data(pdf_name, chan, 80.360, x_range[:-1])
     pdf_hist = hist.Hist(
         hist.axis.Variable(x_range, name="x"),
-        hist.axis.StrCategory(labels, name="pdfVar"),
+        hist.axis.StrCategory(["central", *labels], name="pdfVar", flow=False),
         data=pdf_data.T,
     )
 
@@ -123,7 +127,7 @@ for chan in ["u", "ubar", "d", "dbar", "s", "sbar", "g", "uv", "dv"]:
                 kfactor=pdf_scale,
             )
     else:
-        systs = list(pdf_hist.axes["pdfVar"])
+        systs = list(pdf_hist.axes["pdfVar"])[1:]
         for systDown, systUp in zip(systs[::2], systs[1::2]):
             writer.add_systematic(
                 [pdf_hist[..., systUp], pdf_hist[..., systDown]],
