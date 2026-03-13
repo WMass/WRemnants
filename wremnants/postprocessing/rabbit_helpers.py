@@ -187,13 +187,16 @@ def add_explicit_BinByBinStat(
     }  # integrate out gen axes for bin by bin uncertainties
     integration_var["acceptance"] = hist.sum
 
+    if "_full" in datagroups.channel:
+        sel = {"acceptance": hist.sum}
+    else:
+        sel = {"acceptance": True}
+
     hnom = datagroups.groups[proc].hists[datagroups.nominalName]
     hnom = hnom.project(*datagroups.gen_axes_names)
 
     hvar = datagroups.groups[proc].hists["syst"]
-    hvar_acc = action_sel(hvar, {"acceptance": True}).project(
-        *recovar, *datagroups.gen_axes_names
-    )
+    hvar_acc = action_sel(hvar, sel).project(*recovar, *datagroups.gen_axes_names)
     hvar_reco = action_sel(hvar, integration_var)
 
     rel_unc = np.sqrt(hvar_reco.variances(flow=True)) / hvar_reco.values(flow=True)
@@ -202,10 +205,17 @@ def add_explicit_BinByBinStat(
         hvar_acc, rel_unc[..., *[np.newaxis] * len(datagroups.gen_axes_names)]
     )
 
+    if hasattr(datagroups, "axes_disable_flow") and len(datagroups.axes_disable_flow):
+        hvar = hh.disableFlow(hvar, datagroups.axes_disable_flow)
+    # disable for for reco axes
+    hvar = hh.disableFlow(
+        hvar, [n for n in hvar.axes.name if n not in datagroups.gen_axes_names]
+    )
+
     datagroups.writer.add_beta_variations(
         hvar,
         proc,
-        source_channel=datagroups.channel.replace("_masked", ""),
+        source_channel=datagroups.channel.replace("_masked", "").replace("_full", ""),
         dest_channel=datagroups.channel,
     )
 
@@ -231,8 +241,13 @@ def add_nominal_with_correlated_BinByBinStat(
         sumFakesPartial=True,
     )
 
+    if base_name.endswith("_full"):
+        sel = {"acceptance": hist.sum}
+    else:
+        sel = {"acceptance": True}
+
     # load generator level nominal
-    gen_name = f"{base_name}_yieldsUnfolding_theory_weight"
+    gen_name = f"{base_name.replace('_full','')}_yieldsUnfolding_theory_weight"
     datagroups.loadHistsForDatagroups(
         baseName="nominal",
         syst=gen_name,
@@ -244,12 +259,11 @@ def add_nominal_with_correlated_BinByBinStat(
 
     for proc in datagroups.predictedProcesses():
         logger.info(f"Add process {proc} in channel {datagroups.channel}")
-
         # nominal histograms of prediction
         norm_proc_hist_reco = datagroups.groups[proc].hists[gen_name]
         norm_proc_hist = datagroups.groups[proc].hists[datagroups.nominalName]
 
-        norm_proc_hist_reco = action_sel(norm_proc_hist_reco, {"acceptance": True})
+        norm_proc_hist_reco = action_sel(norm_proc_hist_reco, sel)
 
         if norm_proc_hist_reco.axes.name != datagroups.fit_axes:
             norm_proc_hist_reco = norm_proc_hist_reco.project(*datagroups.fit_axes)
@@ -433,9 +447,6 @@ def add_noi_unfolding_variations(
 
     poi_axes_syst = [f"_{n}" for n in poi_axes] if datagroups.xnorm else poi_axes[:]
     noi_args = dict(
-        histname=(
-            gen_level if datagroups.xnorm else f"nominal_{gen_level}_yieldsUnfolding"
-        ),
         name=f"nominal_{gen_level}_yieldsUnfolding",
         baseName=f"{label}_",
         group=f"normXsec{label}",
@@ -469,21 +480,51 @@ def add_noi_unfolding_variations(
 
     if datagroups.xnorm:
 
-        def make_poi_xnorm_variations(h, poi_axes, poi_axes_syst, norm, h_scale=None):
-            h = hh.disableFlow(
-                h,
-                [
-                    "absYVGen",
-                    "absEtaGen",
-                ],
-            )
+        def make_poi_xnorm_variations(
+            hVar, hNom, poi_axes, poi_axes_syst, norm, h_scale=None
+        ):
+            if "_full" not in datagroups.channel:
+                # include flow in rapidity for total phase space measurement
+                hNom = hh.disableFlow(
+                    hNom,
+                    [
+                        "absYVGen",
+                        "absEtaGen",
+                    ],
+                )
+                hVar = hh.disableFlow(
+                    hVar,
+                    [
+                        "absYVGen",
+                        "absEtaGen",
+                    ],
+                )
+
             hVar = hh.expand_hist_by_duplicate_axes(
-                h, poi_axes[::-1], poi_axes_syst[::-1]
+                hVar, poi_axes[::-1], poi_axes_syst[::-1]
             )
+
+            if "_full" in datagroups.channel:
+                # Do not assign unconstrained parameters in these rapidity flow bins. i.e. disable flow of expanded axes
+                hVar = hh.disableFlow(
+                    hVar,
+                    [
+                        "_absYVGen",
+                        "_absEtaGen",
+                    ],
+                )
+                # set the default scaling values for those to 1
+                h_scale = hh.setFlow(
+                    h_scale,
+                    ["absYVGen", "absEtaGen"],
+                    under=False,
+                    over=True,
+                    default_values=1.0,
+                )
 
             if h_scale is not None:
                 hVar = hh.multiplyHists(hVar, h_scale)
-            return hh.addHists(h, hVar, scale2=norm)
+            return hh.addHists(hNom, hVar, scale2=norm)
 
         if scalemap is None:
             scalemap = get_scalemap(
@@ -492,11 +533,14 @@ def add_noi_unfolding_variations(
                 gen_level,
                 rename_axes={o: n for o, n in zip(poi_axes, poi_axes_syst)},
             )
-
+        nominalName = datagroups.nominalName.replace("_full", "")
         datagroups.addSystematic(
             **noi_args,
+            histname=nominalName,
+            nominalName=nominalName,
             systAxesFlow=[f"_{n}" for n in poi_axes if n in poi_axes_flow],
             action=make_poi_xnorm_variations,
+            actionRequiresNomi=True,
             actionArgs=dict(
                 poi_axes=poi_axes,
                 poi_axes_syst=poi_axes_syst,
@@ -527,6 +571,7 @@ def add_noi_unfolding_variations(
 
         datagroups.addSystematic(
             **noi_args,
+            histname=f"nominal_{gen_level}_yieldsUnfolding",
             systAxesFlow=[n for n in poi_axes if n in poi_axes_flow],
             preOpMap={
                 m.name: make_poi_variations

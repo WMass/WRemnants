@@ -46,8 +46,19 @@ class Datagroups(object):
                 self.results = pickle.load(f)
         elif infile.endswith(".hdf5"):
             logger.info("Load input file")
-            h5file = h5py.File(infile, "r")
-            self.results = base_io.load_results_h5py(h5file)
+            infiles = infile.split(",")
+            self.results = {}
+            for ifile in sorted(infiles):
+                logger.info(f"Now at {ifile}")
+                h5file = h5py.File(ifile, "r")
+                result = base_io.load_results_h5py(h5file)
+                for k, v in result.items():
+                    if k in self.results.keys() and k in ["meta_info"]:
+                        logger.warning(f"Skip {k}")
+                        continue
+
+                    self.results[k] = v
+
         else:
             raise ValueError(f"{infile} has unsupported file type")
 
