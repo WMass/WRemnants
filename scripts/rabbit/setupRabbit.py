@@ -336,6 +336,7 @@ def make_parser(parser=None):
         default=None,
         choices=[
             "charge",
+            "utAngleSign",
             "cosThetaStarll",
             "eta-sign",
             "eta-range",
@@ -503,7 +504,7 @@ def make_parser(parser=None):
     parser.add_argument(
         "--fakeTransferCorrFileName",
         type=str,
-        default="fakeTransferTemplates",
+        default="fakeTransferTemplates_smoothTF",
         help="""
         Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
         Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
@@ -1919,7 +1920,7 @@ def setup(
                 )
 
         if inputBaseName != "prefsr":
-            # make prefsr ane EW free definition
+            # make prefsr and EW free definition
             rabbit_helpers.add_electroweak_uncertainty(
                 datagroups,
                 [*args.ewUnc, *args.fsrUnc, *args.isrUnc],
@@ -3001,6 +3002,54 @@ def setup(
         labelsByAxis=["downUpVar"],
         passToFakes=passSystToFakes,
     )
+
+    # ad-hoc uncertainties for recoil, scaling and smearing met
+    datagroups.addSystematic(
+        "scaleMET_pt",
+        mirror=True,
+        processes=datagroups.allMCProcesses(),
+        groups=[
+            "recoil_syst_tmp",
+            "recoil",
+            "experiment",
+            "expNoLumi",
+            "expNoCalib",
+        ],
+        # scale=0.1,
+        systAxes=[],
+        passToFakes=passSystToFakes,
+    )
+    datagroups.addSystematic(
+        "smearMET_pt",
+        mirror=True,
+        processes=datagroups.allMCProcesses(),
+        groups=[
+            "recoil_syst_tmp",
+            "recoil",
+            "experiment",
+            "expNoLumi",
+            "expNoCalib",
+        ],
+        # scale=0.5,
+        systAxes=[],
+        passToFakes=passSystToFakes,
+    )
+    datagroups.addSystematic(
+        "smearMET_phi",
+        mirror=True,
+        processes=datagroups.allMCProcesses(),
+        groups=[
+            "recoil_syst_tmp",
+            "recoil",
+            "experiment",
+            "expNoLumi",
+            "expNoCalib",
+        ],
+        # scale=0.5,
+        systAxes=[],
+        passToFakes=passSystToFakes,
+    )
+    ####
 
     ## decorrelated momentum scale and resolution, when requested
     if not dilepton and "ptscale" in args.decorrSystByVar and decorr_syst_var in fitvar:
