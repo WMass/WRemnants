@@ -118,6 +118,11 @@ def make_subparsers(parser):
             help="Include underflow/overflow in masked channels (for iterative unfolding)",
         )
         parser.add_argument(
+            "--unfoldingFullPhaseSpace",
+            action="store_true",
+            help="Include masked channel with extrapolation to the full phase space",
+        )
+        parser.add_argument(
             "--unfoldSimultaneousWandZ",
             action="store_true",
             help="Simultaneously unfold W and Z and correlate Z background in W channel",
@@ -3028,20 +3033,21 @@ if __name__ == "__main__":
                 unfolding_with_flow=args.unfoldingWithFlow,
             )
 
-            # add masked channel in full phase space
-            datagroups_xnorm = setup(
-                writer,
-                args,
-                ifile,
-                f"{args.unfoldingLevel}_full",
-                iLumiScale,
-                genvar,
-                genvar=genvar,
-                stat_only=args.doStatOnly or args.doStatOnlyMasked,
-                channel=f"{channel}_full_masked",
-                unfolding_scalemap=unfolding_scalemap,
-                unfolding_with_flow=True,
-            )
+            if args.unfoldingFullPhaseSpace:
+                # add masked channel in full phase space
+                datagroups_xnorm = setup(
+                    writer,
+                    args,
+                    ifile,
+                    f"{args.unfoldingLevel}_full",
+                    iLumiScale,
+                    genvar,
+                    genvar=genvar,
+                    stat_only=args.doStatOnly or args.doStatOnlyMasked,
+                    channel=f"{channel}_full_masked",
+                    unfolding_scalemap=unfolding_scalemap,
+                    unfolding_with_flow=True,
+                )
 
             if args.unfoldSimultaneousWandZ and datagroups.mode == "w_mass":
                 # for simultaneous unfolding of W and Z we need to add the noi variations on the Z background in the single lepton channel
