@@ -17,29 +17,35 @@ from wums import logging, output_tools
 def parse_args():
     parser = parsing.base_parser()
     parser.add_argument(
-        "massive_file",
+        "massiveFile",
         type=str,
         help="Input file with massive-b Z+bb sample (hdf5 or pkl.lz4).",
     )
     parser.add_argument(
-        "massless_file",
+        "masslessFile",
         type=str,
         help="Input file with massless Z sample (hdf5 or pkl.lz4).",
     )
     parser.add_argument(
+        "--massiveProc",
         "--massive-proc",
+        dest="massiveProc",
         type=str,
         default="Zbb_MiNNLO",
         help="Process name for the massive-b sample.",
     )
     parser.add_argument(
+        "--masslessProc",
         "--massless-proc",
+        dest="masslessProc",
         type=str,
         default="Zmumu_MiNNLO",
         help="Process name for the massless sample.",
     )
     parser.add_argument(
+        "--histName",
         "--hist-name",
+        dest="histName",
         type=str,
         default="nominal_gen",
         help="Histogram name to use for the correction.",
@@ -83,7 +89,7 @@ def add_dummy_axes(h2d):
     h2d = h2d.project("absYVgen", "ptVgen")
     axis_absy = h2d.axes["absYVgen"]
     axis_pt = h2d.axes["ptVgen"]
-    axis_Q = hist.axis.Regular(1, 60, 120, name="Q", underflow=True, overflow=True)
+    axis_Q = hist.axis.Regular(1, 60, 120, name="Q", underflow=False, overflow=False)
     axis_charge = hist.axis.Regular(1, 0, 1, name="charge")
     axis_vars = hist.axis.StrCategory(["nominal", "mb_up"], name="vars")
     out = hist.Hist(
@@ -114,18 +120,18 @@ def main():
     args = parse_args()
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-    res_massive, meta_massive, _ = input_tools.read_infile(args.massive_file)
-    res_massless, meta_massless, _ = input_tools.read_infile(args.massless_file)
+    res_massive, meta_massive, _ = input_tools.read_infile(args.massiveFile)
+    res_massless, meta_massless, _ = input_tools.read_infile(args.masslessFile)
 
     h_massive = scale_hist(
         res_massive,
-        args.massive_proc,
-        get_hist(res_massive, args.massive_proc, args.hist_name),
+        args.massiveProc,
+        get_hist(res_massive, args.massiveProc, args.histName),
     )
     h_massless = scale_hist(
         res_massless,
-        args.massless_proc,
-        get_hist(res_massless, args.massless_proc, args.hist_name),
+        args.masslessProc,
+        get_hist(res_massless, args.masslessProc, args.histName),
     )
 
     vars_2d = ["ptVgen", "absYVgen"]
@@ -146,8 +152,10 @@ def main():
         "minnlo_ref_hist": nominal_out,
     }
     meta_dict = {
-        "massive_file": args.massive_file,
-        "massless_file": args.massless_file,
+        "massiveFile": args.massiveFile,
+        "masslessFile": args.masslessFile,
+        "massive_file": args.massiveFile,
+        "massless_file": args.masslessFile,
         "massive_meta": meta_massive[0] if meta_massive else None,
         "massless_meta": meta_massless[0] if meta_massless else None,
     }
