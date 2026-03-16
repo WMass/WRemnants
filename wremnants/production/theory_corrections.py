@@ -130,10 +130,10 @@ theory_corr_weight_map = {
         "pdf4lhc21"
     ),
     "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
-        "msht20mbrange_renorm"
+        "msht20mbrange", renorm=True
     ),
     "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
-        "msht20mcrange_renorm"
+        "msht20mcrange", renorm=True
     ),
     # Tested this, better not to treat this way unless using MSHT20nnlo as central set
     # "scetlib_dyturboMSHT20mbrange" : expand_pdf_entries("msht20mbrange", renorm=True),
@@ -1194,12 +1194,17 @@ def make_pdfs_from_corrs_uncertainties_helper_by_helicity(
         + "/TheoryCorrections/ByHelicity/PDFsFromCorrs/w_z_gen_dists_{pdf}_maxFiles_m1_skimmed.hdf5"
     )
     pdf_helpers = {}
+    mass_corrs = [
+        "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_Corr",
+        "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars_Corr",
+    ]
     for pdf in pdfs_from_corrs:
         logger.debug(f"Making PDF uncertainty helper by helicity for theory corr {pdf}")
+        den = pdf if pdf in mass_corrs else "pdf_uncorr"
         pdf_helper = make_uncertainty_helper_by_helicity(
             proc=proc,
             nom=pdf,
-            den="pdf_uncorr",
+            den=den,
             central_weights=False,
             var_ax_name="vars",
             filename=pdf_file_template.format(pdf=pdf),

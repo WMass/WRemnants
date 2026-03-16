@@ -1138,11 +1138,15 @@ class TheoryHelper(object):
         pdfs = self.datagroups.args_from_metadata("pdfs")
         theory_corrs = self.datagroups.args_from_metadata("theoryCorr")
 
-        from_minnlo = not (
-            "scetlib_dyturboMSHT20mcrange" in theory_corrs
-            and "scetlib_dyturboMSHT20mcrange" in theory_corrs
-            and "msht20" in pdfs[0]
-        )
+        corrs_oldnp = ["scetlib_dyturboMSHT20mcrange", "scetlib_dyturboMSHT20mcrange"]
+        corrs_newnp = [
+            "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars",
+            "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars",
+        ]
+        has_old_corrs = all(corr in theory_corrs for corr in corrs_oldnp)
+        has_new_corrs = all(corr in theory_corrs for corr in corrs_newnp)
+
+        from_minnlo = not (has_new_corrs or (has_old_corrs and "msht20" in pdfs[0]))
 
         if from_minnlo:
             if (
@@ -1159,13 +1163,9 @@ class TheoryHelper(object):
                 raise ValueError(
                     "Must include the msht20mb(c)range pdf sets to take the mass variation from MiNNLO"
                 )
-        elif not (
-            "msht20" in pdfs[0]
-            and "scetlib_dyturboMSHT20mbrange" in theory_corrs
-            and "scetlib_dyturboMSHT20mcrange" in theory_corrs
-        ):
+        elif not (has_new_corrs or (has_old_corrs and "msht20" in pdfs[0])):
             raise ValueError(
-                "In order to take the mb(c) mass unc. from SCETlib+DYTurbo, you need to include those corr files and use MSHT20 as central PDF"
+                "In order to take the mb(c) mass unc. from SCETlib+DYTurbo, you need to include those corr files and either use MSHT20 as central PDF or use those made with the new NP model."
             )
 
         if from_minnlo:
@@ -1173,6 +1173,13 @@ class TheoryHelper(object):
                 bhist = "pdfMSHT20mbrangeByHelicity"
             else:
                 bhist = "pdfMSHT20mbrange"
+        elif has_new_corrs:
+            if self.from_hels:
+                bhist = "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_CorrByHelicity"
+            else:
+                raise ValueError(
+                    "Taking the mb variations from a new-NP theory correction is only supported when done via helicities."
+                )
         else:
             bhist = "scetlib_dyturboMSHT20mbrangeCorr"
         syst_ax = "pdfVar" if from_minnlo else "vars"

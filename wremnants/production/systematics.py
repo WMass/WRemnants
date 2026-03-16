@@ -605,7 +605,13 @@ def add_pdfUncertByHelicity_hist(
             ],
         )
     safeTensorName = f"{tensorName}_clamped"
-    renorm = theory_utils.pdfMap.get(pdf, {}).get("renorm", False)
+    mass_corrs_newnp = [
+        "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_Corr",
+        "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars_Corr",
+    ]
+    renorm = (
+        theory_utils.pdfMap.get(pdf, {}).get("renorm", False) or pdf in mass_corrs_newnp
+    )
     if renorm:
         central_event_weight = "nominal_weight"
     else:
