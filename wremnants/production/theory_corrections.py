@@ -58,9 +58,7 @@ theory_corr_weight_map = {
     "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "msht20"
     ),
-    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
-        "ct18z"
-    ),
+    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info("ct18z"),
     "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "ct18z"
     ),

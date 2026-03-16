@@ -613,7 +613,7 @@ def add_pdfUncertByHelicity_hist(
         central_event_weight = "nominal_weight"
     else:
         central_event_weight = "nominal_weight_pdf_uncorr"
-        
+
     df = df.Define(
         safeTensorName,
         f"auto res = wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0); res = {central_event_weight}*res; return res;",
