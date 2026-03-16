@@ -543,7 +543,7 @@ for h in args.hists:
         base_action = lambda x: hh.projectNoFlow(
             collapseSyst(x[select]), h, overflow_ax
         )
-        base_action = lambda x: collapseSyst(x[select])
+        # base_action = lambda x: collapseSyst(x[select])
         action = base_action
         href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
 
@@ -609,6 +609,7 @@ for h in args.hists:
             )
         to_join.append(var_arg)
 
+    # args that modify filenames found at wums.output_tools.get_filename_modifiers
     filename_modifiers = output_tools.get_filename_modifiers()
     to_join.extend(
         [suffix for suffix, condition in filename_modifiers.items() if condition(args)]

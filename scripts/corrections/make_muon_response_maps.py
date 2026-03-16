@@ -14,32 +14,14 @@ import wums.tfutils
 
 mpl.rcParams["figure.dpi"] = 300
 
+# TODO migrate butojpsik stuff to separate file and leave this untouched or generalize correctly...
+BuToJpsiK = None
 
-# infile = "w_z_muonresponse_scetlib_dyturboCorr_maxFiles_m1.hdf5"
-# og
+infile = "w_z_muonresponse_scetlib_dyturboCorr_maxFiles_m1.hdf5"
 postfix = ""
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr.hdf5"
-# gev wide bins (< gev above)
-postfix = ""
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_gevbins.hdf5"
-# way less bins
-postfix = "lessbins"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_lessbins.hdf5"
-# way less bins but fixed (?)
-postfix = "lessbinsfixed"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_lessbinsfixed.hdf5"
-# gev bins, 28 eta bins, fixed
-postfix = "fixed"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_fixed.hdf5"
-# same bins as fixed (directly above), but almost no selections
-postfix = "noSels"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_noSels.hdf5"
-# supposedly same as fixed, debuggin
-postfix = "nominal"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_nominal.hdf5"
-# more debuggin
-postfix = "debug"
-infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_debug.hdf5"
+if BuToJpsiK:
+    postfix = "debug"
+    infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_debug.hdf5"
 
 hist_response = None
 hist_response_scaled = None
@@ -53,8 +35,6 @@ procs.append("Wminusmunu_2016PostVFP")
 procs.append("Wplustaunu_2016PostVFP")
 procs.append("Wminustaunu_2016PostVFP")
 
-# TODO migrate butojpsik stuff to separate file and leave this untouched or generalize correctly...
-BuToJpsiK = None
 if BuToJpsiK:
     procs = ["BuToJpsiK"]
 
@@ -163,8 +143,6 @@ print("qopr bounds:", qopr_low, qopr_high)
 print("pt bounds:", pt_low, pt_high)
 print("eta bounds:", eta_low, eta_high)
 
-debug_interp = False
-
 
 def interp_cdf(quants_sel, genPt, genEta, genCharge, qopr):
     chargeIdx = tf.where(genCharge > 0.0, 1, 0)
@@ -175,18 +153,6 @@ def interp_cdf(quants_sel, genPt, genEta, genCharge, qopr):
     quants_interp = tfp.math.batch_interp_rectilinear_nd_grid(
         x, x_grid_points=grid_points, y_ref=quants_charge, axis=1
     )
-
-    if debug_interp:
-        tf.print(
-            "quants_interp min/max:",
-            tf.reduce_min(quants_interp),
-            tf.reduce_max(quants_interp),
-        )
-        tf.print(
-            "quants_interp monotone:",
-            tf.reduce_all(quants_interp[1:] > quants_interp[:-1]),
-        )
-        tf.print("min diff", tf.reduce_min(quants_interp[1:] - quants_interp[:-1]))
 
     quants_interp = tf.reshape(quants_interp, [-1])
     quant_cdfvals_interp = tf.reshape(quant_cdfvals, [-1])
@@ -264,8 +230,8 @@ def interp_dweight(genPt, genEta, genCharge, qopr):
     return dweightdscale, dweightdsigmasq
 
 
-# genPt_test = tf.constant(25.0, tf.float64)
-genPt_test = tf.constant(5.0, tf.float64)
+genPt_test = tf.constant(25.0, tf.float64)
+# genPt_test = tf.constant(5.0, tf.float64)
 genEta_test = tf.constant(0.1, tf.float64)
 genCharge_test = tf.constant(1.0, tf.float64)
 qopr_test = tf.constant(1.002, tf.float64)
@@ -280,33 +246,22 @@ print("res2b", res2b)
 scalar_spec = tf.TensorSpec([], tf.float64)
 input_signature = 4 * [scalar_spec]
 
-output_dir = "/ceph/submit/data/user/p/pmlugato/mz/calibration/"
 tflite_model = wums.tfutils.function_to_tflite(interp_dweight, input_signature)
 
-# output_filename = "muon_response.tflite"
-# output_filename = "kaon_response.tflite"
-output_filename = f"kaon_response_{postfix}.tflite"
+output_filename = "muon_response.tflite"
+if BuToJpsiK:
+    # output_filename = "kaon_response.tflite"
+    output_filename = f"kaon_response_{postfix}.tflite"
 
-with open(output_dir + output_filename, "wb") as f:
+with open(output_filename, "wb") as f:
     f.write(tflite_model)
 
 
-# this is just for plotting
-def func_pdf(h):
-    dtype = tf.float64
-    xvals = [tf.constant(center, dtype=dtype) for center in h.axes.centers]
-    xedges = [tf.constant(edge, dtype=dtype) for edge in h.axes.edges]
-    axis = 1
+###########################
 
-    # cdf = wums.fitutils.pchip_interpolate(xi = quants, yi = quant_cdfvals, x = xedges[axis], axis=axis)
-    # cdf = wums.fitutils.cubic_spline_interpolate(
-    #    xi=quants, yi=quant_cdfvals, x=xedges[axis], axis=axis
-    # )
+# plotting and debugging below
 
-    pdf = cdf[:, 1:] - cdf[:, :-1]
-    # pdf = tf.maximum(pdf, tf.zeros_like(pdf))
-
-    return pdf
+###########################
 
 
 qoprvals = np.linspace(0.0, 2.0, 1000)  # og 1000
@@ -366,10 +321,8 @@ testpt = tf.constant(centers_flat[2][ptidx], tf.float64)
 testeta = tf.constant(centers_flat[3][etaidx], tf.float64)
 testcharge = tf.constant(1.0 if charge_idx == 1 else -1.0, tf.float64)
 
-print(f"[diag] Output dir: {outdir}")
-print(
-    f"[diag] Selected bin: ptidx={ptidx}, etaidx={etaidx}, charge={int(testcharge.numpy())}"
-)
+print(f"Output dir: {outdir}")
+print(f"Selected bin: ptidx={ptidx}, etaidx={etaidx}, charge={int(testcharge.numpy())}")
 
 hist_response_sel = hist_response[charge_idx, :, ptidx, etaidx]
 hist_sum = hist_response_sel.sum().value
@@ -381,12 +334,12 @@ qopr_widths = np.diff(qopr_edges)
 hist_density = hist_vals_norm / qopr_widths if hist_sum > 0 else hist_vals
 
 # Empirical CDF from histogram
-print("[diag] Computing histogram CDF")
+print("Computing histogram CDF")
 hist_cdf = np.cumsum(hist_vals_norm)
 hist_cdf = np.clip(hist_cdf, 0.0, 1.0)
 
 # Interpolated CDF/PDF and derivatives
-print("[diag] Computing interpolated CDF/PDF and derivatives")
+print("Computing interpolated CDF/PDF and derivatives")
 qopr_grid = np.linspace(qopr_edges[0], qopr_edges[-1], 500)
 qopr_grid_tf = tf.constant(qopr_grid, tf.float64)
 
@@ -409,12 +362,12 @@ if pdf_area > 0:
 else:
     pdf_vals_norm = pdf_vals
 print(
-    f"[diag] pdf_area={pdf_area:.6g} hist_sum={hist_sum:.6g} "
+    f"pdf_area={pdf_area:.6g} hist_sum={hist_sum:.6g} "
     f"hist_norm_sum={hist_vals_norm.sum():.6g}"
 )
 
 # dweight/dscale = -dpdf/pdf
-print("[diag] Computing dweight/dscale")
+print("Computing dweight/dscale")
 with np.errstate(divide="ignore", invalid="ignore"):
     dweightdscale_vals = -dpdf_vals / pdf_vals
     dweightdscale_vals = np.where(
@@ -424,7 +377,7 @@ with np.errstate(divide="ignore", invalid="ignore"):
 title_prefix = f"ptidx{ptidx} etaidx{etaidx} q{int(testcharge.numpy())}"
 
 # qopr histogram + pdf overlay
-print("[diag] Saving qopr pdf overlay")
+print("Saving qopr pdf overlay")
 _plot_hist_and_smooth(
     qopr_centers,
     hist_density,
@@ -437,7 +390,7 @@ _plot_hist_and_smooth(
     xlim=[0.8, 1.2],
 )
 
-print("[diag] Save qopr distribution w/out PDF overlay")
+print("Save qopr distribution w/out PDF overlay")
 _plot_line(
     qopr_centers,
     hist_density,
@@ -450,7 +403,7 @@ _plot_line(
 )
 
 # CDF overlay (hist CDF + interpolated CDF)
-print("[diag] Saving qopr cdf overlay")
+print("Saving qopr cdf overlay")
 _plot_hist_and_smooth(
     qopr_centers,
     hist_cdf,
@@ -463,7 +416,7 @@ _plot_hist_and_smooth(
 )
 
 # First derivative of CDF = pdf
-print("[diag] Saving pdf")
+print("Saving pdf")
 _plot_line(
     qopr_grid,
     pdf_vals_norm,
@@ -474,7 +427,7 @@ _plot_line(
 )
 
 # Second derivative of CDF = dpdf/dqopr
-print("[diag] Saving dpdf/dqopr")
+print("Saving dpdf/dqopr")
 _plot_line(
     qopr_grid,
     dpdf_vals,
@@ -485,7 +438,7 @@ _plot_line(
 )
 
 # dweight/dscale
-print("[diag] Saving dweight/dscale")
+print("Saving dweight/dscale")
 _plot_line(
     qopr_grid,
     dweightdscale_vals,
@@ -496,7 +449,7 @@ _plot_line(
 )
 
 # Quantiles plot
-print("[diag] Saving quantiles")
+print("Saving quantiles")
 q = quants[charge_idx, :, ptidx, etaidx].numpy()
 _plot_line(
     quant_cdfvals_interp.numpy(),
@@ -507,7 +460,8 @@ _plot_line(
     f"qopr_quantiles_pt{ptidx}_eta{etaidx}_q{int(testcharge.numpy())}.png",
 )
 
-if False:
+debug = False
+if debug:
     for ptidx in range(n_pt):
         for etaidx in range(n_eta):
             testpt = tf.constant(centers_flat[2][ptidx], tf.float64)

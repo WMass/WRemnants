@@ -5,9 +5,9 @@ import hist
 import numpy as np
 import ROOT
 import uproot
+from utilities import common
 
 import narf
-from utilities import common
 from wremnants.butojpsik_histograms import all_butojpsik_axes
 from wums import logging
 

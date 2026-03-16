@@ -23,7 +23,7 @@ default_nfiles = {
     "Ztautau_2016PostVFP": 1200,
 }
 
-new_mz_calibration_samples = [
+btojpsik_calibration_samples = [
     "data2018Acharmonium",
     "data2018Bcharmonium",
     "data2018Ccharmonium",
@@ -274,7 +274,7 @@ def getDatasets(
         is_data = info.get("group", "") == "Data"
 
         prod_tags = data_tags if is_data else mc_tags
-        if sample in new_mz_calibration_samples:
+        if sample in btojpsik_calibration_samples:
             prod_tags = [""]
 
         nfiles = maxFiles

@@ -671,13 +671,11 @@ def common_parser(analysis_label=""):
             )
 
         # specific for unfolding
-        # TODO: shouldn't fail out unless --unfoldingAxes is passed?
         axmap = {
             "w_lowpu": ["ptVGen", "qVGen"],
             "w_mass": ["absEtaGen", "ptGen", "qGen"],
             "z_dilepton": ["ptVGen", "absYVGen"],
             "z_lowpu": ["ptVGen"],
-            "mz_calibration": ["ptVGen"],
         }
         axmap["z_wlike"] = axmap["w_mass"]
         if analysis_label not in axmap:

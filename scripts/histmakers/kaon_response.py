@@ -4,9 +4,9 @@ import hist
 import matplotlib
 import numpy as np
 import ROOT
+from utilities import common, parsing
 
 import narf
-from utilities import common, parsing
 from wums import logging
 
 matplotlib.use("Agg")

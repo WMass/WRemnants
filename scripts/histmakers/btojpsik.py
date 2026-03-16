@@ -1,6 +1,7 @@
 import os
 
 from utilities import common, parsing
+
 from wremnants.datasets.datagroups import Datagroups
 
 analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))

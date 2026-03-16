@@ -3,20 +3,17 @@ import copy
 from wremnants.utilities import common
 
 lumicsv = f"{common.data_dir}/bylsoutput_2018.csv"
-# lumijson = f"{common.data_dir}/Cert_314472-325175_13TeV_UL2018_Collisions18_HLT_IsoMu24_v_CustomJSON.txt"
+lumijson = f"{common.data_dir}/Cert_314472-325175_13TeV_UL2018_Collisions18_HLT_IsoMu24_v_CustomJSON.txt"
 
 # for Charmonium dataset studies, starting with HLT_DoubleMu4_3_Jpsi
 lumicsv_HLT_DoubleMu4_3_Jpsi_vstar = (
     f"{common.data_dir}/bylsoutput_2018_HLT_DoubleMu4_3_Jpsi.csv"
 )
-lumijson = (
+lumijson_legacy = (
     f"{common.data_dir}/Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt"
 )
 
 dataDict = {
-# NOTES
-# BASE_PATH is /scratchnvme/wmass/NANOV9/postVFP (so 2018 BASE path is {BASE_PATH}/../y2018v6/) have to update at some point
-# ZtautauPostVFP sample is one available from centrl production, so
     "SingleMuon_2018A": {
         "filepaths": [
             "{BASE_PATH}/SingleMuon/NanoV9Run2018A_{NANO_PROD_TAG}",
@@ -60,7 +57,7 @@ dataDict = {
         ],
         "group": "Data",
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
-        "lumijson": lumijson,
+        "lumijson": lumijson_legacy,
         "das_name": "private",
     },
     "data2018Bcharmonium": {
@@ -69,7 +66,7 @@ dataDict = {
         ],
         "group": "Data",
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
-        "lumijson": lumijson,
+        "lumijson": lumijson_legacy,
         "das_name": "private",
     },
     "data2018Ccharmonium": {
@@ -78,7 +75,7 @@ dataDict = {
         ],
         "group": "Data",
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
-        "lumijson": lumijson,
+        "lumijson": lumijson_legacy,
         "das_name": "private",
     },
     "data2018Dcharmonium": {
@@ -87,7 +84,7 @@ dataDict = {
         ],
         "group": "Data",
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
-        "lumijson": lumijson,
+        "lumijson": lumijson_legacy,
         "das_name": "private",
     },
     "Zmumu_2018": {
