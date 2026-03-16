@@ -42,7 +42,7 @@ pdfMap = {
         ],
         "alphasRange": "001",
         "inflation_factor_wmass": 1.0,  # not determined
-        "inflation_factor_alphaS": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.0,
     },
     "nnpdf40": {
         "name": "pdfNNPDF40",
@@ -70,7 +70,7 @@ pdfMap = {
         ],
         "alphasRange": "001",
         "inflation_factor_wmass": 1.0,
-        "inflation_factor_alphaS": 1.5,
+        "inflation_factor_alphaS": 2.0,
     },
     "msht20": {
         "name": "pdfMSHT20",
@@ -84,7 +84,7 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "inflation_factor_wmass": 1.5,
-        "inflation_factor_alphaS": 2.0,
+        "inflation_factor_alphaS": 2.2,
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
@@ -128,7 +128,7 @@ pdfMap = {
         ],
         "alphasRange": "002",
         "inflation_factor_wmass": 1.5,
-        "inflation_factor_alphaS": 1.0,  # not determined
+        "inflation_factor_alphaS": 1.5,
     },
     "ct18z": {
         "name": "pdfCT18Z",
@@ -182,7 +182,7 @@ pdfMap = {
         ],  # dummy AS
         "alphasRange": "002",
         "inflation_factor_wmass": 4.0,
-        "inflation_factor_alphaS": 3.0,
+        "inflation_factor_alphaS": 3.5,
     },
 }
 

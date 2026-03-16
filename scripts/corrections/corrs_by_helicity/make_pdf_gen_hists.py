@@ -12,7 +12,7 @@ PDF_SETS = [
     "msht20mbrange_renorm",
     "nnpdf31",
     "ct18",
-    "nnpdf30",
+    "nnpdf31",
     "nnpdf40",
     "pdf4lhc21",
     "msht20",
@@ -27,7 +27,10 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--pdf", nargs="+", help="List of PDFs to process", default=PDF_SETS
+        "--pdf",
+        nargs="+",
+        help="List of PDFs to process (default: %(default)s)",
+        default=PDF_SETS,
     )
     parser.add_argument(
         "-o",
@@ -72,7 +75,7 @@ def main():
         if args.skim:
             pdf_replace = f"_{pdf}" if pdf != "ct18z" else ""
             skim_command = f"""
-            python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1{pdf_replace}_pdfByHelicity.hdf5 \
+            python {os.environ['WREM_BASE']}/scripts/inspect/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1{pdf_replace}_pdfByHelicity.hdf5 \
             --filterHists nominal_gen_pdf --excludeHists alpha --outfile {args.outdir}/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity_skimmed.hdf5
             """
             print(f"Running skimming command: {skim_command}")
