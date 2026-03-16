@@ -944,7 +944,11 @@ class TheoryHelper(object):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
-        scale = scale if scale != -1.0 else self.pdf_inflation_factor(pdfInfo)
+        scale = (
+            scale
+            if scale != -1.0
+            else theory_utils.pdf_inflation_factor(pdfInfo, self.args.noi)
+        )
         pdf_hist = pdfName
 
         if self.pdf_from_corr:
@@ -1207,16 +1211,3 @@ class TheoryHelper(object):
             + [""] * 6
             + ["pdfMSHT20mcrangeUp"],
         )
-
-    def pdf_inflation_factor(self, infoMap):
-        """Return the PDF uncertainty inflation factor for given nuisance parameters."""
-
-        if self.args.noi == ["wmass"] or self.args.noi == ["wmass", "wwidth"]:
-            return infoMap.get("inflation_factor_wmass", 1)
-        elif self.args.noi == ["alphaS"]:
-            return infoMap.get("inflation_factor_alphaS", 1)
-        else:
-            logger.debug(
-                f"No inflation factor defined for nuisance parameters {self.args.noi}, returning 1."
-            )
-            return 1

@@ -6,6 +6,9 @@ import lhapdf
 import numpy as np
 
 from wremnants.utilities import common, samples
+from wums import logging
+
+logger = logging.child_logger(__name__)
 
 pdfMap = {
     "nnpdf31": {
@@ -378,7 +381,7 @@ def eval_pdf(pdf, flav, x, q):
         raise NotImplementedError(f"Flavor type {flav} is unsupported")
 
 
-def get_pdf_data(pdf_name, flavor, Q, x_range):
+def pdf_data_from_lhapdf(pdf_name, flavor, Q, x_range):
     pdf_set = lhapdf.getPDFSet(pdf_name)
     members = pdf_set.mkPDFs()
     # Calculate values for all members (exclude alpha_s members if present)
@@ -389,3 +392,17 @@ def get_pdf_data(pdf_name, flavor, Q, x_range):
         ]
     )
     return all_vals
+
+
+def pdf_inflation_factor(infoMap, noi):
+    """Return the PDF uncertainty inflation factor for given nuisance parameters."""
+
+    if noi == ["wmass"] or noi == ["wmass", "wwidth"]:
+        return infoMap.get("inflation_factor_wmass", 1)
+    elif noi == ["alphaS"]:
+        return infoMap.get("inflation_factor_alphaS", 1)
+    else:
+        logger.debug(
+            f"No inflation factor defined for nuisance parameters {noi}, returning 1."
+        )
+        return 1

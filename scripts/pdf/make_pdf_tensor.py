@@ -97,7 +97,9 @@ if symmetrize == "quadratic":
         s.replace("SymAvg", "Up").replace("SymDiff", "Up") for s in labels[1::2]
     ]
 elif symmetrize == "average":
-    labels = [f"{l}{shift}" for l in labels for shift in ("Down", "Up")]
+    labels = np.array(
+        [f"{l}{shift}" for l in labels for shift in ("Down", "Up")], dtype=str
+    )
 
 x_range = np.logspace(-4, -0.01, 201)
 

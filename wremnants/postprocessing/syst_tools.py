@@ -973,7 +973,7 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
 
 
 # TODO: Integrate with rabbit to avoid code duplication
-def symmetrize_unc_matrix(matrix, nominal, labels, symm_type):
+def symmetrize_unc_matrix(matrix, labels, symm_type):
     if symm_type not in ["quadratic", "average"]:
         raise NotImplementedError(f"Symmetrization type {symm_type} not supported!")
 
@@ -1000,7 +1000,7 @@ def symmetrize_unc_matrix(matrix, nominal, labels, symm_type):
 
         return matrix.iloc[:, : len(labels)]
 
-    avg_idx = np.char.find(labels, "Avg") != 0
+    avg_idx = np.char.find(labels, "Avg") != -1
     symm_diff = 0.5 * np.sqrt(3) * (values[:, ::2] + values[:, 1::2])
 
     values[:, avg_idx] = symm_avg

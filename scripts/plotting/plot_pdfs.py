@@ -4,7 +4,7 @@ import lhapdf
 import matplotlib.pyplot as plt
 import numpy as np
 
-from wremnants import theory_tools
+from wremnants.utilities import theory_utils
 from wums import output_tools, plot_tools
 
 PARTON_FLAVOR_NAMES = {
@@ -33,7 +33,7 @@ def make_pdf_plot(flavor, Q_scale, pdf_sets, labels, colors, outdir, args):
     reference_central = None
 
     for i, name in enumerate(pdf_sets):
-        vals = theory_tools.pdf_data_from_lhapdf(name, flavor, Q_scale, x_range)
+        vals = theory_utils.pdf_data_from_lhapdf(name, flavor, Q_scale, x_range)
         central = vals[0]
         # Hessian uncertainty
         err = np.sqrt(np.sum((vals[1:] - central) ** 2, axis=0))

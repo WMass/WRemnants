@@ -204,7 +204,8 @@ matrix = lh.big_matrix(grids[: nhess + 1]) * pdf_scale
 
 if not symm_errors:
     logger.info(f"Applying symmetrization {pdf_symm} to PDF uncertainties.")
-    matrix = syst_tools.symmetrize_unc_matrix(matrix, grids[0].values, labels, pdf_symm)
+    print(type(labels))
+    matrix = syst_tools.symmetrize_unc_matrix(matrix, labels, pdf_symm)
 
 new_central = grids[0] + np.sum(pulls * matrix, axis=1)
 
