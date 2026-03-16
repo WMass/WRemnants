@@ -5,6 +5,7 @@ import re
 import lhapdf
 import numpy as np
 
+from rabbit import io_tools
 from wremnants.utilities import common, samples
 from wums import logging
 
@@ -406,3 +407,75 @@ def pdf_inflation_factor(infoMap, noi):
             f"No inflation factor defined for nuisance parameters {noi}, returning 1."
         )
         return 1
+
+
+def read_vals_and_errors_from_fit(fitresult_file, fit_types, chan):
+    fitresult = io_tools.get_fitresult(fitresult_file)
+    values = []
+    errors = []  # Will store list of [err, err] to match asymmetric format
+    for fit in fit_types:
+        h = fitresult["mappings"]["BaseMapping"]["channels"][chan][
+            f"hist_{fit}_inclusive"
+        ].get()
+        val = h.values()
+        err = np.sqrt(h.variances())
+        values.append(val)
+        # Symmetrical fits are treated as [err, err] for consistency
+        errors.append([err, err])
+    return values, errors
+
+
+def read_pdf_vals_and_errors(flavor, Q_scale, x_range, pdf_sets):
+    values = []
+    errors = []
+    for name in pdf_sets:
+        pdf_set = lhapdf.getPDFSet(name)
+        vals = pdf_data_from_lhapdf(name, flavor, Q_scale, x_range)
+        central = vals[0]
+        variations = vals[1:]  # All members except central
+
+        scale_err = 1 / 1.645 if pdf_set.errorConfLevel == 90 else 1.0
+        if scale_err != 1.0:
+            logger.info(
+                f"Scaling error by {scale_err:.3f} to convert from 90% CL to 68% CL"
+            )
+
+        if "symmhessian" in pdf_set.errorType.lower():
+            # Standard symmetric Hessian
+            err = np.sqrt(np.sum((variations - central) ** 2, axis=0)) * scale_err
+            err_down = err_up = err
+        # Check if set is asymmetric Hessian (even/odd members)
+        # Common for CT, MSHT. Usually nmemCore is even.
+        elif (
+            "hessian" in pdf_set.errorType.lower()
+            and pdf_set.errorInfo.nmemCore % 2 == 0
+        ):
+            # Odd indices (1, 3, 5...) are usually 'down', even (2, 4, 6...) are 'up'
+            # In vals[1:], index 0 is member 1, index 1 is member 2
+            down_vars = variations[0::2]
+            up_vars = variations[1::2]
+
+            err_down = (
+                np.sqrt(
+                    np.sum(
+                        np.maximum(0, central - down_vars) ** 2
+                        + np.maximum(0, up_vars - central) ** 2,
+                        axis=0,
+                    )
+                )
+                * scale_err
+            )
+            err_up = (
+                np.sqrt(
+                    np.sum(
+                        np.maximum(0, down_vars - central) ** 2
+                        + np.maximum(0, central - up_vars) ** 2,
+                        axis=0,
+                    )
+                )
+                * scale_err
+            )
+
+        values.append(central)
+        errors.append([err_down, err_up])
+    return values, errors

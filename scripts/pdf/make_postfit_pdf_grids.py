@@ -101,6 +101,8 @@ def write_new_grids(
             out.write(f"NumMembers: {postfit_matrix.shape[-1] + 1}\n")
         elif l.find("ErrorType") >= 0:
             out.write(f"ErrorType: symmhessian\n")
+        elif l.find("ErrorConfLevel") >= 0:
+            out.write(f"ErrorConfLevel: 68.26894921370858\n")
         else:
             out.write(l)
     inn.close()

@@ -986,7 +986,7 @@ def symmetrize_unc_matrix(matrix, labels, symm_type):
 
     # logkup = up - nominal
     # logkdown = nominal - down
-    # Leads to a sign flip wrt rabbit
+    # Leads to a sign flip for down wrt rabbit
     # Assyming the unc. are organized down,up,down,up,...
     symm_avg = 0.5 * (-values[:, ::2] + values[:, 1::2])
 
@@ -1002,6 +1002,7 @@ def symmetrize_unc_matrix(matrix, labels, symm_type):
 
     avg_idx = np.char.find(labels, "Avg") != -1
     symm_diff = 0.5 * np.sqrt(3) * (values[:, ::2] + values[:, 1::2])
+    symm_diff = 0
 
     values[:, avg_idx] = symm_avg
     values[:, ~avg_idx] = symm_diff

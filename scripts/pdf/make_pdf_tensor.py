@@ -103,11 +103,14 @@ elif symmetrize == "average":
 
 x_range = np.logspace(-4, -0.01, 201)
 
+# Consistency with the incorrect treatment of the central value in setupRabbit
+category_labels = labels if symHessian else ["central", *labels]
+
 for chan in ["u", "ubar", "d", "dbar", "s", "sbar", "g", "uv", "dv"]:
-    pdf_data = theory_utils.get_pdf_data(pdf_name, chan, 80.360, x_range[:-1])
+    pdf_data = theory_utils.pdf_data_from_lhapdf(pdf_name, chan, 80.360, x_range[:-1])
     pdf_hist = hist.Hist(
         hist.axis.Variable(x_range, name="x"),
-        hist.axis.StrCategory(["central", *labels], name="pdfVar", flow=False),
+        hist.axis.StrCategory(category_labels, name="pdfVar", flow=False),
         data=pdf_data.T,
     )
 
@@ -120,6 +123,7 @@ for chan in ["u", "ubar", "d", "dbar", "s", "sbar", "g", "uv", "dv"]:
     writer.add_data(pdf_hist[..., 0], chan)
 
     if symHessian:
+        # This is wrong in setupRabbit (the central val is treated as a variation) so it should also be wrong here...
         for syst in pdf_hist.axes["pdfVar"]:
             writer.add_systematic(
                 pdf_hist[..., syst],
