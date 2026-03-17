@@ -12,10 +12,11 @@ import matplotlib.pyplot as plt
 import ROOT
 
 import narf
-from wremnants import muon_calibration_pt2
-from wremnants.butojpsik_histograms import all_butojpsik_axes
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import (
+import wremnants.production.muon_calibration as muon_calibration
+from wremnants.production import btojpsik_selections, muon_calibration
+from wremnants.production.butojpsik_axes import all_butojpsik_axes
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
     write_analysis_output,
@@ -27,7 +28,9 @@ parser.add_argument(
     "--selectionHists", action="store_true", help="store hist after each selection"
 )
 parser.add_argument(
-    "--aembitch", action="store_true", help="uncertainty hists for parameterized model"
+    "--include-kaon-scale-variation",
+    action="store_true",
+    help="uncertainty hists for parameterized model",
 )
 parser.add_argument("--cutflow", action="store_true", default=None, help="make cutflow")
 parser.add_argument(
@@ -43,12 +46,6 @@ parser.add_argument(
     type=str,
     default=None,
     help="output filename for cutflow, default is postfix (-p)",
-)
-parser.add_argument(
-    "--save-intermediate-plots",
-    dest="intermediate_plot_dir",
-    default=None,
-    help="Directory to store helper plots (omit to disable plotting).",
 )
 parser.add_argument(
     "--csVarsHist", action="store_true", help="Add CS variables to dilepton hist"
@@ -98,7 +95,7 @@ calib_filepaths = common.calib_filepaths
     data_jpsi_crctn_helper,
     jpsi_crctn_MC_unc_helper,
     jpsi_crctn_data_unc_helper,
-) = muon_calibration_pt2.make_jpsi_crctn_helpers(  # pt 2 !!!
+) = muon_calibration.make_jpsi_crctn_helpers(
     args, calib_filepaths, make_uncertainty_helper=True
 )
 
@@ -184,7 +181,7 @@ def build_graph(df, dataset):
             results.append(df.HistoBoost(hist_name, [all_butojpsik_axes[var]], [var]))
             hist_names.add(hist_name)
 
-    df, cutflow_trigger = muon_calibration_pt2.define_jpsi_triggers(
+    df, cutflow_trigger = btojpsik_selections.define_jpsi_triggers(
         df, trigger_name="DoubleMu4_3_Jpsi"
     )
     # cutflow_trigger = None
@@ -205,72 +202,72 @@ def build_graph(df, dataset):
         (
             "dimuon cand neutral",
             "Require at least one opposite-sign dimuon candidate",
-            lambda d: muon_calibration_pt2.select_opposite_sign_dimuon(d),
+            lambda d: btojpsik_selections.select_opposite_sign_dimuon(d),
         ),
         (
             "muon |eta| < 1.4",
             "Require |eta| < 1.4 for both muons",
-            lambda d: muon_calibration_pt2.select_muon_eta(d, 1.4),
+            lambda d: btojpsik_selections.select_muon_eta(d, 1.4),
         ),
         (
             "muon pT > 4",
             "Require pT > 4 GeV for both muons",
-            lambda d: muon_calibration_pt2.select_muon_pt(d, 4),
+            lambda d: btojpsik_selections.select_muon_pt(d, 4),
         ),
         (
             "muon softMVA > 0.45",
             "Require soft MVA > 0.45 for both muons",
-            lambda d: muon_calibration_pt2.select_muon_softmva(d, 0.45),
+            lambda d: btojpsik_selections.select_muon_softmva(d, 0.45),
         ),
         (
             "dimuon pT > 7",
             "Require dimuon pT > 7 GeV",
-            lambda d: muon_calibration_pt2.select_dimuon_pt(d, 7.0),
+            lambda d: btojpsik_selections.select_dimuon_pt(d, 7.0),
         ),
         (
             "dimuon alphaBS < 0.4",
             "Require dimuon alphaBS < 0.4",
-            lambda d: muon_calibration_pt2.select_dimuon_alphabs(d, 0.4),
+            lambda d: btojpsik_selections.select_dimuon_alphabs(d, 0.4),
         ),  # og 0.4
         (
             "dimuon vtx prob > 0.1",
             "Require dimuon vertex prob > 0.1",
-            lambda d: muon_calibration_pt2.select_dimuon_vtx_prob(d, 0.1),
+            lambda d: btojpsik_selections.select_dimuon_vtx_prob(d, 0.1),
         ),  # og 0.1
         (
             "dimuon sl3d > 4",
             "Require dimuon 3D significance > 4",
-            lambda d: muon_calibration_pt2.select_dimuon_sl3d(d, 4),
+            lambda d: btojpsik_selections.select_dimuon_sl3d(d, 4),
         ),  # og 4
         (
             "bkmm vtx prob > 0.3",
             "Require bkmm J/psi+MC vertex prob > 0.3",
-            lambda d: muon_calibration_pt2.select_bkmm_vtx_prob(d, 0.3),
+            lambda d: btojpsik_selections.select_bkmm_vtx_prob(d, 0.3),
         ),  # og 0.025
         (
             "bkmm mass window",
             "Require |bkmm mass - 5.3| < 0.1 GeV",
-            lambda d: muon_calibration_pt2.select_bkmm_mass_window(d, 5.3, 0.1),
+            lambda d: btojpsik_selections.select_bkmm_mass_window(d, 5.3, 0.1),
         ),  # og 5.4, 0.5
         # adding kaon sels to match what is used to produce maps (for now)
         (
             "kaon |eta| < 1.4",
             "Require |eta| < 1.4 for kaon",
-            lambda d: muon_calibration_pt2.select_kaon_eta(d, 1.4),
+            lambda d: btojpsik_selections.select_kaon_eta(d, 1.4),
         ),
         (
             "kaon pT < 8",
             "Require pT < 8 GeV for kaon",
-            lambda d: muon_calibration_pt2.select_kaon_pt(d, 8),
+            lambda d: btojpsik_selections.select_kaon_pt(d, 8),
         ),
         (
             "bkmm bmm bdt output > 0.10",
             "Require bkmm bmm bdt output variable > 0.10",
-            lambda d: muon_calibration_pt2.select_bkmm_bmm_bdt(d, 0.10),
+            lambda d: btojpsik_selections.select_bkmm_bmm_bdt(d, 0.10),
         ),  # NOTE: this doesn't touch kaon so fine to use I think...
     ]
 
-    df, cutflow_bkmm, dfs_per_cut = muon_calibration_pt2.bkmm_selections(
+    df, cutflow_bkmm, dfs_per_cut = btojpsik_selections.bkmm_selections(
         df, dataset.name, bkmm_selections
     )
 
@@ -299,7 +296,7 @@ def build_graph(df, dataset):
         and dataset.name != "signalBuToJpsiK"
         and not args.checking_signal_stats
     )
-    df = muon_calibration_pt2.select_only_passing_bkmm_candidates(
+    df = btojpsik_selections.select_only_passing_bkmm_candidates(
         df,
         signal=dataset.name == "signalBuToJpsiK",
         select_best=True,
@@ -416,8 +413,8 @@ def build_graph(df, dataset):
         #             GET RID OF PLOTS AND SHIT
 
         # muon scale variation from stats. uncertainty on the jpsi massfit
-        if args.aembitch:
-            df = muon_calibration_pt2.add_jpsi_crctn_stats_unc_hists(
+        if args.include_kaonscale_variation:
+            df = muon_calibration.add_jpsi_crctn_stats_unc_hists(
                 args,
                 df,
                 nominal_axes,  # need to add back
@@ -445,7 +442,7 @@ def build_graph(df, dataset):
     fitcols.append(f"{reco_sel_GF}_recoPt")
     # fitcols.append("bkmm_kaon_curvature")
     fitaxes = [all_butojpsik_axes[a] for a in fitcols]
-    if args.aembitch:
+    if args.include_kaonscale_variation:
         hist_name = "nominal_HistToFit"
         results.append(df.HistoBoost(hist_name, fitaxes, fitcols))
 
