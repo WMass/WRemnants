@@ -26,6 +26,59 @@ from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
 
+def _parse_axis_range_specs(specs):
+    parsed_specs = []
+    for axis, low, high in specs:
+        parsed_specs.append(
+            (
+                axis,
+                parsing.str_to_complex_or_int(low),
+                parsing.str_to_complex_or_int(high),
+            )
+        )
+    return parsed_specs
+
+
+def _build_fitvar_axlim(axlim_specs, fitvar):
+    if not axlim_specs:
+        return []
+
+    parsed_specs = _parse_axis_range_specs(axlim_specs)
+    axlim = [None] * (2 * len(fitvar))
+    seen_axes = set()
+    for axis, low, high in parsed_specs:
+        if axis not in fitvar:
+            raise ValueError(
+                f"--axlim only accepts fit variables. Axis '{axis}' is not one of {fitvar}"
+            )
+        if axis in seen_axes:
+            raise ValueError(f"Duplicate axis '{axis}' passed to --axlim")
+        seen_axes.add(axis)
+        idx = fitvar.index(axis)
+        axlim[2 * idx] = low
+        axlim[2 * idx + 1] = high
+
+    return axlim
+
+
+def _build_preselection_specs(selection_specs, fitvar):
+    if not selection_specs:
+        return []
+
+    parsed_specs = _parse_axis_range_specs(selection_specs)
+    seen_axes = set()
+    for axis, _, _ in parsed_specs:
+        if axis in fitvar:
+            raise ValueError(
+                f"--preselect only accepts non-fit axes. Axis '{axis}' is one of the fit variables {fitvar}"
+            )
+        if axis in seen_axes:
+            raise ValueError(f"Duplicate axis '{axis}' passed to --preselect")
+        seen_axes.add(axis)
+
+    return parsed_specs
+
+
 def make_subparsers(parser):
 
     parser.add_argument(
@@ -265,12 +318,14 @@ def make_parser(parser=None):
     )
     parser.add_argument(
         "--axlim",
-        type=parsing.str_to_complex_or_int,
         default=[],
-        nargs="*",
+        nargs=3,
+        action="append",
+        metavar=("AXIS", "LOW", "HIGH"),
         help="""
-        Restrict axis to this range or these bins (assumes pairs of values by axis, with trailing axes optional).
-        Arguments must be pure real or pure imaginary numbers to select bin indices or values, respectively.
+        Restrict a fit axis to this range or these bins.
+        Repeat as '--axlim AXIS LOW HIGH'. LOW and HIGH must be pure real integers for bin indices
+        or pure imaginary numbers for axis values.
         """,
     )
     parser.add_argument(
@@ -871,16 +926,16 @@ def make_parser(parser=None):
         help="probability density for systematic variations",
     )
     parser.add_argument(
-        "--select",
-        nargs="+",
-        dest="selection",
-        type=str,
-        default=None,
-        help="Apply a selection to the histograms, if the axis exists."
-        "This option can be applied to any of the axis, not necessarily one of the fitaxes, unlike --axlim."
-        "Use complex numbers for axis value, integers for bin number."
-        "e.g. --select 'ptll 0 10"
-        "e.g. --select 'ptll 0j 10j",
+        "--preselect",
+        nargs=3,
+        action="append",
+        dest="preselection",
+        default=[],
+        metavar=("AXIS", "LOW", "HIGH"),
+        help="Apply a strict preselection on a non-fit axis before downstream projections."
+        " Repeat as '--preselect AXIS LOW HIGH'."
+        " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
+        " The command fails if a requested axis is missing from any loaded histogram.",
     )
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
@@ -964,24 +1019,19 @@ def setup(
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
 
-    if args.selection:
-        for sel in args.selection:
-            parts = sel.split()
-            sel_ax, sel_lb, sel_ub = parts[0], parts[1], parts[2]
-            do_sum = len(parts) > 3 and parts[3] == "sum"
-            sel_lb = parsing.str_to_complex_or_int(sel_lb)
-            sel_ub = parsing.str_to_complex_or_int(sel_ub)
-            # By default only restrict the axis range (slice); pass 'sum' as a 4th
-            # argument to also collapse the axis.  Axes not in fitvar are projected
-            # out anyway by sum_gen_axes, so the default (no 'sum') is correct for
-            # both cases: axes kept in the fit (slice stays) and gen-level axes that
-            # are not fit variables (removed by the downstream sum_gen_axes projection).
-            action = hist.sum if do_sum else None
-            datagroups.setGlobalAction(
-                lambda h, _ax=sel_ax, _lb=sel_lb, _ub=sel_ub, _act=action: (
-                    h[{_ax: slice(_lb, _ub, _act)}] if _ax in h.axes.name else h
-                ),
-            )
+    preselection_specs = _build_preselection_specs(args.preselection, fitvar)
+    if preselection_specs:
+
+        def apply_preselection(h, specs=tuple(preselection_specs)):
+            for axis, low, high in specs:
+                if axis not in h.axes.name:
+                    raise ValueError(
+                        f"--preselect requested axis '{axis}', but histogram axes are {h.axes.name}"
+                    )
+                h = h[{axis: slice(low, hh.get_hist_slice_upper(h, axis, high))}]
+            return h
+
+        datagroups.setGlobalAction(apply_preselection)
 
     if args.angularCoeffs:
         datagroups.setGlobalAction(
@@ -990,10 +1040,11 @@ def setup(
             )
         )
 
-    if args.axlim or args.rebin or args.absval:
+    fitvar_axlim = _build_fitvar_axlim(args.axlim, fitvar)
+    if fitvar_axlim or args.rebin or args.absval:
         datagroups.set_rebin_action(
             fitvar,
-            args.axlim,
+            fitvar_axlim,
             args.rebin,
             args.absval,
             args.rebinBeforeSelection,
