@@ -551,11 +551,11 @@ class Datagroups(object):
                     logger.debug("Applying global action")
                     h = self.globalAction(h)
 
-                sum_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
-                if len(sum_axes) > 0:
+                sum_gen_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
+                if len(sum_gen_axes) > 0:
                     # sum over remaining axes (avoid integrating over fit axes & fakerate axes)
-                    logger.debug(f"Sum over axes {sum_axes}")
-                    h = h.project(*[x for x in h.axes.name if x not in sum_axes])
+                    logger.debug(f"Sum over axes {sum_gen_axes}")
+                    h = h.project(*[x for x in h.axes.name if x not in sum_gen_axes])
                     logger.debug(f"Hist axes are now {h.axes.name}")
 
                 if h_id == id(h):
