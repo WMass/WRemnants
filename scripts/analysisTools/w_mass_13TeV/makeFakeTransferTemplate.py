@@ -186,6 +186,14 @@ parser.add_argument(
     help="Postfix appended to output file name",
 )
 parser.add_argument(
+    "--fakeTransferAxis",
+    type=str,
+    default="utAngleSign",
+    help="""
+    Axis where the fake prediction on non-valid bins (i.e. where the A-Ax-B-Bx regions are empty)
+    is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
+)
+parser.add_argument(
     "--nEtaBins",
     type=int,
     default=1,
@@ -263,8 +271,8 @@ logger.info(f"Stacked processes are {prednames}")
 
 histInfo = groups.groups
 
-select_utMinus = {"utAngleSign": hist.tag.Slicer()[0 : 1 : hist.sum]}
-select_utPlus  = {"utAngleSign": hist.tag.Slicer()[1 : 2 : hist.sum]}
+select_utMinus = {args.fakeTransferAxis : hist.tag.Slicer()[0 : 1 : hist.sum]}
+select_utPlus  = {args.fakeTransferAxis : hist.tag.Slicer()[1 : 2 : hist.sum]}
 
 groups.set_histselectors(
     datasets,
@@ -322,7 +330,7 @@ out_hist_nomi = hist.Hist(
     hist.axis.Regular(48, -2.4, 2.4, name="eta", flow=False),
     hist.axis.Regular(30, 26.0, 56.0, name="pt", flow=False),
     hist.axis.Regular(2, -2.0, 2.0, name="charge", flow=False),
-    #hist.axis.Regular(2, -2.0, 2.0, name="utAngleSign")
+    #hist.axis.Regular(2, -2.0, 2.0, name=args.fakeTransferAxis)
     storage=hist.storage.Weight()
 )
 outNomi = out_hist_nomi.view()
@@ -405,7 +413,7 @@ for ch_edges in decorrBins_ch:
         logger.debug(f"Integrals AFTER prompt subraction (uT < 0, uT > 0)")
         logger.debug(f"{root_h_utMinus.Integral()}, {root_h_utPlus.Integral()}")
 
-        ratio_h = root_h_utMinus.Clone(f"fakeRatio_utAngleSign_TH1")
+        ratio_h = root_h_utMinus.Clone(f"fakeRatio_{args.fakeTransferAxis}_TH1")
         ratio_h.Sumw2()
         ratio_h.Divide(root_h_utPlus)
 
@@ -445,11 +453,11 @@ for ch_edges in decorrBins_ch:
 
             if args.addClosure:
 
-                logger.debug("Elaborating corrections evaluated on QCD... ")
-                logger.debug("... be sure that the files are present and the TF have been already smoothed!")
+                logger.debug("Adding variations referred to TFs on different regions ...")
+                logger.debug("  ... be sure that the files are present and the TF have been already smoothed!")
 
-                path_corr_QCD_sv = f"{common.data_dir}/fakesWmass/test/fakeTransferTemplates_QCD.pkl.lz4"
-                path_corr_QCD_signal = f"{common.data_dir}/fakesWmass/test/fakeTransferTemplates_signalRegion_QCD.pkl.lz4"
+                path_corr_QCD_sv = f"{common.data_dir}/fakesWmass/fakeTransferTemplates_{args.postfix}_QCD.pkl.lz4"
+                path_corr_QCD_signal = f"{common.data_dir}/fakesWmass/fakeTransferTemplates_{args.postfix}_signalRegion_QCD.pkl.lz4"
 
                 if os.path.exists(path_corr_QCD_sv):
                     with lz4.frame.open(path_corr_QCD_sv) as fTens:

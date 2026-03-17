@@ -417,6 +417,7 @@ def make_parser(parser=None):
             "run",
             "phi",
             "utAngleSign",
+            "utAngleCosine",
             "nRecoVtx",
             # variables above, systematics below
             "prefire",
@@ -461,6 +462,24 @@ def make_parser(parser=None):
         default=["eta", "pt", "charge"],
     )
     parser.add_argument(
+        "--fakeTransferAxis",
+        type=str,
+        default="utAngleSign",
+        help="""
+        Axis where the fake prediction on non-valid bins (i.e. where the A-Ax-B-Bx regions are empty)
+        is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
+    )
+    parser.add_argument(
+        "--fakeTransferCorrFileName",
+        type=str,
+        default="fakeTransferTemplates",
+        help="""
+        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
+        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
+        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
+        """,
+    )
+    parser.add_argument(
         "--fakeEstimation",
         type=str,
         help="Set the mode for the fake estimation",
@@ -500,16 +519,6 @@ def make_parser(parser=None):
         default="chebyshev",
         choices=Regressor.polynomials,
         help="Type of polynomial for the smoothing of the application region or full prediction, depending on the smoothing mode",
-    )
-    parser.add_argument(
-        "--fakeTransferCorrFileName",
-        type=str,
-        default="fakeTransferTemplates",
-        help="""
-        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
-        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
-        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
-        """,
     )
     parser.add_argument(
         "--ABCDedgesByAxis",
@@ -1230,8 +1239,9 @@ def setup(
 
     if wmass and not datagroups.xnorm:
         datagroups.fakerate_axes = args.fakerateAxes
-        # datagroups.fakeTransferAxis = "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
-        # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
+        datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in datagroups.fakerate_axes else ""
+        datagroups.fakeTransferCorrFileName=args.fakeTransferCorrFileName
+
         histselector_kwargs = dict(
             mode=args.fakeEstimation,
             smoothing_mode=args.fakeSmoothingMode,
@@ -1241,10 +1251,8 @@ def setup(
             integrate_x="mt" not in fitvar,
             forceGlobalScaleFakes=args.forceGlobalScaleFakes,
             abcdExplicitAxisEdges=abcdExplicitAxisEdges,
-            fakeTransferAxis=(
-                "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
-            ),
-            fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+            fakeTransferAxis=datagroups.fakeTransferAxis,
+            fakeTransferCorrFileName=datagroups.fakeTransferCorrFileName,
             histAxesRemovedBeforeFakes=(
                 [str(x.split()[0]) for x in args.selection] if args.selection else []
             ),
@@ -2219,7 +2227,7 @@ def setup(
 
             fakeParamDecorrAxes = (
                 [datagroups.fakeTransferAxis]
-                if (datagroups.fakeTransferAxis != "" and "utAngleSign" in fitvar)
+                if (datagroups.fakeTransferAxis!="")
                 else []
             )
             for axesToDecorrNames in [
@@ -2266,7 +2274,7 @@ def setup(
                     )
 
             # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2'
-            if "utAngleSign" in fitvar:
+            if datagroups.fakeTransferAxis in fitvar:
                 # TODO: extend and use previous function fake_nonclosure(...)
                 def fake_nonclosure_byAxis(
                     h,
@@ -2315,7 +2323,7 @@ def setup(
                     actionArgs=dict(
                         axesToDecorrNames=["eta"],
                         variation_size=0.1,
-                        keepConstantAxisBin={"utAngleSign": 1},
+                        keepConstantAxisBin={datagroups.fakeTransferAxis: 1},
                     ),
                     systAxes=["eta_decorr"],
                 )
@@ -2476,15 +2484,13 @@ def setup(
                     ):
                         if (
                             "effisystTrigIso" in args.decorrSystByVar
-                            and "utAngleSign" in fitvar
-                            and decorr_syst_var == "utAngleSign"
+                            and decorr_syst_var == datagroups.fakeTransferAxis
                         ):
-                            # if "utAngleSign" in fitvar and decorr_syst_var == "utAngleSign":
                             # then decorrelate only for trigger and iso
                             # This also includes an additional inflation by sqrt(2) for trigger/isolation
-                            #
+
                             logger.warning(
-                                "'utAngleSign' is a fit axis, effSyst will be decorrelated by it"
+                                f"'{datagroups.fakeTransferAxis}' is a fit axis, effSyst will be decorrelated by it"
                             )
                             logger.warning(
                                 "but only for trigger/isolation steps (others are kept correlated)"
