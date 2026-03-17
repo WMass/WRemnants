@@ -1,8 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-from utilities import common
-
+from wremnants.utilities import common
 from wums import logging
 
 try:

@@ -7,6 +7,16 @@ import math
 import hist
 
 all_butojpsik_axes = {
+    # fit
+    "bkmm_kaon_stuff_recoPt": hist.axis.Variable(
+        [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False
+    ),
+    "bkmm_kaon_stuff_recoEta": hist.axis.Regular(
+        28, -1.4, 1.4, name="bkmm_kaon_eta", underflow=False, overflow=False
+    ),
+    "bkmm_kaon_stuff_recoCharge": hist.axis.Regular(
+        2, -2, 2, name="bkmm_kaon_charge", underflow=False, overflow=False
+    ),
     # random
     "bkmm_kaon_stuff_response_weights": hist.axis.Regular(
         1000,
@@ -35,9 +45,6 @@ all_butojpsik_axes = {
     ),
     "bkmm_kaon_curvature": hist.axis.Regular(
         5, 0, 1, name="bkmm_kaon_curvature", underflow=False, overflow=False
-    ),
-    "bkmm_kaon_stuff_recoPt": hist.axis.Variable(
-        [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False
     ),
     "bkmm_kaon_stuff_genPt": hist.axis.Variable(
         [1, 2, 3, 8], name="bkmm_kaon_pt", underflow=False, overflow=False

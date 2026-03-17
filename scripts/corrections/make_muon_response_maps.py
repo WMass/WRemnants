@@ -15,13 +15,14 @@ import wums.tfutils
 mpl.rcParams["figure.dpi"] = 300
 
 # TODO migrate butojpsik stuff to separate file and leave this untouched or generalize correctly...
-BuToJpsiK = None
+BuToJpsiK = True
 
 infile = "w_z_muonresponse_scetlib_dyturboCorr_maxFiles_m1.hdf5"
 postfix = ""
 if BuToJpsiK:
-    postfix = "debug"
-    infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaonresponse_scetlib_dyturboCorr_debug.hdf5"
+    postfix = ""
+    infile = "/ceph/submit/data/user/p/pmlugato/mz/calibration/kaon_response.hdf5"
+output_dir = "/ceph/submit/data/user/p/pmlugato/mz/calibration/"
 
 hist_response = None
 hist_response_scaled = None
@@ -250,10 +251,9 @@ tflite_model = wums.tfutils.function_to_tflite(interp_dweight, input_signature)
 
 output_filename = "muon_response.tflite"
 if BuToJpsiK:
-    # output_filename = "kaon_response.tflite"
-    output_filename = f"kaon_response_{postfix}.tflite"
+    output_filename = f"kaon_response.tflite"
 
-with open(output_filename, "wb") as f:
+with open(output_dir + output_filename, "wb") as f:
     f.write(tflite_model)
 
 

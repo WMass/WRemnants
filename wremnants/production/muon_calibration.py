@@ -65,16 +65,29 @@ def make_muon_calibration_helpers(
     return mc_helper, data_helper, uncertainty_helper
 
 
-def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False):
-    if args.muonCorrMC in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
-        mc_corrfile = calib_filepaths["mc_corrfile"][args.muonCorrMC]
+def make_jpsi_crctn_helpers(
+    calib_filepaths,
+    muon_corr_mc,
+    muon_corr_data,
+    scale_var_method,
+    scale_A=1.0,
+    scale_e=1.0,
+    scale_M=1.0,
+    make_uncertainty_helper=False,
+    include_covariance=True,
+    central=False,
+    central_eta_min=-1.4,
+    central_eta_max=1.4,
+):
+    if muon_corr_mc in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
+        mc_corrfile = calib_filepaths["mc_corrfile"][muon_corr_mc]
         logger.warning(
             "You apply J/Psi massfit corrections on MC, this is currenlty not recommended!"
         )
     else:
         mc_corrfile = None
-    if args.muonCorrData in ["massfit", "lbl_massfit"]:
-        data_corrfile = calib_filepaths["data_corrfile"][args.muonCorrData]
+    if muon_corr_data in ["massfit", "lbl_massfit"]:
+        data_corrfile = calib_filepaths["data_corrfile"][muon_corr_data]
     else:
         data_corrfile = None
     mc_helper = make_jpsi_crctn_helper(filepath=mc_corrfile) if mc_corrfile else None
@@ -86,9 +99,11 @@ def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False
         mc_unc_helper = (
             make_jpsi_crctn_unc_helper(
                 filepath_correction=mc_corrfile,
-                scale_var_method=args.muonScaleVariation,
-                include_covariance=True,
-                central=False,
+                scale_var_method=scale_var_method,
+                include_covariance=include_covariance,
+                central=central,
+                central_eta_min=central_eta_min,
+                central_eta_max=central_eta_max,
             )
             if mc_corrfile
             else None
@@ -96,12 +111,14 @@ def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False
         data_unc_helper = (
             make_jpsi_crctn_unc_helper(
                 filepath_correction=data_corrfile,
-                scale_var_method=args.muonScaleVariation,
-                scale_A=args.scale_A,
-                scale_e=args.scale_e,
-                scale_M=args.scale_M,
-                include_covariance=True,
-                central=False,
+                scale_var_method=scale_var_method,
+                scale_A=scale_A,
+                scale_e=scale_e,
+                scale_M=scale_M,
+                include_covariance=include_covariance,
+                central=central,
+                central_eta_min=central_eta_min,
+                central_eta_max=central_eta_max,
             )
             if data_corrfile
             else None
@@ -600,8 +617,8 @@ def make_jpsi_crctn_unc_helper(
         var_mat = np.sqrt(e[None, :]) * v
         var_mat = np.reshape(var_mat, (neta, n_scale_params, nvars))
     else:
-        logger.info(
-            f"Ignoring correlations and assigning a variation to each (A, e, M) for each of {neta} eta bins (no eigen decomposition)"
+        logger.debug(
+            f"Ignoring correlations and assigning a variation to each (A, e, M) for each eta bin (no eigen decomposition)"
         )
         nvars = neta * n_scale_params
 

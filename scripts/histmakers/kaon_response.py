@@ -1,10 +1,13 @@
+"""
+python scripts/histmakers/kaon_response.py --era 2018 --dataPath '/scratch/submit/cms/zmass/' --filterProcs BuToJpsiK
+"""
+
 import os
 
 import hist
 import matplotlib
 import numpy as np
 import ROOT
-from utilities import common, parsing
 
 import narf
 from wums import logging
@@ -12,12 +15,14 @@ from wums import logging
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from wremnants import muon_calibration_pt2
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.production import btojpsik_selections
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+narf.clingutils.Declare('#include "muon_calibration.hpp"')
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import write_analysis_output
+from wremnants.utilities import common, parsing
+
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 logger = logging.setup_logger(__file__)
@@ -34,9 +39,9 @@ parser.add_argument(
 
 
 plot_dir = "/home/submit/pmlugato/public_html/mz/calibration/dweightdscale_checks/"
-tflite_postfix = "debug"
+tflite_postfix = ""
 corr_file = common.calib_filepaths["data_corrfile"]["lbl_massfit"]
-plot_all_kin_bins = True
+plot_all_kin_bins = False
 weight_hist_bins = 200
 weight_hist_range = (-0.2, 0.2)
 
@@ -263,76 +268,64 @@ def build_graph(df, dataset):
     if dataset.is_data:
         df = df.DefinePerSample("nominal_weight", "1.0")
 
-    df, _ = muon_calibration_pt2.define_jpsi_triggers(
+    df, _ = btojpsik_selections.define_jpsi_triggers(
         df, trigger_name="DoubleMu4_3_Jpsi"
     )
 
     bkmm_selections = [
         # (
         #    "dimuon cand neutral",
-        #    "Require at least one opposite-sign dimuon candidate",
-        #    lambda d: muon_calibration_pt2.select_opposite_sign_dimuon(d),
+        #    lambda d: btojpsik_selections.select_opposite_sign_dimuon(d),
         # ),
         # (
         #    "muon |eta| < 1.4",
-        #    "Require |eta| < 1.4 for both muons",
-        #    lambda d: muon_calibration_pt2.select_muon_eta(d, 1.4),
+        #    lambda d: btojpsik_selections.select_muon_eta(d, 1.4),
         # ),
         # (
         #    "muon pT > 4",
-        #    "Require pT > 4 GeV for both muons",
-        #    lambda d: muon_calibration_pt2.select_muon_pt(d, 4),
+        #    lambda d: btojpsik_selections.select_muon_pt(d, 4),
         # ),
         # (
         #    "muon softMVA > 0.45",
-        #    "Require soft MVA > 0.45 for both muons",
-        #    lambda d: muon_calibration_pt2.select_muon_softmva(d, 0.45),
+        #    lambda d: btojpsik_selections.select_muon_softmva(d, 0.45),
         # ),
         # (
         #    "dimuon pT > 7",
-        #    "Require dimuon pT > 7 GeV",
-        #    lambda d: muon_calibration_pt2.select_dimuon_pt(d, 7.0),
+        #    lambda d: btojpsik_selections.select_dimuon_pt(d, 7.0),
         # ),
         # (
         #    "dimuon alphaBS < 0.4",
-        #    "Require dimuon alphaBS < 0.4",
-        #    lambda d: muon_calibration_pt2.select_dimuon_alphabs(d, 0.4),
+        #    lambda d: btojpsik_selections.select_dimuon_alphabs(d, 0.4),
         # ),  # og 0.4
         # (
         #    "dimuon vtx prob > 0.1",
-        #    "Require dimuon vertex prob > 0.1",
-        #    lambda d: muon_calibration_pt2.select_dimuon_vtx_prob(d, 0.1),
+        #    lambda d: btojpsik_selections.select_dimuon_vtx_prob(d, 0.1),
         # ),  # og 0.1
         # (
         #    "dimuon sl3d > 4",
-        #    "Require dimuon 3D significance > 4",
-        #    lambda d: muon_calibration_pt2.select_dimuon_sl3d(d, 4),
+        #    lambda d: btojpsik_selections.select_dimuon_sl3d(d, 4),
         # ),  # og 4
         # (
         #    "bkmm vtx prob > 0.3",
-        #    "Require bkmm J/psi+MC vertex prob > 0.3",
-        #    lambda d: muon_calibration_pt2.select_bkmm_vtx_prob(d, 0.3),
+        #    lambda d: btojpsik_selections.select_bkmm_vtx_prob(d, 0.3),
         # ),  # og 0.025
         # (
         #    "bkmm mass window",
-        #    "Require |bkmm mass - 5.3| < 0.1 GeV",
-        #    lambda d: muon_calibration_pt2.select_bkmm_mass_window(d, 5.3, 0.1),
+        #    lambda d: btojpsik_selections.select_bkmm_mass_window(d, 5.3, 0.1),
         # ),  # og 5.4, 0.5
         (
             "kaon pT < 8",
-            "Require pT < 8 GeV for kaon",
-            lambda d: muon_calibration_pt2.select_kaon_pt(d, 8),
+            lambda d: btojpsik_selections.select_kaon_pt(d, 8),
         ),
         # (
         #   "bkmm bmm bdt output > 0.10",
-        #    "Require bkmm bmm bdt output variable > 0.10",
-        #    lambda d: muon_calibration_pt2.select_bkmm_bmm_bdt(d, 0.10)
+        #    lambda d: btojpsik_selections.select_bkmm_bmm_bdt(d, 0.10)
         # ) # NOTE: this doesn't touch kaon
     ]
 
-    df, _, _ = muon_calibration_pt2.bkmm_selections(df, dataset.name, bkmm_selections)
+    df, _, _ = btojpsik_selections.bkmm_selections(df, dataset.name, bkmm_selections)
 
-    df = muon_calibration_pt2.select_only_passing_bkmm_candidates(
+    df = btojpsik_selections.select_only_passing_bkmm_candidates(
         df,
         signal=dataset.name == "signalBuToJpsiK",
         select_best=True,

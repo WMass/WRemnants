@@ -1,12 +1,5 @@
 import os
 
-from utilities import common, parsing
-
-from wremnants.datasets.datagroups import Datagroups
-
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
-parser, initargs = parsing.common_parser(analysis_label)
-
 import hist
 import matplotlib.pyplot as plt
 import ROOT
@@ -14,21 +7,25 @@ import ROOT
 import narf
 import wremnants.production.muon_calibration as muon_calibration
 from wremnants.production import btojpsik_selections, muon_calibration
-from wremnants.production.butojpsik_axes import all_butojpsik_axes
+from wremnants.production.btojpsik_axes import all_butojpsik_axes
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
     write_analysis_output,
 )
+from wremnants.utilities import common, parsing
 from wums import logging
+
+analysis_label = common.analysis_label(os.path.basename(__file__))
+parser, initargs = parsing.common_parser(analysis_label)
 
 parser.add_argument("--allaxes", action="store_true", help="all histograms")
 parser.add_argument(
     "--selectionHists", action="store_true", help="store hist after each selection"
 )
 parser.add_argument(
-    "--include-kaon-scale-variation",
+    "--include-kaon-scale-variations",
     action="store_true",
     help="uncertainty hists for parameterized model",
 )
@@ -85,7 +82,16 @@ calib_filepaths = common.calib_filepaths
     jpsi_crctn_MC_unc_helper,
     jpsi_crctn_data_unc_helper,
 ) = muon_calibration.make_jpsi_crctn_helpers(
-    args, calib_filepaths, make_uncertainty_helper=True
+    calib_filepaths,
+    muon_corr_mc=args.muonCorrMC,
+    muon_corr_data=args.muonCorrData,
+    scale_var_method=args.muonScaleVariation,
+    scale_A=args.scale_A,
+    scale_e=args.scale_e,
+    scale_M=args.scale_M,
+    make_uncertainty_helper=True,
+    include_covariance=False,
+    central=True,
 )
 
 logger.debug(
@@ -343,6 +349,12 @@ def build_graph(df, dataset):
         df.HistoBoost(f"nominal", [all_butojpsik_axes[final_var]], [final_var])
     )
 
+    fitcols = ["bkmm_jpsimc_mass"]
+    fitcols.append(f"{reco_sel_GF}_recoPt")
+    fitcols.append(f"{reco_sel_GF}_recoEta")
+    fitcols.append(f"{reco_sel_GF}_recoCharge")
+    fitaxes = [all_butojpsik_axes[a] for a in fitcols]
+
     if has_gen_kinematics:
         input_kinematics = [
             f"{reco_sel_GF}_recoPt",
@@ -361,13 +373,13 @@ def build_graph(df, dataset):
             input_kinematics.append(f"{reco_sel_GF}_response_weight")
 
         # kaon scale variation
-        if args.include_kaonscale_variation:
+        if args.include_kaon_scale_variations:
             df = muon_calibration.add_jpsi_crctn_stats_unc_hists(
                 args,
                 df,
-                nominal_axes,  # need to add back
+                fitaxes,  # need to add back
                 results,
-                nominal_cols,
+                fitcols,
                 cols_gen_smeared,
                 calib_filepaths,
                 jpsi_crctn_data_unc_helper,
@@ -385,12 +397,7 @@ def build_graph(df, dataset):
         # df = df.Define("bkmm_kaon_curvature", "1. / bkmm_kaon_pt")
         df = df.Define("bkmm_kaon_curvature", "1. / bkmm_jpsimc_kaon1pt")
 
-    fitcols = nominal_cols.copy()
-    fitcols.remove("bkmm_jpsimc_kaon1pt")
-    fitcols.append(f"{reco_sel_GF}_recoPt")
-    # fitcols.append("bkmm_kaon_curvature")
-    fitaxes = [all_butojpsik_axes[a] for a in fitcols]
-    if args.include_kaonscale_variation:
+    if args.include_kaon_scale_variations:
         hist_name = "nominal_HistToFit"
         results.append(df.HistoBoost(hist_name, fitaxes, fitcols))
 

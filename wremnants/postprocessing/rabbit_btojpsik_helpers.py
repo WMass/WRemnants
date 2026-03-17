@@ -4,14 +4,14 @@ import h5py
 import hist
 import matplotlib.pyplot as plt
 import numpy as np
-from utilities.io_tools import input_tools
 
+from wremnants.utilities.io_tools import base_io
 from wums import boostHistHelpers as hh
 
 
 def load_histogram(_filename: str, _dataset: str):
     h5file = h5py.File(_filename, "r")
-    results = input_tools.load_results_h5py(h5file)
+    results = base_io.load_results_h5py(h5file)
 
     h = results[_dataset]["output"]["nominal_HistToFit"].get()
     hvar = results[_dataset]["output"]["nominal_muonScaleSyst_responseWeights"].get()

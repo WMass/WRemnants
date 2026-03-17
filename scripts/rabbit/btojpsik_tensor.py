@@ -1,6 +1,7 @@
 import argparse
 
-from makemytensor_helpers import (
+from rabbit import tensorwriter
+from wremnants.postprocessing.rabbit_btojpsik_helpers import (
     _reorder_hist_axes,
     _resolve_plot_labels,
     assert_matching_axes,
@@ -11,8 +12,6 @@ from makemytensor_helpers import (
     rebin_histogram,
     rebin_variation_unc_axis,
 )
-
-from rabbit import tensorwriter
 from wums import boostHistHelpers as hh
 
 
@@ -185,6 +184,10 @@ def main():
     signal_hist, data_hist, variation_hist = load_histogram(
         args.input_file, args.dataset_signal
     )
+
+    print(signal_hist)
+    print(data_hist)
+    print(variation_hist)
 
     n_pt_bins = signal_hist.axes[args.pt_axis].size
     n_mass_bins = 10
@@ -462,7 +465,7 @@ def main():
     #    constrained=False,
     # )
 
-    writer.write(args.tensor_output, args.outname, args=args)
+    writer.write(args.tensor_output, args.outname)
 
 
 if __name__ == "__main__":
