@@ -1224,13 +1224,9 @@ def make_pdfs_from_corrs_uncertainties_helper_by_helicity(
         + "/TheoryCorrections/ByHelicity/PDFsFromCorrs/w_z_gen_dists_{pdf}_maxFiles_m1_skimmed.hdf5"
     )
     pdf_helpers = {}
-    mass_corrs = [
-        "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_Corr",
-        "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars_Corr",
-    ]
     for pdf in pdfs_from_corrs:
         logger.debug(f"Making PDF uncertainty helper by helicity for theory corr {pdf}")
-        den = pdf if pdf in mass_corrs else "pdf_uncorr"
+        den = pdf if theory_corr_is_renorm(pdf_name=pdf) else "pdf_uncorr"
         pdf_helper = make_uncertainty_helper_by_helicity(
             proc=proc,
             nom=pdf,
