@@ -220,9 +220,6 @@ def main():
 
     # lose stats quick at "high" pT...
 
-    # REMAKE HISTOGRAMS WITH VARIABLE AXIS AT HIST LEVEL SO DON'T HAVE TO DO SOME REBIN
-    #   BULLSHIT
-
     # import pdb
     # pdb.set_trace()
 
