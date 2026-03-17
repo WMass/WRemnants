@@ -77,11 +77,11 @@ def merge_samples(
         if sample in res_dict.keys():
             if res_dict[sample].get("xsec", None) != v["xsec"]:
                 logger.warning(
-                    f"Mismatch in cross section between samples {k} with xsec={v["xsec"]} and {sample} with xsec={res_dict[sample].get('xsec', None)}"
+                    f"Mismatch in cross section between samples {k} with xsec={v['xsec']} and {sample} with xsec={res_dict[sample].get('xsec', None)}"
                 )
             if res_dict[sample].get("group", None) != v["group"]:
                 logger.warning(
-                    f"Mismatch in group between samples {k} with group={v['group']} and {sample} with group={res_dict[sample].get("group", None)}"
+                    f"Mismatch in group between samples {k} with group={v['group']} and {sample} with group={res_dict[sample].get('group', None)}"
                 )
 
             res_dict[sample]["filepaths"] += v["filepaths"]
@@ -329,6 +329,12 @@ dataDict_nanoGen = {
         ],
         "xsec": xsec_WminusCharmToMuNu,
         "group": "Wmunu",
+        "auxiliary": True,
+    },
+    "Zbb_MiNNLO": {
+        "filepaths": ["{BASE_PATH}/MiNNLO_Zbb_weightsPatch/"],
+        "group": "Zbb",
+        "xsec": 22.2394,
         "auxiliary": True,
     },
 }
