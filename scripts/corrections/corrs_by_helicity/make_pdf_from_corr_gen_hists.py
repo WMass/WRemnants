@@ -31,6 +31,9 @@ THEORY_PREDS = {
     "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars": {
         "pdf": "msht20mcrange"
     },
+    "scetlib_dyturbo_LatticeNP_HERAPDF20EXT_N3p0LL_N2LO_pdfvars": {
+        "pdf": "herapdf20ext"
+    },
 }
 
 
