@@ -42,8 +42,8 @@ def bkmm_selections(df, dataset_name, selections):
             "bkmm_passes", "ROOT::VecOps::RVec<bool>(bkmm_mm_index.size(), true)"
         )
 
-    for cutflow_name, description, selection_func in selections:
-        logger.info(description)
+    for cutflow_name, selection_func in selections:
+        logger.info(cutflow_name)
         df = selection_func(df)
         df = _apply_filter(df, cutflow_name)
         cutflow[cutflow_name] = df.SumAndCount("weight")
@@ -150,7 +150,7 @@ def select_only_passing_bkmm_candidates(
                 """,
             )
 
-            #######################                   FILTER OUT THE -999s FOR NOW CUZ CAUSING NANs
+            # filter out -999s that cause NANs later on
 
             before_filter_weight = None
             after_filter_weight = None
@@ -171,8 +171,6 @@ def select_only_passing_bkmm_candidates(
                     before_filter_weight,
                     filtered_evt_count,
                 )
-
-            #######################                   FILTER OUT THE -999s FOR NOW CUZ CAUSING NANs
 
             # Extract gen values directly - no intermediate columns
             df = df.Define(
@@ -200,7 +198,7 @@ def select_only_passing_bkmm_candidates(
                     df = df.Redefine(
                         col_name,
                         f"ROOT::VecOps::Take({col_name}, ROOT::RVec<int>{{bkmm_best_idx}})",
-                    )  # TRYING TO SET VECTORS OF LENGTH ONE FOR UNCERTAINTY HELPERS
+                    )  # vectors of length 1 for unc helpers
                 if col_name.startswith("mm_"):
                     df = df.Redefine(col_name, f"{col_name}[mm_best_idx]")
 
@@ -358,7 +356,7 @@ def select_bkmm_mass_window(df, center, width):
 
 
 def select_bkmm_bmm_bdt(df, value):
-    """Select greater than value on bkmm bmm bdt variable"""  # NOTE: NEED TO CONFIRM THIS DOESN'T USE KAON AT ALL (variable name suggests it...)
+    """Select greater than value on bkmm bmm bdt variable"""  # NOTE: doesn't use Kaon (bmm)
     condition = _generate_bdt_condition("bkmm_bmm", value)
     return df.Redefine("bkmm_passes", condition)
 

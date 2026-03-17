@@ -77,17 +77,6 @@ datasets = getDatasets(
     era=era,
 )
 
-# dilepton invariant mass cuts
-# mass_min, mass_max = common.get_default_mz_window()
-
-# dilepton_ptV_binning = common.get_dilepton_ptV_binning(args.finePtBinning)
-
-# for a in args.axes:
-#   if a not in all_axes.keys():
-#        logger.error(
-#            f" {a} is not a known axes! Supported axes choices are {list(all_axes.keys())}"
-#        )
-
 calib_filepaths = common.calib_filepaths
 
 (
@@ -197,74 +186,62 @@ def build_graph(df, dataset):
                 )
                 hist_names.add(hist_name)
 
-    # selectionssss (og was BPH-21-006)
+    # selections (og was BPH-21-006)
+    # TODO: shouldn't have to write the numbers twice smh but don't feel like changing right now
     bkmm_selections = [
         (
             "dimuon cand neutral",
-            "Require at least one opposite-sign dimuon candidate",
             lambda d: btojpsik_selections.select_opposite_sign_dimuon(d),
         ),
         (
             "muon |eta| < 1.4",
-            "Require |eta| < 1.4 for both muons",
             lambda d: btojpsik_selections.select_muon_eta(d, 1.4),
         ),
         (
             "muon pT > 4",
-            "Require pT > 4 GeV for both muons",
             lambda d: btojpsik_selections.select_muon_pt(d, 4),
         ),
         (
             "muon softMVA > 0.45",
-            "Require soft MVA > 0.45 for both muons",
             lambda d: btojpsik_selections.select_muon_softmva(d, 0.45),
         ),
         (
             "dimuon pT > 7",
-            "Require dimuon pT > 7 GeV",
             lambda d: btojpsik_selections.select_dimuon_pt(d, 7.0),
         ),
         (
             "dimuon alphaBS < 0.4",
-            "Require dimuon alphaBS < 0.4",
             lambda d: btojpsik_selections.select_dimuon_alphabs(d, 0.4),
         ),  # og 0.4
         (
             "dimuon vtx prob > 0.1",
-            "Require dimuon vertex prob > 0.1",
             lambda d: btojpsik_selections.select_dimuon_vtx_prob(d, 0.1),
         ),  # og 0.1
         (
             "dimuon sl3d > 4",
-            "Require dimuon 3D significance > 4",
             lambda d: btojpsik_selections.select_dimuon_sl3d(d, 4),
         ),  # og 4
         (
             "bkmm vtx prob > 0.3",
-            "Require bkmm J/psi+MC vertex prob > 0.3",
             lambda d: btojpsik_selections.select_bkmm_vtx_prob(d, 0.3),
         ),  # og 0.025
         (
             "bkmm mass window",
-            "Require |bkmm mass - 5.3| < 0.1 GeV",
             lambda d: btojpsik_selections.select_bkmm_mass_window(d, 5.3, 0.1),
         ),  # og 5.4, 0.5
         # adding kaon sels to match what is used to produce maps (for now)
         (
             "kaon |eta| < 1.4",
-            "Require |eta| < 1.4 for kaon",
             lambda d: btojpsik_selections.select_kaon_eta(d, 1.4),
         ),
         (
             "kaon pT < 8",
-            "Require pT < 8 GeV for kaon",
             lambda d: btojpsik_selections.select_kaon_pt(d, 8),
         ),
         (
             "bkmm bmm bdt output > 0.10",
-            "Require bkmm bmm bdt output variable > 0.10",
             lambda d: btojpsik_selections.select_bkmm_bmm_bdt(d, 0.10),
-        ),  # NOTE: this doesn't touch kaon so fine to use I think...
+        ),  # NOTE: this doesn't touch kaon so fine to use...
     ]
 
     df, cutflow_bkmm, dfs_per_cut = btojpsik_selections.bkmm_selections(
@@ -314,7 +291,7 @@ def build_graph(df, dataset):
 
     ###
 
-    # MOVING THIS SHIT FOR NOW BELOW ALIASES FOR CHECKS
+    # move below for checks
 
     # for var in nominal_cols:
     #   # if "gen" in str(var) and dataset.is_data:
@@ -324,12 +301,10 @@ def build_graph(df, dataset):
     #    hist_names.add(hist_name)
     #    final_var = var
 
-    # hack to avoid some shit in makeDataMCstackratioplot or whatever
+    # hack to avoid expectation in makeDataMCstackratioplot when doing selection hists
     # results.append(
     #    df.HistoBoost(f"nominal", [all_butojpsik_axes[final_var]], [final_var])
     # )
-
-    # MOVING THIS SHIT FOR NOW BELOW ALIASES FOR CHECKS
 
     ###
 
@@ -343,7 +318,7 @@ def build_graph(df, dataset):
     # import pdb
     # pdb.set_trace()
 
-    reco_sel_GF = "bkmm_kaon_shit"
+    reco_sel_GF = "bkmm_kaon_stuff"
     df = df.Alias(f"{reco_sel_GF}_recoPt", "kaon_jpsiCorrectedPt")
     df = df.Alias(f"{reco_sel_GF}_recoEta", "bkmm_jpsimc_kaon1eta")
     df = df.Alias(f"{reco_sel_GF}_recoCharge", "bkmm_kaon_charge")
@@ -368,12 +343,6 @@ def build_graph(df, dataset):
         df.HistoBoost(f"nominal", [all_butojpsik_axes[final_var]], [final_var])
     )
 
-    #####
-
-    #     does helper expect same dimension for reco and gen ??? we'll find out
-    # well they are now so that's not the fucking issue
-
-    #####
     if has_gen_kinematics:
         input_kinematics = [
             f"{reco_sel_GF}_recoPt",
@@ -391,28 +360,7 @@ def build_graph(df, dataset):
             )
             input_kinematics.append(f"{reco_sel_GF}_response_weight")
 
-        # logger.debug("Making response vs pt plot")
-        # stuff = df.AsNumpy([f"{reco_sel_GF}_response_weight",f"{reco_sel_GF}_recoPt"])
-        # outdir = '/home/submit/pmlugato/public_html/mz/calibration/'
-        # rw = stuff[f"{reco_sel_GF}_response_weight"]
-        # pt = stuff[f"{reco_sel_GF}_recoPt"]
-        # realrw = []
-        # realpt = []
-        # for i in range(len(rw)):
-        #    #if
-        #    realrw.append(rw[i][0].first)
-        #    realpt.append(pt[i][0])
-        # fig, ax = plt.subplots()
-        # ax.scatter(realpt, realrw, s=4)
-        # ax.set_ylim(bottom=-1000,top=1000)
-        # fig.savefig(f"{outdir}/response_vs_pt_pchip.png", dpi=150, bbox_inches="tight")
-        # plt.close(fig)
-        # import pdb
-        # pdb.set_trace()
-
-        #             GET RID OF PLOTS AND SHIT
-
-        # muon scale variation from stats. uncertainty on the jpsi massfit
+        # kaon scale variation
         if args.include_kaonscale_variation:
             df = muon_calibration.add_jpsi_crctn_stats_unc_hists(
                 args,
@@ -422,7 +370,7 @@ def build_graph(df, dataset):
                 nominal_cols,
                 cols_gen_smeared,
                 calib_filepaths,
-                jpsi_crctn_data_unc_helper,  # data helper but calculated with MC yes but okie
+                jpsi_crctn_data_unc_helper,
                 smearing_weights_procs,
                 reco_sel_GF,
                 dataset.name,
@@ -482,11 +430,10 @@ write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
 
-##############   move shit below to utils somewhere
+##############   move everything below to utils somewhere
 
 if args.cutflow:
 
-    # Aggregate cutflows by era
     eras = ["2018A", "2018B", "2018C", "2018D"]
 
     aggregated_cutflows = {}
@@ -494,30 +441,25 @@ if args.cutflow:
         if "cutflow" not in result:
             continue
 
-        # Determine aggregate name
         agg_name = dataset_name
         for era in eras:
             if f"data{era}charmonium" in dataset_name:
                 agg_name = "data2018charmonium"
                 break
 
-        # Add to aggregated cutflows
         if agg_name not in aggregated_cutflows:
             aggregated_cutflows[agg_name] = result["cutflow"].copy()
         else:
-            # Sum the cutflows
             for cut_name, value in result["cutflow"].items():
                 aggregated_cutflows[agg_name][cut_name] += value
 
-    # Get cutflow data
+    # construct cutflow table
     data_cutflow = aggregated_cutflows.get("data2018charmonium", {})
     signal_cutflow = aggregated_cutflows.get("signalBuToJpsiK", {})
     bjk_cutflow = aggregated_cutflows.get("BuToJpsiK", {})
 
-    # Get all cut names (selections) in order
     cut_names = list(data_cutflow.keys())
 
-    # Prepare table data
     table_data = []
     for cut_name in cut_names:
         data_val = data_cutflow.get(cut_name, 0)
