@@ -18,10 +18,10 @@ def load_histogram(_filename: str, _dataset: str):
 
     combined = None
     for proc in [
-        "data2018Acharmonium",
-        "data2018Bcharmonium",
-        "data2018Ccharmonium",
-        "data2018Dcharmonium",
+        "Charmonium_2018A",
+        "Charmonium_2018B",
+        "Charmonium_2018C",
+        "Charmonium_2018D",
     ]:
         hd = results[proc]["output"]["nominal_HistToFit"].get()
         combined = (

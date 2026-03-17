@@ -37,7 +37,7 @@ procs.append("Wplustaunu_2016PostVFP")
 procs.append("Wminustaunu_2016PostVFP")
 
 if BuToJpsiK:
-    procs = ["BuToJpsiK"]
+    procs = ["BuToJpsiK_2018"]
 
 
 with h5py.File(infile, "r") as f:

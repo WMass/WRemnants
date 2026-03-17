@@ -25,7 +25,7 @@ parser.add_argument(
     "--selectionHists", action="store_true", help="store hist after each selection"
 )
 parser.add_argument(
-    "--include-kaon-scale-variations",
+    "--includeKaonScaleVariations",
     action="store_true",
     help="uncertainty hists for parameterized model",
 )
@@ -34,7 +34,7 @@ parser.add_argument(
     "--saveCutflow", type=str, default=None, help="output path for cutflow"
 )
 parser.add_argument(
-    "--checking-signal-stats",
+    "--checkingSignalStats",
     action="store_true",
     help="Disable non-signal gen matching to compare full BuToJpsiK against signalBuToJpsiK",
 )
@@ -149,7 +149,7 @@ def build_graph(df, dataset):
 
     df = df.DefinePerSample("unity", "1.0")
 
-    if dataset.name == "signalBuToJpsiK":
+    if dataset.name == "signalBuToJpsiK_2018":
         total_evt_count = (
             df.Count()
         )  # matches evtcount in graph_builder otherwise complains
@@ -276,12 +276,12 @@ def build_graph(df, dataset):
 
     needs_gen_match = (
         not dataset.is_data
-        and dataset.name != "signalBuToJpsiK"
-        and not args.checking_signal_stats
+        and dataset.name != "signalBuToJpsiK_2018"
+        and not args.checkingSignalStats
     )
     df = btojpsik_selections.select_only_passing_bkmm_candidates(
         df,
-        signal=dataset.name == "signalBuToJpsiK",
+        signal=dataset.name == "signalBuToJpsiK_2018",
         select_best=True,
         gen_match_nonsignal=needs_gen_match,
         gen_filter_stats=nonsignal_gen_filter_stats if needs_gen_match else None,
@@ -329,7 +329,7 @@ def build_graph(df, dataset):
     df = df.Alias(f"{reco_sel_GF}_recoEta", "bkmm_jpsimc_kaon1eta")
     df = df.Alias(f"{reco_sel_GF}_recoCharge", "bkmm_kaon_charge")
     has_gen_kinematics = not dataset.is_data and (
-        dataset.name == "signalBuToJpsiK" or needs_gen_match
+        dataset.name == "signalBuToJpsiK_2018" or needs_gen_match
     )
     if has_gen_kinematics:
         # temp vars defined during selection of best cand
@@ -373,7 +373,7 @@ def build_graph(df, dataset):
             input_kinematics.append(f"{reco_sel_GF}_response_weight")
 
         # kaon scale variation
-        if args.include_kaon_scale_variations:
+        if args.includeKaonScaleVariations:
             df = muon_calibration.add_jpsi_crctn_stats_unc_hists(
                 args,
                 df,
@@ -397,7 +397,7 @@ def build_graph(df, dataset):
         # df = df.Define("bkmm_kaon_curvature", "1. / bkmm_kaon_pt")
         df = df.Define("bkmm_kaon_curvature", "1. / bkmm_jpsimc_kaon1pt")
 
-    if args.include_kaon_scale_variations:
+    if args.includeKaonScaleVariations:
         hist_name = "nominal_HistToFit"
         results.append(df.HistoBoost(hist_name, fitaxes, fitcols))
 
@@ -450,9 +450,15 @@ if args.cutflow:
 
         agg_name = dataset_name
         for era in eras:
-            if f"data{era}charmonium" in dataset_name:
-                agg_name = "data2018charmonium"
+            if dataset_name == f"Charmonium_{era}":
+                agg_name = "Charmonium_2018"
                 break
+        if dataset_name == "signalBuToJpsiK_2018":
+            agg_name = "signalBuToJpsiK"
+        elif dataset_name == "BuToJpsiK_2018":
+            agg_name = "BuToJpsiK"
+        elif dataset_name == "BuToJpsiPi_2018":
+            agg_name = "BuToJpsiPi"
 
         if agg_name not in aggregated_cutflows:
             aggregated_cutflows[agg_name] = result["cutflow"].copy()
@@ -461,7 +467,7 @@ if args.cutflow:
                 aggregated_cutflows[agg_name][cut_name] += value
 
     # construct cutflow table
-    data_cutflow = aggregated_cutflows.get("data2018charmonium", {})
+    data_cutflow = aggregated_cutflows.get("Charmonium_2018", {})
     signal_cutflow = aggregated_cutflows.get("signalBuToJpsiK", {})
     bjk_cutflow = aggregated_cutflows.get("BuToJpsiK", {})
 

@@ -24,12 +24,12 @@ default_nfiles = {
 }
 
 btojpsik_calibration_samples = [
-    "data2018Acharmonium",
-    "data2018Bcharmonium",
-    "data2018Ccharmonium",
-    "data2018Dcharmonium",
-    "BuToJpsiK",
-    "BuToJpsiPi",
+    "Charmonium_2018A",
+    "Charmonium_2018B",
+    "Charmonium_2018C",
+    "Charmonium_2018D",
+    "BuToJpsiK_2018",
+    "BuToJpsiPi_2018",
 ]
 
 

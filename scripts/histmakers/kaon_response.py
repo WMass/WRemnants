@@ -327,9 +327,10 @@ def build_graph(df, dataset):
 
     df = btojpsik_selections.select_only_passing_bkmm_candidates(
         df,
-        signal=dataset.name == "signalBuToJpsiK",
+        signal=dataset.name == "signalBuToJpsiK_2018",
         select_best=True,
-        gen_match_nonsignal=not dataset.is_data and dataset.name != "signalBuToJpsiK",
+        gen_match_nonsignal=not dataset.is_data
+        and dataset.name != "signalBuToJpsiK_2018",
     )
 
     reco_sel_GF = "selKaon"

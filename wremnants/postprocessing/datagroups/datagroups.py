@@ -87,8 +87,8 @@ class Datagroups(object):
                 make_datagroups_lowPU as make_datagroups,
             )
         elif self.era == "2018":
-            from wremnants.datasets.datagroups2018 import (
-                make_datagroups_2018 as make_datagroups,
+            from wremnants.postprocessing.datagroups.datagroups_btojpsik import (
+                make_datagroups_btojpsik as make_datagroups,
             )
         else:
             from wremnants.postprocessing.datagroups.datagroups2016 import (
@@ -396,13 +396,9 @@ class Datagroups(object):
         scale = proc.xsec / proc.weight_sum
         if not self.xnorm:
             scale *= self.lumi * 1000
-        gen_filter_eff = (
-            self.results[proc.name]["gen_filter_eff"]
-            if "gen_filter_eff" in self.results[proc.name]
-            else 1
-        )
+        gen_filter_eff = self.results[proc.name].get("gen_filter_eff", 1)
         scale * gen_filter_eff
-        
+
         return scale
 
     def getMetaInfo(self):
@@ -764,11 +760,11 @@ class Datagroups(object):
                 reverse=True,
             )
         )
-        print("Groups sorted by yield:")
+        logger.info("Groups sorted by yield:")
         for k, v in self.groups.items():
             used_hist = histName if histName in v.hists else nominalName
             yield_val = get_sum(v.hists[used_hist]) if used_hist in v.hists else 0
-            print(f"  {k}: yield={yield_val}")
+            logger.info(f"  {k}: yield={yield_val}")
 
     def getDatagroupsForHist(self, histName):
         filled = {}

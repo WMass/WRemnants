@@ -40,9 +40,7 @@ def scale_to_data(result_dict):
 
         logger.debug(f"For dataset {d_name} with xsec={xsec}")
 
-        gen_filter_eff = 1
-        if "gen_filter_eff" in result:
-            gen_filter_eff = result["gen_filter_eff"]
+        gen_filter_eff = result.get("gen_filter_eff", 1)
 
         scale = lumi * 1000 * xsec * gen_filter_eff / result["weight_sum"]
 

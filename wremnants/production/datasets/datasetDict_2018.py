@@ -51,7 +51,7 @@ dataDict = {
         "das_name": "private",
     },
     # currently at /scratch/submit/cms/zmass/ on submit82
-    "data2018Acharmonium": {
+    "Charmonium_2018A": {
         "filepaths": [
             "{BASE_PATH}/Charmonium+Run2018A-12Nov2019_UL2018_rsb-v1+MINIAOD/",
         ],
@@ -60,7 +60,7 @@ dataDict = {
         "lumijson": lumijson_legacy,
         "das_name": "private",
     },
-    "data2018Bcharmonium": {
+    "Charmonium_2018B": {
         "filepaths": [
             "{BASE_PATH}/Charmonium+Run2018B-12Nov2019_UL2018-v1+MINIAOD/",
         ],
@@ -69,7 +69,7 @@ dataDict = {
         "lumijson": lumijson_legacy,
         "das_name": "private",
     },
-    "data2018Ccharmonium": {
+    "Charmonium_2018C": {
         "filepaths": [
             "{BASE_PATH}/Charmonium+Run2018C-12Nov2019_UL2018_rsb_v3-v1+MINIAOD/",
         ],
@@ -78,7 +78,7 @@ dataDict = {
         "lumijson": lumijson_legacy,
         "das_name": "private",
     },
-    "data2018Dcharmonium": {
+    "Charmonium_2018D": {
         "filepaths": [
             "{BASE_PATH}/Charmonium+Run2018D-12Nov2019_UL2018-v1+MINIAOD/",
         ],
@@ -278,7 +278,7 @@ dataDict = {
         "group": "QCD",
         "das_name": "/QCD_Pt-20_MuEnrichedPt15_TuneCP5_13TeV-pythia8/RunIISummer20UL18NanoAODv9-106X_upgrade2018_realistic_v16_L1v1-v2/NANOAODSIM",
     },
-    "BuToJpsiK": {
+    "BuToJpsiK_2018": {
         "filepaths": [
             "{BASE_PATH}/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
         ],
@@ -288,7 +288,7 @@ dataDict = {
         "group": "BuToJpsiK",
         "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
     },
-    "signalBuToJpsiK": {
+    "signalBuToJpsiK_2018": {
         "filepaths": [
             "{BASE_PATH}/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
         ],
@@ -298,7 +298,7 @@ dataDict = {
         "group": "signalBuToJpsiK",
         "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
     },
-    "BuToJpsiPi": {
+    "BuToJpsiPi_2018": {
         "filepaths": [
             "{BASE_PATH}/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v1+MINIAODSIM"
         ],

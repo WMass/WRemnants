@@ -3,7 +3,7 @@ from wums import logging
 logger = logging.child_logger(__name__)
 
 
-def make_datagroups_2018(
+def make_datagroups_btojpsik(
     dg, combine=False, pseudodata_pdfset=None, excludeGroups=None, filterGroups=None
 ):
     # reset datagroups
@@ -19,7 +19,7 @@ def make_datagroups_2018(
     )
     dg.addGroup(
         "signalBuToJpsiK",
-        members=dg.get_members_from_results(startswith=["signal"]),
+        members=dg.get_members_from_results(startswith=["signalBuToJpsiK"]),
     )
     dg.addGroup(
         "BuToJpsiPi",
@@ -28,7 +28,7 @@ def make_datagroups_2018(
     dg.addGroup(
         "Other",
         members=dg.get_members_from_results(
-            not_startswith=["signal", "BuToJpsiK", "BuToJpsiPi"]
+            not_startswith=["signalBuToJpsiK", "BuToJpsiK", "BuToJpsiPi"]
         ),
     )
 

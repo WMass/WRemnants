@@ -33,7 +33,7 @@ def bkmm_selections(df, dataset_name, selections):
     cutflow["bkmm dimuon cands > 0"] = df.SumAndCount("weight")
     dfs_per_cut.append(df)
 
-    if dataset_name == "signalBuToJpsiK":
+    if dataset_name == "signalBuToJpsiK_2018":
         logger.debug("Defining signal specific mask")
         df = df.Define("bkmm_passes", "bkmm_gen_pdgId != 0")
     else:
