@@ -314,7 +314,6 @@ nuisance_grouping = {
     ],
     "min": common_groups
     + [
-        "angularCoeffs",
         "massShiftW",
         "massShiftZ",
         "QCDscalePtChargeMiNNLO",
