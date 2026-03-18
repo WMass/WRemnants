@@ -5,6 +5,14 @@ from wremnants.utilities import common
 lumicsv = f"{common.data_dir}/bylsoutput_2018.csv"
 lumijson = f"{common.data_dir}/Cert_314472-325175_13TeV_UL2018_Collisions18_HLT_IsoMu24_v_CustomJSON.txt"
 
+# for Charmonium dataset studies, starting with HLT_DoubleMu4_3_Jpsi
+lumicsv_HLT_DoubleMu4_3_Jpsi_vstar = (
+    f"{common.data_dir}/bylsoutput_2018_HLT_DoubleMu4_3_Jpsi.csv"
+)
+lumijson_legacy = (
+    f"{common.data_dir}/Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt"
+)
+
 dataDict = {
     "SingleMuon_2018A": {
         "filepaths": [
@@ -40,6 +48,43 @@ dataDict = {
         "group": "Data",
         "lumicsv": lumicsv,
         "lumijson": lumijson,
+        "das_name": "private",
+    },
+    # currently at /scratch/submit/cms/zmass/ on submit82
+    "Charmonium_2018A": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium+Run2018A-12Nov2019_UL2018_rsb-v1+MINIAOD/",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
+        "lumijson": lumijson_legacy,
+        "das_name": "private",
+    },
+    "Charmonium_2018B": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium+Run2018B-12Nov2019_UL2018-v1+MINIAOD/",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
+        "lumijson": lumijson_legacy,
+        "das_name": "private",
+    },
+    "Charmonium_2018C": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium+Run2018C-12Nov2019_UL2018_rsb_v3-v1+MINIAOD/",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
+        "lumijson": lumijson_legacy,
+        "das_name": "private",
+    },
+    "Charmonium_2018D": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium+Run2018D-12Nov2019_UL2018-v1+MINIAOD/",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
+        "lumijson": lumijson_legacy,
         "das_name": "private",
     },
     "Zmumu_2018": {
@@ -232,6 +277,36 @@ dataDict = {
         "xsec": 238800,
         "group": "QCD",
         "das_name": "/QCD_Pt-20_MuEnrichedPt15_TuneCP5_13TeV-pythia8/RunIISummer20UL18NanoAODv9-106X_upgrade2018_realistic_v16_L1v1-v2/NANOAODSIM",
+    },
+    "BuToJpsiK_2018": {
+        "filepaths": [
+            "{BASE_PATH}/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
+        ],
+        "xsec": 1.219e7
+        * 1.02e-3
+        * 5.961e-2,  # B production xsec * BR(B --> Jpsi + K) * BR(Jpsi --> mumu)
+        "group": "BuToJpsiK",
+        "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
+    },
+    "signalBuToJpsiK_2018": {
+        "filepaths": [
+            "{BASE_PATH}/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
+        ],
+        "xsec": 1.219e7
+        * 1.02e-3
+        * 5.961e-2,  # B production xsec * BR(B --> Jpsi + K) * BR(Jpsi --> mumu)
+        "group": "signalBuToJpsiK",
+        "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
+    },
+    "BuToJpsiPi_2018": {
+        "filepaths": [
+            "{BASE_PATH}/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v1+MINIAODSIM"
+        ],
+        "xsec": 1.219e7
+        * 3.92e-5
+        * 5.961e-2,  # B production xsec * BR(B --> Jpsi + pi) * BR(Jpsi --> mumu)
+        "group": "BuToJpsiPi",
+        "das_name": "/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v2/MINIAODSIM",
     },
 }
 

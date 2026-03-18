@@ -65,19 +65,31 @@ def make_muon_calibration_helpers(
     return mc_helper, data_helper, uncertainty_helper
 
 
-def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False):
-    if args.muonCorrMC in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
-        mc_corrfile = calib_filepaths["mc_corrfile"][args.muonCorrMC]
+def make_jpsi_crctn_helpers(
+    calib_filepaths,
+    muon_corr_mc,
+    muon_corr_data,
+    scale_var_method,
+    scale_A=1.0,
+    scale_e=1.0,
+    scale_M=1.0,
+    make_uncertainty_helper=False,
+    include_covariance=True,
+    central=False,
+    central_eta_min=-1.4,
+    central_eta_max=1.4,
+):
+    if muon_corr_mc in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
+        mc_corrfile = calib_filepaths["mc_corrfile"][muon_corr_mc]
         logger.warning(
             "You apply J/Psi massfit corrections on MC, this is currenlty not recommended!"
         )
     else:
         mc_corrfile = None
-    if args.muonCorrData in ["massfit", "lbl_massfit"]:
-        data_corrfile = calib_filepaths["data_corrfile"][args.muonCorrData]
+    if muon_corr_data in ["massfit", "lbl_massfit"]:
+        data_corrfile = calib_filepaths["data_corrfile"][muon_corr_data]
     else:
         data_corrfile = None
-    tflite_file = calib_filepaths["tflite_file"]
     mc_helper = make_jpsi_crctn_helper(filepath=mc_corrfile) if mc_corrfile else None
     data_helper = (
         make_jpsi_crctn_helper(filepath=data_corrfile) if data_corrfile else None
@@ -87,11 +99,11 @@ def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False
         mc_unc_helper = (
             make_jpsi_crctn_unc_helper(
                 filepath_correction=mc_corrfile,
-                filepath_tflite=tflite_file,
-                n_eta_bins=24,
-                scale_var_method=args.muonScaleVariation,
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
+                scale_var_method=scale_var_method,
+                include_covariance=include_covariance,
+                central=central,
+                central_eta_min=central_eta_min,
+                central_eta_max=central_eta_max,
             )
             if mc_corrfile
             else None
@@ -99,10 +111,14 @@ def make_jpsi_crctn_helpers(args, calib_filepaths, make_uncertainty_helper=False
         data_unc_helper = (
             make_jpsi_crctn_unc_helper(
                 filepath_correction=data_corrfile,
-                scale_var_method=args.muonScaleVariation,
-                scale_A=args.scale_A,
-                scale_e=args.scale_e,
-                scale_M=args.scale_M,
+                scale_var_method=scale_var_method,
+                scale_A=scale_A,
+                scale_e=scale_e,
+                scale_M=scale_M,
+                include_covariance=include_covariance,
+                central=central,
+                central_eta_min=central_eta_min,
+                central_eta_max=central_eta_max,
             )
             if data_corrfile
             else None
@@ -523,50 +539,102 @@ def make_jpsi_crctn_unc_helper(
     scale_M=1.0,
     isW=True,
     scale_var_method="smearingWeightsSplines",
+    include_covariance=True,
+    central=False,
+    central_eta_min=-1.4,
+    central_eta_max=1.4,
 ):
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("A")
     e = f.Get("e")
     M = f.Get("M")
-    cov = f.Get("covariance_matrix")
 
     A = narf.root_to_hist(A, axis_names=["scale_eta"])
     e = narf.root_to_hist(e, axis_names=["scale_eta"])
     M = narf.root_to_hist(M, axis_names=["scale_eta"])
-    cov = narf.root_to_hist(cov)
+
+    eta_axis_orig = A.axes["scale_eta"]
+    neta_orig = eta_axis_orig.size
+
+    if include_covariance:
+        cov = f.Get("covariance_matrix")
+        cov = narf.root_to_hist(cov)
+
+    if central:
+        eta_centers = eta_axis_orig.centers
+        eta_idx = np.nonzero(
+            (eta_centers >= central_eta_min) & (eta_centers <= central_eta_max)
+        )[0]
+
+        if eta_idx.size == 0:
+            raise ValueError(
+                "No eta bins selected for central J/Psi correction uncertainties."
+            )
+
+        start_idx = int(eta_idx[0])
+        end_idx = int(eta_idx[-1]) + 1
+
+        A = A[start_idx:end_idx]
+        e = e[start_idx:end_idx]
+        M = M[start_idx:end_idx]
 
     f.Close()
 
     axis_eta = A.axes["scale_eta"]
     neta = axis_eta.size
-
-    cov = cov.values()
-    nparmscov = cov.shape[0] // neta
     n_scale_params = 3
-    nvars = neta * n_scale_params
 
-    variances_ref = np.stack([A.variances(), e.variances(), M.variances()], axis=-1)
-    variances = np.reshape(np.diag(cov), (neta, nparmscov))[:, :n_scale_params]
+    if include_covariance:
+        cov = cov.values()
+        nparmscov = cov.shape[0] // neta_orig
+        nvars = neta * n_scale_params
 
-    if not np.all(np.isclose(variances, variances_ref, atol=0.0)):
-        raise ValueError(
-            "Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order."
+        variances_ref = np.stack([A.variances(), e.variances(), M.variances()], axis=-1)
+        variances = np.reshape(np.diag(cov), (neta_orig, nparmscov))[
+            start_idx : end_idx if central else slice(None), :n_scale_params
+        ]
+
+        if not np.all(np.isclose(variances, variances_ref, atol=0.0)):
+            raise ValueError(
+                "Covariance matrix is not consistent with parameter uncertainties or parameters are not in the expected order."
+            )
+
+        cov = np.reshape(cov, (neta_orig, nparmscov, neta_orig, nparmscov))
+        if central:
+            cov = cov[start_idx:end_idx, :, start_idx:end_idx, :]
+
+        cov = cov[:, :n_scale_params, :, :n_scale_params]
+
+        scales = [scale_A, scale_e, scale_M]
+        for iparm, scale in enumerate(scales):
+            cov[:, iparm, :, :] *= scale
+            cov[:, :, :, iparm] *= scale
+
+        cov = np.reshape(cov, (nvars, nvars))
+
+        e, v = np.linalg.eigh(cov)
+        var_mat = np.sqrt(e[None, :]) * v
+        var_mat = np.reshape(var_mat, (neta, n_scale_params, nvars))
+    else:
+        logger.debug(
+            f"Ignoring correlations and assigning a variation to each (A, e, M) for each eta bin (no eigen decomposition)"
         )
+        nvars = neta * n_scale_params
 
-    cov = np.reshape(cov, (neta, nparmscov, neta, nparmscov))
-    cov = cov[:, :n_scale_params, :, :n_scale_params]
+        A_unc = np.sqrt(A.variances()) * scale_A
+        e_unc = np.sqrt(e.variances()) * scale_e
+        M_unc = np.sqrt(M.variances()) * scale_M
 
-    scales = [scale_A, scale_e, scale_M]
-    for iparm, scale in enumerate(scales):
-        cov[:, iparm, :, :] *= scale
-        cov[:, :, :, iparm] *= scale
+        uncs = np.stack([A_unc, e_unc, M_unc], axis=-1)
 
-    cov = np.reshape(cov, (nvars, nvars))
+        var_mat = np.zeros((neta, n_scale_params, nvars))
 
-    e, v = np.linalg.eigh(cov)
-    var_mat = np.sqrt(e[None, :]) * v
-    var_mat = np.reshape(var_mat, (neta, n_scale_params, nvars))
+        ivar = 0
+        for ieta in range(neta):
+            for iparm in range(n_scale_params):
+                var_mat[ieta, iparm, ivar] = uncs[ieta, iparm]
+                ivar += 1
 
     axis_scale_params = hist.axis.Integer(
         0, n_scale_params, underflow=False, overflow=False, name="scale_params"

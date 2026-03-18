@@ -59,6 +59,8 @@ process_colors = {
     "WtoNMu_30": "#00CC99",
     "WtoNMu_50": "#00FFFF",
     "BSM": "#409C3D",
+    "BuToJpsiK": "#f89c20",
+    "BuToJpsiPi": "#e42536",
 }
 
 process_supergroups = {
