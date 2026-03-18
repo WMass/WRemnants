@@ -103,9 +103,9 @@ def main():
             input_file = (
                 f"{args.outdir}/w_z_gen_dists_{pred_corr}_maxFiles_m1{pdf_replace}.hdf5"
             )
-            output_file = input_file.replace(".hdf5", "_skimmed.hdf5")
+            output_file = input_file.replace(f"{pdf_replace}.hdf5", "_skimmed.hdf5")
             skim_command = f"""
-            python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {input_file} \
+            python {os.environ['WREM_BASE']}/scripts/inspect/open_narf_h5py.py {input_file} \
             --filterHistsRegex '^(.*pdfas.*|nominal_gen_theory_uncorr)$' --outfile {output_file}
             """
             print(f"Running skimming command: {skim_command}")
