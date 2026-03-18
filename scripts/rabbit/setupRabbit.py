@@ -1118,9 +1118,7 @@ def setup(
                 else hh.scaleHist(
                     hh.addGenericAxis(
                         h,
-                        hist.axis.Variable(
-                            run_edges + 0.5, name="run", underflow=False, overflow=False
-                        ),
+                        hist.axis.Variable(run_edges + 0.5, name="run"),
                         add_trailing=False,
                     ),
                     lumis[(slice(None),) + (np.newaxis,) * len(h.axes)],
@@ -1839,6 +1837,12 @@ def setup(
                 flavor=datagroups.flavor,
                 passSystToFakes=passSystToFakes,
             )
+
+        rabbit_helpers.add_mb_fo_uncertainty(
+            datagroups,
+            processes=["z_samples"],
+            passSystToFakes=passSystToFakes,
+        )
 
     if datagroups.xnorm or genfit:
         return datagroups
