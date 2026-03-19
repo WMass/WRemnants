@@ -2,7 +2,7 @@ import hist
 import ROOT
 
 import narf
-from wremnants.production import helicity_utils
+from wremnants.production import helicity_utils, theory_corrections
 from wremnants.utilities import binning, common, samples, theory_utils
 from wums import logging
 
@@ -605,11 +605,15 @@ def add_pdfUncertByHelicity_hist(
             ],
         )
     safeTensorName = f"{tensorName}_clamped"
-    renorm = theory_utils.pdfMap.get(pdf, {}).get("renorm", False)
+    renorm = theory_utils.pdfMap.get(pdf, {}).get(
+        "renorm", False
+    ) or theory_corrections.theory_corr_is_renorm(pdf)
+
     if renorm:
         central_event_weight = "nominal_weight"
     else:
         central_event_weight = "nominal_weight_pdf_uncorr"
+
     df = df.Define(
         safeTensorName,
         f"auto res = wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0); res = {central_event_weight}*res; return res;",
