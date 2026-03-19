@@ -51,6 +51,17 @@ dataDict = {
         "das_name": "private",
     },
     # currently at /scratch/submit/cms/zmass/ on submit82
+    "MuOnia_2018": {
+        "filepaths": [
+            "{BASE_PATH}/MuOnia/Run2018A-UL2018_MiniAODv2_NanoAODv9_GT36-v1",
+            "{BASE_PATH}/MuOnia/Run2018B-UL2018_MiniAODv2_NanoAODv9_GT36-v1",
+            "{BASE_PATH}/MuOnia/Run2018C-UL2018_MiniAODv2_NanoAODv9_GT36-v1",
+            "{BASE_PATH}/MuOnia/Run2018D-UL2018_MiniAODv2_NanoAODv9_GT36-v1",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv,
+        "lumijson": lumijson,
+    },
     "Charmonium_2018A": {
         "filepaths": [
             "{BASE_PATH}/Charmonium+Run2018A-12Nov2019_UL2018_rsb-v1+MINIAOD/",
@@ -307,6 +318,13 @@ dataDict = {
         * 5.961e-2,  # B production xsec * BR(B --> Jpsi + pi) * BR(Jpsi --> mumu)
         "group": "BuToJpsiPi",
         "das_name": "/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v2/MINIAODSIM",
+    },
+    "YnSToMuMu_2018": {
+        "filepaths": [
+            "{BASE_PATH}/YnSToMuMu_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL18MiniAOD-106X_upgrade2018_realistic_v11_L1v1-v2+MINIAODSIM"
+        ],
+        "xsec": 3000,
+        "group": "Upsilon",
     },
 }
 

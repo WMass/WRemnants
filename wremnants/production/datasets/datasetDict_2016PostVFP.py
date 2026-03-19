@@ -18,6 +18,16 @@ dataDict = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
     },
+    "MuOnia_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/MuOnia/Run2016F-UL2016_MiniAODv2_NanoAODv9-v1",
+            "{BASE_PATH}/MuOnia/Run2016G-UL2016_MiniAODv2_NanoAODv9-v1",
+            "{BASE_PATH}/MuOnia/Run2016H-UL2016_MiniAODv2_NanoAODv9-v1",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv,
+        "lumijson": lumijson,
+    },
     "Zmumu_2016PostVFP": {
         "filepaths": [
             "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
@@ -256,6 +266,13 @@ dataDict = {
         "xsec": common.xsec_WtoNMu,
         "group": "WtoNMu",
         "auxiliary": True,
+    },
+    "YnSToMuMu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/YnSToMuMu_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL16MiniAOD-106X_mcRun2_asymptotic_v13-v2+MINIAODSIM"
+        ],
+        "xsec": 1,
+        "group": "Upsilon",
     },
 }
 
