@@ -152,10 +152,10 @@ def analysis_debug_output(results):
     logger.debug("")
 
 
-def write_analysis_output(results, outfile, args):
+def write_analysis_output(results, outfile, args, name_append=[]):
     analysis_debug_output(results)
 
-    to_append = []
+    to_append = name_append[:]
     if args.theoryCorr and not args.theoryCorrAltOnly:
         to_append.append(args.theoryCorr[0] + "_Corr")
     if args.maxFiles is not None:

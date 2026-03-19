@@ -591,9 +591,9 @@ def make_jpsi_crctn_unc_helper(
         nvars = neta * n_scale_params
 
         variances_ref = np.stack([A.variances(), e.variances(), M.variances()], axis=-1)
-        variances = np.reshape(np.diag(cov), (neta_orig, nparmscov))[
-            start_idx : end_idx if central else slice(None), :n_scale_params
-        ]
+        variances = np.reshape(np.diag(cov), (neta_orig, nparmscov))[:, :n_scale_params]
+        if central:
+            variances = variances[start_idx:end_idx, :]
 
         if not np.all(np.isclose(variances, variances_ref, atol=0.0)):
             raise ValueError(
@@ -601,10 +601,10 @@ def make_jpsi_crctn_unc_helper(
             )
 
         cov = np.reshape(cov, (neta_orig, nparmscov, neta_orig, nparmscov))
+        cov = cov[:, :n_scale_params, :, :n_scale_params]
+
         if central:
             cov = cov[start_idx:end_idx, :, start_idx:end_idx, :]
-
-        cov = cov[:, :n_scale_params, :, :n_scale_params]
 
         scales = [scale_A, scale_e, scale_M]
         for iparm, scale in enumerate(scales):

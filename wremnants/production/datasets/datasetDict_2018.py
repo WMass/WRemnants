@@ -14,6 +14,18 @@ lumijson_legacy = (
 )
 
 dataDict = {
+    "SingleMuon_2018": {
+        "filepaths": [
+            "{BASE_PATH}/SingleMuon/NanoV9Run2018A_{NANO_PROD_TAG}",
+            "{BASE_PATH}/SingleMuon/NanoV9Run2018B_{NANO_PROD_TAG}",
+            "{BASE_PATH}/SingleMuon/NanoV9Run2018C_{NANO_PROD_TAG}",
+            "{BASE_PATH}/SingleMuon/NanoV9Run2018D_{NANO_PROD_TAG}",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv,
+        "lumijson": lumijson,
+        "das_name": "private",
+    },
     "SingleMuon_2018A": {
         "filepaths": [
             "{BASE_PATH}/SingleMuon/NanoV9Run2018A_{NANO_PROD_TAG}",
@@ -22,6 +34,7 @@ dataDict = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
         "das_name": "private",
+        "auxiliary": True,
     },
     "SingleMuon_2018B": {
         "filepaths": [
@@ -31,6 +44,7 @@ dataDict = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
         "das_name": "private",
+        "auxiliary": True,
     },
     "SingleMuon_2018C": {
         "filepaths": [
@@ -40,6 +54,7 @@ dataDict = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
         "das_name": "private",
+        "auxiliary": True,
     },
     "SingleMuon_2018D": {
         "filepaths": [
@@ -49,6 +64,7 @@ dataDict = {
         "lumicsv": lumicsv,
         "lumijson": lumijson,
         "das_name": "private",
+        "auxiliary": True,
     },
     # currently at /scratch/submit/cms/zmass/ on submit82
     "MuOnia_2018": {
@@ -61,6 +77,20 @@ dataDict = {
         "group": "Data",
         "lumicsv": lumicsv,
         "lumijson": lumijson,
+        "auxiliary": True,
+    },
+    "Charmonium_2018": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium+Run2018A-12Nov2019_UL2018_rsb-v1+MINIAOD/",
+            "{BASE_PATH}/Charmonium+Run2018B-12Nov2019_UL2018-v1+MINIAOD/",
+            "{BASE_PATH}/Charmonium+Run2018C-12Nov2019_UL2018_rsb_v3-v1+MINIAOD/",
+            "{BASE_PATH}/Charmonium+Run2018D-12Nov2019_UL2018-v1+MINIAOD/",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv,
+        "lumijson": lumijson,
+        "das_name": "private",
+        "auxiliary": True,
     },
     "Charmonium_2018A": {
         "filepaths": [
@@ -70,6 +100,7 @@ dataDict = {
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
         "lumijson": lumijson_legacy,
         "das_name": "private",
+        "auxiliary": True,
     },
     "Charmonium_2018B": {
         "filepaths": [
@@ -79,6 +110,7 @@ dataDict = {
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
         "lumijson": lumijson_legacy,
         "das_name": "private",
+        "auxiliary": True,
     },
     "Charmonium_2018C": {
         "filepaths": [
@@ -88,6 +120,7 @@ dataDict = {
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
         "lumijson": lumijson_legacy,
         "das_name": "private",
+        "auxiliary": True,
     },
     "Charmonium_2018D": {
         "filepaths": [
@@ -97,6 +130,7 @@ dataDict = {
         "lumicsv": lumicsv_HLT_DoubleMu4_3_Jpsi_vstar,
         "lumijson": lumijson_legacy,
         "das_name": "private",
+        "auxiliary": True,
     },
     "Zmumu_2018": {
         "filepaths": [
@@ -298,6 +332,7 @@ dataDict = {
         * 5.961e-2,  # B production xsec * BR(B --> Jpsi + K) * BR(Jpsi --> mumu)
         "group": "BuToJpsiK",
         "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
+        "auxiliary": True,
     },
     "signalBuToJpsiK_2018": {
         "filepaths": [
@@ -308,6 +343,7 @@ dataDict = {
         * 5.961e-2,  # B production xsec * BR(B --> Jpsi + K) * BR(Jpsi --> mumu)
         "group": "signalBuToJpsiK",
         "das_name": "/BuToJpsiK_BMuonFilter_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v1/MINIAODSIM",
+        "auxiliary": True,
     },
     "BuToJpsiPi_2018": {
         "filepaths": [
@@ -318,6 +354,7 @@ dataDict = {
         * 5.961e-2,  # B production xsec * BR(B --> Jpsi + pi) * BR(Jpsi --> mumu)
         "group": "BuToJpsiPi",
         "das_name": "/BuToJpsiPi_SoftQCDnonD_TuneCP5_13TeV-pythia8-evtgen/RunIISummer20UL17MiniAODv2-106X_mc2017_realistic_v9-v2/MINIAODSIM",
+        "auxiliary": True,
     },
     "YnSToMuMu_2018": {
         "filepaths": [
@@ -325,6 +362,7 @@ dataDict = {
         ],
         "xsec": 3000,
         "group": "Upsilon",
+        "auxiliary": True,
     },
 }
 

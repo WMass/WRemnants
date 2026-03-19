@@ -23,15 +23,6 @@ default_nfiles = {
     "Ztautau_2016PostVFP": 1200,
 }
 
-btojpsik_calibration_samples = [
-    "Charmonium_2018A",
-    "Charmonium_2018B",
-    "Charmonium_2018C",
-    "Charmonium_2018D",
-    "BuToJpsiK_2018",
-    "BuToJpsiPi_2018",
-]
-
 
 def buildFileListPosix(path):
     outfiles = []
@@ -274,8 +265,6 @@ def getDatasets(
         is_data = info.get("group", "") == "Data"
 
         prod_tags = data_tags if is_data else mc_tags
-        if sample in btojpsik_calibration_samples:
-            prod_tags = [""]
 
         nfiles = maxFiles
         if type(maxFiles) == dict:

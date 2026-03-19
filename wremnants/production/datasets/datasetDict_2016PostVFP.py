@@ -27,6 +27,18 @@ dataDict = {
         "group": "Data",
         "lumicsv": lumicsv,
         "lumijson": lumijson,
+        "auxiliary": True,
+    },
+    "Charmonium_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/Charmonium/Run2016F-UL2016_MiniAODv2_NanoAODv9-v1",
+            "{BASE_PATH}/Charmonium/Run2016G-UL2016_MiniAODv2_NanoAODv9-v1",
+            "{BASE_PATH}/Charmonium/Run2016H-UL2016_MiniAODv2_NanoAODv9-v1",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv,
+        "lumijson": lumijson,
+        "auxiliary": True,
     },
     "Zmumu_2016PostVFP": {
         "filepaths": [
@@ -271,8 +283,41 @@ dataDict = {
         "filepaths": [
             "{BASE_PATH}/YnSToMuMu_TuneCP5_13TeV-pythia8-evtgen+RunIISummer20UL16MiniAOD-106X_mcRun2_asymptotic_v13-v2+MINIAODSIM"
         ],
-        "xsec": 1,
+        "xsec": 3000,  # guessed on data vs. MC
         "group": "Upsilon",
+        "auxiliary": True,
+    },
+    "Y1SToMuMu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/Upsilon1SToMuMu_Pt5_TuneCP5_13TeV_pythia8-EvtGen/NanoV9MCPostVFP_TrackFitV722_NanoProdv6/"
+        ],
+        "xsec": 700,  # guessed on data vs. MC
+        "group": "Upsilon",
+        "auxiliary": True,
+    },
+    "Y2SToMuMu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/Upsilon2SToMuMu_Pt5_TuneCP5_13TeV_pythia8-EvtGen/NanoV9MCPostVFP_TrackFitV722_NanoProdv6/"
+        ],
+        "xsec": 300,  # guessed on data vs. MC
+        "group": "Upsilon",
+        "auxiliary": True,
+    },
+    "Y3SToMuMu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/Upsilon3SToMuMu_Pt5_TuneCP5_13TeV_pythia8-EvtGen/NanoV9MCPostVFP_TrackFitV722_NanoProdv6/"
+        ],
+        "xsec": 200,  # guessed on data vs. MC
+        "group": "Upsilon",
+        "auxiliary": True,
+    },
+    "JpsiToMuMu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/JpsiToMuMu_JpsiPt8_TuneCP5_13TeV-pythia8/NanoV9MCPostVFP_TrackFitV722_NanoProdv6/"
+        ],
+        "xsec": 25000.0,  # guessed on data vs. MC
+        "group": "JPsi",
+        "auxiliary": True,
     },
 }
 

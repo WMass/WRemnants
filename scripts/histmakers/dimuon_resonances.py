@@ -1,21 +1,29 @@
 import math
 import os
 
-from wremnants.utilities import common, parsing
-from wums import logging
-
-analysis_label = common.analysis_label(os.path.basename(__file__))
-parser, initargs = parsing.common_parser(analysis_label)
-
-args = parser.parse_args()
-
-logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
-
 import hist
 
 import narf
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import write_analysis_output
+from wremnants.utilities import common, parsing
+from wums import logging
+
+analysis_label = common.analysis_label(os.path.basename(__file__))
+parser, initargs = parsing.common_parser(analysis_label)
+parser.add_argument(
+    "--resonance",
+    type=str,
+    choices=["jpsi", "psiprime", "upsilon"],
+    help="Resonance for selection",
+    default="upsilon",
+)
+parser = parsing.set_parser_default(parser, "theoryCorr", [])
+
+args = parser.parse_args()
+
+logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,
@@ -27,19 +35,54 @@ datasets = getDatasets(
     mc_tags=[""],
 )
 
+
+resonance_options = {
+    "jpsi": {
+        "hlt": {
+            "2016PostVFP": [
+                "HLT_Dimuon16_Jpsi",
+                "HLT_Dimuon20_Jpsi",
+                "HLT_DoubleMu4_3_Jpsi_Displaced",
+            ],
+            "2018": [
+                "HLT_DoubleMu4_3_Jpsi",
+                "HLT_Dimuon25_Jpsi_noCorrL1",
+                "HLT_Dimuon25_Jpsi",
+            ],
+        },
+        "mass": [2.9, 3.3],
+    },
+    "psiprime": {
+        "hlt": {
+            "2016PostVFP": ["HLT_Dimuon8_PsiPrime_Barrel", "HLT_Dimuon13_PsiPrime"],
+            "2018": ["HLT_Dimuon18_PsiPrime_noCorrL1", "HLT_Dimuon18_PsiPrime"],
+        },
+        "mass": [3.35, 4.05],
+    },
+    "upsilon": {
+        "hlt": {
+            "2016PostVFP": ["HLT_Dimuon8_Upsilon_Barrel", "HLT_Dimuon13_Upsilon"],
+            "2018": ["HLT_Dimuon24_Upsilon_noCorrL1", "HLT_Dimuon12_Upsilon_y1p4"],
+        },
+        "mass": [8.5, 11.5],
+    },
+}
+
+cfg = resonance_options[args.resonance]
+mass_lo, mass_hi = cfg["mass"]
+
+
 # define histogram axes, see: https://hist.readthedocs.io/en/latest/index.html
 axis_nLepton = hist.axis.Integer(0, 5, name="nLepton", underflow=False)
 
 all_axes = {
-    "mll": hist.axis.Regular(20, 8.5, 11.5, name="mll"),
+    "mll": hist.axis.Regular(20, mass_lo, mass_hi, name="mll"),
     "yll": hist.axis.Regular(50, -2.5, 2.5, name="yll"),
-    "ptll": hist.axis.Regular(30, 5, 20, name="ptll", underflow=False),
+    "ptll": hist.axis.Regular(50, 0, 50, name="ptll", underflow=False),
     "pt": hist.axis.Regular(50, 0, 50, name="pt"),
     "eta": hist.axis.Regular(48, -2.4, 2.4, name="eta"),
     "phi": hist.axis.Regular(20, -math.pi, math.pi, circular=True, name="phi"),
 }
-
-cuts = {}
 
 
 def build_graph(df, dataset):
@@ -53,7 +96,6 @@ def build_graph(df, dataset):
         df = df.Define("weight", "std::copysign(1.0, genWeight)")
 
     weightsum = df.SumAndCount("weight")
-    # cuts["initial"] = weightsum
 
     df = df.Define(
         "Muon_isGoodGlobal", f"Muon_isGlobal && Muon_pt > 4 && abs(Muon_eta) < 2.4"
@@ -64,8 +106,6 @@ def build_graph(df, dataset):
 
     # filter events
     df = df.Filter("Sum(Muon_isGoodNegative) >= 1 && Sum(Muon_isGoodPositive) >= 1 ")
-
-    # cuts["dimuon_OS"] = df.SumAndCount("weight")
 
     df = df.Define("muon_pt", "Muon_pt[Muon_isGoodPositive][0]")
     df = df.Define("muon_eta", "Muon_eta[Muon_isGoodPositive][0]")
@@ -90,11 +130,10 @@ def build_graph(df, dataset):
     )
 
     df = df.Define("mll", "ll_mom4.mass()")
-    df = df.Filter(f"mll >= 8.5 && mll < 11.5")
 
-    # cuts["dimuon_mass"] = df.SumAndCount("weight")
+    df = df.Filter(f"mll >= {mass_lo} && mll < {mass_hi}")
 
-    df = df.Define("ptll", "ll_mom4.mass()")
+    df = df.Define("ptll", "ll_mom4.pt()")
     df = df.Define("phill", "ll_mom4.phi()")
     df = df.Define("yll", "ll_mom4.Rapidity()")
 
@@ -102,11 +141,13 @@ def build_graph(df, dataset):
     df = df.Define("trailing_pt", "muon_pt > antimuon_pt ? antimuon_pt : muon_pt")
 
     # fill histograms
-    for hlt in ["HLT_Dimuon24_Upsilon_noCorrL1", "HLT_Dimuon12_Upsilon_y1p4"]:
+    for hlt in [None, *cfg["hlt"][args.era]]:
 
-        df_sel = df.Filter(hlt)
-
-        # cuts[hlt] = df_sel.SumAndCount("weight")
+        if hlt is None:
+            hlt = "nominal"
+            df_sel = df
+        else:
+            df_sel = df.Filter(hlt)
 
         results.append(df_sel.HistoBoost(f"{hlt}_mll", [all_axes["mll"]], ["mll"]))
         results.append(df_sel.HistoBoost(f"{hlt}_ptll", [all_axes["ptll"]], ["ptll"]))
@@ -149,8 +190,5 @@ def build_graph(df, dataset):
 
 resultdict = narf.build_and_run(datasets, build_graph)
 
-for name, nevents in cuts.items():
-    print(f"{name}: {nevents}")
-
 fout = f"{os.path.basename(__file__).replace('py', 'hdf5')}"
-write_analysis_output(resultdict, fout, args)
+write_analysis_output(resultdict, fout, args, name_append=[args.resonance, args.era])
