@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import math
+import sys
 
 import hist
 import numpy as np
@@ -79,7 +80,29 @@ def _build_preselection_specs(selection_specs, fitvar):
     return parsed_specs
 
 
-def make_subparsers(parser):
+def _normalize_negative_imaginary_bounds(argv):
+    normalized_argv = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        normalized_argv.append(token)
+
+        if token in {"--axlim", "--preselect"} and i + 3 < len(argv):
+            normalized_argv.append(argv[i + 1])
+            for value in (argv[i + 2], argv[i + 3]):
+                if value.startswith("-") and value.endswith("j"):
+                    normalized_argv.append(f" {value}")
+                else:
+                    normalized_argv.append(value)
+            i += 4
+            continue
+
+        i += 1
+
+    return normalized_argv
+
+
+def make_subparsers(parser, argv=None):
 
     parser.add_argument(
         "--analysisMode",
@@ -89,7 +112,7 @@ def make_subparsers(parser):
         help="Select analysis mode to run. Default is the traditional analysis",
     )
 
-    tmpKnownArgs, _ = parser.parse_known_args()
+    tmpKnownArgs, _ = parser.parse_known_args(argv)
     subparserName = tmpKnownArgs.analysisMode
     if subparserName is None:
         return parser
@@ -186,7 +209,7 @@ def make_subparsers(parser):
     return parser
 
 
-def make_parser(parser=None):
+def make_parser(parser=None, argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-o",
@@ -947,7 +970,7 @@ def make_parser(parser=None):
         action="store_true",
         help="Use the Breit-Wigner mass wights for mW.",
     )
-    parser = make_subparsers(parser)
+    parser = make_subparsers(parser, argv=argv)
 
     return parser
 
@@ -2899,8 +2922,9 @@ def outputFolderName(outfolder, datagroups, doStatOnly, postfix):
 
 
 if __name__ == "__main__":
-    parser = make_parser()
-    args = parser.parse_args()
+    argv = _normalize_negative_imaginary_bounds(sys.argv[1:])
+    parser = make_parser(argv=argv)
+    args = parser.parse_args(argv)
 
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
