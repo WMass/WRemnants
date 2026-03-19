@@ -1038,11 +1038,12 @@ class Datagroups(object):
         rename=True,
     ):
         if len(ax_lim):
-            if not all(x.real == 0 or x.imag == 0 for x in ax_lim):
+            specified_ax_lim = [x for x in ax_lim if x is not None]
+            if not all(x.real == 0 or x.imag == 0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim only accepts pure real or imaginary numbers"
                 )
-            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in ax_lim):
+            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim requires real numbers to be of integer type"
                 )
