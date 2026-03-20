@@ -1,6 +1,6 @@
 import os
 
-from wremnants.utilities import binning, common, parsing, samples
+from wremnants.utilities import binning, common, parsing, samples, theory_utils
 
 analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
@@ -78,6 +78,14 @@ parser.add_argument(
     "--makeCSQuantileHists",
     action="store_true",
     help="Make hists with fine binned CS variables for producing quantiles",
+)
+parser.add_argument(
+    "--quarkMassCorr",
+    nargs="*",
+    type=str,
+    default=["MiNNLO_Zbb"],
+    choices=theory_utils.valid_theory_corrections(),
+    help="Apply quark-mass correction generators as additional theory variations.",
 )
 parser.add_argument(
     "--splitSampleInN",
@@ -504,10 +512,17 @@ if args.jackknifeN > 0:
         0, args.jackknifeN, underflow=False, overflow=False, name="jackknife_sample"
     )
 
+procs_v = [d.name for d in datasets if d.name in samples.vprocs]
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
-corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
-)
+corr_helpers = theory_corrections.load_corr_helpers(procs_v, theory_corrs)
+if args.quarkMassCorr:
+    procs_z = [d.name for d in datasets if d.name in samples.zprocs]
+    corr_helpers_quark_mass = theory_corrections.load_corr_helpers(
+        procs_z, args.quarkMassCorr
+    )
+    for proc, helper_map in corr_helpers_quark_mass.items():
+        corr_helpers.setdefault(proc, {})
+        corr_helpers[proc].update(helper_map)
 
 
 def build_graph(df, dataset):

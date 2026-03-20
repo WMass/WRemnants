@@ -87,8 +87,8 @@ class Datagroups(object):
                 make_datagroups_lowPU as make_datagroups,
             )
         elif self.era == "2018":
-            from wremnants.postprocessing.datagroups.datagroups_btojpsik import (
-                make_datagroups_btojpsik as make_datagroups,
+            from wremnants.postprocessing.datagroups.datagroups_default import (
+                make_datagroups as make_datagroups,
             )
         else:
             from wremnants.postprocessing.datagroups.datagroups2016 import (
