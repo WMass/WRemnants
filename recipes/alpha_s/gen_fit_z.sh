@@ -83,7 +83,10 @@ fit_cmd=(
     -o "${fitdir}"
     --doImpacts
     --globalImpacts
+    --saveHists
     --computeHistErrors
+    --computeHistCov
+    --computeHistImpacts
     --computeVariations
     --covarianceFit
     -t -1

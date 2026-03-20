@@ -216,7 +216,7 @@ jobs:
       - name: wmass analysis
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/histmakers/mw_with_mu_eta_pt.py --dataPath $DATAPATH 
-          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass5_2016PostVFP
+          -j $((NTHREADS)) --maxFiles $((MAX_FILES)) --forceDefaultName -o $WREMNANTS_OUTDIR --theoryAgnostic --unfolding --poiAsNoi --auxiliaryProcs WtoNMuMass50_2016PostVFP
 
   w-fit:
     # The type of runner that the job will run on
@@ -315,7 +315,7 @@ jobs:
       - name: bsm rabbit setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
-          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass5 0.001 --breitwignerWMassWeights
+          -i $HIST_FILE --lumiScale $LUMI_SCALE --addBSMMixing WtoNMuMass50 0.001 --breitwignerWMassWeights
           --postfix bsm -o $WREMNANTS_OUTDIR
 
       - name: bsm rabbit fit
@@ -330,19 +330,19 @@ jobs:
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_limit.py
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/WMass.hdf5 -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/ 
-          -t -1 --asymptoticLimits WtoNMuMass5_mixing --modes gaussian
+          -t -1 --asymptoticLimits WtoNMuMass50_mixing --modes gaussian
           
       - name: bsm plot postfit variations
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
           -o $WEB_DIR/$PLOT_DIR/BSM -m Project -m Normalize --title CMS --subtitle Preliminary --titlePos 0 --yscale '1.3' 
           --result asimov --lowerLegCols 3 --rrange 0.98 1.02
-          --varNames massShiftW100MeV 'WtoNMuMass5_mixing' --varColors red blue
+          --varNames massShiftW100MeV 'WtoNMuMass50_mixing' --varColors red blue
 
       # - name: bsm plot parameter correlations
       #   run: >- 
       #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
-      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass5' massShiftW100MeV 
+      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' massShiftW100MeV
       #     --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py' --correlation --showNumbers
 
       # - name: bsm plot pulls and impacts
@@ -354,7 +354,7 @@ jobs:
       # - name: bsm likelihood scan
       #   run: >- 
       #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_likelihood_scan.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
-      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass5' --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py'
+      #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py'
 
   w-plotting:
     # The type of runner that the job will run on
@@ -1241,6 +1241,36 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/gen_fit_z.sh
           $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_OUTDIR/alpha_s_wz_unfolding_fitresult.hdf5 --outdir $ALPHAS_WZ_OUTDIR
+
+      - name: alphaS z gen-fit xsec
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py
+          $ALPHAS_WZ_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
+          --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
+
+      - name: alphaS z gen-fit xsec uncertainties
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py
+          $ALPHAS_WZ_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
+          --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
+
+      - name: alphaS z gen-fit xsec covariance
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          $ALPHAS_WZ_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --title CMS --subtitle Preliminary
+          -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py
+
+      - name: alphaS z gen-fit xsec corrrelation
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          $ALPHAS_WZ_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --title CMS --subtitle Preliminary
+          -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py --correlation
 
       - name: alphaS wz gen fit from wz unfolding
         run: >-
