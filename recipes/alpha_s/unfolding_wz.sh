@@ -69,6 +69,7 @@ setup_cmd=(
     --systematicType normal
     --postfix unfolding
     --unfoldSimultaneousWandZ
+    --fakeSmoothingMode hybrid
     --npUnc "${alpha_s_np_unc_model}"
     --pdfUncFromCorr
 )

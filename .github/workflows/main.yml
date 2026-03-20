@@ -930,7 +930,7 @@ jobs:
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_HIST_FILE=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=5" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
@@ -1091,7 +1091,9 @@ jobs:
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
-          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
+          echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
+          echo "FITRESULT_2D=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_reco_2d_fitresult.hdf5" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
@@ -1101,12 +1103,12 @@ jobs:
 
       - name: dilepton prefit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $FITRESULT_2D
           --config wremnants/utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --prefit --title CMS --subtitle Preliminary -m BaseMapping
 
       - name: dilepton postfit plot
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll/fitresults.hdf5 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py $FITRESULT_2D
           --config wremnants/utilities/styles/styles.py -o $WEB_DIR/$PLOT_DIR --yscale 1.2 --title CMS --subtitle Preliminary -m BaseMapping
 
       - name: dilepton plotting ptll
@@ -1207,7 +1209,7 @@ jobs:
           echo "ALPHAS_WZ_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_WZ_WZ_GENFIT=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_wz_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=5" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4

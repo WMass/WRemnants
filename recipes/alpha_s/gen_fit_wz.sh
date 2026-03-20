@@ -71,6 +71,7 @@ setup_cmd=(
     --noi alphaS wmass
     --postfix "${postfix}"
     --baseName prefsr
+    --fakeSmoothingMode hybrid
     --npUnc "${alpha_s_np_unc_model}"
     --pdfUncFromCorr
 )
