@@ -1029,7 +1029,7 @@ class TheoryHelper(object):
                 "theoryCorr"
             ):
                 # asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                asname = "scetlib_dyturboCT18Z_pdfas_Corr"
+                asname = "scetlib_dyturboCT18Z_pdfasCorr"
                 if asname.replace("Corr", "") in self.datagroups.args_from_metadata(
                     "theoryCorr"
                 ):

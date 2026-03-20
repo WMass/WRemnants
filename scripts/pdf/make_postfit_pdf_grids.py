@@ -4,15 +4,13 @@ import numpy as np
 if not hasattr(np, "int"):
     np.int = int
 import argparse
-import os
-import sys
 
-import lhapdf
-from mc2hlib import lh
-from mc2hlib.common import load_pdf
+import h5py
 
-from rabbit import io_tools
-from wremnants.postprocessing import syst_tools
+from wremnants.postprocessing.postfit_pdf_helper import (
+    RabbitPostfitPdfHelper,
+    SimplePostfitPdfHelper,
+)
 from wremnants.utilities import theory_utils
 from wums import logging
 
@@ -22,7 +20,7 @@ parser.add_argument(
     "--fitresult",
     type=str,
     required=True,
-    help="Path to the rabbit fit result file.",
+    help="Path to the fit result file (rabbit HDF5 or simple covariance HDF5).",
 )
 parser.add_argument(
     "-o",
@@ -53,171 +51,54 @@ parser.add_argument(
     "--noColorLogger", action="store_true", help="Disable colored logging output."
 )
 parser.add_argument(
-    "--pseudoData", type=str, default=None, help="Pseudo-data label to use."
+    "--pseudoData",
+    type=str,
+    default=None,
+    help="Pseudo-data label to use (rabbit format only).",
 )
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 
-def pdf_covariance(fitresult, pdf_nuisances):
-    cov = fitresult["cov"].get()
-    var_names = np.array(cov.axes["parms_x"])
-
-    pdf_mask = np.isin(var_names, pdf_nuisances)
-    return cov.values()[np.ix_(pdf_mask, pdf_mask)]
+def is_simple_format(path):
+    """Return True if the HDF5 file is in the simple covariance format."""
+    with h5py.File(path, "r") as f:
+        return "covariance" in f
 
 
-def postfit_eignvectors(cov_pdf):
-    eigv, V = np.linalg.eigh(cov_pdf)
-    return V * np.sqrt(np.maximum(eigv, 0))
-
-
-def write_new_grids(
-    base_name, outfolder, fitlabel, postfit_matrix, central_grid, pdf_scale
-):
-    scale_label = (
-        "unscaled" if pdf_scale == 1 else f"uncx{pdf_scale:.1f}".replace(".", "p")
-    )
-    new_pdf = f"{os.path.basename(base_name)}_{fitlabel}_{scale_label}"
-
-    outdir = os.path.join(outfolder, new_pdf)
-    if not os.path.exists(outdir):
-        logger.info(f"Creating output folder {outfolder}")
-        os.makedirs(outdir)
-
-    inn = open(base_name + ".info", "r")
-    outbase = "/".join([outdir, new_pdf])
-    out = open(outbase + ".info", "w")
-
-    for l in inn.readlines():
-        if l.find("SetDesc:") >= 0:
-            out.write(
-                f'SetDesc: "{pdf.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {pdf_scale}. Produced by the command {' '.join(sys.argv)}"\n'
-            )
-        elif l.find("SetIndex:") >= 0:
-            out.write(f"SetIndex: {args.lhaid}\n")
-        elif l.find("NumMembers:") >= 0:
-            out.write(f"NumMembers: {postfit_matrix.shape[-1] + 1}\n")
-        elif l.find("ErrorType") >= 0:
-            out.write(f"ErrorType: symmhessian\n")
-        elif l.find("ErrorConfLevel") >= 0:
-            out.write(f"ErrorConfLevel: 68.26894921370858\n")
-        else:
-            out.write(l)
-    inn.close()
-    out.close()
-
-    lh.write_replica(
-        0, outbase, b"PdfType: 'central'\nFormat: lhagrid1\n", central_grid
-    )
-    for column in postfit_matrix.columns:
-        header = b"PdfType: 'error'\nFormat: lhagrid1\n"
-        lh.write_replica(column + 1, outbase, header, postfit_matrix[column])
-    logger.info(f"Wrote PDF grids to {outbase}")
-
-
-Q = 100
-# Probably possible to read from LHAPDF
-max_nf = 5
-photon = False
-
-fitresult, meta = io_tools.get_fitresult(
-    args.fitresult, meta=True, result=args.pseudoData
-)
-
-input_meta = meta["meta_info_input"]
-
-if "meta_info_input" not in input_meta:
-    if args.pdf_name == "auto":
+if is_simple_format(args.fitresult):
+    logger.info("Detected simple covariance HDF5 format.")
+    pdf_helper = SimplePostfitPdfHelper(args.fitresult)
+    if args.pdf_name != "auto" and args.pdf_name != pdf_helper.pdf_name:
         raise ValueError(
-            "PDF name must be specified if not present in fit result metadata."
+            f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_helper.pdf_name}."
         )
-
-    logger.warning(
-        "Input metadata does not contain PDF information. Using specified PDF name."
-    )
-    pdf_input = args.pdf_name
 else:
-    pdf_input = input_meta["meta_info_input"]["args"]["pdfs"][0]
-
-    if args.pdf_name != "auto" and args.pdf_name != pdf_input:
+    logger.info("Detected rabbit HDF5 format.")
+    pdf_helper = RabbitPostfitPdfHelper(args.fitresult, pseudoData=args.pseudoData)
+    if pdf_helper.pdf_name is None:
+        if args.pdf_name == "auto":
+            raise ValueError(
+                "PDF name must be specified if not present in fit result metadata."
+            )
+        logger.warning(
+            "Input metadata does not contain PDF information. Using specified PDF name."
+        )
+        pdf_helper.pdf_name = args.pdf_name
+    elif args.pdf_name != "auto" and args.pdf_name != pdf_helper.pdf_name:
         raise ValueError(
-            f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_input}."
+            f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_helper.pdf_name}."
         )
 
-pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
-pdf_name = pdfInfo["lha_name"]
-pdf_scale = input_meta["meta_info"]["args"]["scalePdf"]
-pdf_symm = input_meta["meta_info"]["args"]["symmetrizePdfUnc"]
-
-if pdf_scale == -1:
-    pdf_scale = theory_utils.pdf_inflation_factor(
-        pdfInfo, input_meta["meta_info"]["args"]["noi"]
-    )
-    logger.info(f"Using default inflation factor from theory_utils: {pdf_scale}")
-
-pdf_scale *= pdfInfo["scale"] if "scale" in pdfInfo else 1
-logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
 # TODO: Need to scale back at the end to get 95% CL for consistency?
 
-pdf_lha = lhapdf.getPDFSet(pdf_name)
-errors = pdf_lha.errorInfo
-
-if errors.coreType not in ["hessian", "symmhessian"]:
-    raise ValueError(
-        f"Unsupported PDF error type: {errors.corrType}. Only Hessian PDFs are supported."
-    )
-
-symm_errors = errors.coreType == "symmhessian"
-
-errors = pdf_lha.errorInfo
-nhess = errors.nmemCore
-
-pdf_nuis_regex = r"pdf\d+"
-labels, pulls, constraints = io_tools.get_pulls_and_constraints(
-    fitresult,
-    keep_nuisances=pdf_nuis_regex,
-)
-
-if pulls.size - 1 == nhess:
-    logger.warning(
-        "Found an extra nuisance parameter. Assuming pdf1 nuisance is a duplicate of the central value"
-    )
-    pdf_nuis_regex = r"pdf(?![1][^\d])\d+"
-
-    labels, pulls, constraints = io_tools.get_pulls_and_constraints(
-        fitresult,
-        keep_nuisances=pdf_nuis_regex,
-    )
-
-pdf, fl, xgrid = load_pdf(pdf_name, Q, max_nf, photon)
-new_pdf, fl, xgrid = load_pdf(pdf_name, Q, max_nf, photon)
-
-pdf_cov = pdf_covariance(fitresult, labels)
-K = postfit_eignvectors(pdf_cov)
-
-central_pdf_path = "/".join([lhapdf.paths()[0], pdf_name, pdf_name])
-headers, grids = lh.load_all_replicas(pdf, central_pdf_path)
-
-# Exclude alpha_s, central is excluded by default in the returned matrix
-# Big matrix is hessian_i-central, scale up by pdfScale
-matrix = lh.big_matrix(grids[: nhess + 1]) * pdf_scale
-
-if not symm_errors:
-    logger.info(f"Applying symmetrization {pdf_symm} to PDF uncertainties.")
-    print(type(labels))
-    matrix = syst_tools.symmetrize_unc_matrix(matrix, labels, pdf_symm)
-
-new_central = grids[0] + np.sum(pulls * matrix, axis=1)
-
-postfit_matrix = matrix.dot(K).add(new_central, axis=0)
-
-write_new_grids(
+postfit_matrix, new_central, central_pdf_path = pdf_helper.compute_postfit_matrix()
+pdf_helper.write_grids(
     central_pdf_path,
     args.outfolder,
     args.fit_label,
+    args.lhaid,
     postfit_matrix,
     new_central,
-    pdf_scale,
 )
