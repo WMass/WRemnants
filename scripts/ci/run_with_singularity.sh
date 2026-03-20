@@ -1,7 +1,10 @@
 #!/bin/bash
-export APPTAINER_BIND="/scratch,/cvmfs,/etc/pki/tls/certs,/etc/grid-security/certificates" 
+export APPTAINER_BIND="/scratch,/cvmfs,/etc/pki/tls/certs,/etc/grid-security/certificates"
 if [[ -d $WREM_BASE ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},${WREM_BASE}/.."
+fi
+if [[ -d /ceph ]]; then
+    export APPTAINER_BIND="${APPTAINER_BIND},/ceph"
 fi
 CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v46
 
