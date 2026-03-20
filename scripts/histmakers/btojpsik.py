@@ -105,9 +105,9 @@ diff_weights_helper = (
     else None  # smearingWeightsSplines is default
 )
 
-print(f"\n\n diff_weights_helper is None: {diff_weights_helper is None}")
-print(f"\n\n data_jpsi_crctn_helper is None: {data_jpsi_crctn_helper is None}")
-print(f"\n\n mc_jpsi_crctn_helper is None: {mc_jpsi_crctn_helper is None}")
+logger.debug(f"\n\n diff_weights_helper is None: {diff_weights_helper is None}")
+logger.debug(f"\n\n data_jpsi_crctn_helper is None: {data_jpsi_crctn_helper is None}")
+logger.debug(f"\n\n mc_jpsi_crctn_helper is None: {mc_jpsi_crctn_helper is None}")
 
 
 for a in args.axes:

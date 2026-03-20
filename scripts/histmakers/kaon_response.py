@@ -31,7 +31,7 @@ parser.add_argument(
     "--ptCutoff",
     type=float,
     default=-1.0,
-    help="pT cutoff for input histograms to make_muon_response_maps.py",
+    help="pT cutoff for input histograms to make_response_maps.py",
 )
 parser.add_argument(
     "--testHelpers", action="store_true", help="test diff weights helper"
