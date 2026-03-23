@@ -1371,9 +1371,9 @@ jobs:
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
           -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --otherExtensions pdf png -n 50 --postfix reco --scaleImpacts 100
 
-  alphas-wz-unfolding:
+  alphas-z-unfolding:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, alphas-z-histmaker, alphas-w-histmaker]
+    needs: [setenv, alphas-z-histmaker]
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1381,21 +1381,20 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
           echo "ALPHAS_WZ_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_W_HIST=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: alphaS wz unfolding
+      - name: alphaS z unfolding
         run: >-
-          scripts/ci/run_with_singularity.sh recipes/alpha_s/unfolding_wz.sh
-          $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_W_HIST --outdir $ALPHAS_WZ_OUTDIR
+          scripts/ci/run_with_singularity.sh recipes/alpha_s/unfolding_z.sh
+          $ALPHAS_WZ_Z_HIST --outdir $ALPHAS_WZ_OUTDIR
 
   alphas-z-gen-fit:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, alphas-z-histmaker, alphas-wz-unfolding]
+    needs: [setenv, alphas-z-histmaker, alphas-z-unfolding]
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1414,10 +1413,10 @@ jobs:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: alphaS z gen fit from wz unfolding
+      - name: alphaS z gen fit from z unfolding
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/gen_fit_z.sh
-          $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_OUTDIR/alpha_s_wz_unfolding_fitresult.hdf5 --outdir $ALPHAS_WZ_OUTDIR
+          $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5 --outdir $ALPHAS_WZ_OUTDIR
 
       - name: alphaS z gen-fit xsec
         run: >-
@@ -1455,41 +1454,6 @@ jobs:
           $ALPHAS_WZ_Z_GENFIT --title CMS --subtitle Preliminary
           --showNumbers --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
           -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --otherExtensions pdf png -n 50 --postfix z_genfit --scaleImpacts 1.5
-
-  alphas-wz-gen-fit:
-    runs-on: [self-hosted, linux, x64]
-    needs: [setenv, alphas-z-histmaker, alphas-w-histmaker, alphas-wz-unfolding]
-    steps:
-      - env:
-          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
-          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
-          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
-        run: |
-          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
-          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
-          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_W_HIST=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_WZ_GENFIT=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_wz_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
-
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          lfs: 'true'
-
-      - name: alphaS wz gen fit from wz unfolding
-        run: >-
-          scripts/ci/run_with_singularity.sh recipes/alpha_s/gen_fit_wz.sh
-          $ALPHAS_WZ_W_HIST $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_OUTDIR/alpha_s_wz_unfolding_fitresult.hdf5 --outdir $ALPHAS_WZ_OUTDIR
-
-      - name: alphaS wz gen-fit impacts
-        run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
-          $ALPHAS_WZ_WZ_GENFIT --title CMS --subtitle Preliminary
-          --showNumbers --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --otherExtensions pdf png -n 50 --postfix wz_genfit --scaleImpacts 1.5
-
 
   combined-fit:
     runs-on: [self-hosted, linux, x64]
@@ -1534,7 +1498,7 @@ jobs:
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-w-histmaker, alphas-wz-reco, alphas-wz-unfolding, alphas-z-gen-fit, alphas-wz-gen-fit, combined-fit]
+    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-w-histmaker, alphas-wz-reco, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
     if: always() 
     steps:
       - env:
