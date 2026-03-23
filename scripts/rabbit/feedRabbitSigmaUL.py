@@ -287,7 +287,6 @@ class SigmaULTheoryFitWriter(TensorWriter):
             normalize=normalize,
             apply_postOp=apply_postOp,
         )
-        print("bleh", h)
         super().add_process(h, name, channel, **kwargs)
         self.ref[channel][name] = h
 
@@ -560,9 +559,7 @@ def add_sigmaul_process(args, writer):
         "Z",
         f"{args.predGenerator}_hist",
     )
-    print(h_sig_sigmaul)
     h_sig_sigmaul = _select_baseline_variation(h_sig_sigmaul)
-    print(h_sig_sigmaul)
     writer.add_process(h_sig_sigmaul, PROCESS_NAME, SIGMAUL_CHANNEL, signal=False)
 
 
@@ -606,7 +603,7 @@ def add_bc_quark_mass_variations(writer):
     for helper_name, nuisance_name, down_var, up_var in BC_QUARK_MASS_VARIATIONS:
         h = corr_helpers["Z"][helper_name]
         # Use the same multiplicative construction as add_scale_systematic:
-        # direct_nominal * (coarse_var / coarse_nominal).
+        # nominal * (quark_mass_var / quark_mass_nominal).
         writer.add_scale_systematic(
             [
                 h[{"vars": up_var}],
