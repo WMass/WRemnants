@@ -43,91 +43,120 @@ def expand_pdf_entries(pdf, alphas=False, renorm=False):
     return vals
 
 
+def make_theory_corr_weight_info(pdf, *, alphas=False, renorm=False):
+    return {
+        "weights": expand_pdf_entries(pdf, alphas=alphas, renorm=renorm),
+        "renorm": renorm,
+        "alphas": alphas,
+    }
+
+
 theory_corr_weight_map = {
-    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
+    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
         "msht20", alphas=True
     ),
-    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfvars": expand_pdf_entries("msht20"),
-    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_CT18Z_N3p1LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_CT18Z_N4p0LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_nnlojet_CT18Z_N3p1LL_N3LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_nnlojet_CT18Z_N4p0LLN3LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "msht20an3lo", alphas=True
-    ),
-    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
-        "msht20an3lo"
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18z", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "ct18", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "herapdf20", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "msht20", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "msht20an3lo", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2L0_pdfas": expand_pdf_entries(
-        "nnpdf31", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "nnpdf31", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "nnpdf40", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfas": expand_pdf_entries(
-        "pdf4lhc21", alphas=True, renorm=True
-    ),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfvars": expand_pdf_entries("ct18z"),
-    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfvars": expand_pdf_entries("ct18"),
-    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
-        "herapdf20"
-    ),
-    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+    "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "msht20"
     ),
-    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info("ct18z"),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_CT18Z_N3p1LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_CT18Z_N4p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_nnlojet_CT18Z_N3p1LL_N3LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_nnlojet_CT18Z_N4p0LLN3LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "msht20an3lo", alphas=True
+    ),
+    "scetlib_dyturbo_MSHT20an3lo_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "msht20an3lo"
     ),
-    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "herapdf20", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "msht20", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "msht20an3lo", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2L0_pdfas": make_theory_corr_weight_info(
+        "nnpdf31", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "nnpdf31", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "nnpdf40", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "pdf4lhc21", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N2p1LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18"
+    ),
+    "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "herapdf20"
+    ),
+    "scetlib_dyturbo_LatticeNP_HERAPDF20EXT_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "herapdf20ext"
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20"
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20aN3LO_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20an3lo"
+    ),
+    "scetlib_dyturbo_LatticeNP_NNPDF31_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "nnpdf31"
     ),
-    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+    "scetlib_dyturbo_LatticeNP_NNPDF40_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "nnpdf40"
     ),
-    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfvars": expand_pdf_entries(
+    "scetlib_dyturbo_LatticeNP_PDF4LHC21_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "pdf4lhc21"
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20mbrange", renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20mcrange", renorm=True
     ),
     # Tested this, better not to treat this way unless using MSHT20nnlo as central set
     # "scetlib_dyturboMSHT20mbrange" : expand_pdf_entries("msht20mbrange", renorm=True),
@@ -257,7 +286,7 @@ def define_theory_corr(df, dataset_name, helpers, generators, modify_central_wei
 
 def define_theory_corr_weight_column(df, generator):
     if generator in theory_corr_weight_map:
-        values = theory_corr_weight_map[generator]
+        values = theory_corr_weight_map[generator]["weights"]
         df = df.Define(
             f"{generator}_corr_weight",
             f"Eigen::TensorFixedSize<double, Eigen::Sizes<{len(values)}>> res; "
@@ -272,6 +301,13 @@ def define_theory_corr_weight_column(df, generator):
     else:
         df = df.Alias(f"{generator}_corr_weight", "nominal_weight_uncorr")
     return df
+
+
+def theory_corr_is_renorm(pdf_name):
+    return theory_corr_weight_map.get(
+        pdf_name.replace("_Corr", ""),
+        {},
+    ).get("renorm", False)
 
 
 def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
@@ -397,7 +433,7 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
     if "powheg" not in dataset_name:
         # no preFSR particles in powheg samples
         df = generator_level_definitions.define_prefsr_vars(df)
-        if not dataset_name.startswith("WtoNMu_MN"):
+        if not dataset_name.startswith(("WtoNMuMass", "WtoMuNuSMEFT")):
             # no intermediate bosons in some events in madgraph samples
             logger.debug(f"Define intermediate gen variables for {dataset_name}")
             df = generator_level_definitions.define_intermediate_gen_vars(
@@ -449,6 +485,12 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
     df = define_nominal_weight(df)
     df = define_pdf_columns(df, dataset_name, args.pdfs, args.altPdfOnlyCentral)
     df = define_breit_wigner_weights(df, dataset_name)
+    df = define_quark_mass_theory_corr(
+        df,
+        dataset_name,
+        helpers,
+        generators=getattr(args, "quarkMassCorr", []),
+    )
 
     return df
 
@@ -572,6 +614,30 @@ def define_ew_theory_corr(
     if "ew_theory_corr_weight" not in df.GetColumnNames():
         logger.debug("Define 'ew_theory_corr_weight'=1.0")
         df = df.DefinePerSample("ew_theory_corr_weight", "1.0")
+
+    return df
+
+
+def define_quark_mass_theory_corr(df, dataset_name, helpers, generators):
+    logger.debug("Define quark mass theory corr")
+    dataset_helpers = helpers.get(dataset_name, [])
+
+    for generator in generators:
+        if generator not in dataset_helpers:
+            continue
+
+        helper = dataset_helpers[generator]
+        df = df.Define(
+            f"{generator}Weight_tensor",
+            helper,
+            [
+                "massVgen",
+                "absYVgen",
+                "ptVgen",
+                "chargeVgen",
+                "nominal_weight",
+            ],
+        )
 
     return df
 
@@ -1190,10 +1256,11 @@ def make_pdfs_from_corrs_uncertainties_helper_by_helicity(
     pdf_helpers = {}
     for pdf in pdfs_from_corrs:
         logger.debug(f"Making PDF uncertainty helper by helicity for theory corr {pdf}")
+        den = pdf if theory_corr_is_renorm(pdf_name=pdf) else "pdf_uncorr"
         pdf_helper = make_uncertainty_helper_by_helicity(
             proc=proc,
             nom=pdf,
-            den="pdf_uncorr",
+            den=den,
             central_weights=False,
             var_ax_name="vars",
             filename=pdf_file_template.format(pdf=pdf),

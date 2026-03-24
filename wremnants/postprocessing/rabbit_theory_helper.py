@@ -42,7 +42,13 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        self.corr_hist_name = (corr_hists[0] + "Corr") if corr_hists else None
+        if len(corr_hists) > 1 and corr_hists[1].startswith(corr_hists[0] + "_"):
+            self._corr_sep = "_"
+        else:
+            self._corr_sep = ""
+        self.corr_hist_name = (
+            (corr_hists[0] + self._corr_sep + "Corr") if corr_hists else None
+        )
 
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -950,20 +956,25 @@ class TheoryHelper(object):
             else theory_utils.pdf_inflation_factor(pdfInfo, self.args.noi)
         )
         pdf_hist = pdfName
+        pdf_hist_ext = None
 
         if self.pdf_from_corr:
-            pdf_corr_hist = f"{self.corr_hist_name.replace("Corr", "pdfvarsCorr")}"
+            pdf_corr_hist = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfvars' + self._corr_sep + 'Corr')}"
             if pdf_corr_hist.replace(
-                "Corr", ""
+                self._corr_sep + "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
                 raise RuntimeError(
                     f"PDF correction histogram {pdf_corr_hist} not found in metadata. "
                     "Cannot add PDF uncertainty from corrections!"
                 )
             pdf_hist = pdf_corr_hist
+        elif pdfName == "pdfHERAPDF20":
+            pdf_hist_ext = pdf_hist.replace("pdfHERAPDF20", "pdfHERAPDF20ext")
 
         if self.from_hels:
             pdf_hist += "ByHelicity"
+            if pdf_hist_ext is not None:
+                pdf_hist_ext += "ByHelicity"
 
         logger.info(f"Using PDF hist {pdf_hist}, apply scaling of {scale}")
 
@@ -991,14 +1002,32 @@ class TheoryHelper(object):
                 ],
                 **pdf_args,
             )
+            if pdf_hist_ext is not None:
+                ext_names = theory_utils.pdfNamesAsymHessian(
+                    theory_utils.pdfMap["herapdf20ext"]["entries"],
+                    pdfset=theory_utils.pdfMap["herapdf20ext"]["name"],
+                )
+                self.datagroups.addSystematic(
+                    pdf_hist_ext,
+                    outNames=[""] + ext_names[1:-3] + ["", "", ""],
+                    **pdf_args,
+                )
+
+                tmp_pdf_args = pdf_args.copy()
+                tmp_pdf_args["mirror"] = True
+                self.datagroups.addSystematic(
+                    pdf_hist_ext,
+                    outNames=[""] * (len(ext_names) - 3) + ext_names[-3:],
+                    **tmp_pdf_args,
+                )
         else:
             self.datagroups.addSystematic(
                 pdf_hist, skipEntries=[{pdf_ax: "^pdf0[a-z]*"}], **pdf_args
             )
-            if pdfName == "pdfHERAPDF20":
+            if pdf_hist_ext is not None:
 
                 self.datagroups.addSystematic(
-                    pdf_hist.replace("pdfHERAPDF20", "pdfHERAPDF20ext"),
+                    pdf_hist_ext,
                     skipEntries=[
                         {pdf_ax: "^pdf(0|[6-8])[a-z]*"}
                     ],  # exclude 0, 6 and above
@@ -1008,7 +1037,7 @@ class TheoryHelper(object):
                 tmp_pdf_args = pdf_args.copy()
                 tmp_pdf_args["mirror"] = True
                 self.datagroups.addSystematic(
-                    pdf_hist.replace("pdfHERAPDF20", "pdfHERAPDF20ext"),
+                    pdf_hist_ext,
                     skipEntries=[
                         {pdf_ax: "^(?!pdf[6-8][a-z]*)"}
                     ],  # exclude everything but 6-8
@@ -1022,17 +1051,19 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            asname = f"{self.corr_hist_name.replace("Corr", "pdfasCorr")}"
+            asname = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfas' + self._corr_sep + 'Corr')}"
             # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
-            if asname.replace("Corr", "") not in self.datagroups.args_from_metadata(
-                "theoryCorr"
-            ):
-                # asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                asname = "scetlib_dyturboCT18Z_pdfasCorr"
-                if asname.replace("Corr", "") in self.datagroups.args_from_metadata(
-                    "theoryCorr"
-                ):
+            if asname.replace(
+                self._corr_sep + "Corr", ""
+            ) not in self.datagroups.args_from_metadata("theoryCorr"):
+                if self._corr_sep == "_":
+                    asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
+                else:
+                    asname = "scetlib_dyturboCT18Z_pdfasCorr"
+                if asname.replace(
+                    self._corr_sep + "Corr", ""
+                ) in self.datagroups.args_from_metadata("theoryCorr"):
                     logger.warning(
                         f"AlphaS correction histogram {asname} not found in theoryCorrs. "
                         "Falling back to default alphaS corrections scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfasCorr."
@@ -1143,11 +1174,15 @@ class TheoryHelper(object):
         pdfs = self.datagroups.args_from_metadata("pdfs")
         theory_corrs = self.datagroups.args_from_metadata("theoryCorr")
 
-        from_minnlo = not (
-            "scetlib_dyturboMSHT20mcrange" in theory_corrs
-            and "scetlib_dyturboMSHT20mcrange" in theory_corrs
-            and "msht20" in pdfs[0]
-        )
+        corrs_oldnp = ["scetlib_dyturboMSHT20mcrange", "scetlib_dyturboMSHT20mcrange"]
+        corrs_newnp = [
+            "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars",
+            "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars",
+        ]
+        has_old_corrs = all(corr in theory_corrs for corr in corrs_oldnp)
+        has_new_corrs = all(corr in theory_corrs for corr in corrs_newnp)
+
+        from_minnlo = not (has_new_corrs or (has_old_corrs and "msht20" in pdfs[0]))
 
         if from_minnlo:
             if (
@@ -1164,13 +1199,9 @@ class TheoryHelper(object):
                 raise ValueError(
                     "Must include the msht20mb(c)range pdf sets to take the mass variation from MiNNLO"
                 )
-        elif not (
-            "msht20" in pdfs[0]
-            and "scetlib_dyturboMSHT20mbrange" in theory_corrs
-            and "scetlib_dyturboMSHT20mcrange" in theory_corrs
-        ):
+        elif not (has_new_corrs or (has_old_corrs and "msht20" in pdfs[0])):
             raise ValueError(
-                "In order to take the mb(c) mass unc. from SCETlib+DYTurbo, you need to include those corr files and use MSHT20 as central PDF"
+                "In order to take the mb(c) mass unc. from SCETlib+DYTurbo, you need to include those corr files and either use MSHT20 as central PDF or use those made with the new NP model."
             )
 
         if from_minnlo:
@@ -1178,6 +1209,13 @@ class TheoryHelper(object):
                 bhist = "pdfMSHT20mbrangeByHelicity"
             else:
                 bhist = "pdfMSHT20mbrange"
+        elif has_new_corrs:
+            if self.from_hels:
+                bhist = "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_CorrByHelicity"
+            else:
+                raise ValueError(
+                    "Taking the mb variations from a new-NP theory correction is only supported when done via helicities."
+                )
         else:
             bhist = "scetlib_dyturboMSHT20mbrangeCorr"
         syst_ax = "pdfVar" if from_minnlo else "vars"

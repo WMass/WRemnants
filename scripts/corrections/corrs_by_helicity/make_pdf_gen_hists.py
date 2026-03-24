@@ -75,7 +75,7 @@ def main():
         if args.skim:
             pdf_replace = f"_{pdf}" if pdf != "ct18z" else ""
             skim_command = f"""
-            python {os.environ['WREM_BASE']}/utilities/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1{pdf_replace}_pdfByHelicity.hdf5 \
+            python {os.environ['WREM_BASE']}/scripts/inspect/open_narf_h5py.py {args.outdir}/w_z_gen_dists_maxFiles_m1{pdf_replace}_pdfByHelicity.hdf5 \
             --filterHists nominal_gen_pdf --excludeHists alpha --outfile {args.outdir}/w_z_gen_dists_maxFiles_m1_{pdf}_pdfByHelicity_skimmed.hdf5
             """
             print(f"Running skimming command: {skim_command}")

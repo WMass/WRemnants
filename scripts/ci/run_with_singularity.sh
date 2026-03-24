@@ -1,5 +1,5 @@
 #!/bin/bash
-export APPTAINER_BIND="/scratch,/cvmfs,/etc/pki/tls/certs,/etc/grid-security/certificates" 
+export APPTAINER_BIND="/ceph,/scratch,/cvmfs,/run,/etc/pki/tls/certs,/etc/grid-security/certificates"
 if [[ -d $WREM_BASE ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},${WREM_BASE}/.."
 fi

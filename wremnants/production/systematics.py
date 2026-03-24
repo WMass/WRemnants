@@ -2,7 +2,7 @@ import hist
 import ROOT
 
 import narf
-from wremnants.production import helicity_utils
+from wremnants.production import helicity_utils, theory_corrections
 from wremnants.utilities import binning, common, samples, theory_utils
 from wums import logging
 
@@ -605,11 +605,15 @@ def add_pdfUncertByHelicity_hist(
             ],
         )
     safeTensorName = f"{tensorName}_clamped"
-    renorm = theory_utils.pdfMap.get(pdf, {}).get("renorm", False)
+    renorm = theory_utils.pdfMap.get(pdf, {}).get(
+        "renorm", False
+    ) or theory_corrections.theory_corr_is_renorm(pdf)
+
     if renorm:
         central_event_weight = "nominal_weight"
     else:
         central_event_weight = "nominal_weight_pdf_uncorr"
+
     df = df.Define(
         safeTensorName,
         f"auto res = wrem::clamp_tensor_safe({tensorName}, -theory_weight_truncate, theory_weight_truncate, 1.0); res = {central_event_weight}*res; return res;",
@@ -1394,7 +1398,11 @@ def add_theory_hists(
     add_pdf_hists(results, df, dataset_name, axes, cols, args.pdfs, **info)
     add_qcdScale_hist(results, df, scale_axes, scale_cols, **info)
 
-    theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
+    theory_corrs = [
+        *args.theoryCorr,
+        *args.ewTheoryCorr,
+        *getattr(args, "quarkMassCorr", []),
+    ]
     if theory_corrs and dataset_name in corr_helpers:
         add_theory_corr_hists(
             results,

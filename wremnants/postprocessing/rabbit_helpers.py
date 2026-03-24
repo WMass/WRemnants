@@ -289,6 +289,65 @@ def add_nominal_with_correlated_BinByBinStat(
         )
 
 
+def add_mb_fo_uncertainty(
+    datagroups,
+    processes="signal_samples",
+    passSystToFakes=True,
+    passToFakes=None,
+):
+    if passToFakes is not None:
+        passSystToFakes = passToFakes
+
+    corr_hist_name = "MiNNLO_Zbb_Corr"
+    processes_expanded = datagroups.expandProcesses(processes)
+    processes_with_corr = []
+
+    for proc in processes_expanded:
+        members = datagroups.groups[proc].members
+        has_corr = any(
+            corr_hist_name in datagroups.results[member.name]["output"]
+            for member in members
+            if member.name in datagroups.results
+            and "output" in datagroups.results[member.name]
+        )
+        if has_corr:
+            processes_with_corr.append(proc)
+
+    if len(processes_with_corr) == 0:
+        logger.info(
+            f"Skip mb_fo systematic: histogram '{corr_hist_name}' is not available"
+        )
+        return
+
+    # b-quark mass uncertainty from dedicated MiNNLO_Zbb correction histogram
+    datagroups.addSystematic(
+        corr_hist_name,
+        name="mb_fo",
+        processes=processes_with_corr,
+        mirror=True,
+        scale=1.0,
+        systAxes=["vars"],
+        skipEntries=[{"vars": ["nominal"]}],
+        passToFakes=passSystToFakes,
+        groups=["bcQuarkMass", "theory"],
+    )
+
+
+def _ew_corr_hist_name(card_tool, ewUnc):
+    """Return the correct histogram name for an EW correction, detecting whether
+    the file uses the new '{ewUnc}_Corr' or old '{ewUnc}Corr' naming convention.
+    Returns None if neither is found (correction not present in this file)."""
+    for proc_data in card_tool.results.values():
+        if not isinstance(proc_data, dict) or "output" not in proc_data:
+            continue
+        available = proc_data["output"]
+        if any(k.endswith(f"_{ewUnc}_Corr") for k in available):
+            return f"{ewUnc}_Corr"
+        if any(k.endswith(f"_{ewUnc}Corr") for k in available):
+            return f"{ewUnc}Corr"
+    return None
+
+
 def add_electroweak_uncertainty(
     card_tool,
     ewUncs,
@@ -303,11 +362,17 @@ def add_electroweak_uncertainty(
     w_samples = [p for p in all_samples if p[0] == "W"]
 
     for ewUnc in ewUncs:
+        ew_hist = _ew_corr_hist_name(card_tool, ewUnc)
+        if ew_hist is None:
+            logger.warning(
+                f"EW correction histogram for {ewUnc} not found in file, skipping."
+            )
+            continue
         if "renesanceEW" in ewUnc:
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
                 card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                    ew_hist,
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
                     labelsByAxis=[f"renesanceEWCorr"],
@@ -320,10 +385,10 @@ def add_electroweak_uncertainty(
         elif ewUnc == "powhegFOEW":
             if z_samples:
                 card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                    ew_hist,
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[ew_hist],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -332,10 +397,10 @@ def add_electroweak_uncertainty(
                     name="ewScheme",
                 )
                 card_tool.addSystematic(
-                    f"{ewUnc}Corr",
+                    ew_hist,
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}Corr"],
+                    labelsByAxis=[ew_hist],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -377,12 +442,12 @@ def add_electroweak_uncertainty(
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
             card_tool.addSystematic(
-                f"{ewUnc}Corr",
+                ew_hist,
                 systAxes=["systIdx"],
                 mirror=True,
                 passToFakes=passSystToFakes,
                 processes=samples,
-                labelsByAxis=[f"{ewUnc}Corr"],
+                labelsByAxis=[ew_hist],
                 scale=scale,
                 preOp=preOp,
                 groups=[f"theory_ew_{ewUnc}", "theory_ew", "theory"],
