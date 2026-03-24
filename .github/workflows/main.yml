@@ -920,7 +920,7 @@ jobs:
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_HIST_FILE=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${MAX_FILES}*10" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
@@ -1319,10 +1319,10 @@ jobs:
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_W_HIST=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
+          echo "ALPHAS_W_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${MAX_FILES}*10" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
@@ -1333,7 +1333,7 @@ jobs:
       - name: alphaS histmaker (W)
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/histmaker_w.sh
-          --outdir $ALPHAS_WZ_OUTDIR --dataPath $DATAPATH --nThreads $ALPHAS_NTHREADS --maxFiles $ALPHAS_MAX_FILES
+          --outdir $ALPHAS_OUTDIR --dataPath $DATAPATH --nThreads $ALPHAS_NTHREADS --maxFiles $ALPHAS_MAX_FILES
           --filterProcs $ALPHAS_FILTER_PROCS
 
   alphas-wz-reco:
@@ -1350,9 +1350,9 @@ jobs:
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "LUMI_SCALE=${LUMI_SCALE}" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_W_HIST=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
+          echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_W_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
@@ -1362,14 +1362,14 @@ jobs:
       - name: alphaS wz reco fit
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/fitter_wz.sh
-          $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_W_HIST --outdir $ALPHAS_WZ_OUTDIR --lumiScale $LUMI_SCALE
+          $ALPHAS_Z_HIST $ALPHAS_W_HIST --outdir $ALPHAS_OUTDIR --lumiScale $LUMI_SCALE
 
       - name: alphaS wz reco impacts
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
-          $ALPHAS_WZ_OUTDIR/alpha_s_wz_reco_fitresult.hdf5 --title CMS --subtitle Preliminary
+          $ALPHAS_OUTDIR/alpha_s_reco_fitresult.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --otherExtensions pdf png -n 50 --postfix reco --scaleImpacts 100
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --otherExtensions pdf png -n 50 --postfix reco --scaleImpacts 100
 
   alphas-z-unfolding:
     runs-on: [self-hosted, linux, x64]
@@ -1379,8 +1379,8 @@ jobs:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
+          echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
@@ -1390,7 +1390,7 @@ jobs:
       - name: alphaS z unfolding
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/unfolding_z.sh
-          $ALPHAS_WZ_Z_HIST --outdir $ALPHAS_WZ_OUTDIR
+          $ALPHAS_Z_HIST --outdir $ALPHAS_OUTDIR
 
   alphas-z-gen-fit:
     runs-on: [self-hosted, linux, x64]
@@ -1404,9 +1404,9 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s_wz" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
-          echo "ALPHAS_WZ_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s_wz/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
+          echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
@@ -1416,44 +1416,44 @@ jobs:
       - name: alphaS z gen fit from z unfolding
         run: >-
           scripts/ci/run_with_singularity.sh recipes/alpha_s/gen_fit_z.sh
-          $ALPHAS_WZ_Z_HIST $ALPHAS_WZ_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5 --outdir $ALPHAS_WZ_OUTDIR
+          $ALPHAS_Z_HIST $ALPHAS_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5 --outdir $ALPHAS_OUTDIR
 
       - name: alphaS z gen-fit xsec
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py
-          $ALPHAS_WZ_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          $ALPHAS_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
           -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: alphaS z gen-fit xsec uncertainties
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py
-          $ALPHAS_WZ_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          $ALPHAS_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
           -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
       - name: alphaS z gen-fit xsec covariance
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
-          $ALPHAS_WZ_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --title CMS --subtitle Preliminary
+          $ALPHAS_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: alphaS z gen-fit xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
-          $ALPHAS_WZ_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --postfix z_genfit --title CMS --subtitle Preliminary
+          $ALPHAS_Z_GENFIT
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py --correlation
 
       - name: alphaS z gen-fit impacts
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
-          $ALPHAS_WZ_Z_GENFIT --title CMS --subtitle Preliminary
+          $ALPHAS_Z_GENFIT --title CMS --subtitle Preliminary
           --showNumbers --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
-          -o $WEB_DIR/$PLOT_DIR/alpha_s_wz --otherExtensions pdf png -n 50 --postfix z_genfit --scaleImpacts 1.5
+          -o $WEB_DIR/$PLOT_DIR/alpha_s --otherExtensions pdf png -n 50 --postfix z_genfit --scaleImpacts 1.5
 
   combined-fit:
     runs-on: [self-hosted, linux, x64]
