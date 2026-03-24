@@ -547,20 +547,20 @@ class Datagroups(object):
                     )
                     h = preOpMap[member.name](h, **preOpArgs)
 
-                sum_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
-                if len(sum_axes) > 0:
+                if self.globalAction:
+                    logger.debug("Applying global action")
+                    h = self.globalAction(h)
+
+                sum_gen_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
+                if len(sum_gen_axes) > 0:
                     # sum over remaining axes (avoid integrating over fit axes & fakerate axes)
-                    logger.debug(f"Sum over axes {sum_axes}")
-                    h = h.project(*[x for x in h.axes.name if x not in sum_axes])
+                    logger.debug(f"Sum over axes {sum_gen_axes}")
+                    h = h.project(*[x for x in h.axes.name if x not in sum_gen_axes])
                     logger.debug(f"Hist axes are now {h.axes.name}")
 
                 if h_id == id(h):
                     logger.debug(f"Make explicit copy")
                     h = h.copy()
-
-                if self.globalAction:
-                    logger.debug("Applying global action")
-                    h = self.globalAction(h)
 
                 if forceNonzero:
                     logger.debug("force non zero")
@@ -1038,11 +1038,12 @@ class Datagroups(object):
         rename=True,
     ):
         if len(ax_lim):
-            if not all(x.real == 0 or x.imag == 0 for x in ax_lim):
+            specified_ax_lim = [x for x in ax_lim if x is not None]
+            if not all(x.real == 0 or x.imag == 0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim only accepts pure real or imaginary numbers"
                 )
-            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in ax_lim):
+            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim requires real numbers to be of integer type"
                 )
