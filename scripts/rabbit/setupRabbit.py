@@ -949,14 +949,13 @@ def make_parser(parser=None, argv=None):
         help="probability density for systematic variations",
     )
     parser.add_argument(
-        "--preselect",
+        "--presel",
         nargs=3,
         action="append",
-        dest="preselection",
         default=[],
         metavar=("AXIS", "LOW", "HIGH"),
         help="Apply a strict preselection on a non-fit axis before downstream projections."
-        " Repeat as '--preselect AXIS LOW HIGH'."
+        " Repeat as '--presel AXIS LOW HIGH'."
         " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
         " The command fails if a requested axis is missing from any loaded histogram.",
     )
@@ -1042,7 +1041,7 @@ def setup(
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
 
-    preselection_specs = _build_preselection_specs(args.preselection, fitvar)
+    preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:
 
         def apply_preselection(h, specs=tuple(preselection_specs)):
