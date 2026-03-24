@@ -942,11 +942,7 @@ jobs:
           --unfoldingAxes ptVGen absYVGen helicitySig
           --unfoldingInclusive
           --pdfs ct18z
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas
-          --theoryCorr scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars
-          --theoryCorr scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars
+          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars
           --filterProcs $ALPHAS_FILTER_PROCS
 
   alphas-z-reco:
@@ -1381,11 +1377,7 @@ jobs:
           --poiAsNoi
           --forceDefaultName
           --pdfs ct18z
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
-          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas
-          --theoryCorr scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars
-          --theoryCorr scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars
+          --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars
           --filterProcs $ALPHAS_FILTER_PROCS
 
   alphas-wz-reco:
