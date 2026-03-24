@@ -1,0 +1,155 @@
+import argparse
+
+import hist
+import numpy as np
+
+from rabbit import inputdata, tensorwriter
+from wremnants.utilities import theory_utils
+from wums import logging, output_tools
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-o", "--output", default="./", help="output directory")
+parser.add_argument("--outname", default="test_tensor", help="output file name")
+parser.add_argument(
+    "--postfix",
+    default=None,
+    type=str,
+    help="Postfix to append on output file name",
+)
+parser.add_argument(
+    "--sparse",
+    default=False,
+    action="store_true",
+    help="Make sparse tensor",
+)
+parser.add_argument(
+    "--rabbit-input",
+    type=str,
+    required=True,
+    help="Rabbit input file for the reference fit",
+)
+parser.add_argument(
+    "--proc",
+    type=str,
+    choices=["Zmumu", "Wmunu"],
+    required=True,
+    help="Process name to use for the PDF fit (should match the signal)",
+)
+parser.add_argument(
+    "--noColorLogger", action="store_true", help="Disable colored logging output."
+)
+parser.add_argument(
+    "-l", "--fit-label", type=str, default="cmsmw", help="Label in the output PDF grids"
+)
+parser.add_argument(
+    "-v", "--verbose", choices=[0, 1, 2, 3, 4], default=3, help="Set verbosity level."
+)
+args = parser.parse_args()
+
+logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+indata = inputdata.FitInputData(args.rabbit_input)
+
+# Build tensor
+writer = tensorwriter.TensorWriter(
+    sparse=args.sparse,
+)
+
+metadata = indata.metadata
+
+pdf_input = indata.metadata["meta_info_input"]["args"]["pdfs"][0]
+pdf_scale = metadata["meta_info"]["args"]["scalePdf"]
+
+pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
+pdf_name = pdfInfo["lha_name"]
+
+if pdf_scale == -1:
+    pdf_scale = theory_utils.pdf_inflation_factor(
+        theory_utils.pdfMap[pdf_input], metadata["meta_info"]["args"]["noi"]
+    )
+    logger.info(f"Using default inflation factor: {pdf_scale}")
+
+pdf_scale *= pdfInfo["scale"] if "scale" in pdfInfo else 1.0
+logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
+
+symHessian = pdfInfo["combine"] == "symHessian"
+symmetrize = indata.metadata["meta_info"]["args"]["symmetrizePdfUnc"]
+print(f"PDF symmetrization procedure: {symmetrize}")
+
+if not symHessian:
+    logger.info(f"Applying {symmetrize} symmetrization procedure")
+
+labels = np.array(
+    [
+        s
+        for s in indata.systs
+        if "pdf" in s.decode()
+        and not any(x in s.decode() for x in ["mcrange", "mbrange", "pdfAlphaS"])
+    ],
+    dtype=str,
+)
+
+if symmetrize == "quadratic":
+    labels[::2] = [
+        s.replace("SymAvg", "Down").replace("SymDiff", "Down") for s in labels[::2]
+    ]
+    labels[1::2] = [
+        s.replace("SymAvg", "Up").replace("SymDiff", "Up") for s in labels[1::2]
+    ]
+elif symmetrize == "average":
+    labels = np.array(
+        [f"{l}{shift}" for l in labels for shift in ("Down", "Up")], dtype=str
+    )
+
+x_range = np.logspace(-4, -0.01, 201)
+
+# Consistency with the incorrect treatment of the central value in setupRabbit
+category_labels = labels if symHessian else ["central", *labels]
+
+for chan in ["u", "ubar", "d", "dbar", "s", "sbar", "g", "uv", "dv"]:
+    pdf_data = theory_utils.pdf_data_from_lhapdf(pdf_name, chan, 80.360, x_range[:-1])
+    pdf_hist = hist.Hist(
+        hist.axis.Variable(x_range, name="x"),
+        hist.axis.StrCategory(category_labels, name="pdfVar", flow=False),
+        data=pdf_data.T,
+    )
+
+    writer.add_channel(pdf_hist.axes[:-1], chan)
+
+    if args.proc.encode("utf-8") not in indata.procs:
+        raise ValueError(f"Process {args.proc} not found in input data")
+
+    writer.add_process(pdf_hist[..., 0], args.proc, chan, signal=False)
+    writer.add_data(pdf_hist[..., 0], chan)
+
+    if symHessian:
+        # This is wrong in setupRabbit (the central val is treated as a variation) so it should also be wrong here...
+        for syst in pdf_hist.axes["pdfVar"]:
+            writer.add_systematic(
+                pdf_hist[..., syst],
+                syst,
+                args.proc,
+                chan,
+                kfactor=pdf_scale,
+            )
+    else:
+        systs = list(pdf_hist.axes["pdfVar"])[1:]
+        for systDown, systUp in zip(systs[::2], systs[1::2]):
+            writer.add_systematic(
+                [pdf_hist[..., systUp], pdf_hist[..., systDown]],
+                systUp.replace("Up", ""),
+                args.proc,
+                chan,
+                symmetrize=symmetrize,
+                kfactor=pdf_scale,
+            )
+
+directory = args.output
+if directory == "":
+    directory = "./"
+filename = args.outname
+if args.postfix:
+    filename += f"_{args.postfix}"
+
+meta_data = {"meta_info": output_tools.make_meta_info_dict()}
+writer.write(outfolder=directory, outfilename=filename, meta_data_dict=meta_data)
