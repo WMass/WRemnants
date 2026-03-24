@@ -912,7 +912,7 @@ jobs:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
           NTHREADS: ${{ needs.setenv.outputs.NTHREADS }}
-          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
+          ALPHAS_MAX_FILES: 100
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "NTHREADS=${NTHREADS}" >> $GITHUB_ENV
@@ -920,7 +920,7 @@ jobs:
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_HIST_FILE=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_histmaker.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${ALPHAS_MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
@@ -1315,14 +1315,14 @@ jobs:
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
-          MAX_FILES: ${{ needs.setenv.outputs.MAX_FILES }}*10
+          ALPHAS_MAX_FILES: 100
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_W_HIST=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_w_histmaker.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_NTHREADS=8" >> $GITHUB_ENV
-          echo "ALPHAS_MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
+          echo "ALPHAS_MAX_FILES=${ALPHAS_MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
