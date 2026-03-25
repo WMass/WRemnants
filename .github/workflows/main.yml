@@ -39,7 +39,7 @@ jobs:
   #    permissions: write-all
   #    steps:
   #      - name: Checkout
-  #        uses: actions/checkout@v4
+  #        uses: actions/checkout@v5
   #
   #      - name: setup plot dir
   #        run: echo PLOT_DIR=$(date +%Y_%m_%d)/PR$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }') >> $GITHUB_ENV
@@ -66,7 +66,7 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -131,7 +131,7 @@ jobs:
       NOMINAL_FAKE_SMOOTHING: ${{steps.export.outputs.NOMINAL_FAKE_SMOOTHING}}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -207,7 +207,7 @@ jobs:
           echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -238,7 +238,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -302,7 +302,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -374,7 +374,7 @@ jobs:
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "NOMINAL_FAKE_SMOOTHING=${NOMINAL_FAKE_SMOOTHING}" >> $GITHUB_ENV
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -436,7 +436,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -529,7 +529,7 @@ jobs:
           echo "HIST_FILE_MU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MU}" >> $GITHUB_ENV
           echo "HIST_FILE_E=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_E}" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -631,7 +631,7 @@ jobs:
           echo "HIST_FILE_MUMU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MUMU}" >> $GITHUB_ENV
           echo "HIST_FILE_EE=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_EE}" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -694,7 +694,7 @@ jobs:
           echo "HIST_FILE_MUMU=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_MUMU}" >> $GITHUB_ENV
           echo "HIST_FILE_EE=${WREMNANTS_OUTDIR}/${OUTFILE_LOWPU_EE}" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -750,7 +750,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -814,7 +814,7 @@ jobs:
           echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WLIKE}" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -859,7 +859,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/mz_dilepton_mll.hdf5" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -922,7 +922,7 @@ jobs:
           echo "ALPHAS_MAX_FILES=${ALPHAS_MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -983,8 +983,9 @@ jobs:
           echo "ALPHAS_STABLE_DIR_LINK=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.stable_dir_link }}" >> $GITHUB_ENV
           echo "ALPHAS_STABLE_FIT_LINK=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.stable_fit_link }}" >> $GITHUB_ENV
           echo "ALPHAS_IMPACTS_POSTFIX=${{ matrix.impacts_postfix }}" >> $GITHUB_ENV
+          echo "ALPHAS_PLOT_DIR=${WEB_DIR}/${PLOT_DIR}/alpha_s" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1012,7 +1013,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           "$ALPHAS_STABLE_FIT_LINK" --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping min
-          -o "$WEB_DIR/$PLOT_DIR" --otherExtensions pdf png -n 50 --scaleImpacts 2.0 --postfix "$ALPHAS_IMPACTS_POSTFIX"
+          -o "$ALPHAS_PLOT_DIR" --otherExtensions pdf png -n 50 --scaleImpacts 2.0 --postfix "$ALPHAS_IMPACTS_POSTFIX"
 
   dilepton:
     # The type of runner that the job will run on
@@ -1038,7 +1039,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1153,7 +1154,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON_UNFOLDING}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1257,7 +1258,7 @@ jobs:
           echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1329,7 +1330,7 @@ jobs:
           echo "MAX_FILES=${MAX_FILES}" >> $GITHUB_ENV
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1363,7 +1364,7 @@ jobs:
           echo "ALPHAS_MAX_FILES=${ALPHAS_MAX_FILES}" >> $GITHUB_ENV
           echo "ALPHAS_FILTER_PROCS=SingleMuon_2016PostVFP Zmumu_2016PostVFP Ztautau_2016PostVFP Wplusmunu_2016PostVFP Wminusmunu_2016PostVFP Wplustaunu_2016PostVFP Wminustaunu_2016PostVFP DYJetsToMuMuMass10to50_2016PostVFP TTLeptonic_2016PostVFP WWTo2L2Nu_2016PostVFP QCDmuEnrichPt15_2016PostVFP GGToMuMuMass5to50_2016PostVFP GGToLL_2016PostVFP QGToDYQTo2L_2016PostVFP QGToWQToLNu_2016PostVFP" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1401,8 +1402,9 @@ jobs:
           echo "ALPHAS_W_HIST=${WREMNANTS_OUTDIR}/alpha_s/mw_with_mu_eta_pt.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_WZ_RECO_DIR=${WREMNANTS_OUTDIR}/alpha_s/Combination_ZMassDileptonWMass_reco" >> $GITHUB_ENV
           echo "ALPHAS_WZ_RECO_COMBINE=${WREMNANTS_OUTDIR}/alpha_s/Combination_ZMassDileptonWMass_reco/Combination.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_PLOT_DIR=${WEB_DIR}/${PLOT_DIR}/alpha_s" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1434,7 +1436,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           $ALPHAS_OUTDIR/alpha_s_wz_reco_fitresult.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --otherExtensions pdf png -n 50 --postfix reco --scaleImpacts 100
+          -o $ALPHAS_PLOT_DIR --otherExtensions pdf png -n 50 --postfix reco --scaleImpacts 100
 
   alphas-z-unfolding:
     runs-on: [self-hosted, linux, x64]
@@ -1449,7 +1451,7 @@ jobs:
           echo "ALPHAS_Z_UNFOLDING_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile_unfolding" >> $GITHUB_ENV
           echo "ALPHAS_Z_UNFOLDING_COMBINE=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile_unfolding/ZMassDilepton.hdf5" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1497,8 +1499,9 @@ jobs:
           echo "ALPHAS_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptVGen_absYVGen_theoryfitViaMC" >> $GITHUB_ENV
           echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_ct18z_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_PLOT_DIR=${WEB_DIR}/${PLOT_DIR}/alpha_s" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
@@ -1532,7 +1535,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py
           $ALPHAS_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          -o $ALPHAS_PLOT_DIR --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
@@ -1540,7 +1543,7 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py
           $ALPHAS_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
+          -o $ALPHAS_PLOT_DIR --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
@@ -1548,14 +1551,14 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
           $ALPHAS_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
+          -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: alphaS z gen-fit xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
           $ALPHAS_Z_GENFIT
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
+          -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py --correlation
 
       - name: alphaS z gen-fit impacts
@@ -1563,7 +1566,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           $ALPHAS_Z_GENFIT --title CMS --subtitle Preliminary
           --showNumbers --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
-          -o $WEB_DIR/$PLOT_DIR/alpha_s --otherExtensions pdf png -n 50 --postfix z_genfit --scaleImpacts 1.5
+          -o $ALPHAS_PLOT_DIR --otherExtensions pdf png -n 50 --postfix z_genfit --scaleImpacts 1.5
 
   combined-fit:
     runs-on: [self-hosted, linux, x64]
@@ -1582,7 +1585,7 @@ jobs:
           echo "HIST_FILE_DILEPTON=${WREMNANTS_OUTDIR}/${OUTFILE_DILEPTON}" >> $GITHUB_ENV
           echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: 'recursive'
           lfs: 'true'
