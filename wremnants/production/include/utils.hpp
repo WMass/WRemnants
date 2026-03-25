@@ -1108,7 +1108,8 @@ double get_scaled_smeared_variable(const unsigned int run,
                                    const unsigned int lumi,
                                    const unsigned long long event,
                                    const double var, const double scale = 1.0,
-                                   const double smear = 0.1) {
+                                   const double smear = 0.1,
+                                   const bool isPhiAngle = false) {
 
   // use scale=1.1 and smear=0.2 for 10% larger mean value and 20% resolution
   // smearing
@@ -1116,9 +1117,18 @@ double get_scaled_smeared_variable(const unsigned int run,
   std::mt19937 rng(seq);
 
   double scaled_var = var * scale;
-  if (smear <= 0)
+  if (smear <= 0) {
+    // 0 is valid and equivalent to a dirac delta, negative should never happen
     return scaled_var;
-  std::normal_distribution<double> dis(scaled_var, scaled_var * smear);
+  }
+
+  std::normal_distribution<double> dis(scaled_var,
+                                       std::abs(scaled_var * smear));
+  if (isPhiAngle) {
+    // deal with angle in -pi, pi
+    double phi = dis(rng);
+    return std::atan2(std::sin(phi), std::cos(phi));
+  }
   return dis(rng);
 }
 

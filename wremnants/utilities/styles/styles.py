@@ -363,6 +363,7 @@ nuisance_grouping = {
         "muonCalibration",
         "Fake",
         "recoil_stat",
+        "recoil_syst",
         "recoil_syst_tmp",
     ],
     "width": common_groups
@@ -378,6 +379,7 @@ nuisance_grouping = {
         "massShift",
         "recoil_stat",
         "recoil_syst_tmp",
+        "recoil_syst",
     ],
     "min": common_groups
     + [
@@ -600,6 +602,7 @@ impact_labels = {
     "CMS_background": "Other bkg.",
     "recoil_stat": "recoil stat.",
     "recoil_syst_tmp": "recoil syst.",
+    "recoil_syst": "recoil syst.",
     "FakeHighMT": "FakeHighMT",
     "FakeLowMT": "FakeLowMT",
     "rFake": "fakerate",

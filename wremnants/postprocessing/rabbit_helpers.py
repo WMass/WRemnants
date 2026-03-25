@@ -166,6 +166,20 @@ def add_recoil_uncertainty(
             systAxes=["recoil_unc"],
             passToFakes=passSystToFakes,
         )
+        datagroups.addSystematic(
+            "recoil_syst",
+            processes=samples,
+            mirror=True,
+            groups=[
+                "recoil",
+                "recoil_syst",
+                "experiment",
+                "expNoCalib",
+                "expNoLumi",
+            ],
+            systAxes=["recoil_unc"],
+            passToFakes=passSystToFakes,
+        )
 
     if pu_type == "lowPU":
         group_compact = False

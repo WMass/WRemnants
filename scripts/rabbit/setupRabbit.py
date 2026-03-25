@@ -17,7 +17,8 @@ from wremnants.postprocessing.datagroups.datagroups import Datagroups
 from wremnants.postprocessing.histselections import FakeSelectorSimpleABCD
 from wremnants.postprocessing.regression import Regressor
 from wremnants.postprocessing.syst_tools import (
-    add_nonprompt_transfer_factor_variations,
+    fake_nonclosure_byAxis,
+    fake_transferFactor_ptSyst,
     scale_hist_up_down,
     scale_hist_up_down_corr_from_file,
 )
@@ -461,6 +462,24 @@ def make_parser(parser=None):
         default=["eta", "pt", "charge"],
     )
     parser.add_argument(
+        "--fakeTransferAxis",
+        type=str,
+        default="utAngleSign",
+        help="""
+        Axis where the fake prediction on non-valid bins (i.e. where the A-Ax-B-Bx regions are empty)
+        is estimated by using the other 'valid' bins of this axis, via a normalization or shape reweighting.""",
+    )
+    parser.add_argument(
+        "--fakeTransferCorrFileName",
+        type=str,
+        default="fakeTransferTemplates_smoothTF",
+        help="""
+        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
+        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
+        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
+        """,
+    )
+    parser.add_argument(
         "--fakeEstimation",
         type=str,
         help="Set the mode for the fake estimation",
@@ -502,15 +521,11 @@ def make_parser(parser=None):
         help="Type of polynomial for the smoothing of the application region or full prediction, depending on the smoothing mode",
     )
     parser.add_argument(
-        "--fakeTransferCorrFileName",
-        type=str,
-        default="fakeTransferTemplates_smoothTF",
-        help="""
-        Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.
-        Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape 
-        at negative uTmu must be taken from positive bin, but a shape correction is needed versus pTmu.
-        """,
+        "--addCustomRecoilSyst",
+        action="store_true",
+        help="Add custom recoil systematic uncertainties from smearing met pt/phi and scaling met pt",
     )
+
     parser.add_argument(
         "--ABCDedgesByAxis",
         type=str,
@@ -1230,7 +1245,7 @@ def setup(
 
     if wmass and not datagroups.xnorm:
         datagroups.fakerate_axes = args.fakerateAxes
-        # datagroups.fakeTransferAxis = "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+        # datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
         # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
         histselector_kwargs = dict(
             mode=args.fakeEstimation,
@@ -1242,7 +1257,9 @@ def setup(
             forceGlobalScaleFakes=args.forceGlobalScaleFakes,
             abcdExplicitAxisEdges=abcdExplicitAxisEdges,
             fakeTransferAxis=(
-                "utAngleSign" if "utAngleSign" in args.fakerateAxes else ""
+                args.fakeTransferAxis
+                if args.fakeTransferAxis in args.fakerateAxes
+                else ""
             ),
             fakeTransferCorrFileName=args.fakeTransferCorrFileName,
             histAxesRemovedBeforeFakes=(
@@ -2189,6 +2206,7 @@ def setup(
                 param_idx=1,
                 variation_size=0.5,
                 normalize=False,
+                fakeselector=None,
                 *args,
                 **kwargs,
             ):
@@ -2268,6 +2286,7 @@ def setup(
                             axesToDecorrNames=axesToDecorrNames,
                             param_idx=idx,
                             variation_size=mag,
+                            fakeselector=fakeselector,
                         ),
                         systAxes=(
                             ["var"]
@@ -2285,42 +2304,6 @@ def setup(
                     for sel in ["utAngleSign 1 2", "utAngleSign 0 1"]
                 )
             ):
-                # TODO: extend and use previous function fake_nonclosure(...)
-                # TODO: move function elsewhere
-                def fake_nonclosure_byAxis(
-                    h,
-                    axesToDecorrNames=["eta"],
-                    variation_size=0.1,
-                    keepConstantAxisBin={},
-                    *args,
-                    **kwargs,
-                ):
-
-                    # with keepConstantAxisBin one can keep a range of bins untouched by passing slice(start, stop)
-                    # e.g. keepConstantAxisBin={"utAngleSign": slice(1, 2)}, maybe also by values with complex numbers
-
-                    logger.info(
-                        f"Doing decorr nonclosure with keepConstantAxisBin={keepConstantAxisBin}"
-                    )
-                    hnom = fakeselector.get_hist(h, *args, **kwargs)
-                    hvar = (1 + variation_size) * hnom
-                    if keepConstantAxisBin:
-                        ax_names = [n for n in hvar.axes.name]
-                        idxs = [slice(None)] * hvar.ndim
-                        for name in keepConstantAxisBin.keys():
-                            if name not in ax_names:
-                                raise ValueError(
-                                    f"In fake_nonclosure_byAxis(): axis '{name}' not found in hvar, valid names are {ax_names}"
-                                )
-                            ax_index = ax_names.index(name)
-                            idxs[ax_index] = keepConstantAxisBin[name]
-                        hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
-
-                    hvar = rabbit_helpers.decorrelateByAxes(
-                        hvar, hnom, axesToDecorrNames
-                    )
-
-                    return hvar
 
                 datagroups.addSystematic(
                     inputBaseName,
@@ -2337,58 +2320,10 @@ def setup(
                         axesToDecorrNames=["eta"],
                         variation_size=0.1,
                         keepConstantAxisBin={"utAngleSign": 1},
+                        fakeselector=fakeselector,
                     ),
                     systAxes=["eta_decorr"],
                 )
-
-                # TODO: move function elsewhere
-                def fake_transferFactor_ptSyst(
-                    h,
-                    axesToDecorrNames=[],
-                    altHistName="fakeCorr_altStat",
-                    varIdxs=[0],
-                    correctionFile="",
-                    *args,
-                    **kwargs,
-                ):
-                    hnom = fakeselector.get_hist(h, *args, **kwargs)
-
-                    ax_names = [n for n in hnom.axes.name]
-                    sel_var = [slice(None)] * hnom.ndim
-                    sel_const = [slice(None)] * hnom.ndim
-                    sel_var[ax_names.index(datagroups.fakeTransferAxis)] = 0
-                    sel_const[ax_names.index(datagroups.fakeTransferAxis)] = 1
-
-                    hvar = add_nonprompt_transfer_factor_variations(
-                        hnom.copy(),
-                        correctionFile,
-                        altHistName,
-                        sel_var,
-                        varIdxs=varIdxs,
-                    )
-
-                    hvar_utPlus = hnom.copy()[tuple(sel_const)]
-
-                    if varIdxs[0] != -1:
-                        hvar.values()[
-                            tuple([*sel_const, slice(None), slice(None)])
-                        ] = hvar_utPlus.values()[..., None, None]
-                    else:
-                        hvar.values()[
-                            tuple([*sel_const, slice(None)])
-                        ] = hvar_utPlus.values()[..., None]
-
-                    if len(axesToDecorrNames) > 0:
-                        hvar = rabbit_helpers.decorrelateByAxes(
-                            hvar,
-                            hnom,
-                            axesToDecorrNames,
-                            newDecorrAxesNames=[
-                                f"{x}_decorr" for x in axesToDecorrNames
-                            ],
-                        )
-
-                    return hvar
 
                 ## TODO: move the following systematics in an imported file, once this is finalized
                 datagroups.addSystematic(
@@ -2406,6 +2341,8 @@ def setup(
                         altHistName="fakeCorr_altStat",
                         varIdxs=[0],
                         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                        fakeselector=fakeselector,
+                        fakeTransferAxis=datagroups.fakeTransferAxis,
                     ),
                     systAxes=["varTF", "downUpVar"],
                     labelsByAxis=["varTF", "downUpVar"],
@@ -2427,6 +2364,8 @@ def setup(
                 #         altHistName="fakeCorr_closQCDsv",
                 #         varIdxs = [],
                 #         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                #         fakeselector=fakeselector,
+                #         fakeTransferAxis=datagroups.fakeTransferAxis,
                 #     ),
                 #     systAxes=["downUpVar"],
                 #     labelsByAxis=["downUpVar"],
@@ -2448,6 +2387,8 @@ def setup(
                         altHistName="fakeCorr_closQCDsignal",
                         varIdxs=[],
                         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
+                        fakeselector=fakeselector,
+                        fakeTransferAxis=datagroups.fakeTransferAxis,
                     ),
                     systAxes=["downUpVar"],
                     labelsByAxis=["downUpVar"],
@@ -3003,53 +2944,52 @@ def setup(
         passToFakes=passSystToFakes,
     )
 
-    # ad-hoc uncertainties for recoil, scaling and smearing met
-    datagroups.addSystematic(
-        "scaleMET_pt",
-        mirror=True,
-        processes=datagroups.allMCProcesses(),
-        groups=[
-            "recoil_syst_tmp",
-            "recoil",
-            "experiment",
-            "expNoLumi",
-            "expNoCalib",
-        ],
-        # scale=0.1,
-        systAxes=[],
-        passToFakes=passSystToFakes,
-    )
-    datagroups.addSystematic(
-        "smearMET_pt",
-        mirror=True,
-        processes=datagroups.allMCProcesses(),
-        groups=[
-            "recoil_syst_tmp",
-            "recoil",
-            "experiment",
-            "expNoLumi",
-            "expNoCalib",
-        ],
-        # scale=0.5,
-        systAxes=[],
-        passToFakes=passSystToFakes,
-    )
-    datagroups.addSystematic(
-        "smearMET_phi",
-        mirror=True,
-        processes=datagroups.allMCProcesses(),
-        groups=[
-            "recoil_syst_tmp",
-            "recoil",
-            "experiment",
-            "expNoLumi",
-            "expNoCalib",
-        ],
-        # scale=0.5,
-        systAxes=[],
-        passToFakes=passSystToFakes,
-    )
-    ####
+    if args.addCustomRecoilSyst:
+        datagroups.addSystematic(
+            "scaleMET_pt",
+            mirror=True,
+            processes=datagroups.allMCProcesses(),
+            groups=[
+                "recoil_syst_tmp",
+                "recoil",
+                "experiment",
+                "expNoLumi",
+                "expNoCalib",
+            ],
+            # scale=0.1,
+            systAxes=[],
+            passToFakes=passSystToFakes,
+        )
+        datagroups.addSystematic(
+            "smearMET_pt",
+            mirror=True,
+            processes=datagroups.allMCProcesses(),
+            groups=[
+                "recoil_syst_tmp",
+                "recoil",
+                "experiment",
+                "expNoLumi",
+                "expNoCalib",
+            ],
+            # scale=0.5,
+            systAxes=[],
+            passToFakes=passSystToFakes,
+        )
+        datagroups.addSystematic(
+            "smearMET_phi",
+            mirror=True,
+            processes=datagroups.allMCProcesses(),
+            groups=[
+                "recoil_syst_tmp",
+                "recoil",
+                "experiment",
+                "expNoLumi",
+                "expNoCalib",
+            ],
+            scale=0.4,  # from 5% -> scale * 5% for test (see histmaker)
+            systAxes=[],
+            passToFakes=passSystToFakes,
+        )
 
     ## decorrelated momentum scale and resolution, when requested
     if not dilepton and "ptscale" in args.decorrSystByVar and decorr_syst_var in fitvar:

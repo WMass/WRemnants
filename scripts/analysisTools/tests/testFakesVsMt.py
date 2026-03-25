@@ -65,6 +65,8 @@ from scripts.analysisTools.plotUtils.utility import (
 from scripts.analysisTools.tests.cropNegativeTemplateBins import cropNegativeContent
 from scripts.analysisTools.tests.testPlots1D import plotDistribution1D
 
+narf.clingutils.Declare('#include "histHelpers.hpp"')
+
 # will use as input the histogram mTStudyForFakes with eta-pt-charge-mt-passIso-hasJet, where mt is the full distribution
 
 
@@ -110,7 +112,7 @@ def plotProjection1D(
         rootHists[d].GetAxis(2).SetRange(chargeBin, chargeBin)
         rootHists[d].GetAxis(3).SetRange(firstBinMt, lastBinMt)
         rootHists[d].GetAxis(4).SetRange(isoAxisRange[0], isoAxisRange[1])
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             rootHists[d].GetAxis(5).SetRange(jetAxisRange[0], jetAxisRange[1])
             rootHists[d].GetAxis(6).SetRange(1, rootHists[d].GetAxis(6).GetNbins())
         if d == "Data":
@@ -716,6 +718,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         "mtOverPt": "mTStudyForFakesAlt2",
         "altMt": "mTStudyForFakesAlt3",
         "dxybs": "mTStudyForFakesAlt4",
+        "mtBinnedUt": "mTStudyForFakesAlt5",
     }
 
     etaLabel = "#eta^{#mu}" if not args.absEta else "|#eta^{#mu}|"
@@ -731,8 +734,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
         "altMt": f"{metLabel} (1 - {dphiMuMetLabel})",
         "dxybs": "Thr - |dxy_{bs}^{#mu}| (cm)",
     }
-    xABCD = args.xABCD
-    noMtABCD = xABCD != "mt"
+    xABCD = "mt" if args.xABCD in ["mt", "mtBinnedUt"] else args.xABCD
+    noMtABCD = xABCD not in ["mt", "mtBinnedUt"]
 
     xAxisName = args.xAxisName
     if args.absEta and "|#eta" not in xAxisName and "#eta" in xAxisName:
@@ -767,7 +770,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
     datasetsNoFakes = list(filter(lambda x: x != "Fake", datasets))
     datasetsNoQCDFakes = list(filter(lambda x: x not in ["QCD", "Fake"], datasets))
     logger.info(f"All original datasets available {datasets}")
-    inputHistName = inputHistDict[xABCD]
+    inputHistName = inputHistDict[args.xABCD]
     groups.setNominalName(inputHistName)
     groups.loadHistsForDatagroups(
         inputHistName, syst="", procsToRead=datasets, applySelection=False
@@ -794,6 +797,18 @@ def runStudy(fname, charges, mainOutputFolder, args):
             s = hist.tag.Slicer()
             # logger.info(d)
             hnarfTMP = histInfo[d].hists[inputHistName]
+            if args.presel is not None:
+                axName, axLow, axHigh = args.presel.split(",")
+                axLow = float(axLow)
+                if float(axHigh) >= hnarfTMP.axes[axName].edges[-1]:
+                    hnarfTMP = hnarfTMP[
+                        {axName: s[complex(0, axLow) : hist.overflow : hist.sum]}
+                    ]
+                else:
+                    axHigh = float(axHigh)
+                    hnarfTMP = hnarfTMP[
+                        {axName: s[complex(0, axLow) : complex(0, axHigh) : hist.sum]}
+                    ]
             if charge == "inclusive":
                 # integrate but keep charge axis with 1 single bin
                 hnarfTMP = hnarfTMP[{"charge": s[:: hist.rebin(2)]}]
@@ -863,7 +878,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
                     hnarf_fakerateDeltaPhi = hnarf_fakerateDeltaPhi[
                         {"DphiMuonMet": s[:: hist.rebin(2)]}
                     ]
-                if not noMtABCD:
+                if not noMtABCD and args.xABCD != "mtBinnedUt":
                     # make all TH of FRF in bins of dphi
                     histo_fakes_dphiBins = narf.hist_to_root(
                         hnarf_fakerateDeltaPhi
@@ -1083,7 +1098,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             0: ["muon_eta", etaLabel],
             1: ["muon_pt", ptLabel + " (GeV)"],
         }
-        if noMtABCD:
+        if noMtABCD or args.xABCD == "mtBinnedUt":
             axisVar[3] = [xABCD, zAxisName]
         else:
             axisVar[3] = ["mT", args.met + f" {mtLabel} (GeV)"]
@@ -1138,7 +1153,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         for xbin in axisVar.keys():
             if "Data" not in rootHists_forplots.keys():
                 continue
-            if noMtABCD:
+            if noMtABCD or args.xABCD == "mtBinnedUt":
                 plotProjection1D(
                     rootHists_forplots,
                     datasetsNoFakes,
@@ -1273,7 +1288,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         # set charge from charge axis
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
         # now get a TH3
         histoPassIso = histo_fakes.Projection(0, 1, 3, "E")
@@ -1281,7 +1296,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         histoPassIso.SetTitle("fakes_passIso")
         histo_fakes.GetAxis(2).SetRange(chargeBin, chargeBin)
         histo_fakes.GetAxis(4).SetRange(1, 1)  # FailIso
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             histo_fakes.GetAxis(5).SetRange(2 if args.jetCut else 1, 2)
         histoFailIso = histo_fakes.Projection(0, 1, 3, "E")
         histoFailIso.SetName("fakes_failIso")
@@ -1296,7 +1311,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             histo_fakes.GetAxis(3).GetNbins(),
         )  # high mT
         histo_fakes.GetAxis(4).SetRange(1, 1)  # FailIso
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             histo_fakes.GetAxis(5).SetRange(1, 2)  # jet inclusive
         histoPassMtFailIso = histo_fakes.Projection(0, 1, 3, "E")
         histoPassMtFailIso.SetName("fakes_passMt_failIso_jetInclusive")
@@ -1314,7 +1329,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             1, histo_fakes.GetAxis(3).FindFixBin(mtThreshold - 0.0005)
         )
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             histo_fakes.GetAxis(5).SetRange(1, 2)  # always integrate jet here
         # now get a TH2 for passIso
         histoPassIsoLowMt_jetInclusive_vsEtaPt = histo_fakes.Projection(1, 0, "E")
@@ -1350,7 +1365,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
         ## now redo the same for the >=1 jet region
         ## could be done from previous TH3 histograms integrating in mT, but they don't always have the same jet cut
         histo_fakes.GetAxis(4).SetRange(2, 2)  # passIso, equivalent to lowIso
-        if not noMtABCD:
+        if not noMtABCD and args.xABCD != "mtBinnedUt":
             histo_fakes.GetAxis(5).SetRange(2, 2)  # always integrate jet here
         # now get a TH2 for passIso
         histoPassIsoLowMt_1orMoreJet_vsEtaPt = histo_fakes.Projection(1, 0, "E")
@@ -2238,6 +2253,8 @@ def runStudy(fname, charges, mainOutputFolder, args):
 
 def runStudyVsDphi(fname, charges, mainOutputFolder, args):
 
+    xABCD = args.xABCD if args.xABCD != "mtBinnedUt" else "mt"
+
     etaLabel = "#eta^{#mu}" if not args.absEta else "|#eta^{#mu}|"
     ptLabel = "#it{p}_{T}^{#mu}"
 
@@ -2309,8 +2326,8 @@ def runStudyVsDphi(fname, charges, mainOutputFolder, args):
             nPtBins = hnarf.axes["pt"].size
 
             lowMtUpperBound = float(args.mtNominalRange.split(",")[1])
-            hnarf = hnarf[{args.xABCD: s[: complex(0, lowMtUpperBound) : hist.sum]}]
-            # hnarf = hnarf[{args.xABCD : s[::hist.sum]}]
+            hnarf = hnarf[{xABCD: s[: complex(0, lowMtUpperBound) : hist.sum]}]
+            # hnarf = hnarf[{xABCD : s[::hist.sum]}]
             chargeIndex = 0 if charge in ["minus", "inclusive"] else 1
             hnarf = hnarf[{"charge": s[chargeIndex : chargeIndex + 1 : hist.sum]}]
 
@@ -2429,7 +2446,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--xABCD",
         default="mt",
-        choices=["mt", "oneMinusCosdphi", "mtOverPt", "altMt", "dxybs"],
+        choices=["mt", "oneMinusCosdphi", "mtOverPt", "altMt", "dxybs", "mtBinnedUt"],
         help="X variable to use for ABCD method (y is pass isolation)",
     )
     parser.add_argument("-x", "--xAxisName", default="#eta^{#mu}", help="x axis name")
@@ -2535,6 +2552,12 @@ if __name__ == "__main__":
         default=-1.0,
     )
     parser.add_argument(
+        "--presel",
+        type=str,
+        help="Apply slice selection to axis and integrate it away, use as '--presel axisName,low,high'",
+        default=None,
+    )
+    parser.add_argument(
         "--dphiStudy",
         action="store_true",
         help="Only do some plots for dphi study skipping the rest",
@@ -2577,7 +2600,7 @@ if __name__ == "__main__":
         subFolder += f"_absEta"
     if args.postfix:
         subFolder += f"_{args.postfix}"
-    if args.xABCD != "mt":
+    if args.xABCD not in ["mt", "mtBinnedUt"]:
         subFolder += f"_{args.xABCD}"
     if args.fitErf:
         subFolder += f"_fitErf"
@@ -2602,9 +2625,14 @@ if __name__ == "__main__":
     if len(charges) == 2 and not args.dphiStudy:
         outFile = mainOutputFolder + fname
         mergeCmd = f"hadd -f {outFile} {' '.join(filesToMerge)}"
-        safeSystem(mergeCmd)
-        logger.info("")
-        logger.info(f"Saving all FRF corrections vs eta-pt in file {outFile}")
-        logger.info("")
+        status = safeSystem(mergeCmd, quitOnFail=False)
+        if status:
+            logger.warning(
+                f"Skip saving of all FRF corrections vs eta-pt in file {outFile}"
+            )
+        else:
+            logger.info("")
+            logger.info(f"Saving all FRF corrections vs eta-pt in file {outFile}")
+            logger.info("")
 
     copyOutputToEos(mainOutputFolder, outdir_original, eoscp=args.eoscp)
