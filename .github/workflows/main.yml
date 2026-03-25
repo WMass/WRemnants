@@ -1512,7 +1512,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py \
             "$direct_theory_input" -o "$fitdir" --doImpacts --globalImpacts \
             --saveHists --computeHistErrors --computeHistCov --computeHistImpacts --computeVariations \
-            --covarianceFit -t -1 -m BaseMapping -m Project ch0 ptVGen -m Project ch0 absYVGen
+            --covarianceFit -t -1 -m BaseMapping -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen
           
           ln -sfn "$fitdir" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit"
           ln -sfn "$fitdir/fitresults.hdf5" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit_fitresult.hdf5"
@@ -1522,7 +1522,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists.py
           $ALPHAS_Z_GENFIT
           -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
-          -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
+          -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config 'wremnants/utilities/styles/styles.py' --rrange '0.8' '1.2' --unfoldedXsec
 
       - name: alphaS z gen-fit xsec uncertainties
@@ -1530,7 +1530,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_uncertainties.py
           $ALPHAS_Z_GENFIT
           -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --extraTextLoc '0.05' '0.7' --legCols 1
-          -m Project ch0 ptVGen -m Project ch0 absYVGen --yscale '1.2'
+          -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --yscale '1.2'
           --title CMS --subtitle Preliminary --config wremnants/utilities/styles/styles.py --grouping max --legCols 2
 
       - name: alphaS z gen-fit xsec covariance
@@ -1538,14 +1538,14 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
           $ALPHAS_Z_GENFIT
           -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
-          -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py
+          -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: alphaS z gen-fit xsec corrrelation
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
           $ALPHAS_Z_GENFIT
           -o $WEB_DIR/$PLOT_DIR/alpha_s --postfix z_genfit --title CMS --subtitle Preliminary
-          -m Project ch0 ptVGen -m Project ch0 absYVGen --config wremnants/utilities/styles/styles.py --correlation
+          -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py --correlation
 
       - name: alphaS z gen-fit impacts
         run: >-
