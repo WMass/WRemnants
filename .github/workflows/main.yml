@@ -948,6 +948,22 @@ jobs:
   alphas-z-reco:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, alphas-z-histmaker]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: "2d"
+            fitvar: "ptll-yll"
+            fitdir_suffix: "ZMassDilepton_ptll_yll"
+            stable_dir_link: "alpha_s_z_reco_2d"
+            stable_fit_link: "alpha_s_z_reco_2d_fitresult.hdf5"
+            impacts_postfix: "z_reco_2d_fitresult"
+          - mode: "4d"
+            fitvar: "ptll-yll-cosThetaStarll_quantile-phiStarll_quantile"
+            fitdir_suffix: "ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile"
+            stable_dir_link: "alpha_s_z_reco_4d"
+            stable_fit_link: "alpha_s_z_reco_4d_fitresult.hdf5"
+            impacts_postfix: "z_reco_4d_fitresult"
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -961,56 +977,42 @@ jobs:
           echo "LUMI_SCALE=$LUMI_SCALE" >> $GITHUB_ENV
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_HIST_FILE=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_FITVAR=${{ matrix.fitvar }}" >> $GITHUB_ENV
+          echo "ALPHAS_FITDIR=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.fitdir_suffix }}" >> $GITHUB_ENV
+          echo "ALPHAS_COMBINE_FILE=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.fitdir_suffix }}/ZMassDilepton.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_STABLE_DIR_LINK=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.stable_dir_link }}" >> $GITHUB_ENV
+          echo "ALPHAS_STABLE_FIT_LINK=${WREMNANTS_OUTDIR}/alpha_s/${{ matrix.stable_fit_link }}" >> $GITHUB_ENV
+          echo "ALPHAS_IMPACTS_POSTFIX=${{ matrix.impacts_postfix }}" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: alphaS Z reco fits (2D and 4D)
+      - name: alphaS Z reco setup (${{ matrix.mode }})
         run: |
           set -euo pipefail
           mkdir -p $ALPHAS_OUTDIR
-          
-          for fitvar in "ptll-yll" "ptll-yll-cosThetaStarll_quantile-phiStarll_quantile"; do
-            if [[ "$fitvar" == "ptll-yll" ]]; then
-              fitdir="$ALPHAS_OUTDIR/ZMassDilepton_ptll_yll"
-              stable_dir_link="$ALPHAS_OUTDIR/alpha_s_z_reco_2d"
-              stable_fit_link="$ALPHAS_OUTDIR/alpha_s_z_reco_2d_fitresult.hdf5"
-            else
-              fitdir="$ALPHAS_OUTDIR/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile"
-              stable_dir_link="$ALPHAS_OUTDIR/alpha_s_z_reco_4d"
-              stable_fit_link="$ALPHAS_OUTDIR/alpha_s_z_reco_4d_fitresult.hdf5"
-            fi
-            
-            combine_file="$fitdir/ZMassDilepton.hdf5"
-            
-            scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
-              -i $ALPHAS_HIST_FILE --fitvar "$fitvar" --lumiScale $LUMI_SCALE --realData \
-              -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --pdfUncFromCorr
-            
-            scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py \
-              "$combine_file" -t -1 --computeHistErrors --doImpacts -o "$fitdir/"
-            
-            ln -sfn "$fitdir" "$stable_dir_link"
-            ln -sfn "$fitdir/fitresults.hdf5" "$stable_fit_link"
-          done
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
+            -i $ALPHAS_HIST_FILE --fitvar "$ALPHAS_FITVAR" --lumiScale $LUMI_SCALE --realData \
+            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --pdfUncFromCorr
 
-      - name: alphaS impacts (2D and 4D)
+      - name: alphaS Z reco fit (${{ matrix.mode }})
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          "$ALPHAS_COMBINE_FILE" -t -1 --computeHistErrors --doImpacts -o "$ALPHAS_FITDIR/"
+
+      - name: alphaS Z reco links (${{ matrix.mode }})
         run: |
-          set -euo pipefail
-          fitdirs=(
-            "$ALPHAS_OUTDIR/alpha_s_z_reco_2d_fitresult.hdf5"
-            "$ALPHAS_OUTDIR/alpha_s_z_reco_4d_fitresult.hdf5"
-          )
+          ln -sfn "$ALPHAS_FITDIR" "$ALPHAS_STABLE_DIR_LINK"
+          ln -sfn "$ALPHAS_FITDIR/fitresults.hdf5" "$ALPHAS_STABLE_FIT_LINK"
 
-          for fitresult in "${fitdirs[@]}"; do
-            postfix=$(basename "$fitresult" .hdf5 | sed 's/^alpha_s_//')
-            scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py \
-              "$fitresult" --title CMS --subtitle Preliminary \
-              --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping min \
-              -o "$WEB_DIR/$PLOT_DIR" --otherExtensions pdf png -n 50 --scaleImpacts 2.0 --postfix "$postfix"
-          done
+      - name: alphaS impacts (${{ matrix.mode }})
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
+          "$ALPHAS_STABLE_FIT_LINK" --title CMS --subtitle Preliminary
+          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping min
+          -o "$WEB_DIR/$PLOT_DIR" --otherExtensions pdf png -n 50 --scaleImpacts 2.0 --postfix "$ALPHAS_IMPACTS_POSTFIX"
 
   dilepton:
     # The type of runner that the job will run on
@@ -1397,32 +1399,35 @@ jobs:
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_W_HIST=${WREMNANTS_OUTDIR}/alpha_s/mw_with_mu_eta_pt.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_WZ_RECO_DIR=${WREMNANTS_OUTDIR}/alpha_s/Combination_ZMassDileptonWMass_reco" >> $GITHUB_ENV
+          echo "ALPHAS_WZ_RECO_COMBINE=${WREMNANTS_OUTDIR}/alpha_s/Combination_ZMassDileptonWMass_reco/Combination.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: alphaS WZ reco fit
+      - name: alphaS WZ reco setup
         run: |
           set -euo pipefail
           mkdir -p $ALPHAS_OUTDIR
-          fitdir="$ALPHAS_OUTDIR/Combination_ZMassDileptonWMass_reco"
-          combine_file="$fitdir/Combination.hdf5"
-          
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_Z_HIST $ALPHAS_W_HIST \
             --fitvar "ptll-yll-cosThetaStarll_quantile-phiStarll_quantile" "eta-pt-charge" \
             --lumiScale $LUMI_SCALE $LUMI_SCALE \
             -o $ALPHAS_OUTDIR --noi alphaS wmass --postfix reco \
             --npUnc LatticeEigvars --pdfUncFromCorr
-          
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py \
-            "$combine_file" -t -1 --computeVariations -m Project ch0 ptll yll -m Select ch1 \
-            --computeHistErrors --doImpacts -o "$fitdir/" --globalImpacts
-          
-          ln -sfn "$fitdir" "$ALPHAS_OUTDIR/alpha_s_wz_reco"
-          ln -sfn "$fitdir/fitresults.hdf5" "$ALPHAS_OUTDIR/alpha_s_wz_reco_fitresult.hdf5"
+
+      - name: alphaS WZ reco fit
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          "$ALPHAS_WZ_RECO_COMBINE" -t -1 --computeVariations -m Project ch0 ptll yll -m Select ch1
+          --computeHistErrors --doImpacts -o "$ALPHAS_WZ_RECO_DIR/" --globalImpacts
+
+      - name: alphaS WZ reco links
+        run: |
+          ln -sfn "$ALPHAS_WZ_RECO_DIR" "$ALPHAS_OUTDIR/alpha_s_wz_reco"
+          ln -sfn "$ALPHAS_WZ_RECO_DIR/fitresults.hdf5" "$ALPHAS_OUTDIR/alpha_s_wz_reco_fitresult.hdf5"
 
       - name: alphaS wz reco impacts
         run: >-
@@ -1441,18 +1446,18 @@ jobs:
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_Z_UNFOLDING_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile_unfolding" >> $GITHUB_ENV
+          echo "ALPHAS_Z_UNFOLDING_COMBINE=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile_unfolding/ZMassDilepton.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           lfs: 'true'
 
-      - name: alphaS Z unfolding
+      - name: alphaS Z unfolding setup
         run: |
           set -euo pipefail
           mkdir -p $ALPHAS_OUTDIR
-          fitdir="$ALPHAS_OUTDIR/ZMassDilepton_ptll_yll_cosThetaStarll_quantile_phiStarll_quantile_unfolding"
-          
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_Z_HIST -o $ALPHAS_OUTDIR \
             --analysisMode unfolding --poiAsNoi \
@@ -1462,14 +1467,18 @@ jobs:
             --realData --systematicType normal --postfix unfolding \
             --npUnc LatticeEigvars --pdfUncFromCorr \
             --rebin 2 2 # this is for CI only! needed for max_files=100
-          
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py \
-            "$fitdir/ZMassDilepton.hdf5" -o "$fitdir" --binByBinStatType normal-multiplicative \
-            -t -1 --doImpacts --globalImpacts --computeHistErrors --computeHistImpacts --computeHistCov --saveHists \
-            -m Select "ch0_masked" "helicitySig:0" --postfix asimov
-          
-          ln -sfn "$fitdir" "$ALPHAS_OUTDIR/alpha_s_z_unfolding"
-          ln -sfn "$fitdir/fitresults_asimov.hdf5" "$ALPHAS_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5"
+
+      - name: alphaS Z unfolding fit
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          "$ALPHAS_Z_UNFOLDING_COMBINE" -o "$ALPHAS_Z_UNFOLDING_DIR" --binByBinStatType normal-multiplicative
+          -t -1 --doImpacts --globalImpacts --computeHistErrors --computeHistImpacts --computeHistCov --saveHists
+          -m Select "ch0_masked" "helicitySig:0" --postfix asimov
+
+      - name: alphaS Z unfolding links
+        run: |
+          ln -sfn "$ALPHAS_Z_UNFOLDING_DIR" "$ALPHAS_OUTDIR/alpha_s_z_unfolding"
+          ln -sfn "$ALPHAS_Z_UNFOLDING_DIR/fitresults_asimov.hdf5" "$ALPHAS_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5"
 
   alphas-z-gen-fit:
     runs-on: [self-hosted, linux, x64]
@@ -1486,36 +1495,38 @@ jobs:
           echo "ALPHAS_OUTDIR=${WREMNANTS_OUTDIR}/alpha_s" >> $GITHUB_ENV
           echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_Z_GENFIT_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptVGen_absYVGen_theoryfitViaMC" >> $GITHUB_ENV
+          echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_ct18z_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
 
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           lfs: 'true'
 
+      - name: alphaS Z gen-level setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/feedRabbitSigmaUL.py
+          -i $ALPHAS_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5
+          --predGenerator scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO
+          --pdfs ct18z
+          -o $ALPHAS_OUTDIR
+          --systematicType log_normal
+          --fitresultMapping "Select helicitySig:0"
+          --channelSigmaUL ch0_masked
+          --outname direct_sigmaul_carrot
+          --postfix direct_sigmaul
+
       - name: alphaS Z gen-level fit
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          "$ALPHAS_Z_DIRECT_THEORY_INPUT" -o "$ALPHAS_Z_GENFIT_DIR" --doImpacts --globalImpacts
+          --saveHists --computeHistErrors --computeHistCov --computeHistImpacts --computeVariations
+          --covarianceFit -t -1 -m BaseMapping -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen
+
+      - name: alphaS Z gen-level links
         run: |
-          set -euo pipefail
-          fitdir="$ALPHAS_OUTDIR/ZMassDilepton_ptVGen_absYVGen_theoryfitViaMC"
-          direct_theory_input="$ALPHAS_OUTDIR/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_ct18z_alphaS_direct_sigmaul.hdf5"
-          
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/feedRabbitSigmaUL.py \
-            -i $ALPHAS_OUTDIR/alpha_s_z_unfolding_fitresult.hdf5 \
-            --predGenerator scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO \
-            --pdfs ct18z \
-            -o $ALPHAS_OUTDIR \
-            --systematicType log_normal \
-            --fitresultMapping "Select helicitySig:0" \
-            --channelSigmaUL ch0_masked \
-            --outname direct_sigmaul_carrot \
-            --postfix direct_sigmaul
-          
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py \
-            "$direct_theory_input" -o "$fitdir" --doImpacts --globalImpacts \
-            --saveHists --computeHistErrors --computeHistCov --computeHistImpacts --computeVariations \
-            --covarianceFit -t -1 -m BaseMapping -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen
-          
-          ln -sfn "$fitdir" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit"
-          ln -sfn "$fitdir/fitresults.hdf5" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit_fitresult.hdf5"
+          ln -sfn "$ALPHAS_Z_GENFIT_DIR" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit"
+          ln -sfn "$ALPHAS_Z_GENFIT_DIR/fitresults.hdf5" "$ALPHAS_OUTDIR/alpha_s_z_gen_fit_fitresult.hdf5"
 
       - name: alphaS z gen-fit xsec
         run: >-
@@ -1577,13 +1588,13 @@ jobs:
           lfs: 'true'
 
       - name: wmass combined setup
-        run: >- 
+        run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py
           -i $HIST_FILE_WMASS $HIST_FILE_DILEPTON --fitvar eta-pt-charge ptll-yll --lumiScale $LUMI_SCALE $LUMI_SCALE -o $RABBIT_DIR
 
       - name: wmass combined fit
-        run: >- 
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
           '$RABBIT_DIR/Combination_WMassZMassDilepton/Combination.hdf5'
           -t -1 --doImpacts
           -o '$RABBIT_DIR/Combination_WMassZMassDilepton/'
@@ -1592,13 +1603,13 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
           ${WREMNANTS_OUTDIR}/Combination_WMassZMassDilepton/fitresults.hdf5 --title CMS --subtitle Preliminary
-          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max 
+          --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix withZ --scaleImpacts 100
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-w-histmaker, alphas-wz-reco, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
-    if: always() 
+    if: always()
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
