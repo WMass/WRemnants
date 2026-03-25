@@ -356,6 +356,50 @@ def add_nominal_with_correlated_BinByBinStat(
         )
 
 
+def add_mb_fo_uncertainty(
+    datagroups,
+    processes="signal_samples",
+    passSystToFakes=True,
+    passToFakes=None,
+):
+    if passToFakes is not None:
+        passSystToFakes = passToFakes
+
+    corr_hist_name = "MiNNLO_Zbb_Corr"
+    processes_expanded = datagroups.expandProcesses(processes)
+    processes_with_corr = []
+
+    for proc in processes_expanded:
+        members = datagroups.groups[proc].members
+        has_corr = any(
+            corr_hist_name in datagroups.results[member.name]["output"]
+            for member in members
+            if member.name in datagroups.results
+            and "output" in datagroups.results[member.name]
+        )
+        if has_corr:
+            processes_with_corr.append(proc)
+
+    if len(processes_with_corr) == 0:
+        logger.info(
+            f"Skip mb_fo systematic: histogram '{corr_hist_name}' is not available"
+        )
+        return
+
+    # b-quark mass uncertainty from dedicated MiNNLO_Zbb correction histogram
+    datagroups.addSystematic(
+        corr_hist_name,
+        name="mb_fo",
+        processes=processes_with_corr,
+        mirror=True,
+        scale=1.0,
+        systAxes=["vars"],
+        skipEntries=[{"vars": ["nominal"]}],
+        passToFakes=passSystToFakes,
+        groups=["bcQuarkMass", "theory"],
+    )
+
+
 def add_electroweak_uncertainty(
     datagroups,
     ewUncs,
