@@ -13,13 +13,6 @@ def parse_args():
     analysis_label = common.analysis_label(os.path.basename(__file__))
     parser, _ = parsing.common_parser(analysis_label)
     parser.add_argument(
-        "--particleType",
-        type=str,
-        required=True,
-        choices=["kaon", "muon"],
-        help="Particle type used to select the default process list and output name",
-    )
-    parser.add_argument(
         "--inputFile",
         type=str,
         required=True,
@@ -30,6 +23,13 @@ def parse_args():
         type=str,
         required=True,
         help="Directory where the output TFLite file will be written",
+    )
+    parser.add_argument(
+        "--particleType",
+        type=str,
+        default="muon",
+        choices=["kaon", "muon"],
+        help="Particle type used to select the default process list and output name",
     )
     parser.add_argument(
         "--procs",
