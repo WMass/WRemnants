@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import math
+import sys
 
 import hist
 import numpy as np
@@ -28,7 +29,82 @@ from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
 
-def make_subparsers(parser):
+def _parse_axis_range_specs(specs):
+    parsed_specs = []
+    for axis, low, high in specs:
+        parsed_specs.append(
+            (
+                axis,
+                parsing.str_to_complex_or_int(low),
+                parsing.str_to_complex_or_int(high),
+            )
+        )
+    return parsed_specs
+
+
+def _build_fitvar_axlim(axlim_specs, fitvar):
+    if not axlim_specs:
+        return []
+
+    parsed_specs = _parse_axis_range_specs(axlim_specs)
+    axlim = [None] * (2 * len(fitvar))
+    seen_axes = set()
+    for axis, low, high in parsed_specs:
+        if axis not in fitvar:
+            raise ValueError(
+                f"--axlim only accepts fit variables. Axis '{axis}' is not one of {fitvar}"
+            )
+        if axis in seen_axes:
+            raise ValueError(f"Duplicate axis '{axis}' passed to --axlim")
+        seen_axes.add(axis)
+        idx = fitvar.index(axis)
+        axlim[2 * idx] = low
+        axlim[2 * idx + 1] = high
+
+    return axlim
+
+
+def _build_preselection_specs(selection_specs, fitvar):
+    if not selection_specs:
+        return []
+
+    parsed_specs = _parse_axis_range_specs(selection_specs)
+    seen_axes = set()
+    for axis, _, _ in parsed_specs:
+        if axis in fitvar:
+            raise ValueError(
+                f"--preselect only accepts non-fit axes. Axis '{axis}' is one of the fit variables {fitvar}"
+            )
+        if axis in seen_axes:
+            raise ValueError(f"Duplicate axis '{axis}' passed to --preselect")
+        seen_axes.add(axis)
+
+    return parsed_specs
+
+
+def _normalize_negative_imaginary_bounds(argv):
+    normalized_argv = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        normalized_argv.append(token)
+
+        if token in {"--axlim", "--preselect"} and i + 3 < len(argv):
+            normalized_argv.append(argv[i + 1])
+            for value in (argv[i + 2], argv[i + 3]):
+                if value.startswith("-") and value.endswith("j"):
+                    normalized_argv.append(f" {value}")
+                else:
+                    normalized_argv.append(value)
+            i += 4
+            continue
+
+        i += 1
+
+    return normalized_argv
+
+
+def make_subparsers(parser, argv=None):
 
     parser.add_argument(
         "--analysisMode",
@@ -38,7 +114,7 @@ def make_subparsers(parser):
         help="Select analysis mode to run. Default is the traditional analysis",
     )
 
-    tmpKnownArgs, _ = parser.parse_known_args()
+    tmpKnownArgs, _ = parser.parse_known_args(argv)
     subparserName = tmpKnownArgs.analysisMode
     if subparserName is None:
         return parser
@@ -135,7 +211,7 @@ def make_subparsers(parser):
     return parser
 
 
-def make_parser(parser=None):
+def make_parser(parser=None, argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-o",
@@ -267,12 +343,14 @@ def make_parser(parser=None):
     )
     parser.add_argument(
         "--axlim",
-        type=parsing.str_to_complex_or_int,
         default=[],
-        nargs="*",
+        nargs=3,
+        action="append",
+        metavar=("AXIS", "LOW", "HIGH"),
         help="""
-        Restrict axis to this range or these bins (assumes pairs of values by axis, with trailing axes optional).
-        Arguments must be pure real or pure imaginary numbers to select bin indices or values, respectively.
+        Restrict a fit axis to this range or these bins.
+        Repeat as '--axlim AXIS LOW HIGH'. LOW and HIGH must be pure real integers for bin indices
+        or pure imaginary numbers for axis values.
         """,
     )
     parser.add_argument(
@@ -939,16 +1017,15 @@ def make_parser(parser=None):
         help="probability density for systematic variations",
     )
     parser.add_argument(
-        "--select",
-        nargs="+",
-        dest="selection",
-        type=str,
-        default=None,
-        help="Apply a selection to the histograms, if the axis exists."
-        "This option can be applied to any of the axis, not necessarily one of the fitaxes, unlike --axlim."
-        "Use complex numbers for axis value, integers for bin number."
-        "e.g. --select 'ptll 0 10"
-        "e.g. --select 'ptll 0j 10j",
+        "--presel",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("AXIS", "LOW", "HIGH"),
+        help="Apply a strict preselection on a non-fit axis before downstream projections."
+        " Repeat as '--presel AXIS LOW HIGH'."
+        " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
+        " The command fails if a requested axis is missing from any loaded histogram.",
     )
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
@@ -960,7 +1037,7 @@ def make_parser(parser=None):
         action="store_true",
         help="Use the Breit-Wigner mass weights for mW.",
     )
-    parser = make_subparsers(parser)
+    parser = make_subparsers(parser, argv=argv)
 
     return parser
 
@@ -1032,18 +1109,19 @@ def setup(
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
 
-    if args.selection:
-        for sel in args.selection:
-            sel_ax, sel_lb, sel_ub = sel.split()
-            sel_lb = parsing.str_to_complex_or_int(sel_lb)
-            sel_ub = parsing.str_to_complex_or_int(sel_ub)
-            datagroups.setGlobalAction(
-                lambda h: (
-                    h[{sel_ax: slice(sel_lb, sel_ub, hist.sum)}]
-                    if sel_ax in h.axes.name
-                    else h
-                ),
-            )
+    preselection_specs = _build_preselection_specs(args.presel, fitvar)
+    if preselection_specs:
+
+        def apply_preselection(h, specs=tuple(preselection_specs)):
+            for axis, low, high in specs:
+                if axis not in h.axes.name:
+                    raise ValueError(
+                        f"--preselect requested axis '{axis}', but histogram axes are {h.axes.name}"
+                    )
+                h = h[{axis: slice(low, hh.get_hist_slice_upper(h, axis, high))}]
+            return h
+
+        datagroups.setGlobalAction(apply_preselection)
 
     if args.angularCoeffs:
         datagroups.setGlobalAction(
@@ -1052,10 +1130,11 @@ def setup(
             )
         )
 
-    if args.axlim or args.rebin or args.absval:
+    fitvar_axlim = _build_fitvar_axlim(args.axlim, fitvar)
+    if fitvar_axlim or args.rebin or args.absval:
         datagroups.set_rebin_action(
             fitvar,
-            args.axlim,
+            fitvar_axlim,
             args.rebin,
             args.absval,
             args.rebinBeforeSelection,
@@ -1135,7 +1214,7 @@ def setup(
                         hist.axis.Variable(run_edges + 0.5, name="run"),
                         add_trailing=False,
                     ),
-                    lumis[:, *[np.newaxis for a in h.axes]],
+                    lumis[(slice(None),) + (np.newaxis,) * len(h.axes)],
                 )
             )
         )
@@ -3035,8 +3114,9 @@ def outputFolderName(outfolder, datagroups, doStatOnly, postfix):
 
 
 if __name__ == "__main__":
-    parser = make_parser()
-    args = parser.parse_args()
+    argv = _normalize_negative_imaginary_bounds(sys.argv[1:])
+    parser = make_parser(argv=argv)
+    args = parser.parse_args(argv)
 
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -3239,7 +3319,6 @@ if __name__ == "__main__":
                     datagroups,
                     "Z",
                     True,
-                    False,
                     poi_axes=poi_axes,
                     prior_norm=args.priorNormXsec,
                     scale_norm=args.scaleNormXsecHistYields,
