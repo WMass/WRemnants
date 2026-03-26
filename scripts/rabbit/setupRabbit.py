@@ -1052,23 +1052,11 @@ def setup(
                     raise ValueError(
                         f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
                     )
+                h = h[
+                    {axis_name: slice(low, hh.get_hist_slice_upper(h, axis_name, high))}
+                ]
                 if ":sum" in axis:
-                    h = h[
-                        {
-                            axis_name: (
-                                slice(low, hh.get_hist_slice_upper(h, axis_name, high)),
-                                hist.sum,
-                            )
-                        }
-                    ]
-                else:
-                    h = h[
-                        {
-                            axis_name: slice(
-                                low, hh.get_hist_slice_upper(h, axis_name, high)
-                            )
-                        }
-                    ]
+                    h = h[{axis_name: hist.sum}]
             return h
 
         datagroups.setGlobalAction(apply_preselection)
