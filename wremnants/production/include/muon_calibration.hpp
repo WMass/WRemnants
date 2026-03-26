@@ -1761,7 +1761,7 @@ public:
 
       const double qop = charge / pt / std::cosh(eta);
 
-      const double dsigma = sigmarel_ * qop;
+      const double dsigma = std::abs(sigmarel_ * qop);
 
       std::normal_distribution gaus{qop, dsigma};
 

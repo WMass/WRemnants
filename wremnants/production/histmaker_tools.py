@@ -40,7 +40,9 @@ def scale_to_data(result_dict):
 
         logger.debug(f"For dataset {d_name} with xsec={xsec}")
 
-        scale = lumi * 1000 * xsec / result["weight_sum"]
+        gen_filter_eff = result.get("gen_filter_eff", 1)
+
+        scale = lumi * 1000 * xsec * gen_filter_eff / result["weight_sum"]
 
         result["weight_sum"] = result["weight_sum"] * scale
 
@@ -49,6 +51,10 @@ def scale_to_data(result_dict):
             histo = histogram.get()
 
             histo *= scale
+
+        if "cutflow" in result:
+            for selection in result["cutflow"].keys():
+                result["cutflow"][selection] = result["cutflow"][selection] * scale
 
     logger.info(f"Scale to data: {time.time() - time0}")
 
@@ -146,10 +152,10 @@ def analysis_debug_output(results):
     logger.debug("")
 
 
-def write_analysis_output(results, outfile, args):
+def write_analysis_output(results, outfile, args, name_append=[]):
     analysis_debug_output(results)
 
-    to_append = []
+    to_append = name_append[:]
     if args.theoryCorr and not args.theoryCorrAltOnly:
         to_append.append(args.theoryCorr[0] + "_Corr")
     if args.maxFiles is not None:
