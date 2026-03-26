@@ -323,6 +323,7 @@ def make_parser(parser=None):
             "zmass",
             "sin2thetaW",
             "wwidth",
+            "zwidth",
             "xsec",
             "massdiffW",
             "widthdiffW",
@@ -1521,93 +1522,19 @@ def setup(
             add_to_data_covariance=datagroups.isAbsorbedNuisance(name),
         )
 
-    decorwidth = args.decorMassWidth or ("wwidth" in args.noi)
+    decorwidth = args.decorMassWidth or any(x in args.noi for x in ["wwidth", "zwidth"])
     if not (stat_only and constrainMass) and args.massVariation != 0:
         massVariation = 2.1 if (not wmass and constrainMass) else args.massVariation
-        massWeightName = (
-            f"massWeight_widthdecor{label}" if decorwidth else f"massWeight{label}"
+        rabbit_helpers.add_V_mass_uncertainty(
+            datagroups,
+            signal_samples_forMass,
+            args,
+            passSystToFakes=passSystToFakes,
+            label=label,
+            massVariation=massVariation,
+            constrainMass=constrainMass,
+            decorwidth=decorwidth,
         )
-        mass_info = dict(
-            processes=signal_samples_forMass,
-            group=f"massShift",
-            noi=not constrainMass,
-            skipEntries=theory_utils.massWeightNames(proc=label, exclude=massVariation),
-            mirror=False,
-            noConstraint=not constrainMass,
-            systAxes=["massShift"],
-            passToFakes=passSystToFakes,
-        )
-
-        if args.breitwignerWMassWeights and label == "W":
-            preOpMap = {}
-            for group in ["Wmunu", "Wtaunu"]:
-                if group not in datagroups.groups.keys():
-                    continue
-                for member in datagroups.groups[group].members:
-                    h_ref = datagroups.readHist(
-                        datagroups.nominalName, member, massWeightName
-                    )
-                    preOpMap[member.name] = (
-                        lambda h, h_ref=h_ref: rabbit_helpers.correct_bw_xsec(h, h_ref)
-                    )
-
-            datagroups.addSystematic(
-                histname=f"breitwigner_{massWeightName}",
-                name=f"massWeight{label}",
-                preOpMap=preOpMap,
-                **mass_info,
-            )
-        else:
-            if len(args.fitMassDecorr) == 0:
-                datagroups.addSystematic(
-                    massWeightName,
-                    **mass_info,
-                )
-            else:
-                suffix = "".join([a.capitalize() for a in args.fitMassDecorr])
-                new_names = [f"{a}_decorr" for a in args.fitMassDecorr]
-                datagroups.addSystematic(
-                    histname=massWeightName,
-                    processes=signal_samples_forMass,
-                    name=f"massDecorr{suffix}{label}",
-                    group=f"massDecorr{label}",
-                    # systNameReplace=[("Shift",f"Diff{suffix}")],
-                    skipEntries=[
-                        (x, *[-1] * len(args.fitMassDecorr))
-                        for x in theory_utils.massWeightNames(
-                            proc=label, exclude=args.massVariation
-                        )
-                    ],
-                    noi=not constrainMass,
-                    noConstraint=not constrainMass,
-                    mirror=False,
-                    systAxes=["massShift", *new_names],
-                    passToFakes=passSystToFakes,
-                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
-                    isPoiHistDecorr=len(args.fitMassDecorr),
-                    actionRequiresNomi=True,
-                    action=rabbit_helpers.decorrelateByAxes,
-                    actionArgs=dict(
-                        axesToDecorrNames=args.fitMassDecorr,
-                        newDecorrAxesNames=new_names,
-                        axlim=args.decorrAxlim,
-                        rebin=args.decorrRebin,
-                        absval=args.decorrAbsval,
-                    ),
-                )
-
-            if "massdiffW" in args.noi:
-                suffix = "".join([a.capitalize() for a in args.massDiffWVar.split("-")])
-                rabbit_helpers.add_mass_diff_variations(
-                    datagroups,
-                    args.massDiffWVar,
-                    name=massWeightName,
-                    processes=signal_samples_forMass,
-                    constrain=constrainMass,
-                    suffix=suffix,
-                    label=label,
-                    passSystToFakes=passSystToFakes,
-                )
 
     # this appears within doStatOnly because technically these nuisances should be part of it
     if isPoiAsNoi:
@@ -1686,11 +1613,9 @@ def setup(
             passSystToFakes=passSystToFakes,
         )
 
-    if ("wwidth" in args.noi and not wmass) or (
+    if ("zwidth" in args.noi and not wmass) or (
         not datagroups.xnorm and not stat_only and not args.noTheoryUnc
     ):
-        # Experimental range
-        # widthVars = (42, ['widthW2p043GeV', 'widthW2p127GeV']) if wmass else (2.3, ['widthZ2p4929GeV', 'widthZ2p4975GeV'])
         # Variation from EW fit (mostly driven by alphas unc.)
         datagroups.addSystematic(
             "widthWeightZ",
@@ -1701,132 +1626,22 @@ def setup(
             ),
             groups=["ZmassAndWidth" if wmass else "widthZ", "theory"],
             mirror=False,
-            noi="wwidth" in args.noi if not wmass else False,
-            noConstraint="wwidth" in args.noi if not wmass else False,
+            noi="zwidth" in args.noi if not wmass else False,
+            noConstraint="zwidth" in args.noi if not wmass else False,
             systAxes=["width"],
             systNameReplace=[["2p49333GeV", "Down"], ["2p49493GeV", "Up"]],
             passToFakes=passSystToFakes,
         )
 
+    # TODO: move closer to W mass uncertainty?
     if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
-        widthVarTag = ""
-        if (
-            args.widthVariationW[0] == args.widthVariationW[1]
-            and args.widthVariationW[0] == "0.6"
-        ):
-            widthVarTag = "WidthW0p6MeV"
-            width_info = dict(
-                name=widthVarTag,
-                skipEntries=theory_utils.widthWeightNames(
-                    proc="W", exclude=(2.09053, 2.09173)
-                ),
-                systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
-            )
-        else:
-            widthLowValues = {
-                "0.6": "2.09053",
-                "6": "2.085",
-                "48": "2.043",
-            }
-            widthHighValues = {
-                "0.6": "2.09173",
-                "36": "2.127",
-            }
-            widthVarDown = args.widthVariationW[0].replace(".", "p")
-            widthVarUp = args.widthVariationW[1].replace(".", "p")
-            widthVarTag = f"WidthWm{widthVarDown}p{widthVarUp}MeV"
-            wlv = widthLowValues[args.widthVariationW[0]]
-            whv = widthHighValues[args.widthVariationW[1]]
-            wlvStr = wlv.replace(".", "p") + "GeV"
-            whvStr = whv.replace(".", "p") + "GeV"
-            width_info = dict(
-                name=widthVarTag,
-                skipEntries=theory_utils.widthWeightNames(
-                    proc="W", exclude=(float(wlv), float(whv))
-                ),
-                systNameReplace=[[wlvStr, "Down"], [whvStr, "Up"]],
-            )
-
-        width_info.update(
-            dict(
-                processes=signal_samples_forMass,
-                groups=["widthW", "theory"],
-                mirror=False,
-                noi="wwidth" in args.noi,
-                noConstraint="wwidth" in args.noi,
-                systAxes=["width"],
-                passToFakes=passSystToFakes,
-            )
+        rabbit_helpers.add_W_width_uncertainty(
+            datagroups,
+            signal_samples_forMass,
+            args,
+            passSystToFakes=passSystToFakes,
+            label=label,
         )
-        widthWeightName = f"widthWeight{label}"
-        if args.breitwignerWMassWeights:
-            preOpMap = {}
-            for group in ["Wmunu", "Wtaunu"]:
-                if group not in datagroups.groups.keys():
-                    continue
-                for member in datagroups.groups[group].members:
-                    h_ref = datagroups.readHist(
-                        datagroups.nominalName, member, widthWeightName
-                    )
-                    preOpMap[member.name] = (
-                        lambda h, h_ref=h_ref: rabbit_helpers.correct_bw_xsec(h, h_ref)
-                    )
-            datagroups.addSystematic(
-                histname=f"breitwigner_{widthWeightName}",
-                preOpMap=preOpMap,
-                **width_info,
-            )
-        else:
-            if len(args.fitWidthDecorr) == 0:
-                datagroups.addSystematic(
-                    widthWeightName,
-                    **width_info,
-                )
-            else:
-                suffix = "".join([a.capitalize() for a in args.fitWidthDecorr])
-                new_names = [f"{a}_decorr" for a in args.fitWidthDecorr]
-                datagroups.addSystematic(
-                    histname=widthWeightName,
-                    processes=signal_samples_forMass,
-                    name=f"widthDecorr{suffix}{label}",
-                    groups=[f"widthDecorr{label}", "theory"],
-                    skipEntries=[
-                        (x, *[-1] * len(args.fitWidthDecorr))
-                        for x in width_info["skipEntries"]
-                    ],
-                    noi="wwidth" in args.noi,
-                    noConstraint="wwidth" in args.noi,
-                    mirror=False,
-                    systAxes=["width", *new_names],
-                    systNameReplace=width_info["systNameReplace"],
-                    passToFakes=passSystToFakes,
-                    # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
-                    isPoiHistDecorr=len(args.fitWidthDecorr),
-                    actionRequiresNomi=True,
-                    action=rabbit_helpers.decorrelateByAxes,
-                    actionArgs=dict(
-                        axesToDecorrNames=args.fitWidthDecorr,
-                        newDecorrAxesNames=new_names,
-                        axlim=args.decorrAxlim,
-                        rebin=args.decorrRebin,
-                        absval=args.decorrAbsval,
-                    ),
-                )
-
-            if "widthdiffW" in args.noi:
-                suffix = "".join(
-                    [a.capitalize() for a in args.widthDiffWVar.split("-")]
-                )
-                rabbit_helpers.add_width_diff_variations(
-                    datagroups,
-                    args.widthDiffWVar,
-                    name=widthWeightName,
-                    processes=signal_samples_forMass,
-                    constrain="wwidth" not in args.noi,
-                    suffix=suffix,
-                    label=label,
-                    passSystToFakes=passSystToFakes,
-                )
 
     if "sin2thetaW" in args.noi or (not stat_only and not args.noTheoryUnc):
         datagroups.addSystematic(
@@ -1907,6 +1722,9 @@ def setup(
 
             massVariationZ = 2.1 if constrainMassZ else args.massVariation
 
+            # FIXME/TODO:
+            # does it make sense to define Z mass as unconstrained in the W fit?
+            # maybe for a simultaenous W and Z mass fit?
             datagroups.addSystematic(
                 f"massWeightZ",
                 processes=["single_v_nonsig_samples"],
@@ -1920,19 +1738,6 @@ def setup(
                 systAxes=["massShift"],
                 passToFakes=passSystToFakes,
             )
-
-            if "massDiffZ" in args.noi:
-                suffix = "".join([a.capitalize() for a in args.massDiffZVar.split("-")])
-                rabbit_helpers.add_mass_diff_variations(
-                    datagroups,
-                    args.massDiffZVar,
-                    name=f"{massWeightName}Z",
-                    processes=["single_v_nonsig_samples"],
-                    constrain=constrainMass,
-                    suffix=suffix,
-                    label="Z",
-                    passSystToFakes=passSystToFakes,
-                )
 
         if inputBaseName != "prefsr":
             # make prefsr and EW free definition
@@ -2351,29 +2156,6 @@ def setup(
                     systAxes=["varTF", "downUpVar"],
                     labelsByAxis=["varTF", "downUpVar"],
                 )
-
-                ## syst for transfer factor difference between data and QCD MC in control region
-                # datagroups.addSystematic(
-                #     inputBaseName,
-                #     groups=[subgroup, "Fake", "experiment", "expNoCalib", "expNoLumi"],
-                #     name=f"{datagroups.fakeName}TransferFactorClosQCD",
-                #     baseName=f"{datagroups.fakeName}TransferFactorClosQCD",
-                #     processes=datagroups.fakeName,
-                #     noConstraint=False,
-                #     mirror=False,
-                #     scale=1,
-                #     applySelection=False,  # don't apply selection, external parameters need to be added
-                #     action=fake_transferFactor_ptSyst,
-                #     actionArgs=dict(
-                #         altHistName="fakeCorr_closQCDsv",
-                #         varIdxs = [],
-                #         correctionFile=f"{common.data_dir}/fakesWmass/{args.fakeTransferCorrFileName}.pkl.lz4",
-                #         fakeselector=fakeselector,
-                #         fakeTransferAxis=datagroups.fakeTransferAxis,
-                #     ),
-                #     systAxes=["downUpVar"],
-                #     labelsByAxis=["downUpVar"],
-                # )
 
                 # syst for transfer factor difference between control and signal regions from MC
                 datagroups.addSystematic(

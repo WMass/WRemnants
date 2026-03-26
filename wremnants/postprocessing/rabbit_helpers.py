@@ -10,6 +10,104 @@ from wums import logging
 logger = logging.child_logger(__name__)
 
 
+def decorrelateByAxis(
+    hvar,
+    hnom,
+    axisToDecorrName,
+    newDecorrAxisName=None,
+    axlim=[],
+    rebin=[],
+    absval=False,
+):
+    return decorrelateByAxes(
+        hvar,
+        hnom,
+        axesToDecorrNames=[axisToDecorrName],
+        newDecorrAxesNames=[newDecorrAxisName],
+        axlim=[axlim],
+        rebin=[rebin],
+        absval=[absval],
+    )
+
+
+def decorrelateByAxes(
+    hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axlim=[], rebin=[], absval=[]
+):
+
+    commonMessage = f"Requested to decorrelate uncertainty in histogram {hvar.name} by {axesToDecorrNames} axes"
+    if any(a not in hvar.axes.name for a in axesToDecorrNames):
+        raise ValueError(
+            f"{commonMessage}, but available axes for histogram are {hvar.axes.name}"
+        )
+
+    if len(newDecorrAxesNames) == 0:
+        newDecorrAxesNames = [f"{n}_decorr" for n in axesToDecorrNames]
+    elif len(axesToDecorrNames) != len(newDecorrAxesNames):
+        raise ValueError(
+            f"If newDecorrAxisName are specified, they must have the same length than axisToDecorrName, but they are {newDecorrAxesNames} and {axesToDecorrNames}."
+        )
+
+    # subtract nominal hist to get variation only
+    hvar = hh.addHists(hvar, hnom, scale2=-1)
+    # expand edges for variations on diagonal elements
+    hvar = hh.expand_hist_by_duplicate_axes(
+        hvar, axesToDecorrNames, newDecorrAxesNames, put_trailing=True
+    )
+    # rebin duplicated axes
+    if len(axlim) or len(rebin):
+        hvar = hh.rebinHistMultiAx(
+            hvar, newDecorrAxesNames, rebin, axlim[::2], axlim[1::2]
+        )
+
+    for ax, absval in zip(newDecorrAxesNames, absval):
+        if absval:
+            logger.info(f"Taking the absolute value of axis '{ax}'")
+            hvar = hh.makeAbsHist(hvar, ax, rename=False)
+    # add back nominal histogram while broadcasting
+    hvar = hh.addHists(hvar, hnom)
+
+    # if there is a mirror axis, put it at the end, since CardTool.py requires it like that
+    if (
+        "mirror" in hvar.axes.name
+        and hvar.axes.name.index("mirror") != len(hvar.shape) - 1
+    ):
+        sortedAxes = [n for n in hvar.axes.name if n != "mirror"]
+        sortedAxes.append("mirror")
+        hvar = hvar.project(*sortedAxes)
+
+    return hvar
+
+
+def correct_bw_xsec(h, h_ref):
+    """
+    Normalize the Breit-Wigner mass variation histograms
+    to the cross section from the MiNNLO mass variation histograms.
+    Assumes that the histograms have been filled with the same mass variations, in the same order.
+    """
+
+    if "massShift" in h.axes.name:
+        var = "massShift"
+    elif "width" in h.axes.name:
+        var = "width"
+
+    h_axis_labels = [n for n in h.axes[var]]
+    h_ref_axis_labels = [n for n in h_ref.axes[var]]
+    if (
+        len(h_axis_labels) != len(h_ref_axis_labels)
+        or h_axis_labels != h_ref_axis_labels
+    ):
+        logger.warning(
+            f"Breit-Wigner variations do not match MiNNLO variations: {h_axis_labels} vs {h_ref_axis_labels}."
+            "Cannot apply correction."
+        )
+        return h
+
+    h_corr = hh.divideHists(h.project(var), h_ref.project(var))
+    h = hh.multiplyHists(h, h_corr)
+
+    return h
+
+
 def add_mass_diff_variations(
     datagroups,
     mass_diff_var,
@@ -136,6 +234,241 @@ def add_width_diff_variations(
                 h, *args, "eta", hist.tag.Slicer()[complex(0, -0.9) : complex(0, 0.9) :]
             ),
         )
+
+
+def add_V_mass_uncertainty(
+    datagroups,
+    processes,
+    args,
+    passSystToFakes=True,
+    label="W",
+    massVariation=100,
+    constrainMass=False,
+    decorwidth=False,
+):
+
+    # This function is supposed to deal with the case where the mass is the fit NOI.
+    # If this is the mW fit, then the nuisance parameter controlling the uncertainty
+    # in mZ has to be defined elsewhere
+
+    massWeightName = (
+        f"massWeight_widthdecor{label}" if decorwidth else f"massWeight{label}"
+    )
+    mass_info = dict(
+        processes=processes,
+        group=f"massShift",
+        noi=not constrainMass,
+        skipEntries=theory_utils.massWeightNames(proc=label, exclude=massVariation),
+        mirror=False,
+        noConstraint=not constrainMass,
+        systAxes=["massShift"],
+        passToFakes=passSystToFakes,
+    )
+
+    if args.breitwignerWMassWeights and label == "W":
+        preOpMap = {}
+        for group in ["Wmunu", "Wtaunu"]:
+            if group not in datagroups.groups.keys():
+                continue
+            for member in datagroups.groups[group].members:
+                h_ref = datagroups.readHist(
+                    datagroups.nominalName, member, massWeightName
+                )
+                preOpMap[member.name] = lambda h, h_ref=h_ref: correct_bw_xsec(h, h_ref)
+
+        datagroups.addSystematic(
+            histname=f"breitwigner_{massWeightName}",
+            name=f"massWeight{label}",
+            preOpMap=preOpMap,
+            **mass_info,
+        )
+    else:
+        if len(args.fitMassDecorr) == 0:
+            datagroups.addSystematic(
+                massWeightName,
+                **mass_info,
+            )
+        else:
+            suffix = "".join([a.capitalize() for a in args.fitMassDecorr])
+            new_names = [f"{a}_decorr" for a in args.fitMassDecorr]
+            datagroups.addSystematic(
+                histname=massWeightName,
+                processes=processes,
+                name=f"massDecorr{suffix}{label}",
+                group=f"massDecorr{label}",
+                # systNameReplace=[("Shift",f"Diff{suffix}")],
+                skipEntries=[
+                    (x, *[-1] * len(args.fitMassDecorr))
+                    for x in theory_utils.massWeightNames(
+                        proc=label, exclude=args.massVariation
+                    )
+                ],
+                noi=not constrainMass,
+                noConstraint=not constrainMass,
+                mirror=False,
+                systAxes=["massShift", *new_names],
+                passToFakes=passSystToFakes,
+                # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                isPoiHistDecorr=len(args.fitMassDecorr),
+                actionRequiresNomi=True,
+                action=decorrelateByAxes,
+                actionArgs=dict(
+                    axesToDecorrNames=args.fitMassDecorr,
+                    newDecorrAxesNames=new_names,
+                    axlim=args.decorrAxlim,
+                    rebin=args.decorrRebin,
+                    absval=args.decorrAbsval,
+                ),
+            )
+
+        if "massdiffW" in args.noi:
+            suffix = "".join([a.capitalize() for a in args.massDiffWVar.split("-")])
+            add_mass_diff_variations(
+                datagroups,
+                args.massDiffWVar,
+                name=massWeightName,
+                processes=processes,
+                constrain=constrainMass,
+                suffix=suffix,
+                label=label,
+                passSystToFakes=passSystToFakes,
+            )
+
+        elif "massdiffZ" in args.noi:
+            suffix = "".join([a.capitalize() for a in args.massDiffZVar.split("-")])
+            add_mass_diff_variations(
+                datagroups,
+                args.massDiffZVar,
+                name=massWeightName,
+                processes=processes,
+                constrain=constrainMass,
+                suffix=suffix,
+                label=label,
+                passSystToFakes=passSystToFakes,  # automatically False for Z
+            )
+
+
+def add_W_width_uncertainty(
+    datagroups,
+    processes,
+    args,
+    passSystToFakes=True,
+    label="W",
+):
+    widthVarTag = ""
+    if (
+        args.widthVariationW[0] == args.widthVariationW[1]
+        and args.widthVariationW[0] == "0.6"
+    ):
+        widthVarTag = "WidthW0p6MeV"
+        width_info = dict(
+            name=widthVarTag,
+            skipEntries=theory_utils.widthWeightNames(
+                proc="W", exclude=(2.09053, 2.09173)
+            ),
+            systNameReplace=[["2p09053GeV", "Down"], ["2p09173GeV", "Up"]],
+        )
+    else:
+        widthLowValues = {
+            "0.6": "2.09053",
+            "6": "2.085",
+            "48": "2.043",
+        }
+        widthHighValues = {
+            "0.6": "2.09173",
+            "36": "2.127",
+        }
+        widthVarDown = args.widthVariationW[0].replace(".", "p")
+        widthVarUp = args.widthVariationW[1].replace(".", "p")
+        widthVarTag = f"WidthWm{widthVarDown}p{widthVarUp}MeV"
+        wlv = widthLowValues[args.widthVariationW[0]]
+        whv = widthHighValues[args.widthVariationW[1]]
+        wlvStr = wlv.replace(".", "p") + "GeV"
+        whvStr = whv.replace(".", "p") + "GeV"
+        width_info = dict(
+            name=widthVarTag,
+            skipEntries=theory_utils.widthWeightNames(
+                proc="W", exclude=(float(wlv), float(whv))
+            ),
+            systNameReplace=[[wlvStr, "Down"], [whvStr, "Up"]],
+        )
+
+    width_info.update(
+        dict(
+            processes=processes,
+            groups=["widthW", "theory"],
+            mirror=False,
+            noi="wwidth" in args.noi,
+            noConstraint="wwidth" in args.noi,
+            systAxes=["width"],
+            passToFakes=passSystToFakes,
+        )
+    )
+    widthWeightName = f"widthWeight{label}"
+    if args.breitwignerWMassWeights:
+        preOpMap = {}
+        for group in ["Wmunu", "Wtaunu"]:
+            if group not in datagroups.groups.keys():
+                continue
+            for member in datagroups.groups[group].members:
+                h_ref = datagroups.readHist(
+                    datagroups.nominalName, member, widthWeightName
+                )
+                preOpMap[member.name] = lambda h, h_ref=h_ref: correct_bw_xsec(h, h_ref)
+        datagroups.addSystematic(
+            histname=f"breitwigner_{widthWeightName}",
+            preOpMap=preOpMap,
+            **width_info,
+        )
+    else:
+        if len(args.fitWidthDecorr) == 0:
+            datagroups.addSystematic(
+                widthWeightName,
+                **width_info,
+            )
+        else:
+            suffix = "".join([a.capitalize() for a in args.fitWidthDecorr])
+            new_names = [f"{a}_decorr" for a in args.fitWidthDecorr]
+            datagroups.addSystematic(
+                histname=widthWeightName,
+                processes=processes,
+                name=f"widthDecorr{suffix}{label}",
+                groups=[f"widthDecorr{label}", "theory"],
+                skipEntries=[
+                    (x, *[-1] * len(args.fitWidthDecorr))
+                    for x in width_info["skipEntries"]
+                ],
+                noi="wwidth" in args.noi,
+                noConstraint="wwidth" in args.noi,
+                mirror=False,
+                systAxes=["width", *new_names],
+                systNameReplace=width_info["systNameReplace"],
+                passToFakes=passSystToFakes,
+                # isPoiHistDecorr is a special flag to deal with how the massShift variations are internally formed
+                isPoiHistDecorr=len(args.fitWidthDecorr),
+                actionRequiresNomi=True,
+                action=decorrelateByAxes,
+                actionArgs=dict(
+                    axesToDecorrNames=args.fitWidthDecorr,
+                    newDecorrAxesNames=new_names,
+                    axlim=args.decorrAxlim,
+                    rebin=args.decorrRebin,
+                    absval=args.decorrAbsval,
+                ),
+            )
+
+        if "widthdiffW" in args.noi:
+            suffix = "".join([a.capitalize() for a in args.widthDiffWVar.split("-")])
+            add_width_diff_variations(
+                datagroups,
+                args.widthDiffWVar,
+                name=widthWeightName,
+                processes=processes,
+                constrain="wwidth" not in args.noi,
+                suffix=suffix,
+                label=label,
+                passSystToFakes=passSystToFakes,
+            )
 
 
 def add_recoil_uncertainty(
@@ -738,101 +1071,3 @@ def add_bsm_process(
     # scale BSM cross section to SM cross section
     for m in datagroups.groups[bsm_name].members:
         m.xsec = xsec
-
-
-def decorrelateByAxis(
-    hvar,
-    hnom,
-    axisToDecorrName,
-    newDecorrAxisName=None,
-    axlim=[],
-    rebin=[],
-    absval=False,
-):
-    return decorrelateByAxes(
-        hvar,
-        hnom,
-        axesToDecorrNames=[axisToDecorrName],
-        newDecorrAxesNames=[newDecorrAxisName],
-        axlim=[axlim],
-        rebin=[rebin],
-        absval=[absval],
-    )
-
-
-def decorrelateByAxes(
-    hvar, hnom, axesToDecorrNames, newDecorrAxesNames=[], axlim=[], rebin=[], absval=[]
-):
-
-    commonMessage = f"Requested to decorrelate uncertainty in histogram {hvar.name} by {axesToDecorrNames} axes"
-    if any(a not in hvar.axes.name for a in axesToDecorrNames):
-        raise ValueError(
-            f"{commonMessage}, but available axes for histogram are {hvar.axes.name}"
-        )
-
-    if len(newDecorrAxesNames) == 0:
-        newDecorrAxesNames = [f"{n}_decorr" for n in axesToDecorrNames]
-    elif len(axesToDecorrNames) != len(newDecorrAxesNames):
-        raise ValueError(
-            f"If newDecorrAxisName are specified, they must have the same length than axisToDecorrName, but they are {newDecorrAxesNames} and {axesToDecorrNames}."
-        )
-
-    # subtract nominal hist to get variation only
-    hvar = hh.addHists(hvar, hnom, scale2=-1)
-    # expand edges for variations on diagonal elements
-    hvar = hh.expand_hist_by_duplicate_axes(
-        hvar, axesToDecorrNames, newDecorrAxesNames, put_trailing=True
-    )
-    # rebin duplicated axes
-    if len(axlim) or len(rebin):
-        hvar = hh.rebinHistMultiAx(
-            hvar, newDecorrAxesNames, rebin, axlim[::2], axlim[1::2]
-        )
-
-    for ax, absval in zip(newDecorrAxesNames, absval):
-        if absval:
-            logger.info(f"Taking the absolute value of axis '{ax}'")
-            hvar = hh.makeAbsHist(hvar, ax, rename=False)
-    # add back nominal histogram while broadcasting
-    hvar = hh.addHists(hvar, hnom)
-
-    # if there is a mirror axis, put it at the end, since CardTool.py requires it like that
-    if (
-        "mirror" in hvar.axes.name
-        and hvar.axes.name.index("mirror") != len(hvar.shape) - 1
-    ):
-        sortedAxes = [n for n in hvar.axes.name if n != "mirror"]
-        sortedAxes.append("mirror")
-        hvar = hvar.project(*sortedAxes)
-
-    return hvar
-
-
-def correct_bw_xsec(h, h_ref):
-    """
-    Normalize the Breit-Wigner mass variation histograms
-    to the cross section from the MiNNLO mass variation histograms.
-    Assumes that the histograms have been filled with the same mass variations, in the same order.
-    """
-
-    if "massShift" in h.axes.name:
-        var = "massShift"
-    elif "width" in h.axes.name:
-        var = "width"
-
-    h_axis_labels = [n for n in h.axes[var]]
-    h_ref_axis_labels = [n for n in h_ref.axes[var]]
-    if (
-        len(h_axis_labels) != len(h_ref_axis_labels)
-        or h_axis_labels != h_ref_axis_labels
-    ):
-        logger.warning(
-            f"Breit-Wigner variations do not match MiNNLO variations: {h_axis_labels} vs {h_ref_axis_labels}."
-            "Cannot apply correction."
-        )
-        return h
-
-    h_corr = hh.divideHists(h.project(var), h_ref.project(var))
-    h = hh.multiplyHists(h, h_corr)
-
-    return h
