@@ -69,13 +69,14 @@ def _build_preselection_specs(selection_specs, fitvar):
     parsed_specs = _parse_axis_range_specs(selection_specs)
     seen_axes = set()
     for axis, _, _ in parsed_specs:
-        if axis in fitvar:
+        axis_name = axis.split(":")[0]
+        if axis_name in fitvar:
             raise ValueError(
-                f"--preselect only accepts non-fit axes. Axis '{axis}' is one of the fit variables {fitvar}"
+                f"--presel only accepts non-fit axes. Axis '{axis_name}' is one of the fit variables {fitvar}"
             )
-        if axis in seen_axes:
-            raise ValueError(f"Duplicate axis '{axis}' passed to --preselect")
-        seen_axes.add(axis)
+        if axis_name in seen_axes:
+            raise ValueError(f"Duplicate axis '{axis}' passed to --presel")
+        seen_axes.add(axis_name)
 
     return parsed_specs
 
@@ -87,7 +88,7 @@ def _normalize_negative_imaginary_bounds(argv):
         token = argv[i]
         normalized_argv.append(token)
 
-        if token in {"--axlim", "--preselect"} and i + 3 < len(argv):
+        if token in {"--axlim", "--presel"} and i + 3 < len(argv):
             normalized_argv.append(argv[i + 1])
             for value in (argv[i + 2], argv[i + 3]):
                 if value.startswith("-") and value.endswith("j"):
@@ -95,9 +96,8 @@ def _normalize_negative_imaginary_bounds(argv):
                 else:
                     normalized_argv.append(value)
             i += 4
-            continue
-
-        i += 1
+        else:
+            i += 1
 
     return normalized_argv
 
@@ -957,7 +957,8 @@ def make_parser(parser=None, argv=None):
         help="Apply a strict preselection on a non-fit axis before downstream projections."
         " Repeat as '--presel AXIS LOW HIGH'."
         " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
-        " The command fails if a requested axis is missing from any loaded histogram.",
+        " The command fails if a requested axis is missing from any loaded histogram."
+        " One can use 'AXIS:sum' instead of just 'AXIS' to pass hist.sum to the slice",
     )
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
@@ -1046,11 +1047,28 @@ def setup(
 
         def apply_preselection(h, specs=tuple(preselection_specs)):
             for axis, low, high in specs:
-                if axis not in h.axes.name:
+                axis_name = axis.split(":")[0]
+                if axis_name not in h.axes.name:
                     raise ValueError(
-                        f"--preselect requested axis '{axis}', but histogram axes are {h.axes.name}"
+                        f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
                     )
-                h = h[{axis: slice(low, hh.get_hist_slice_upper(h, axis, high))}]
+                if ":sum" in axis:
+                    h = h[
+                        {
+                            axis_name: (
+                                slice(low, hh.get_hist_slice_upper(h, axis_name, high)),
+                                hist.sum,
+                            )
+                        }
+                    ]
+                else:
+                    h = h[
+                        {
+                            axis_name: slice(
+                                low, hh.get_hist_slice_upper(h, axis_name, high)
+                            )
+                        }
+                    ]
             return h
 
         datagroups.setGlobalAction(apply_preselection)
