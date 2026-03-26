@@ -73,10 +73,10 @@ def _build_preselection_specs(selection_specs, fitvar):
     for axis, _, _ in parsed_specs:
         if axis in fitvar:
             raise ValueError(
-                f"--preselect only accepts non-fit axes. Axis '{axis}' is one of the fit variables {fitvar}"
+                f"--presel only accepts non-fit axes. Axis '{axis}' is one of the fit variables {fitvar}"
             )
         if axis in seen_axes:
-            raise ValueError(f"Duplicate axis '{axis}' passed to --preselect")
+            raise ValueError(f"Duplicate axis '{axis}' passed to --presel")
         seen_axes.add(axis)
 
     return parsed_specs
@@ -89,7 +89,7 @@ def _normalize_negative_imaginary_bounds(argv):
         token = argv[i]
         normalized_argv.append(token)
 
-        if token in {"--axlim", "--preselect"} and i + 3 < len(argv):
+        if token in {"--axlim", "--presel"} and i + 3 < len(argv):
             normalized_argv.append(argv[i + 1])
             for value in (argv[i + 2], argv[i + 3]):
                 if value.startswith("-") and value.endswith("j"):
@@ -1116,7 +1116,7 @@ def setup(
             for axis, low, high in specs:
                 if axis not in h.axes.name:
                     raise ValueError(
-                        f"--preselect requested axis '{axis}', but histogram axes are {h.axes.name}"
+                        f"--presel requested axis '{axis}', but histogram axes are {h.axes.name}"
                     )
                 h = h[{axis: slice(low, hh.get_hist_slice_upper(h, axis, high))}]
             return h
@@ -1341,7 +1341,7 @@ def setup(
             ),
             fakeTransferCorrFileName=args.fakeTransferCorrFileName,
             histAxesRemovedBeforeFakes=(
-                [str(x.split()[0]) for x in args.selection] if args.selection else []
+                [str(x.split()[0]) for x in args.presel] if args.presel else []
             ),
         )
         datagroups.set_histselectors(
@@ -2183,14 +2183,10 @@ def setup(
                         ),
                     )
 
-            # must skip this part when fitting only utPlus with --select 'utAngleSign 1 2' or --select 'utAngleSign 0 1'
-            # is there a better way to check whether the negative uT bi
+            # must skip this part when fitting only utPlus with '--presel utAngleSign 1 2' or '--presel utAngleSign 0 1'
             if "utAngleSign" in fitvar and (
-                args.selection is None
-                or not any(
-                    sel in args.selection
-                    for sel in ["utAngleSign 1 2", "utAngleSign 0 1"]
-                )
+                not args.presel
+                or not any(sel[0] == "utAngleSign" for sel in args.presel)
             ):
 
                 datagroups.addSystematic(
