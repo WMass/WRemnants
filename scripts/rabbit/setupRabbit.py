@@ -75,7 +75,7 @@ def _build_preselection_specs(selection_specs, fitvar):
                 f"--presel only accepts non-fit axes. Axis '{axis_name}' is one of the fit variables {fitvar}"
             )
         if axis_name in seen_axes:
-            raise ValueError(f"Duplicate axis '{axis}' passed to --presel")
+            raise ValueError(f"Duplicate axis '{axis_name}' passed to --presel")
         seen_axes.add(axis_name)
 
     return parsed_specs
@@ -100,6 +100,19 @@ def _normalize_negative_imaginary_bounds(argv):
             i += 1
 
     return normalized_argv
+
+
+def apply_preselection(h, specs: tuple = ()):
+    for axis, low, high in specs:
+        axis_name = axis.split(":")[0]
+        if axis_name not in h.axes.name:
+            raise ValueError(
+                f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
+            )
+        h = h[{axis_name: slice(low, hh.get_hist_slice_upper(h, axis_name, high))}]
+        if ":sum" in axis:
+            h = h[{axis_name: hist.sum}]
+    return h
 
 
 def make_subparsers(parser, argv=None):
@@ -1044,22 +1057,9 @@ def setup(
 
     preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:
-
-        def apply_preselection(h, specs=tuple(preselection_specs)):
-            for axis, low, high in specs:
-                axis_name = axis.split(":")[0]
-                if axis_name not in h.axes.name:
-                    raise ValueError(
-                        f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
-                    )
-                h = h[
-                    {axis_name: slice(low, hh.get_hist_slice_upper(h, axis_name, high))}
-                ]
-                if ":sum" in axis:
-                    h = h[{axis_name: hist.sum}]
-            return h
-
-        datagroups.setGlobalAction(apply_preselection)
+        datagroups.setGlobalAction(
+            lambda h: apply_preselection(h, specs=tuple(preselection_specs))
+        )
 
     if args.angularCoeffs:
         datagroups.setGlobalAction(
