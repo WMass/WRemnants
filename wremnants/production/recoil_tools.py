@@ -1463,7 +1463,6 @@ class Recoil:
         return df
 
     def setup_recoil_Z_unc(self):
-        # if not self.dataset.name in self.datasets_to_apply or not self.storeHists:
         if not self.dataset.name in self.datasets_to_apply:
             return
 
@@ -1554,7 +1553,6 @@ class Recoil:
                 )
 
     def setup_recoil_W_unc(self):
-        # if not self.dataset.name in self.datasets_to_apply or not self.storeHists:
         if not self.dataset.name in self.datasets_to_apply:
             return
 

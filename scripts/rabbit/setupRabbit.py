@@ -436,7 +436,7 @@ def make_parser(parser=None, argv=None):
             "eta-sign",
             "eta-range",
         ],
-        help="For use with --noi widthDiffW, select the variable to define the different mass differences",
+        help="For use with --noi widthDiffW, select the variable to define the different width differences",
     )
     parser.add_argument(
         "--massDiffZVar",
@@ -1026,7 +1026,7 @@ def make_parser(parser=None, argv=None):
         " Repeat as '--presel AXIS LOW HIGH'."
         " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
         " The command fails if a requested axis is missing from any loaded histogram."
-        " One can use 'AXIS:sum' instead of just 'AXIS' to pass hist.sum to the slice",
+        " Use AXIS:sum LOW HIGH to slice [LOW, HIGH] and then sum over the axis (removing it from the histogram).",
     )
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
@@ -2096,14 +2096,17 @@ def setup(
 
             def fake_nonclosure(
                 h,
-                axesToDecorrNames,
+                *args,
+                axesToDecorrNames=None,
                 param_idx=1,
                 variation_size=0.5,
                 normalize=False,
                 fakeselector=None,
-                *args,
                 **kwargs,
             ):
+                # enforce expectation for optional arguments, extra positional arguments are rejected
+                if args:
+                    raise TypeError(f"Unexpected positional arguments: {args}")
                 # apply variation by adding parameter value (assumes log space, e.g. in full smoothing)
                 fakeselector.spectrum_regressor.external_params = np.zeros(
                     fakeSmoothingOrder + 1
@@ -2823,7 +2826,6 @@ def setup(
                 "expNoLumi",
                 "expNoCalib",
             ],
-            # scale=0.1,
             systAxes=[],
             passToFakes=passSystToFakes,
         )
@@ -2838,7 +2840,6 @@ def setup(
                 "expNoLumi",
                 "expNoCalib",
             ],
-            # scale=0.5,
             systAxes=[],
             passToFakes=passSystToFakes,
         )
@@ -2853,7 +2854,6 @@ def setup(
                 "expNoLumi",
                 "expNoCalib",
             ],
-            scale=0.4,  # from 5% -> scale * 5% for test (see histmaker)
             systAxes=[],
             passToFakes=passSystToFakes,
         )

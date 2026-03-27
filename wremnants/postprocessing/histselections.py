@@ -465,7 +465,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             trTensorPath = (
                 f"{data_dir}/fakesWmass/{self.fakeTransferCorrFileName}.pkl.lz4"
             )
-            logger.warning(f"Loaded transfer tensor for fakes: {trTensorPath}")
+            logger.info(f"Loaded transfer tensor for fakes: {trTensorPath}")
             with lz4.frame.open(trTensorPath) as fTens:
                 resultDict = pickle.load(fTens)
             self.fakeTransferTensor = resultDict["fakeCorr"]
@@ -475,7 +475,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             self.rebin_smoothing_axis = None
 
         if hasattr(self, "fakerate_integration_axes"):
-            logger.warning(
+            logger.info(
                 f"self.fakerate_integration_axes = {self.fakerate_integration_axes}"
             )
             if smoothing_mode == "full" and len(self.fakerate_integration_axes):
@@ -627,7 +627,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
             if not self.integrate_x and self.swap_regions:
                 logger.warning(
-                    f"Regions for fakerate estiamation can only be swapped if abcd-x axis is integrated"
+                    f"Regions for fakerate estimation can only be swapped if abcd-x axis is integrated"
                 )
             if self.swap_regions and self.integrate_x:
                 if type(self) == FakeSelectorSimpleABCD:
@@ -664,7 +664,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             elif variations_frf:
                 dvar = cval[..., np.newaxis, np.newaxis] * y_frf_var[..., :, :]
             elif self.smoothing_mode in ["hybrid"]:
-                # noo bin by bin statistical uncertainty, all regions covered by smoothing
+                # no bin by bin statistical uncertainty, all regions covered by smoothing
                 dvar = np.zeros_like(cvar)
             else:
                 # only take bin by bin uncertainty from c region
@@ -1199,7 +1199,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
                 if fakeTransferAxis_idx < 0:
                     logger.debug(
-                        f"All ABCD values are zeros! Returning zero as Fake estimate."
+                        f"All ABCD values are zeros! Returning zero as nonprompt estimate."
                     )
                     logger.debug(f"Syst variations: {syst_variations}")
                     sval_sliced = np.zeros_like(sval_sliced[..., 0])
@@ -1220,7 +1220,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
 
                 else:
                     logger.debug(
-                        f"All ABCD values are zeros! Returning Fake estimate based on other bin, with an HARDCODED norm. factor"
+                        f"All ABCD values are zeros! Returning nonprompt estimate obtained from another bin, with a correction factor"
                     )
                     logger.debug(f"Syst variations: {syst_variations}")
                     compl_mask = np.array(

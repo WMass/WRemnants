@@ -1109,27 +1109,29 @@ double get_scaled_smeared_variable(const unsigned int run,
                                    const unsigned long long event,
                                    const double var, const double scale = 1.0,
                                    const double smear = 0.1,
-                                   const bool isPhiAngle = false) {
+                                   const unsigned int seed_modifier = 0,
+                                   const bool is_phi_angle = false) {
 
   // use scale=1.1 and smear=0.2 for 10% larger mean value and 20% resolution
   // smearing
-  std::seed_seq seq{std::size_t(run), std::size_t(lumi), std::size_t(event)};
-  std::mt19937 rng(seq);
-
   double scaled_var = var * scale;
   if (smear <= 0) {
     // 0 is valid and equivalent to a dirac delta, negative should never happen
     return scaled_var;
   }
 
+  std::seed_seq seq{std::size_t(run), std::size_t(lumi), std::size_t(event),
+                    std::size_t(seed_modifier)};
+  std::mt19937 rng(seq);
   std::normal_distribution<double> dis(scaled_var,
                                        std::abs(scaled_var * smear));
-  if (isPhiAngle) {
+  if (is_phi_angle) {
     // deal with angle in -pi, pi
     double phi = dis(rng);
     return std::atan2(std::sin(phi), std::cos(phi));
+  } else {
+    return dis(rng);
   }
-  return dis(rng);
 }
 
 } // namespace wrem

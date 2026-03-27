@@ -133,7 +133,7 @@ def add_mass_diff_variations(
     )
     # mass difference by swapping the +50MeV with the -50MeV variations for half of the bins
     args = ["massShift", f"massShift{label}50MeVUp", f"massShift{label}50MeVDown"]
-    if any(mass_diff_var == var for var in ["charge", "utAngleSign"]):
+    if mass_diff_var in ["charge", "utAngleSign"]:
         datagroups.addSystematic(
             **mass_diff_args,
             # # on gen level based on the sample, only possible for mW
@@ -213,7 +213,7 @@ def add_width_diff_variations(
     )
     # width difference by swapping the +0.6 MeV with the -0.6 MeV variations for half of the bins
     args = ["width", f"width{label}0p6MeVUp", f"width{label}0p6MeVDown"]
-    if any(width_diff_var == var for var in ["charge", "utAngleSign"]):
+    if width_diff_var in ["charge", "utAngleSign"]:
         datagroups.addSystematic(
             **width_diff_args,
             preOp=lambda h: hh.swap_histogram_bins(h, *args, width_diff_var, 0),

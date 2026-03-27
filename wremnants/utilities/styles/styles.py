@@ -182,8 +182,6 @@ axis_labels = {
     "MET_pt": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
     "MET": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
     "met": {"label": r"$\mathit{p}_{\mathrm{T}}^{miss}$", "unit": "GeV"},
-    # "mt": {"label": r"$\mathit{m}_{T}^{\mu,MET}$", "unit": "GeV"},
-    # "mt": {"label": r"$\mathit{m}_{T}^{W}$", "unit": "GeV"},
     "mt": {"label": r"$\mathit{m}_{T}$", "unit": "GeV"},
     "mtfix": {"label": r"$\mathit{m}_{T}^\mathrm{fix}$", "unit": "GeV"},
     "etaPlus": r"$\mathit{\eta}^{\mu(+)}$",

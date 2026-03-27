@@ -973,11 +973,11 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
 
 def fake_nonclosure_byAxis(
     h,
+    *args,
     axesToDecorrNames=["eta"],
     variation_size=0.1,
     keepConstantAxisBin={},
     fakeselector=None,
-    *args,
     **kwargs,
 ):
 
@@ -987,6 +987,10 @@ def fake_nonclosure_byAxis(
     logger.info(
         f"Doing decorr nonclosure with keepConstantAxisBin={keepConstantAxisBin}"
     )
+    # enforce expectation for optional arguments, extra positional arguments are rejected
+    if args:
+        raise TypeError(f"Unexpected positional arguments: {args}")
+
     hnom = fakeselector.get_hist(h, *args, **kwargs)
     hvar = (1 + variation_size) * hnom
     if keepConstantAxisBin:
