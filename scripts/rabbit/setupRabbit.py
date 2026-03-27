@@ -971,7 +971,7 @@ def make_parser(parser=None, argv=None):
         " Repeat as '--presel AXIS LOW HIGH'."
         " LOW and HIGH must be pure real integers for bin indices or pure imaginary numbers for axis values."
         " The command fails if a requested axis is missing from any loaded histogram."
-        " One can use 'AXIS:sum' instead of just 'AXIS' to pass hist.sum to the slice",
+        " Use AXIS:sum LOW HIGH to slice [LOW, HIGH] and then sum over the axis (removing it from the histogram).",
     )
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
