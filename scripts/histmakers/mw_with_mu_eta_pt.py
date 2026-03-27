@@ -603,7 +603,14 @@ diff_weights_helper = (
     jpsi_crctn_MC_unc_helper,
     jpsi_crctn_data_unc_helper,
 ) = muon_calibration.make_jpsi_crctn_helpers(
-    args, calib_filepaths, make_uncertainty_helper=True
+    calib_filepaths,
+    muon_corr_mc=args.muonCorrMC,
+    muon_corr_data=args.muonCorrData,
+    scale_var_method=args.muonScaleVariation,
+    scale_A=args.scale_A,
+    scale_e=args.scale_e,
+    scale_M=args.scale_M,
+    make_uncertainty_helper=True,
 )
 
 z_non_closure_parametrized_helper, z_non_closure_binned_helper = (
