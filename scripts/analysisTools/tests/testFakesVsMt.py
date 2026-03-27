@@ -64,6 +64,7 @@ from scripts.analysisTools.plotUtils.utility import (
 # sys.path.append(os.getcwd())
 from scripts.analysisTools.tests.cropNegativeTemplateBins import cropNegativeContent
 from scripts.analysisTools.tests.testPlots1D import plotDistribution1D
+from wremnants.production.histmaker_tools import writeMetaInfoToRootFile
 
 narf.clingutils.Declare('#include "histHelpers.hpp"')
 
@@ -712,13 +713,14 @@ def runStudy(fname, charges, mainOutputFolder, args):
     histoChi2diffTest = None
     histoPullsPol1Slope = None
 
+    # TODO: WIP
     inputHistDict = {
         "mt": "mTStudyForFakes",
         "oneMinusCosdphi": "mTStudyForFakesAlt",
         "mtOverPt": "mTStudyForFakesAlt2",
         "altMt": "mTStudyForFakesAlt3",
-        "dxybs": "mTStudyForFakesAlt4",
-        "mtBinnedUt": "mTStudyForFakesAlt5",
+        "dxybs": "mTStudyForFakesAlt4",  # "mTStudyForFakes_dxybs",
+        "mtBinnedUt": "mTStudyForFakesAlt5",  # "mTStudyForFakes_uTAngleCosine",
     }
 
     etaLabel = "#eta^{#mu}" if not args.absEta else "|#eta^{#mu}|"
@@ -2233,6 +2235,7 @@ def runStudy(fname, charges, mainOutputFolder, args):
             f"Saving FRF correction vs eta-pt in file\n{outFile}\nfor charge {charge}"
         )
         logger.info("")
+        writeMetaInfoToRootFile(fout, args=args)
         fout.Close()
 
         logger.info("-" * 30)
