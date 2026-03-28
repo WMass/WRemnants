@@ -86,6 +86,10 @@ class Datagroups(object):
             from wremnants.postprocessing.datagroups.datagroupsLowPU import (
                 make_datagroups_lowPU as make_datagroups,
             )
+        elif self.era == "2018":
+            from wremnants.postprocessing.datagroups.datagroups_default import (
+                make_datagroups as make_datagroups,
+            )
         else:
             from wremnants.postprocessing.datagroups.datagroups2016 import (
                 make_datagroups_2016 as make_datagroups,
@@ -268,6 +272,9 @@ class Datagroups(object):
     ):
         logger.info(f"Set histselector")
         if self.mode[0] != "w":
+            logger.debug(
+                "histselectors only implemented for single lepton (with fakes)"
+            )
             return  # histselectors only implemented for single lepton (with fakes)
         auxiliary_info = {"ABCDmode": mode}
         signalselector = sel.SignalSelectorABCD
@@ -383,11 +390,15 @@ class Datagroups(object):
         self.nominalName = name
 
     def processScaleFactor(self, proc):
+        logger.debug("entered processScaleFactor")
         if proc.is_data or proc.xsec is None:
             return 1
         scale = proc.xsec / proc.weight_sum
         if not self.xnorm:
             scale *= self.lumi * 1000
+        gen_filter_eff = self.results[proc.name].get("gen_filter_eff", 1)
+        scale * gen_filter_eff
+
         return scale
 
     def getMetaInfo(self):
@@ -547,20 +558,20 @@ class Datagroups(object):
                     )
                     h = preOpMap[member.name](h, **preOpArgs)
 
-                sum_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
-                if len(sum_axes) > 0:
+                if self.globalAction:
+                    logger.debug("Applying global action")
+                    h = self.globalAction(h)
+
+                sum_gen_axes = [x for x in self.sum_gen_axes if x in h.axes.name]
+                if len(sum_gen_axes) > 0:
                     # sum over remaining axes (avoid integrating over fit axes & fakerate axes)
-                    logger.debug(f"Sum over axes {sum_axes}")
-                    h = h.project(*[x for x in h.axes.name if x not in sum_axes])
+                    logger.debug(f"Sum over axes {sum_gen_axes}")
+                    h = h.project(*[x for x in h.axes.name if x not in sum_gen_axes])
                     logger.debug(f"Hist axes are now {h.axes.name}")
 
                 if h_id == id(h):
                     logger.debug(f"Make explicit copy")
                     h = h.copy()
-
-                if self.globalAction:
-                    logger.debug("Applying global action")
-                    h = self.globalAction(h)
 
                 if forceNonzero:
                     logger.debug("force non zero")
@@ -716,6 +727,26 @@ class Datagroups(object):
         def get_sum(h):
             return h.sum() if not hasattr(h.sum(), "value") else h.sum().value
 
+        logger.debug(
+            f"Sorting groups by yields for histName: {histName}, nominalName: {nominalName}"
+        )
+        for k, v in self.groups.items():
+            available_hists = list(v.hists.keys())
+            logger.debug(f"Group: {k}, Available hists: {available_hists}")
+            if histName in v.hists:
+                yield_val = get_sum(v.hists[histName])
+                logger.debug(
+                    f"  Using histName '{histName}' for group '{k}', yield: {yield_val}"
+                )
+            elif nominalName in v.hists:
+                yield_val = get_sum(v.hists[nominalName])
+                logger.debug(
+                    f"  Using nominalName '{nominalName}' for group '{k}', yield: {yield_val}"
+                )
+            else:
+                logger.debug(
+                    f"  No valid histogram found for group '{k}', yield set to 0"
+                )
         self.groups = dict(
             sorted(
                 self.groups.items(),
@@ -729,6 +760,11 @@ class Datagroups(object):
                 reverse=True,
             )
         )
+        logger.info("Groups sorted by yield:")
+        for k, v in self.groups.items():
+            used_hist = histName if histName in v.hists else nominalName
+            yield_val = get_sum(v.hists[used_hist]) if used_hist in v.hists else 0
+            logger.info(f"  {k}: yield={yield_val}")
 
     def getDatagroupsForHist(self, histName):
         filled = {}
@@ -1038,11 +1074,12 @@ class Datagroups(object):
         rename=True,
     ):
         if len(ax_lim):
-            if not all(x.real == 0 or x.imag == 0 for x in ax_lim):
+            specified_ax_lim = [x for x in ax_lim if x is not None]
+            if not all(x.real == 0 or x.imag == 0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim only accepts pure real or imaginary numbers"
                 )
-            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in ax_lim):
+            if any(x.imag == 0 and (x.real % 1) != 0.0 for x in specified_ax_lim):
                 raise ValueError(
                     "In set_rebin_action(): ax_lim requires real numbers to be of integer type"
                 )
