@@ -1381,13 +1381,10 @@ def build_graph(df, dataset):
         df = df.Alias("MET_corr_rec_phi", f"{met}_phi")
 
     df = df.Define(
-        "goodMuons_utReco0",
-        "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
-    )
-    df = df.Define(
         "goodMuons_angleSignUt0",
         "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
     )
+
     df = df.Define(
         "goodMuons_angleCosineUt0",
         "wrem::zqtproj0_angleCosine(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
@@ -1716,185 +1713,189 @@ def build_graph(df, dataset):
         # instead of passIso in mTStudyForFakes
         # df = df.Define("passIsoAlt", "(goodMuons_pfRelIso04_all0 * Muon_pt[goodMuons][0] / goodMuons_jetpt0) < 0.12")
         # df = df.Define("passIsoAlt", "(Muon_vtxAgnPfRelIso04_chg[goodMuons][0] * Muon_pt[goodMuons][0]) < 5.0")
-        if auxiliary_histograms:
-            # Defined as Threshold - |dxybs| so that for signal it peaks at Threshold instead of 0
-            # for convenience in the later study
+
+        # Defined as Threshold - |dxybs| so that for signal it peaks at Threshold instead of 0
+        # for convenience in the later study
+        df = df.Define(
+            "goodMuons_dxybs0", f"{args.dxybs} - abs(Muon_dxybs[goodMuons][0])"
+        )
+
+        mTStudyForFakes = df.HistoBoost(
+            "mTStudyForFakes",
+            mTStudyForFakes_axes,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "transverseMass",
+                "passIso",
+                "hasCleanJet",
+                "goodMuons_dphiMuMet0",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakes)
+
+        mTStudyForFakes_dxybs = df.HistoBoost(
+            "mTStudyForFakes_dxybs",
+            mTStudyForFakes_axes_dxybs,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_dxybs0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakes_dxybs)
+
+        mTStudyForFakes_uTAngleCosine = df.HistoBoost(
+            "mTStudyForFakes_uTAngleCosine",
+            mTStudyForFakes_axes_uTAngleCosine,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "transverseMass",
+                "passIso",
+                "goodMuons_angleCosineUt0",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakes_uTAngleCosine)
+
+        df = df.Define(
+            "goodMuons_utReco0",
+            "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
+        )
+        if not dataset.is_data:
+            # the following can differ from goodMuons_uT0 which uses the gen boson (so both gen muon and neutrino)
             df = df.Define(
-                "goodMuons_dxybs0", f"{args.dxybs} - abs(Muon_dxybs[goodMuons][0])"
+                "goodMuons_utGenMet0",
+                "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
             )
-
-            mTStudyForFakes = df.HistoBoost(
-                "mTStudyForFakes",
-                mTStudyForFakes_axes,
+            df = df.Define(
+                "goodMuons_utReso0",
+                "(goodMuons_utGenMet0 != 0) ? (goodMuons_utReco0 / goodMuons_utGenMet0) : 0.0",
+            )
+            df = df.Define(
+                "goodMuons_angleCosineUtGenMet0",
+                "wrem::zqtproj0_angleCosine(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
+            )
+            ut_bins = (
+                *np.arange(-40, -19, 5),
+                *np.arange(-18, 21, 2),
+                *np.arange(25, 51, 5),
+                *np.arange(60, 101, 10),
+            )
+            axis_ut_recoMet = hist.axis.Variable(
+                ut_bins, name="ut_recoMet", underflow=True, overflow=True
+            )
+            axis_ut_genMet = hist.axis.Variable(
+                ut_bins, name="ut_genMet", underflow=True, overflow=True
+            )
+            axis_ut_reso = hist.axis.Regular(
+                100, -2, 2, name="ut_reso", underflow=True, overflow=True
+            )
+            axis_uTAngleCosineGenMet = hist.axis.Regular(
+                20,
+                -1,
+                1,
+                name="uTAngleCosineGenMet",
+                overflow=False,
+                underflow=False,
+            )
+            #
+            etaPtUtGenUt = df.HistoBoost(
+                "etaPtUtGenUt",
                 [
-                    "goodMuons_eta0",
-                    "goodMuons_pt0",
-                    "goodMuons_charge0",
-                    "transverseMass",
-                    "passIso",
-                    "hasCleanJet",
-                    "goodMuons_dphiMuMet0",
-                    "nominal_weight",
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_recoMet,
+                    axis_ut_genMet,
+                    axis_passIso,
+                    axis_passMT,
                 ],
-            )
-            results.append(mTStudyForFakes)
-
-            mTStudyForFakes_dxybs = df.HistoBoost(
-                "mTStudyForFakes_dxybs",
-                mTStudyForFakes_axes_dxybs,
                 [
                     "goodMuons_eta0",
                     "goodMuons_pt0",
-                    "goodMuons_charge0",
-                    "goodMuons_dxybs0",
+                    "goodMuons_utReco0",
+                    "goodMuons_utGenMet0",
                     "passIso",
                     "passMT",
                     "nominal_weight",
                 ],
             )
-            results.append(mTStudyForFakes_dxybs)
-
-            mTStudyForFakes_uTAngleCosine = df.HistoBoost(
-                "mTStudyForFakes_uTAngleCosine",
-                mTStudyForFakes_axes_uTAngleCosine,
+            results.append(etaPtUtGenUt)
+            #
+            etaPtUtAngleCosineGenUtAngleCosine = df.HistoBoost(
+                "etaPtUtAngleCosineGenUtAngleCosine",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_uTAngleCosine,
+                    axis_uTAngleCosineGenMet,
+                    axis_passIso,
+                    axis_passMT,
+                ],
                 [
                     "goodMuons_eta0",
                     "goodMuons_pt0",
-                    "goodMuons_charge0",
-                    "transverseMass",
-                    "passIso",
                     "goodMuons_angleCosineUt0",
+                    "goodMuons_angleCosineUtGenMet0",
+                    "passIso",
+                    "passMT",
                     "nominal_weight",
                 ],
             )
-            results.append(mTStudyForFakes_uTAngleCosine)
-
-            if not dataset.is_data:
-                # the following can differ from goodMuons_uT0 which uses the gen boson (so both gen muon and neutrino)
-                df = df.Define(
-                    "goodMuons_utGenMet0",
-                    "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
-                )
-                df = df.Define(
+            results.append(etaPtUtAngleCosineGenUtAngleCosine)
+            #
+            etaPtUtResoUt = df.HistoBoost(
+                "etaPtUtResoUt",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_recoMet,
+                    axis_ut_reso,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_utReco0",
                     "goodMuons_utReso0",
-                    "(goodMuons_utGenMet0 != 0) ? (goodMuons_utReco0 / goodMuons_utGenMet0) : 0.0",
-                )
-                df = df.Define(
-                    "goodMuons_angleCosineUtGenMet0",
-                    "wrem::zqtproj0_angleCosine(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
-                )
-                ut_bins = (
-                    *np.arange(-40, -19, 5),
-                    *np.arange(-18, 21, 2),
-                    *np.arange(25, 51, 5),
-                    *np.arange(60, 101, 10),
-                )
-                axis_ut_recoMet = hist.axis.Variable(
-                    ut_bins, name="ut_recoMet", underflow=True, overflow=True
-                )
-                axis_ut_genMet = hist.axis.Variable(
-                    ut_bins, name="ut_genMet", underflow=True, overflow=True
-                )
-                axis_ut_reso = hist.axis.Regular(
-                    100, -2, 2, name="ut_reso", underflow=True, overflow=True
-                )
-                axis_uTAngleCosineGenMet = hist.axis.Regular(
-                    20,
-                    -1,
-                    1,
-                    name="uTAngleCosineGenMet",
-                    overflow=False,
-                    underflow=False,
-                )
-                #
-                etaPtUtGenUt = df.HistoBoost(
-                    "etaPtUtGenUt",
-                    [
-                        axis_eta,
-                        axis_pt,
-                        axis_ut_recoMet,
-                        axis_ut_genMet,
-                        axis_passIso,
-                        axis_passMT,
-                    ],
-                    [
-                        "goodMuons_eta0",
-                        "goodMuons_pt0",
-                        "goodMuons_utReco0",
-                        "goodMuons_utGenMet0",
-                        "passIso",
-                        "passMT",
-                        "nominal_weight",
-                    ],
-                )
-                results.append(etaPtUtGenUt)
-                #
-                etaPtUtAngleCosineGenUtAngleCosine = df.HistoBoost(
-                    "etaPtUtAngleCosineGenUtAngleCosine",
-                    [
-                        axis_eta,
-                        axis_pt,
-                        axis_uTAngleCosine,
-                        axis_uTAngleCosineGenMet,
-                        axis_passIso,
-                        axis_passMT,
-                    ],
-                    [
-                        "goodMuons_eta0",
-                        "goodMuons_pt0",
-                        "goodMuons_angleCosineUt0",
-                        "goodMuons_angleCosineUtGenMet0",
-                        "passIso",
-                        "passMT",
-                        "nominal_weight",
-                    ],
-                )
-                results.append(etaPtUtAngleCosineGenUtAngleCosine)
-                #
-                etaPtUtResoUt = df.HistoBoost(
-                    "etaPtUtResoUt",
-                    [
-                        axis_eta,
-                        axis_pt,
-                        axis_ut_recoMet,
-                        axis_ut_reso,
-                        axis_passIso,
-                        axis_passMT,
-                    ],
-                    [
-                        "goodMuons_eta0",
-                        "goodMuons_pt0",
-                        "goodMuons_utReco0",
-                        "goodMuons_utReso0",
-                        "passIso",
-                        "passMT",
-                        "nominal_weight",
-                    ],
-                )
-                results.append(etaPtUtResoUt)
-                #
-                etaPtUtResoGenUt = df.HistoBoost(
-                    "etaPtUtResoGenUt",
-                    [
-                        axis_eta,
-                        axis_pt,
-                        axis_ut_genMet,
-                        axis_ut_reso,
-                        axis_passIso,
-                        axis_passMT,
-                    ],
-                    [
-                        "goodMuons_eta0",
-                        "goodMuons_pt0",
-                        "goodMuons_utGenMet0",
-                        "goodMuons_utReso0",
-                        "passIso",
-                        "passMT",
-                        "nominal_weight",
-                    ],
-                )
-                results.append(etaPtUtResoGenUt)
-                #
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtResoUt)
+            #
+            etaPtUtResoGenUt = df.HistoBoost(
+                "etaPtUtResoGenUt",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_genMet,
+                    axis_ut_reso,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_utGenMet0",
+                    "goodMuons_utReso0",
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtResoGenUt)
+            #
 
     # add filter of deltaPhi(muon,met) before other histograms (but after histogram mTStudyForFakes)
     if args.dphiMuonMetCut > 0.0 and not args.makeMCefficiency:
@@ -2129,18 +2130,19 @@ def build_graph(df, dataset):
         unweighted = df.HistoBoost("unweighted", axes, cols)
         results.append(unweighted)
 
-    nominal_withUt = df.HistoBoost(
-        "nominal_withUt",
-        [*axes, axis_ut_fine],
-        [*cols, "goodMuons_utReco0", "nominal_weight"],
-    )
-    results.append(nominal_withUt)
-    nominal_withUtAngleCosine = df.HistoBoost(
-        "nominal_withUtAngleCosine",
-        [*axes, axis_uTAngleCosine],
-        [*cols, "goodMuons_angleCosineUt0", "nominal_weight"],
-    )
-    results.append(nominal_withUtAngleCosine)
+    if auxiliary_histograms:
+        nominal_withUt = df.HistoBoost(
+            "nominal_withUt",
+            [*axes, axis_ut_fine],
+            [*cols, "goodMuons_utReco0", "nominal_weight"],
+        )
+        results.append(nominal_withUt)
+        nominal_withUtAngleCosine = df.HistoBoost(
+            "nominal_withUtAngleCosine",
+            [*axes, axis_uTAngleCosine],
+            [*cols, "goodMuons_angleCosineUt0", "nominal_weight"],
+        )
+        results.append(nominal_withUtAngleCosine)
 
     if dataset.is_data:
         nominal = df.HistoBoost("nominal", axes, cols)
