@@ -1411,13 +1411,16 @@ def setup(
             masked_flow_axes=masked_flow_axes,
         )
     else:
+        if isUnfolding:
+            bin_by_bin_stat_scale = 1.0
+        elif wmass:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForMW
+        elif dilepton:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForDilepton
+
         datagroups.addNominalHistograms(
             real_data=args.realData,
-            bin_by_bin_stat_scale=(
-                args.binByBinStatScaleForMW
-                if wmass
-                else args.binByBinStatScaleForDilepton if dilepton else 1.0
-            ),
+            bin_by_bin_stat_scale=bin_by_bin_stat_scale,
             fitresult_data=fitresult_data,
             masked=datagroups.xnorm and fitresult_data is None,
             masked_flow_axes=masked_flow_axes,
@@ -1559,7 +1562,6 @@ def setup(
                 raise NotImplementedError(
                     f"noi variations currently only works for 1 signal group but got {len(signal_groups)}"
                 )
-
             rabbit_helpers.add_noi_unfolding_variations(
                 datagroups,
                 label,
