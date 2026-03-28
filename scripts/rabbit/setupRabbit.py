@@ -207,14 +207,21 @@ def make_subparsers(parser, argv=None):
             help="Include underflow/overflow in masked channels (for iterative unfolding)",
         )
         parser.add_argument(
+            "--unfoldingFullPhaseSpace",
+            action="store_true",
+            help="Include masked channel with extrapolation to the full phase space",
+        )
+        parser.add_argument(
             "--unfoldSimultaneousWandZ",
             action="store_true",
             help="Simultaneously unfold W and Z and correlate Z background in W channel",
         )
         parser.add_argument(
             "--constrainNOIs",
-            action="store_true",
-            help="Constrain NOI variation",
+            type=str,
+            default=[],
+            nargs="+",
+            help="Constrain NOI variation for given groups",
         )
 
         parser = parsing.set_parser_default(parser, "massVariation", 10)
@@ -1001,6 +1008,7 @@ def setup(
     fitresult_data=None,
     unfolding_scalemap=None,
     base_group=None,
+    unfolding_with_flow=False,
 ):
     isUnfolding = args.analysisMode == "unfolding"
     isTheoryAgnostic = args.analysisMode in [
@@ -1233,7 +1241,7 @@ def setup(
             member_filter=lambda x: not x.name.endswith("OOA"),
             fitvar=fitvar,
             histToReadAxes=args.unfoldingLevel,
-            disable_flow_fit_axes=not (datagroups.xnorm and args.unfoldingWithFlow),
+            disable_flow_fit_axes=not (datagroups.xnorm and unfolding_with_flow),
         )
 
         # out of acceptance contribution
@@ -1472,12 +1480,14 @@ def setup(
                 args.pseudoDataProcsRegexp,
             )
 
+    if datagroups.xnorm and isUnfolding and unfolding_with_flow:
+        masked_flow_axes = ["ptGen", "ptVGen"]
+        if "_full" in datagroups.channel:
+            masked_flow_axes.extend(["absEtaGen", "absYVGen"])
+    else:
+        masked_flow_axes = []
+
     if args.correlateSignalMCstat and datagroups.xnorm:
-        masked_flow_axes = (
-            ["ptGen", "ptVGen"]
-            if (datagroups.xnorm and isUnfolding and args.unfoldingWithFlow)
-            else []
-        )
         rabbit_helpers.add_nominal_with_correlated_BinByBinStat(
             datagroups,
             wmass,
@@ -1486,20 +1496,19 @@ def setup(
             masked_flow_axes=masked_flow_axes,
         )
     else:
+        if isUnfolding:
+            bin_by_bin_stat_scale = 1.0
+        elif wmass:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForMW
+        elif dilepton:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForDilepton
+
         datagroups.addNominalHistograms(
             real_data=args.realData,
-            bin_by_bin_stat_scale=(
-                args.binByBinStatScaleForMW
-                if wmass
-                else args.binByBinStatScaleForDilepton if dilepton else 1.0
-            ),
+            bin_by_bin_stat_scale=bin_by_bin_stat_scale,
             fitresult_data=fitresult_data,
             masked=datagroups.xnorm and fitresult_data is None,
-            masked_flow_axes=(
-                ["ptGen", "ptVGen"]
-                if (datagroups.xnorm and isUnfolding and args.unfoldingWithFlow)
-                else []
-            ),
+            masked_flow_axes=masked_flow_axes,
         )
 
     if stat_only and isUnfolding and not isPoiAsNoi:
@@ -1633,6 +1642,11 @@ def setup(
             theoryAgnostic_helper.add_theoryAgnostic_uncertainty()
 
         elif isUnfolding:
+            signal_groups = datagroups.expandProcesses("signal_samples")
+            if len(signal_groups) != 1:
+                raise NotImplementedError(
+                    f"noi variations currently only works for 1 signal group but got {len(signal_groups)}"
+                )
             rabbit_helpers.add_noi_unfolding_variations(
                 datagroups,
                 label,
@@ -1642,7 +1656,7 @@ def setup(
                 scale_norm=args.scaleNormXsecHistYields,
                 gen_level=args.unfoldingLevel,
                 fitresult=unfolding_scalemap,
-                constrained=args.constrainNOIs,
+                constrained=signal_groups[0] in args.constrainNOIs,
             )
 
     if args.muRmuFPolVar and not isTheoryAgnosticPolVar:
@@ -1658,7 +1672,10 @@ def setup(
 
     if args.correlateSignalMCstat and datagroups.xnorm and args.fitresult is None:
         # use variations from reco histogram and apply them to xnorm
-        source = ("nominal", f"{inputBaseName}_yieldsUnfolding_theory_weight")
+        source = (
+            "nominal",
+            f"{inputBaseName.replace('_full','')}_yieldsUnfolding_theory_weight",
+        )
         # need to find the reco variables that correspond to the reco fit, reco fit must be done with variables in same order as gen bins
         gen2reco = {
             "qGen": "charge",
@@ -3105,7 +3122,24 @@ if __name__ == "__main__":
                 stat_only=args.doStatOnly or args.doStatOnlyMasked,
                 channel=f"{channel}_masked",
                 unfolding_scalemap=unfolding_scalemap,
+                unfolding_with_flow=args.unfoldingWithFlow,
             )
+
+            if args.unfoldingFullPhaseSpace:
+                # add masked channel in full phase space
+                datagroups_xnorm = setup(
+                    writer,
+                    args,
+                    ifile,
+                    f"{args.unfoldingLevel}_full",
+                    iLumiScale,
+                    genvar,
+                    genvar=genvar,
+                    stat_only=args.doStatOnly or args.doStatOnlyMasked,
+                    channel=f"{channel}_full_masked",
+                    unfolding_scalemap=unfolding_scalemap,
+                    unfolding_with_flow=True,
+                )
 
             if args.unfoldSimultaneousWandZ and datagroups.mode == "w_mass":
                 # for simultaneous unfolding of W and Z we need to add the noi variations on the Z background in the single lepton channel
