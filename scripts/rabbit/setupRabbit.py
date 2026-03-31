@@ -1502,6 +1502,8 @@ def setup(
             bin_by_bin_stat_scale = args.binByBinStatScaleForMW
         elif dilepton:
             bin_by_bin_stat_scale = args.binByBinStatScaleForDilepton
+        else:
+            bin_by_bin_stat_scale = 1.0
 
         datagroups.addNominalHistograms(
             real_data=args.realData,

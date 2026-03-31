@@ -341,7 +341,7 @@ jobs:
 
       # - name: bsm plot parameter correlations
       #   run: >- 
-      #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
+      #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
       #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' massShiftW100MeV
       #     --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py' --correlation --showNumbers
 
@@ -475,14 +475,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary  --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1097,14 +1097,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1185,7 +1185,7 @@ jobs:
       - name: unfolding plot pulls 
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
-          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 -m ungrouped --sortDescending -s constraint --debug --noImpacts
+          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 -m ungrouped --sortDescending -s constraint --debug --impactType none
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding -n 50 --otherExtensions png pdf
 
       - name: plot xsec
@@ -1204,14 +1204,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary 
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1549,14 +1549,14 @@ jobs:
 
       - name: alphaS z gen-fit xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $ALPHAS_Z_GENFIT
           -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: alphaS z gen-fit xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $ALPHAS_Z_GENFIT
           -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py --correlation
