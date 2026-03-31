@@ -365,7 +365,7 @@ float zqtproj0(const float &goodMuons_pt0, const float &goodMuons_eta0,
                                        GenPart_eta[postFSRnusIdx[0]],
                                        GenPart_phi[postFSRnusIdx[0]], 0.);
   TVector2 Muon(muon.X(), muon.Y()), Neutrino(neutrino.X(), neutrino.Y());
-  return (Muon * ((Muon + Neutrino))) / sqrt(Muon * Muon);
+  return (Muon * ((Muon + Neutrino))) / std::sqrt(Muon * Muon);
 }
 
 float zqtproj0(float pt, float phi, float ptOther, float phiOther) {
@@ -1102,6 +1102,36 @@ double get_differential_norm_weight(const double var_value,
   size_t idx = std::distance(axis_edges.begin(), it) - 1;
 
   return weight_list[idx];
+}
+
+double get_scaled_smeared_variable(const unsigned int run,
+                                   const unsigned int lumi,
+                                   const unsigned long long event,
+                                   const double var, const double scale = 1.0,
+                                   const double smear = 0.1,
+                                   const unsigned int seed_modifier = 0,
+                                   const bool is_phi_angle = false) {
+
+  // use scale=1.1 and smear=0.2 for 10% larger mean value and 20% resolution
+  // smearing
+  double scaled_var = var * scale;
+  if (smear <= 0) {
+    // 0 is valid and equivalent to a dirac delta, negative should never happen
+    return scaled_var;
+  }
+
+  std::seed_seq seq{std::size_t(run), std::size_t(lumi), std::size_t(event),
+                    std::size_t(seed_modifier)};
+  std::mt19937 rng(seq);
+  std::normal_distribution<double> dis(scaled_var,
+                                       std::abs(scaled_var * smear));
+  if (is_phi_angle) {
+    // deal with angle in -pi, pi
+    double phi = dis(rng);
+    return std::atan2(std::sin(phi), std::cos(phi));
+  } else {
+    return dis(rng);
+  }
 }
 
 } // namespace wrem

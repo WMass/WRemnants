@@ -130,7 +130,9 @@ def aggregate_groups(datasets, result_dict, groups_to_aggregate):
 def writeMetaInfoToRootFile(rtfile, exclude_diff="notebooks", args=None):
     import ROOT
 
-    meta_dict = ioutils.make_meta_info_dict(exclude_diff, args=args, wd=common.base_dir)
+    meta_dict = output_tools.make_meta_info_dict(
+        exclude_diff, args=args, wd=common.base_dir
+    )
     d = rtfile.mkdir("meta_info")
     d.cd()
 
