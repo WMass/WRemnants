@@ -996,8 +996,8 @@ for proc in generator_vars.keys():  # loop over processes
             ["lambda20.5", "lambda20.0", "chargeVgenNP0scetlibNPLambda2"],
             ["lambda40.16", "lambda40.01", "chargeVgenNP0scetlibNPLambda4"],
             [
-                "delta_lambda20.105",
-                "delta_lambda20.145",
+                "delta_lambda2-0.02",
+                "delta_lambda20.02",
                 "chargeVgenNP0scetlibNPDelta_Lambda2",
             ],
         ]
