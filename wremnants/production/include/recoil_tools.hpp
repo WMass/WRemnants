@@ -40,10 +40,10 @@ TVector2 get_z_mom(const float pt1, const float phi1, const float pt2,
   TVector2 l1 = TVector2();
   l1.SetMagPhi(pt1, phi1);
 
-  TVector2 l2 = TVector2();
-  l2.SetMagPhi(pt2, phi2);
+  TVector2 z = TVector2();
+  z.SetMagPhi(pt2, phi2);
+  z += l1;
 
-  TVector2 z = l1 + l2;
   return z;
 }
 

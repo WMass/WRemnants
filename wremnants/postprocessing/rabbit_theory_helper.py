@@ -4,6 +4,11 @@ import hist
 import numpy as np
 
 from wremnants.postprocessing import syst_tools
+from wremnants.postprocessing.theory_variation_labels import (
+    BC_QUARK_MASS_VARIATIONS,
+    LATTICE_GAMMA_NP_UNCERTAINTIES,
+    TRANSITION_FO_UNCERTAINTIES,
+)
 from wremnants.utilities import binning, theory_utils
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -13,6 +18,32 @@ logger = logging.child_logger(__name__)
 
 def match_str_axis_entries(str_axis, match_re):
     return [x for x in str_axis if any(re.match(r, x) for r in match_re)]
+
+
+def _pdf_entry_index(pdf_var):
+    if not isinstance(pdf_var, str) or not pdf_var.startswith("pdf"):
+        raise ValueError(f"Unexpected PDF variation label '{pdf_var}'")
+    return int(pdf_var.replace("pdf", ""))
+
+
+def _quark_mass_outnames(nuisance_name):
+    entries = {
+        nuisance: (down_var, up_var)
+        for _, nuisance, down_var, up_var in BC_QUARK_MASS_VARIATIONS
+    }
+    if nuisance_name not in entries:
+        raise KeyError(
+            f"Nuisance '{nuisance_name}' not found in BC_QUARK_MASS_VARIATIONS"
+        )
+
+    down_var, up_var = entries[nuisance_name]
+    down_idx = _pdf_entry_index(down_var)
+    up_idx = _pdf_entry_index(up_var)
+    max_idx = max(down_idx, up_idx)
+    out_names = [""] * (max_idx + 1)
+    out_names[down_idx] = f"{nuisance_name}Down"
+    out_names[up_idx] = f"{nuisance_name}Up"
+    return out_names
 
 
 class TheoryHelper(object):
@@ -628,12 +659,9 @@ class TheoryHelper(object):
             self.np_model == "LatticeEigvars"
         ):  # new SCETlib NP model, using lattice central values and constrained eigenvariations
             lattice_vals = [
-                "lambda2_nu0.0696-lambda4_nu0.0122-lambda_inf_nu1.1Ext",
-                "lambda2_nu0.1044-lambda4_nu0.0026-lambda_inf_nu2.1Ext",
-                "lambda2_nu0.1153-lambda4_nu0.0032-lambda_inf_nu1.6Ext",
-                "lambda2_nu0.0587-lambda4_nu0.0116-lambda_inf_nu1.6Ext",
-                "lambda2_nu0.0873-lambda4_nu0.0092",
-                "lambda2_nu0.0867-lambda4_nu0.0056",
+                variation
+                for up, down, _ in LATTICE_GAMMA_NP_UNCERTAINTIES
+                for variation in (up, down)
             ]
             if not all([x in self.corr_hist.axes[self.syst_ax] for x in lattice_vals]):
                 raise ValueError(
@@ -1125,9 +1153,9 @@ class TheoryHelper(object):
             outNames = []
 
             if transition:
-                sel_vars.extend(
-                    ["transition_points0.2_0.35_1.0", "transition_points0.2_0.75_1.0"]
-                )
+                transition_down = TRANSITION_FO_UNCERTAINTIES[0][1]
+                transition_up = TRANSITION_FO_UNCERTAINTIES[0][0]
+                sel_vars.extend([transition_down, transition_up])
                 outNames.extend(
                     [
                         f"resumTransition{name_append}Down",
@@ -1136,9 +1164,9 @@ class TheoryHelper(object):
                 )
 
             if scale:
-                sel_vars.extend(
-                    ["renorm_scale_pt20_envelope_Down", "renorm_scale_pt20_envelope_Up"]
-                )
+                scale_down = TRANSITION_FO_UNCERTAINTIES[1][1]
+                scale_up = TRANSITION_FO_UNCERTAINTIES[1][0]
+                sel_vars.extend([scale_down, scale_up])
                 resum_fo_name = "resumFOScale"
                 if not self.correlate_fo_scale:
                     resum_fo_name += name_append
@@ -1223,12 +1251,7 @@ class TheoryHelper(object):
             symmetrize=self.pdf_symmetrize,
             groups=["bcQuarkMass", "pTModeling", "theory", "theory_qcd"],
             passToFakes=self.propagate_to_fakes,
-            outNames=[
-                "",
-                "pdfMSHT20mbrangeDown",
-            ]
-            + [""] * 4
-            + ["pdfMSHT20mbrangeUp"],
+            outNames=_quark_mass_outnames("pdfMSHT20mbrange"),
         )
 
         self.datagroups.addSystematic(
@@ -1238,12 +1261,7 @@ class TheoryHelper(object):
             symmetrize=self.pdf_symmetrize,
             groups=["bcQuarkMass", "pTModeling", "theory", "theory_qcd"],
             passToFakes=self.propagate_to_fakes,
-            outNames=[
-                "",
-                "pdfMSHT20mcrangeDown",
-            ]
-            + [""] * 6
-            + ["pdfMSHT20mcrangeUp"],
+            outNames=_quark_mass_outnames("pdfMSHT20mcrange"),
         )
 
     def pdf_inflation_factor(self, infoMap):

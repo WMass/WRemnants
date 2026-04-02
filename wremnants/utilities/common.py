@@ -16,7 +16,7 @@ BR_TAUToMU = 0.1739
 BR_TAUToE = 0.1782
 Z_TAU_TO_LEP_RATIO = 1.0 - (1.0 - BR_TAUToMU - BR_TAUToE) ** 2
 
-# cross sections in pb at sqrt(s)=13Tev (TODO: add source information)
+# cross sections in pb at sqrt(s)=13TeV (TODO: add source information)
 xsec_DYJetsToLL = 2001.9
 xsec_WplusJetsToLNu = 11765.9
 xsec_WminusJetsToLNu = 8703.87
@@ -66,6 +66,7 @@ calib_filepaths = {
     "data_resofile": f"{calib_dir}/sigmaDATA_LBL_JYZ.root",
     "tflite_file": f"{calib_dir}/muon_response.tflite",
     # 'tflite_file': f"{calib_dir}/muon_response_nosmearing.tflite"
+    "kaon_tflite_file": f"{calib_dir}/kaon_response.tflite",
 }
 closure_filepaths = {
     "parametrized": f"{closure_dir}/parametrizedClosureZ_ORkinweight_binsel_MCstat_fullres.root",
