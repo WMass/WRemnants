@@ -262,7 +262,7 @@ def make_cross_section(sub, logger=None, verbose=4):
             "observable": "DSIG/DPT",
             "isDividedByBinWidth": True,
             "addImage": True,
-            "reference": "Fig A12",
+            "reference": "Fig A7",
         },
         ##
         "Zwlike_y": {
@@ -271,7 +271,7 @@ def make_cross_section(sub, logger=None, verbose=4):
             "observable": "DSIG/DYRAP",
             "isDividedByBinWidth": True,
             "addImage": True,
-            "reference": "Fig xx in supplementary material, and Fig A9 in paper",
+            "reference": "Fig B3 in supplementary material",
         },
         ##
         "Zwlike_pt": {
@@ -280,7 +280,7 @@ def make_cross_section(sub, logger=None, verbose=4):
             "observable": "DSIG/DPT",
             "isDividedByBinWidth": True,
             "addImage": True,
-            "reference": "Fig 2 and A9",
+            "reference": "Fig 2",
         },
         ##
         "W_pt_helFit": {
@@ -289,7 +289,7 @@ def make_cross_section(sub, logger=None, verbose=4):
             "observable": "DSIG/DPT",
             "isDividedByBinWidth": True,
             "addImage": True,
-            "reference": "Fig A14a",
+            "reference": "Fig B6a in supplementary material",
         },
         ##
         "W_y_helFit": {
@@ -298,7 +298,7 @@ def make_cross_section(sub, logger=None, verbose=4):
             "observable": "DSIG/DYRAP",
             "isDividedByBinWidth": True,
             "addImage": True,
-            "reference": "Fig A14b",
+            "reference": "Fig B6b in supplementary material",
         },
     }
 
@@ -391,34 +391,55 @@ def make_mass_summary(sub, logger=None, verbose=4):
     # TODO: use a common path
     basePath = data_dir + "/hepdata/SMP_23_002/"
     input_dict = {
+        # obsolete plot
+        # "W_ptW_modeling": {
+        #     "file": "W/Wmass_modeling_summary.root",
+        #     "hist": "mass_summary",
+        #     "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from $\\mathit{p}_{T}^{W}$ modeling), with the alternative measurements using different approaches to the $\\mathit{p}_{T}^{W}$ modeling and its uncertainty.",
+        #     "indepVarTitle": "$\\mathit{p}_{T}^{W}$ model",
+        #     "observable": "M",
+        #     "addImage": True,
+        #     "reference": "Fig A12",
+        # },
+        #
+        "Zwlike_ptZ_modeling": {
+            "file": "Zwlike/Wlike_modeling_summary_PerBinStatCorrUnc.root",
+            "hist": "mass_summary",
+            "desc": "Comparison of the nominal $\\mathit{m}_{Z}$ measurement and its uncertainty (total or only from $\\mathit{p}_{T}^{Z}$ modeling), with the alternative measurements using different approaches to the $\\mathit{p}_{T}^{Z}$ modeling and its uncertainty.",
+            "indepVarTitle": "$\\mathit{p}_{T}^{Z}$ model",
+            "observable": "M",
+            "addImage": True,
+            "reference": "Fig B5a in supplementary material",
+        },
+        #
         "W_ptW_modeling": {
-            "file": "W/Wmass_modeling_summary.root",
+            "file": "W/Wmass_modeling_summary_PerBinStatCorrUnc.root",
             "hist": "mass_summary",
             "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from $\\mathit{p}_{T}^{W}$ modeling), with the alternative measurements using different approaches to the $\\mathit{p}_{T}^{W}$ modeling and its uncertainty.",
             "indepVarTitle": "$\\mathit{p}_{T}^{W}$ model",
             "observable": "M",
             "addImage": True,
-            "reference": "Fig A12",
+            "reference": "Fig B5b in supplementary material",
         },
         #
         "W_pdfUnscaled": {
             "file": "W/Wmass_pdf_summary_unscaled.root",
             "hist": "mass_summary",
-            "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from the CT18Z PDF set), with the alternative measurements using different PDFs and their uncertainty before the scaling procedure described in the paper text. The measured mass values are those reported in Table A.7 of the paper.",
+            "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from the CT18Z PDF set), with the alternative measurements using different PDFs and their uncertainty before the scaling procedure described in the paper text. The measured mass values are those reported in Table A.3 of the paper.",
             "indepVarTitle": "PDF set",
             "observable": "M",
             "addImage": True,
-            "reference": "Fig A18a",
+            "reference": "Fig B7a in supplementary material",
         },
         #
         "W_pdfScaled": {
             "file": "W/Wmass_pdf_summary_scaled.root",
             "hist": "mass_summary",
-            "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from the CT18Z PDF set), with the alternative measurements using different PDFs and their uncertainty after the scaling procedure described in the paper text. The measured mass values are those reported in Table A.7 of the paper. The scale factors for the PDF uncertainties from each set are reported in Table A.3 of the paper.",
+            "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from the CT18Z PDF set), with the alternative measurements using different PDFs and their uncertainty after the scaling procedure described in the paper text. The measured mass values and scale factors for the PDF uncertainties from each set are those reported in Table A.3 of the paper.",
             "indepVarTitle": "PDF set",
             "observable": "M",
             "addImage": True,
-            "reference": "Fig A18b",
+            "reference": "Fig B7b in supplementary material",
         },
     }
 
@@ -537,15 +558,16 @@ if __name__ == "__main__":
     if outdir and not os.path.exists(outdir):
         os.makedirs(outdir)
 
-    logger.warning("\n\n")
-    logger.warning(
-        r"To save PNG images for some plots and convert them within hepdata_lib"
-    )
-    logger.warning(r"you need to work within the following singularity image")
-    logger.warning(
-        r"/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v38_patch0"
-    )
-    logger.warning("\n\n")
+    ### message might be obsolete, latest singularity should work
+    # logger.warning("\n\n")
+    # logger.warning(
+    #     r"To save PNG images for some plots and convert them within hepdata_lib"
+    # )
+    # logger.warning(r"you need to work within the following singularity image")
+    # logger.warning(
+    #     r"/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v38_patch0"
+    # )
+    # logger.warning("\n\n")
 
     if not args.skipCovariance:
         logger.warning("Preparing covariance matrices as root files")
