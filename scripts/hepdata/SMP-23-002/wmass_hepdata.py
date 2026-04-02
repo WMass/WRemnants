@@ -9,8 +9,8 @@ from hepdata_lib.helpers import round_value_and_uncertainty
 from scripts.analysisTools.plotUtils.utility import (
     common_plot_parser,  # TODO: move to main common parser
 )
-from utilities.common import base_dir, data_dir
-from utilities.io_tools import conversion_tools, input_tools
+from wremnants.utilities.common import base_dir, data_dir
+from wremnants.utilities.io_tools import conversion_tools, root_io
 from wums import logging
 
 
@@ -106,8 +106,8 @@ def make_covariance_matrix(logger=None, verbose=4):
 
         # could use load_covariance_pois in utilities/io_tools/combinetf_input.py
         # which returns covariance as boost hist and a list with rows' labels
-        infile = input_tools.safeOpenRootFile(filename)
-        th2 = input_tools.safeGetRootObject(infile, histname, detach=True)
+        infile = root_io.safeOpenRootFile(filename)
+        th2 = root_io.safeGetRootObject(infile, histname, detach=True)
         infile.Close()
 
         logger.info("Histogram read from file, converting labels ...")
@@ -130,7 +130,7 @@ def make_covariance_matrix(logger=None, verbose=4):
         houtputname = "covariance_matrix"
         tag = m.lower()
         outname = f"{tmp_outdir}covariance_{tag}.root"
-        outfile = input_tools.safeOpenRootFile(outname, mode="recreate")
+        outfile = root_io.safeOpenRootFile(outname, mode="recreate")
         th2.Write(houtputname)
         outfile.Close()
         logger.info(f"Histogram {houtputname} saved in file {outname}")
@@ -193,8 +193,8 @@ def make_pulls_and_constraints(sub, logger=None, verbose=4):
         )
 
         # open root file to get histogram and retrieve bin labels
-        infile = input_tools.safeOpenRootFile(filename)
-        th2 = input_tools.safeGetRootObject(infile, histname, detach=True)
+        infile = root_io.safeOpenRootFile(filename)
+        th2 = root_io.safeGetRootObject(infile, histname, detach=True)
         infile.Close()
         logger.info("Histogram read from file ...")
 
@@ -325,7 +325,7 @@ def make_cross_section(sub, logger=None, verbose=4):
 
         # loop file to get list of keys
         # but then use the hepdata_lib helpers to retrieve all the information
-        infile = input_tools.safeOpenRootFile(filename)
+        infile = root_io.safeOpenRootFile(filename)
         hnames = []
         htitles = []
         xAxisTitle = ""
@@ -447,8 +447,8 @@ def make_mass_summary(sub, logger=None, verbose=4):
 
         logger.info("Preparing 1 table ...")
 
-        infile = input_tools.safeOpenRootFile(filename)
-        th2 = input_tools.safeGetRootObject(infile, histname, detach=True)
+        infile = root_io.safeOpenRootFile(filename)
+        th2 = root_io.safeGetRootObject(infile, histname, detach=True)
         infile.Close()
         xAxisTitle = th2.GetYaxis().GetBinLabel(1)
         if th2.GetNbinsY() == 4:

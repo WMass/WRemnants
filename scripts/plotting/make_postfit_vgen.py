@@ -7,9 +7,9 @@ import pandas as pd
 
 import narf
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import input_tools
-from wremnants import syst_tools
+from wremnants.postprocessing import syst_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import input_tools, root_io
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 
@@ -70,17 +70,15 @@ def quadrature_sum_hist(hists, is_down):
 def load_hist(filename, fittype="postfit", helicity=False):
     fitresult = rabbit.io_tools.get_fitresult(filename)
     obs = {args.obs, "helicity", "chargeVgen"} if helicity else {args.obs}
-    if "physics_models" in fitresult.keys():
-        if any("Project" in k for k in fitresult["physics_models"].keys()):
-            model_key = [
-                k for k in fitresult["physics_models"].keys() if "Project" in k
-            ][0]
-            h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+    if "mappings" in fitresult.keys():
+        if any("Project" in k for k in fitresult["mappings"].keys()):
+            model_key = [k for k in fitresult["mappings"].keys() if "Project" in k][0]
+            h = fitresult["mappings"][model_key]["channels"]["ch0"][
                 f"hist_{fittype}_inclusive"
             ]
         else:
             model_key = "Basemodel"
-        h = fitresult["physics_models"][model_key]["channels"]["ch0"][
+        h = fitresult["mappings"][model_key]["channels"]["ch0"][
             f"hist_{fittype}_inclusive"
         ]
     else:
@@ -96,7 +94,11 @@ hnom = "nominal_gen"
 
 unfolded_data = pickle.load(open(args.unfolded, "rb")) if args.unfolded else None
 
-procs = ["WplusmunuPostVFP", "WminusmunuPostVFP"] if args.w else ["ZmumuPostVFP"]
+procs = (
+    ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
+    if args.w
+    else ["Zmumu_2016PostVFP"]
+)
 
 hists_nom = []
 hists_err = []
@@ -403,7 +405,7 @@ if args.cmsDecor == "Preliminary":
 if args.saveForHepdata:
     # open root file
     outfile_root = f"{outdir}/{name}.root"
-    rf = input_tools.safeOpenRootFile(outfile_root, mode="recreate")
+    rf = root_io.safeOpenRootFile(outfile_root, mode="recreate")
     logger.warning(f"Saving histograms for HEPData in {outfile_root}")
     for ih, h in enumerate(hists_nom):
         hroot = narf.hist_to_root(h)

@@ -1,10 +1,9 @@
 import os
 
-from utilities import common, parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.utilities import binning, common, parsing, samples
 from wums import logging
 
-analysis_label = Datagroups.analysisLabel(
+analysis_label = common.analysis_label(
     os.path.basename(__file__).replace("_VETOEFFI", "")
 )
 parser, initargs = parsing.common_parser(analysis_label)
@@ -15,16 +14,15 @@ import hist
 import ROOT
 
 import narf
-from wremnants import (
+from wremnants.production import (
     muon_calibration,
     muon_selections,
     pileup,
     theory_corrections,
-    theory_tools,
     vertex,
 )
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import (
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
     write_analysis_output,
@@ -48,6 +46,7 @@ datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
+    aux=args.auxiliaryProcs,
     nanoVersion="v9",
     base_path=args.dataPath,
     oneMCfileEveryN=args.oneMCfileEveryN,
@@ -86,7 +85,7 @@ axis_pt = hist.axis.Regular(
     overflow=False,
     underflow=False,
 )
-axis_charge = common.axis_charge
+axis_charge = binning.axis_charge
 axis_passVeto = hist.axis.Boolean(name="passVeto")
 
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passVeto]
@@ -116,7 +115,14 @@ closure_filepaths = common.closure_filepaths
     jpsi_crctn_MC_unc_helper,
     jpsi_crctn_data_unc_helper,
 ) = muon_calibration.make_jpsi_crctn_helpers(
-    args, calib_filepaths, make_uncertainty_helper=True
+    calib_filepaths,
+    muon_corr_mc=args.muonCorrMC,
+    muon_corr_data=args.muonCorrData,
+    scale_var_method=args.muonScaleVariation,
+    scale_A=args.scale_A,
+    scale_e=args.scale_e,
+    scale_M=args.scale_M,
+    make_uncertainty_helper=True,
 )
 
 mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper = (
@@ -132,7 +138,7 @@ bias_helper = (
 )
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
-procsWithTheoryCorr = [d.name for d in datasets if d.name in common.vprocs]
+procsWithTheoryCorr = [d.name for d in datasets if d.name in samples.vprocs]
 if len(procsWithTheoryCorr):
     corr_helpers = theory_corrections.load_corr_helpers(
         procsWithTheoryCorr, theory_corrs
@@ -146,9 +152,9 @@ smearing_weights_procs = []
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
-    isW = dataset.name in common.wprocs
-    isWmunu = dataset.name in ["WplusmunuPostVFP", "WminusmunuPostVFP"]
-    isZ = dataset.name in common.zprocs
+    isW = dataset.name in samples.wprocs
+    isWmunu = dataset.name in ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
+    isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"
 
@@ -187,7 +193,7 @@ def build_graph(df, dataset):
 
     logger.debug(f"Exp weight defined: {weight_expr}")
     df = df.Define("exp_weight", weight_expr)
-    df = theory_tools.define_theory_weights_and_corrs(
+    df = theory_corrections.define_theory_weights_and_corrs(
         df, dataset.name, corr_helpers, args
     )
 

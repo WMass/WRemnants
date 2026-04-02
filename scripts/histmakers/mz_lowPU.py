@@ -1,10 +1,9 @@
 import os
 
-from utilities import common, parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.utilities import binning, common, parsing, samples
 from wums import logging
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 parser.add_argument(
     "--flavor",
@@ -19,8 +18,6 @@ parser = parsing.set_parser_default(
 )
 parser = parsing.set_parser_default(parser, "era", "2017H")
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
-
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -28,16 +25,15 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 import hist
 
 import narf
-import wremnants.lowpu as lowpu
-from wremnants import (
+from wremnants.production import (
+    lowpu,
     muon_selections,
-    syst_tools,
+    systematics,
     theory_corrections,
-    theory_tools,
     unfolding_tools,
 )
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import (
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
     write_analysis_output,
@@ -45,8 +41,7 @@ from wremnants.histmaker_tools import (
 
 ###################################
 flavor = args.flavor  # mumu, ee
-sigProcs = ["Zmumu"] if flavor == "mumu" else ["Zee"]
-base_group = sigProcs[0]
+base_group = f"Z{flavor}"
 
 # dilepton invariant mass cuts
 mass_min = 60
@@ -61,16 +56,16 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=list(
         set(
-            args.excludeProcs + ["singlemuon"] if flavor == "ee" else ["singleelectron"]
+            args.excludeProcs + [f"SingleMuon_{args.era}"]
+            if flavor == "ee"
+            else [f"HighEGJet_{args.era}"]
         )
     ),
+    aux=args.auxiliaryProcs,
     base_path=args.dataPath,
-    extended="msht20an3lo" not in args.pdfs,
-    mode=analysis_label,
     era=args.era,
     nanoVersion="v12",
 )
-
 
 for d in datasets:
     logger.info(f"Dataset {d.name}")
@@ -96,7 +91,7 @@ nominal_axes = [
         overflow=True,
     ),
     hist.axis.Regular(20, -2.5, 2.5, name="yll", overflow=True, underflow=True),
-    common.axis_charge,
+    binning.axis_charge,
 ]
 
 # corresponding columns
@@ -108,7 +103,9 @@ axis_wlike_met = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axes_mt = [axis_mt]
 cols_mt = ["transverseMass"]
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(args)
+theory_helpers_procs = theory_corrections.make_theory_helpers(
+    args.pdfs, args.theoryCorr
+)
 axis_ptVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["ptVgen"]
 axis_chargeVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["chargeVgen"]
 
@@ -134,17 +131,17 @@ if args.unfolding:
     )
 
     if not args.poiAsNoi:
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
+        datasets = unfolding_tools.add_out_of_acceptance(datasets, group=base_group)
 
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs_lowpu], theory_corrs
+    [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
 )
 
 # recoil initialization
 if not args.noRecoil:
-    from wremnants import recoil_tools
+    from wremnants.production import recoil_tools
 
     recoilHelper = recoil_tools.Recoil("lowPU", args, flavor)
 
@@ -154,11 +151,8 @@ def build_graph(df, dataset):
 
     results = []
 
-    isW = dataset.name in common.wprocs_lowpu
-    isZ = dataset.name in common.zprocs_lowpu
-
     theory_helpers = None
-    if dataset.name in common.vprocs_lowpu:
+    if dataset.name in samples.vprocs:
         theory_helpers = theory_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
@@ -172,7 +166,7 @@ def build_graph(df, dataset):
     axes = nominal_axes
     cols = nominal_cols
 
-    if args.unfolding and dataset.name in sigProcs:
+    if args.unfolding and dataset.group == base_group:
         df = unfolder_z.add_gen_histograms(
             args, df, results, dataset, corr_helpers, theory_helpers
         )
@@ -361,7 +355,7 @@ def build_graph(df, dataset):
             df = df.Define("SFMC", "lepSF_IDISO*lepSF_HLT*prefireCorr")
 
         df = df.Define("exp_weight", "SFMC")
-        df = theory_tools.define_theory_weights_and_corrs(
+        df = theory_corrections.define_theory_weights_and_corrs(
             df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
     else:
@@ -478,7 +472,7 @@ def build_graph(df, dataset):
             "NonTrigLep_charge",
         ]
         df = recoilHelper.recoil_Z(
-            df, results, dataset, common.zprocs_recoil_lowpu, leps_uncorr, leps_corr
+            df, results, dataset, samples.zprocs_recoil_lowpu, leps_uncorr, leps_corr
         )  # produces corrected MET as MET_corr_rec_pt/phi
     else:
         df = df.Alias("MET_corr_rec_pt", "MET_pt")
@@ -534,12 +528,12 @@ def build_graph(df, dataset):
                     f"{n}_prefireCorr",
                     [*a],
                     [*c, "prefireCorr_syst_tensor"],
-                    tensor_axes=[common.down_up_axis],
+                    tensor_axes=[binning.down_up_axis],
                 )
             )
 
-            if dataset.name in common.vprocs_lowpu:
-                df = syst_tools.add_theory_hists(
+            if dataset.name in samples.vprocs:
+                df = systematics.add_theory_hists(
                     results,
                     df,
                     args,
@@ -662,7 +656,7 @@ def build_graph(df, dataset):
             if not args.noRecoil and args.recoilUnc:
                 df = recoilHelper.add_recoil_unc_Z(df, results, dataset, c, a, n)
 
-    if args.unfolding and args.poiAsNoi and dataset.name in sigProcs:
+    if args.unfolding and args.poiAsNoi and dataset.group == base_group:
         unfolder_z.add_poi_as_noi_histograms(
             df,
             results,

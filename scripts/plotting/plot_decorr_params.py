@@ -6,9 +6,9 @@ from matplotlib.patches import Polygon
 from scipy.stats import chi2
 
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import rabbit_input
-from utilities.styles import styles
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import rabbit_input
+from wremnants.utilities.styles import styles
 from wums import logging, output_tools, plot_tools
 
 
@@ -19,9 +19,10 @@ def get_values_and_impacts_as_panda(
     global_impacts=False,
     scale=1.0,
     scale_from_poi_name=False,
+    result=None,
 ):
 
-    fitres, meta = rabbit.io_tools.get_fitresult(input_file, meta=True)
+    fitres, meta = rabbit.io_tools.get_fitresult(input_file, meta=True, result=result)
     poi_names = rabbit.io_tools.get_poi_names(meta)
     poi_values = []
     totals = []
@@ -81,6 +82,12 @@ if __name__ == "__main__":
         help="Fitresult file from combinetf with nominal fit",
     )
     parser.add_argument(
+        "--result",
+        default=None,
+        type=str,
+        help="fitresults key in file (e.g. 'asimov'). Leave empty for data fit result.",
+    )
+    parser.add_argument(
         "--data",
         action="store_true",
         help="Specify if the fit is performed on data, needed for correct p-value calculation",
@@ -129,6 +136,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Use the global impacts to plot uncertainties (they must be present in the input file)",
     )
+    parser.add_argument(
+        "--poiScale",
+        type=float,
+        default=-1,
+        help="Scale poi uncertainty by this factor, default does nothing",
+    )
 
     parser = parsing.set_parser_default(parser, "legCols", 1)
 
@@ -152,6 +165,7 @@ if __name__ == "__main__":
             args.infileInclusive,
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
+            result=args.result,
         )
         fInclusive = rabbit.io_tools.get_fitresult(args.infileInclusive)
         nll_inclusive = fInclusive["nllvalreduced"]
@@ -162,12 +176,14 @@ if __name__ == "__main__":
             args.infileNominal,
             partial_impacts_to_read=partial_impacts_to_read,
             global_impacts=args.globalImpacts,
+            result=args.result,
         )
 
     df = get_values_and_impacts_as_panda(
         args.infile,
         partial_impacts_to_read=partial_impacts_to_read,
         global_impacts=args.globalImpacts,
+        result=args.result,
     )
 
     df["Params"] = df["Name"].apply(lambda x: x.split("_")[0])
@@ -176,27 +192,32 @@ if __name__ == "__main__":
     for param, df_p in df.groupby("Params"):
         logger.info(f"Make plot for {param}")
 
-        if param is not None and "MeV" in param:
-            xlabel = param.split("MeV")[0]
-            if xlabel.startswith("massShift"):
-                proc = xlabel.replace("massShift", "")[0]
+        scale = args.poiScale if args.poiScale > 0 else 1
+
+        if param is not None and ("MeV" in param or "width" in param):
+            if param.startswith("massShift"):
+                proc = param.split("MeV")[0].replace("massShift", "")[0]
                 xlabel = r"$\mathit{m}_\mathrm{" + str(proc) + "}$ (MeV)"
                 offset = 80354 if proc == "W" else 91187.6
 
-            if xlabel.startswith("Width"):
-                proc = xlabel.replace("Width", "")[0]
+                scale = float(
+                    re.search(
+                        r"\d+(\.\d+)?", param.split("MeV")[0].replace("p", ".")
+                    ).group()
+                )
+            elif param.startswith("width"):
+                proc = param.replace("width", "")[0]
                 xlabel = r"$\mathit{\Gamma}_\mathrm{" + str(proc) + "}$ (MeV)"
                 offset = 2091.13 if proc == "W" else 2494.13
+                if args.poiScale < 0:
+                    logger.warning(f"No scaling set for {param} uncertainty, using 1.0")
+            else:
+                xlabel = param
 
-            scale = float(
-                re.search(
-                    r"\d+(\.\d+)?", param.split("MeV")[0].replace("p", ".")
-                ).group()
-            )
             if "Diff" in param:
                 scale *= 2  # take diffs by 2 as up and down pull in opposite directions
         else:
-            scale = 1
+            scale = args.poiScale if args.poiScale > 0 else 1
             offset = 0
             xlabel = param
 
@@ -226,15 +247,15 @@ if __name__ == "__main__":
         if "eta" in axes:
             # this assumes the 48 eta bins are rebinned uniformly, and 0 is an edge of the central bins
             nEtaBins = df_p.shape[0] if "charge" not in axes else int(df_p.shape[0] / 2)
-            nEtaBinsOneSide = int(nEtaBins / 2)
+            lowest_eta = -2.4
             etaWidth = 4.8 / nEtaBins
             df_p["yticks"] = (
                 df_p["eta"]
-                .apply(lambda x: round((x - nEtaBinsOneSide) * etaWidth, 1))
+                .apply(lambda x: round(lowest_eta + x * etaWidth, 1))
                 .astype(str)
                 + r"<\mathit{\eta}^{\mu}<"
                 + df_p["eta"]
-                .apply(lambda x: round((x - nEtaBinsOneSide) * etaWidth + etaWidth, 1))
+                .apply(lambda x: round(lowest_eta + (x + 1) * etaWidth, 1))
                 .astype(str)
             )
             if "charge" in axes:
@@ -370,6 +391,22 @@ if __name__ == "__main__":
             df_p["yticks"] = (
                 df_p["phi"].apply(lambda x: str(axis_ranges[x])).astype(str)
             )
+        elif "charge" in axes:
+            axis_ranges = {
+                0: rf"$\mathit{{q}}_{{T}}^{{\mu}}$ < 0",
+                1: rf"$\mathit{{q}}_{{T}}^{{\mu}}$ > 0",
+            }
+            df_p["yticks"] = (
+                df_p["charge"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
+        elif "utAngleSign" in axes:
+            axis_ranges = {
+                0: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ < 0",
+                1: rf"$\mathit{{u}}_{{T}}^{{\mu}}$ > 0",
+            }
+            df_p["yticks"] = (
+                df_p["utAngleSign"].apply(lambda x: str(axis_ranges[x])).astype(str)
+            )
         elif "nRecoVtx" in axes:
             nRecoVtxBins = df.shape[0]
             if nRecoVtxBins == 5:
@@ -399,7 +436,7 @@ if __name__ == "__main__":
         val = df_p["value"].values * scale + offset
         err = df_p["err_Total"].values * scale
         err_stat = df_p["err_stat"].values * scale
-        err_cal = df_p[f"err_{partialImpact}"].values * scale
+        err_part = df_p[f"err_{partialImpact}"].values * scale
 
         if args.infileNominal:
             if len(dfNominal) > 1:
@@ -429,7 +466,7 @@ if __name__ == "__main__":
                 )
 
             c_err_stat = dfInclusive["err_stat"].values[0] * scale
-            c_err_cal = dfInclusive[f"err_{partialImpact}"].values[0] * scale
+            c_err_part = dfInclusive[f"err_{partialImpact}"].values[0] * scale
             c_err = dfInclusive["err_Total"].values[0] * scale
             c = dfInclusive["value"].values[0] * scale + offset
 
@@ -474,12 +511,13 @@ if __name__ == "__main__":
             logger.info(f"nll_inclusive = {nll_inclusive}; nll = {nll}")
 
             chi2_stat = 2 * (nll_inclusive - nll)
-            if args.data:
-                chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
-            else:
+            chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
+            if args.result == "asimov":
+                chi2_stat = 0
+            elif not args.data:
                 # in case of pseudodata fits there are no statistical fluctuations and we can only access the expected p-value, where ndf has to be added to the test statistic
                 chi2_stat += ndf
-                chi2_label = r"<\mathit{\chi}^2/\mathit{ndf}>"
+                chi2_label = f"<{chi2_label}>"
 
             p_value = 1 - chi2.cdf(chi2_stat, ndf)
             logger.info(f"ndf = {ndf}; Chi2 = {chi2_stat}; p-value={p_value}")
@@ -530,7 +568,7 @@ if __name__ == "__main__":
                 alpha=0.3,
             )
             ax1.fill_between(
-                [c - c_err_cal, c + c_err_cal],
+                [c - c_err_part, c + c_err_part],
                 ylim[0],
                 ylim[1],
                 color="gray",
@@ -556,7 +594,7 @@ if __name__ == "__main__":
         ax1.errorbar(
             val,
             y,
-            xerr=err_cal,
+            xerr=err_part,
             color="orange",
             marker="",
             linestyle="",

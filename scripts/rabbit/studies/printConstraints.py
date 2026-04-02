@@ -3,7 +3,7 @@ import argparse
 import ROOT
 import uproot
 
-from utilities import input_tools
+from wremnants.utilities import input_tools
 
 parser = argparse.ArgumentParser()
 parser.add_argument(

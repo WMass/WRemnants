@@ -3,8 +3,8 @@ import argparse
 import hist
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools
+from wremnants.utilities import common
+from wremnants.utilities.io_tools import input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
@@ -63,9 +63,9 @@ procs = ["Zmumu", "Wplusmunu", "Wminusmunu"]
 charge_dict = {"Zmumu": 0, "Wplusmunu": 1, "Wminusmunu": 0}
 
 procs_dict = {
-    "Zmumu": "ZmumuPostVFP",
-    "Wminusmunu": "WminusmunuPostVFP",
-    "Wplusmunu": "WplusmunuPostVFP",
+    "Zmumu": "Zmumu_2016PostVFP",
+    "Wminusmunu": "Wminusmunu_2016PostVFP",
+    "Wplusmunu": "Wplusmunu_2016PostVFP",
 }
 
 project = args.project

@@ -4,7 +4,7 @@ import re
 
 import lz4.frame
 
-from utilities import common, parsing
+from wremnants.utilities import common, parsing
 from wums import logging, output_tools
 
 

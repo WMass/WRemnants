@@ -5,9 +5,9 @@ import hist
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utilities import common, parsing
-from utilities.io_tools import input_tools
-from wremnants import theory_corrections
+from wremnants.production import theory_corrections
+from wremnants.utilities import common, parsing, samples
+from wremnants.utilities.io_tools import base_io, input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 
@@ -42,6 +42,12 @@ def parse_args():
         ],
         required=True,
         help="Generator used to produce correction hist",
+    )
+    parser.add_argument(
+        "--qtCutoff",
+        type=float,
+        default=1.0,
+        help="Upper limit for zeroing bins in the fixed order program (GeV)",
     )
     parser.add_argument(
         "--outpath",
@@ -114,12 +120,20 @@ def parse_args():
         action="store_true",
         help="Normalize the corrections",
     )
+    parser.add_argument(
+        "--eras",
+        type=str,
+        nargs="+",
+        choices=samples.supported_eras,
+        help="Data set to process",
+        default=["13TeVGen"],
+    )
     args = parser.parse_args()
 
     return args
 
 
-def read_corr(procName, generator, corrFiles, axes, smooth=None):
+def read_corr(procName, generator, corrFiles, axes, qt_cutoff=1.0, smooth=None):
     logger = logging.child_logger("read_corr")
     charge = 0 if procName[0] == "Z" else (1 if "Wplus" in procName else -1)
     corr_file = corrFiles[0]
@@ -147,9 +161,6 @@ def read_corr(procName, generator, corrFiles, axes, smooth=None):
 
             fo_func = getattr(input_tools, f"read_matched_scetlib_{fo_generator}_hist")
 
-            zero_nons_bins = (
-                0 if "nnlojet" not in fo_generator else hist.tag.Slicer()[0:2]
-            )
             # TODO: Should probably be more general...
             smooth_args = {}
             if smooth == "fo_sing":
@@ -160,7 +171,9 @@ def read_corr(procName, generator, corrFiles, axes, smooth=None):
                 fo_files[0],
                 axes,
                 charge=charge,
-                zero_nons_bins=zero_nons_bins,
+                zero_nons_bins=slice(
+                    0j, complex(0, qt_cutoff)
+                ),  # set bins with qT < qtCutoff GeV to 0
                 **smooth_args,
             )
         else:
@@ -212,8 +225,8 @@ def main():
     }
 
     if args.proc == "z":
-        eventgen_procs = ["ZmumuPostVFP"]
-        filesByProc = {"ZmumuPostVFP": args.corrFiles}
+        eventgen_procs = ["Zmumu"]  # , "DYJetsToMuMuMass10to50"]
+        filesByProc = {"Zmumu": args.corrFiles}
     else:
         wpfiles = list(
             filter(
@@ -232,31 +245,33 @@ def main():
         if len(wpfiles) != len(wmfiles):
             if args.duplicateWminus:
                 logger.warning("Using W- correction as a proxy for W+!")
-                filesByProc = {
-                    "WplusmunuPostVFP": wmfiles,
-                    "WminusmunuPostVFP": wmfiles,
-                }
+                filesByProc = {"Wplusmunu": wmfiles, "Wminusmunu": wmfiles}
 
             else:
                 raise ValueError(
                     f"Expected equal number of files for W+ and W-, found {len(wpfiles)} (Wp) and {len(wmfiles)} (Wm)"
                 )
         else:
-            filesByProc = {"WplusmunuPostVFP": wpfiles, "WminusmunuPostVFP": wmfiles}
+            filesByProc = {"Wplusmunu": wpfiles, "Wminusmunu": wmfiles}
 
         if args.proc == "w":
-            eventgen_procs = ["WplusmunuPostVFP", "WminusmunuPostVFP"]
+            eventgen_procs = ["Wplusmunu", "Wminusmunu"]
         elif args.proc == "bsm":
             eventgen_procs = [
-                "WtoNMu_MN-5-V-0p001",
-                "WtoNMu_MN-10-V-0p001",
-                "WtoNMu_MN-50-V-0p001",
+                "WtoNMuMN5V0p001",
+                "WtoNMuMN10V0p001",
+                "WtoNMuMN30V0p001",
+                "WtoNMuMN50V0p001",
             ]
 
     minnloh = hh.sumHists(
         [
             input_tools.read_mu_hist_combine_tau(
-                args.minnloFile, proc, args.minnloh, combine_with_tau=args.proc != "bsm"
+                args.minnloFile,
+                proc,
+                args.minnloh,
+                eras=args.eras,
+                combine_with_tau=args.proc != "bsm",
             )
             for proc in eventgen_procs
         ]
@@ -268,11 +283,18 @@ def main():
     # Rename minnlo axes to match corr, needed for the broadcast now
     for ax in minnloh.axes:
         if ax.name in ax_map:
-            ax._ax.metadata["name"] = ax_map[ax.name]
+            hh.renameAxis(minnloh, ax.name, ax_map[ax.name])
 
     numh = hh.sumHists(
         [
-            read_corr(procName, args.generator, corr_file, args.axes, args.smooth)
+            read_corr(
+                procName,
+                args.generator,
+                corr_file,
+                args.axes,
+                qt_cutoff=args.qtCutoff,
+                smooth=args.smooth,
+            )
             for procName, corr_file in filesByProc.items()
         ]
     )
@@ -353,14 +375,14 @@ def main():
 
     generator = args.generator
     if args.postfix:
-        generator += args.postfix
-    outfile = f"{args.outpath}/{generator}Corr{args.proc.upper()}.pkl.lz4"
+        generator += f"_{args.postfix}"
+    outfile = f"{args.outpath}/{generator}_Corr{args.proc.upper()}.pkl.lz4"
 
     meta_dict = {}
     for f in [args.minnloFile] + args.corrFiles:
         label = os.path.basename(f)
         try:
-            meta = input_tools.get_metadata(f)
+            meta = base_io.get_metadata(f)
             meta_dict[label] = meta
             if "scetlib" in args.generator and f.endswith("pkl"):
                 meta["config"] = input_tools.get_scetlib_config(f)
@@ -408,6 +430,10 @@ def main():
             "absY": "$|y^{{{final_state}}}|$",
         }
 
+        outdir = output_tools.make_plot_dir(
+            *args.plotdir.rsplit("/", 1), eoscp=args.eoscp
+        )
+
         for charge in minnloh.axes["charge"].centers:
             if args.duplicateWminus and charge == 1:
                 continue
@@ -419,48 +445,76 @@ def main():
                 proc = "Wp" if charge.imag > 0 else "Wm"
                 final_state = "\\ell^{+}\\nu" if charge.imag > 0 else "\\ell^{-}\\nu"
 
-            fig, ax = plt.subplots(figsize=(6, 6))
-            corrh[{"vars": 0, "charge": charge, "Q": 0}].plot(ax=ax, cmin=0.5, cmax=1.5)
+            for imass, mass_edges in enumerate(minnloh.axes["Q"]):
+                if len(minnloh.axes["Q"].centers) > 1:
+                    suffix = f"_{int(mass_edges[0])}to{int(mass_edges[1])}GeV"
+                    extra_text_base = [
+                        f"{int(mass_edges[0])} < Q < {int(mass_edges[1])} GeV"
+                    ]
+                else:
+                    suffix = ""
+                    extra_text_base = []
 
-            outdir = output_tools.make_plot_dir(
-                *args.plotdir.rsplit("/", 1), eoscp=args.eoscp
-            )
-            plot_name = f"corr2D_{generator}_MiNNLO_{proc}"
-            plot_tools.save_pdf_and_png(outdir, plot_name)
-            output_tools.write_index_and_log(
-                outdir, plot_name, args=args, analysis_meta_info=meta_dict
-            )
+                for ivar, var in enumerate(corrh.axes["vars"]):
 
-            for varm, varn in zip(minnloh.axes.name[:-1], numh.axes.name[:-2]):
-                fig = plot_tools.makePlotWithRatioToRef(
-                    [
-                        minnloh[{"charge": charge}].project(varm),
-                        numh[{"vars": 0, "charge": charge}].project(varn),
-                    ],
-                    [
-                        "MiNNLO",
-                        generator,
-                    ],
-                    colors=["orange", "mediumpurple"],
-                    linestyles=[
-                        "solid",
-                        "dashed",
-                    ],
-                    xlabel=xlabel[varm].format(final_state=final_state),
-                    ylabel="Events/bin",
-                    rlabel="x/MiNNLO",
-                    legtext_size=24,
-                    rrange=[0.8, 1.2],
-                    yscale=1.1,
-                    xlim=None,
-                    binwnorm=1.0,
-                    baseline=True,
-                )
-                plot_name = f"{varm}_{generator}_MiNNLO_{proc}"
-                plot_tools.save_pdf_and_png(outdir, plot_name)
-                output_tools.write_index_and_log(
-                    outdir, plot_name, args=args, analysis_meta_info=meta_dict
-                )
+                    if len(corrh.axes["vars"]) > 1:
+                        suffix += f"_{var}"
+                        extra_text = [*extra_text_base, var]
+                    else:
+                        extra_text = extra_text_base
+
+                    if "vars" in minnloh.axes.name:
+                        iminnloh = minnloh[{"Q": imass, "charge": charge, "vars": ivar}]
+                    else:
+                        iminnloh = minnloh[{"Q": imass, "charge": charge}]
+
+                    inumh = numh[{"Q": imass, "charge": charge, "vars": ivar}]
+                    icorrh = corrh[{"Q": imass, "charge": charge, "vars": ivar}]
+
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    icorrh.plot(ax=ax, cmin=0.5, cmax=1.5)
+
+                    plot_name = f"corr2D_{generator}_MiNNLO_{proc}{suffix}"
+                    plot_tools.save_pdf_and_png(outdir, plot_name)
+                    output_tools.write_index_and_log(
+                        outdir, plot_name, args=args, analysis_meta_info=meta_dict
+                    )
+
+                    for varm, varn in zip(iminnloh.axes.name, inumh.axes.name):
+                        fig = plot_tools.makePlotWithRatioToRef(
+                            [
+                                iminnloh.project(varm),
+                                inumh.project(varn),
+                            ],
+                            [
+                                "MiNNLO",
+                                generator.replace("_", " ").replace("FineBins ", ""),
+                            ],
+                            colors=["orange", "mediumpurple"],
+                            linestyles=[
+                                "solid",
+                                "dashed",
+                            ],
+                            xlabel=xlabel[varm].format(final_state=final_state),
+                            ylabel="Events/bin",
+                            rlabel="x/MiNNLO",
+                            legtext_size=24,
+                            nlegcols=1,
+                            rrange=[0.8, 1.2],
+                            yscale=1.1,
+                            xlim=None,
+                            binwnorm=1.0,
+                            baseline=True,
+                            extra_text=extra_text,
+                            extra_text_loc=(0.5, 0.7) if varm == "qT" else (0.1, 0.2),
+                        )
+                        plot_name = f"{varm}_{generator}_MiNNLO_{proc}{suffix}"
+                        plot_tools.save_pdf_and_png(outdir, plot_name)
+                        output_tools.write_index_and_log(
+                            outdir, plot_name, args=args, analysis_meta_info=meta_dict
+                        )
+
+                    break  # only plot first variation
         if output_tools.is_eosuser_path(args.plotdir) and args.eoscp:
             output_tools.copy_to_eos(outdir, args.plotdir)
 

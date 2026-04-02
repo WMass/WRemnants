@@ -12,11 +12,10 @@ import pandas as pd
 from matplotlib.patches import Ellipse, Polygon
 
 import rabbit.io_tools
-from utilities import parsing
-from utilities.io_tools import tex_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import tex_tools
 
 from wums import logging, output_tools, plot_tools  # isort: skip
-
 
 parser = parsing.plot_parser()
 parser.add_argument("infile", type=str, help="Rabbit fitresult file")
@@ -43,24 +42,24 @@ grouping = getattr(config, "nuisance_grouping", {}).get("xsecs", None)
 translate_label = getattr(config, "systematics_labels", {})
 
 fitresult, meta = rabbit.io_tools.get_fitresult(args.infile, meta=True)
-result = fitresult["physics_models"]
+result = fitresult["mappings"]
 
 pdf_results = {}
 comp_result = {}
-pdf_lumis = {}
 for pdf_file in args.pdfFiles:
     pdf_name = pdf_file.split("/")[-2].split("_")[-1]
+    pdf_name = pdf_name.upper().replace("AN3LO", "an3lo")
+
+    logger.info(f"Now at PDF {pdf_name}")
 
     pdf_result, pdf_meta = rabbit.io_tools.get_fitresult(pdf_file, meta=True)
 
-    pdf_lumis[pdf_name] = pdf_meta["meta_info_input"]["channel_info"]["ch0"]["lumi"]
+    pdf_mapping = pdf_result["mappings"]
 
-    pdf_model = pdf_result["physics_models"]
-
-    if "CompositeModel" in pdf_model.keys():
-        comp_result[pdf_name] = pdf_model["CompositeModel"]
+    if "CompositeMapping" in pdf_mapping.keys():
+        comp_result[pdf_name] = pdf_mapping["CompositeMapping"]
     else:
-        pdf_results[pdf_name] = pdf_model
+        pdf_results[pdf_name] = pdf_mapping
 
 nPDFs = len(args.pdfFiles)
 pdf_colors = {
@@ -68,12 +67,12 @@ pdf_colors = {
     "CT18Z": "#E42536",
     "PDF4LHC21": "#9467bd",
     "MSHT20": "#7f7f7f",
-    "MSHT20aN3LO": "#8c564b",
+    "MSHT20an3lo": "#8c564b",
     "NNPDF31": "#e377c2",
     "NNPDF40": "#17becf",
 }
 
-# model, channel, bin
+# mapping, channel, bin
 xsec_keys = [
     (r"$\mathrm{W}^{-}$", "Project ch1_masked qGen", "ch1_masked", {"qGen": 0}),
     (r"$\mathrm{W}^{+}$", "Project ch1_masked qGen", "ch1_masked", {"qGen": 1}),
@@ -81,7 +80,7 @@ xsec_keys = [
     (r"$\mathrm{Z}$", "Project ch0_masked", "ch0_masked", None),
     (
         r"$\mathrm{W}^{+}/\mathrm{W}^{-}$",
-        "Ratio ch1_masked ch1_masked qGen:0,ptGen:sum,absEtaGen:sum qGen:1,ptGen:sum,absEtaGen:sum",
+        "Ratio ch1_masked ch1_masked qGen:1,ptGen:sum,absEtaGen:sum qGen:0,ptGen:sum,absEtaGen:sum",
         "ch1_masked",
         None,
     ),
@@ -115,10 +114,10 @@ custom_order = [
 ]
 
 dfs = []
-for name, model, channel, selection in xsec_keys:
-    hp = result[model]["channels"][channel]["hist_prefit_inclusive"].get()
-    h1 = result[model]["channels"][channel]["hist_postfit_inclusive"].get()
-    hi = result[model]["channels"][channel][
+for name, mapping, channel, selection in xsec_keys:
+    hp = result[mapping]["channels"][channel]["hist_prefit_inclusive"].get()
+    h1 = result[mapping]["channels"][channel]["hist_postfit_inclusive"].get()
+    hi = result[mapping]["channels"][channel][
         "hist_postfit_inclusive_global_impacts_grouped"
     ].get()
     if selection is not None:
@@ -130,18 +129,13 @@ for name, model, channel, selection in xsec_keys:
         h1 = h1[{"yield": hist.sum}]
         hi = hi[{"yield": hist.sum}]
 
-    if model.startswith("Ratio"):
-        scale = 1
-    else:
-        scale = 1 / (lumi * 1000)
+    prefit = hp.value
+    prefit_error = hp.variance**0.5
 
-    prefit = hp.value * scale
-    prefit_error = hp.variance**0.5 * scale
+    value = h1.value
+    error = h1.variance**0.5
 
-    value = h1.value * scale
-    error = h1.variance**0.5 * scale
-
-    impacts = hi.values() * scale
+    impacts = hi.values()
 
     labels = np.array(hi.axes["impacts"])
     mask = np.isin(labels, grouping)
@@ -190,22 +184,24 @@ for name, model, channel, selection in xsec_keys:
     df["prefit_error"] = prefit_error
 
     for pdf_name, pdf_res in pdf_results.items():
-        hr = pdf_res[model.replace("_masked", "")]["channels"][
+        channel_mappings = pdf_res[mapping.replace("_masked", "")]["channels"][
             channel.replace("_masked", "")
-        ]["hist_prefit_inclusive"].get()
+        ]
+        hr = channel_mappings["hist_prefit_inclusive"].get()
+        hr_impacts = channel_mappings[
+            "hist_prefit_inclusive_global_impacts_grouped"
+        ].get()
 
         if selection is not None:
             hr = hr[selection]
+            hr_impacts = hr_impacts[selection]
         if getattr(hr, "axes", False) and "yield" in hr.axes.name:
             hr = hr[{"yield": hist.sum}]
+            hr_impacts = hr_impacts[{"yield": hist.sum}]
 
-        if model.startswith("Ratio"):
-            scale = 1
-        else:
-            scale = 1 / (pdf_lumis[pdf_name] * 1000)
-
-        df[pdf_name] = hr.value * scale
-        df[f"{pdf_name}_error"] = hr.variance**0.5 * scale
+        df[pdf_name] = hr.value
+        df[f"{pdf_name}_error"] = hr.variance**0.5
+        df[f"{pdf_name}_pdf"] = hr_impacts[{"impacts": f"pdf{pdf_name}"}]
 
     # Convert 'labels' column to categorical with the custom order
     df["label"] = pd.Categorical(df["label"], categories=custom_order, ordered=True)
@@ -305,6 +301,17 @@ for i, name in enumerate(names[::-1]):
             marker="o",
             label=pdf_name if i == 0 else None,
         )
+        # # only plot PDF uncertainties
+        # pdf_error_pdf = df_g[f"{pdf_name}_pdf"].values[0] / norm
+        # ax.errorbar(
+        #     [pdf_value],
+        #     [i + 1 - (j + 1) / (nPDFs + 1)],
+        #     xerr=pdf_error_pdf,
+        #     color=pdf_colors[pdf_name],
+        #     capsize=5,
+        #     capthick=2,
+        #     marker="o",
+        # )
 
     # round to two significant digits in total uncertainty
     sig_digi = 2 - int(math.floor(math.log10(abs(total)))) - 1
@@ -387,7 +394,7 @@ plot_tools.addLegend(
 ax.set_xlim([lo, hi])
 ax.set_ylim([0, len(norms) + 2])
 
-ax.set_xlabel("1./Measurement", fontsize=20)
+ax.set_xlabel("Prediction / Measurement")
 
 # Disable ticks on the top and right axes
 ax.tick_params(top=False)
@@ -414,7 +421,7 @@ output_tools.write_index_and_log(
 # make plot 2D ellipses
 
 
-def plot_cov_ellipse(cov, pos, nstd=2, **kwargs):
+def plot_cov_ellipse(cov, pos, nstd=1, **kwargs):
     """
     Plots an `nstd` sigma ellipse based on the covariance matrix (`cov`)
     centered at position `pos`.
@@ -442,12 +449,6 @@ for name, channel0, channel1, unit in (
     ("WZ", xsec_keys[2], xsec_keys[3], "pb"),
     ("R", xsec_keys[4], xsec_keys[5], None),
 ):
-    ckey1 = (
-        channel0[1].replace("_masked", "") + " " + channel0[2].replace("_masked", "")
-    )
-    ckey2 = (
-        channel1[1].replace("_masked", "") + " " + channel1[2].replace("_masked", "")
-    )
 
     plt.clf()
     fig = plt.figure()
@@ -455,11 +456,10 @@ for name, channel0, channel1, unit in (
     ax = fig.add_subplot(111)
 
     for pdf_name, result in comp_result.items():
+        ckey0 = channel0[1] + " " + channel0[2]
+        ckey1 = channel1[1] + " " + channel1[2]
+
         ibin = 0
-        if name == "R":
-            scale = 1
-        else:
-            scale = 1 / (1000 * pdf_lumis[pdf_name])
         for k, r in result["channels"].items():
             fittype = "postfit" if f"hist_postfit_inclusive" in r.keys() else "prefit"
 
@@ -467,54 +467,55 @@ for name, channel0, channel1, unit in (
             if getattr(hi, "axes", False) and "yield" in hi.axes.name:
                 hi = hi[{"yield": hist.sum}]
 
-            if k == ckey1:
+            if k == ckey0 or k == ckey0.replace("_masked", ""):
                 sel = channel0[-1]
 
                 if sel is not None:
-                    x = hi[sel].value * scale
+                    x = hi[sel].value
                     ix = ibin + [i for i in sel.values()][0]
                 else:
-                    x = hi.value * scale
+                    x = hi.value
                     ix = ibin
 
-            if k == ckey2:
+            if k == ckey1 or k == ckey1.replace("_masked", ""):
                 sel = channel1[-1]
                 if sel is not None:
-                    y = hi[channel0[-1]].value * scale
+                    y = hi[sel].value
                     iy = ibin + [i for i in sel.values()][0]
                 else:
-                    y = hi.value * scale
+                    y = hi.value
                     iy = ibin
 
             ibin += hi.size if hasattr(hi, "size") else 1
 
         cov = result[f"hist_{fittype}_inclusive_cov"].get().values()
-        cov = cov[np.ix_([ix, iy], [ix, iy])] * scale**2
+        cov = cov[np.ix_([ix, iy], [ix, iy])]
 
         # for pos, cov in zip(points, covs):
         if fittype == "postfit":
-            icol = "grey"
             ell = plot_cov_ellipse(
                 cov,
                 np.array([x, y]),
-                nstd=2,
+                nstd=1,
                 edgecolor="none",
-                facecolor=icol,
+                facecolor="grey",
                 label="Measurement",
             )
+            ax.add_patch(ell)
+            ax.plot(x, y, color="black", marker="P")
         else:
             icol = pdf_colors[pdf_name]
             ell = plot_cov_ellipse(
                 cov,
                 np.array([x, y]),
-                nstd=2,
+                nstd=1,
                 edgecolor=icol,
                 facecolor="none",
                 linewidth=2,
                 label=pdf_name,
             )
-        ax.add_patch(ell)
-        ax.plot(x, y, color=icol, marker="o", alpha=0)  # measurement center
+            ax.add_patch(ell)
+            ax.plot(x, y, color=icol, marker="o", alpha=0)
 
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
@@ -550,7 +551,7 @@ for name, channel0, channel1, unit in (
         padding_loc="auto",
     )
 
-    plot_tools.add_cms_decor(ax, args.cmsDecor, data=True, lumi=lumi, loc=args.logoPos)
+    plot_tools.add_cms_decor(ax, args.cmsDecor, data=True, loc=args.logoPos)
 
     outname = f"summary_2D_{name}"
     if args.postfix:

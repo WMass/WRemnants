@@ -4,10 +4,9 @@ import hist
 import matplotlib as mpl
 import numpy as np
 
-from utilities import parsing
-from utilities.styles import styles
-from wremnants import plot_tools
-from wums import logging, output_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.styles import styles
+from wums import logging, output_tools, plot_tools
 
 
 # harmonic polynomials

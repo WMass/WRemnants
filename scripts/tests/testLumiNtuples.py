@@ -1,4 +1,4 @@
-from utilities import common, parsing
+from wremnants.utilities import binning, common, parsing
 from wums import output_tools
 
 parser, initargs = parsing.common_parser()
@@ -88,7 +88,7 @@ axis_passMT = hist.axis.Boolean(name="passMT")
 nominal_axes = [axis_eta, axis_pt, axis_charge, axis_passIso, axis_passMT]
 
 axis_ptVgen = hist.axis.Variable(
-    common.ptV_10quantiles_binning,
+    binning.ptV_10quantiles_binning,
     name="ptVgen",
     underflow=False,
 )
@@ -109,10 +109,6 @@ def build_graph(df, dataset):
     weightsum = df.SumAndCount("weight")
 
     df = df.Filter("HLT_IsoTkMu24 || HLT_IsoMu24")
-
-    isW = dataset.name in common.wprocs
-    isZ = dataset.name in common.zprocs
-    isTop = dataset.group == "Top"
 
     df = df.Define("passMT", "1")
     df = df.Define("passIso", "1")

@@ -5,20 +5,20 @@ import hist
 import lz4.frame
 from matplotlib import cm
 
-from utilities import parsing
-from utilities.io_tools import input_tools
-from wremnants import plot_tools, theory_tools
+from wremnants.postprocessing import theory_tools
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import input_tools
 from wums import boostHistHelpers as hh
-from wums import logging
+from wums import logging, plot_tools
 
 s = hist.tag.Slicer()
 # Map hist_name argument to the actual hist and it's axis stored in files
 lookup = {
     "minnlo": {
         "dirs": {
-            "z": ("ZmumuPostVFP", "output"),
-            "wp": ("WplusmunuPostVFP", "output"),
-            "wm": ("WminusmunuPostVFP", "output"),
+            "z": ("Zmumu_2016PostVFP", "output"),
+            "wp": ("Wplusmunu_2016PostVFP", "output"),
+            "wm": ("Wminusmunu_2016PostVFP", "output"),
         },
         "ptV": {
             "hist": "nominal_gen",

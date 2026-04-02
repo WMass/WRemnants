@@ -7,7 +7,7 @@ ROOT.gStyle.SetOptTitle(0)
 import functions
 import plotutils
 
-from wremnants.datasets import datagroups
+from wremnants.postprocessing.datagroups import datagroups
 
 if __name__ == "__main__":
 

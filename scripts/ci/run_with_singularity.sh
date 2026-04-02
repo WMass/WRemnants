@@ -1,9 +1,12 @@
 #!/bin/bash
-export APPTAINER_BIND="/scratch,/cvmfs" 
+export APPTAINER_BIND="/scratch,/cvmfs,/etc/pki/tls/certs,/etc/grid-security/certificates"
 if [[ -d $WREM_BASE ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},${WREM_BASE}/.."
 fi
-CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v44
+if [[ -d /ceph ]]; then
+    export APPTAINER_BIND="${APPTAINER_BIND},/ceph"
+fi
+CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v46
 
 # Kerberos cache setup
 # Assuming kinit was already done on the host!
@@ -18,4 +21,4 @@ else
     echo "⚠️ Warning: Kerberos cache directory $KRB5CC_HOST_DIR does not exist!"
 fi
 
-singularity run $CONTAINER $@
+singularity run $CONTAINER "$@"

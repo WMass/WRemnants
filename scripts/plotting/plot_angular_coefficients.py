@@ -5,9 +5,9 @@ import mplhep as hep
 import numpy as np
 from scipy.stats import chi2
 
-from utilities import parsing
-from utilities.io_tools import input_tools
-from wremnants import theory_tools
+from wremnants.production import helicity_utils
+from wremnants.utilities import parsing
+from wremnants.utilities.io_tools import base_io
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools, plot_tools
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     helicity_sum = {}
     for helicity_file in args.helicities:
         with h5py.File(helicity_file, "r") as ff:
-            out = input_tools.load_results_h5py(ff)
+            out = base_io.load_results_h5py(ff)
 
         for key in out.keys():
             if not key.startswith(args.process) or key in ["meta_info"]:
@@ -95,7 +95,7 @@ if __name__ == "__main__":
             with h5py.File(
                 helicity_file.replace("helicity_xsecs", "gen_dists"), "r"
             ) as ff:
-                out = input_tools.load_results_h5py(ff)
+                out = base_io.load_results_h5py(ff)
             procs = [k for k in out.keys() if k.startswith(args.process)]
             if len(procs) > 1:
                 logger.warning(
@@ -140,12 +140,12 @@ if __name__ == "__main__":
 
         if not args.plotXsecs:
             hists1d = {
-                k: [theory_tools.helicity_xsec_to_angular_coeffs(h) for h in v]
+                k: [helicity_utils.helicity_xsec_to_angular_coeffs(h) for h in v]
                 for k, v in hists1d.items()
             }
             if len(helicity_sum):
                 h1d_sum = {
-                    k: theory_tools.helicity_xsec_to_angular_coeffs(v)
+                    k: helicity_utils.helicity_xsec_to_angular_coeffs(v)
                     for k, v in h1d_sum.items()
                 }
 

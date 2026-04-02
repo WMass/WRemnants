@@ -1,9 +1,8 @@
 import os
 
-from utilities import common, differential, parsing
-from wremnants.datasets.datagroups import Datagroups
+from wremnants.utilities import binning, common, parsing, samples
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 
@@ -13,24 +12,25 @@ import ROOT
 
 import narf
 import wremnants
-from wremnants import (
-    helicity_utils,
+from wremnants.production import (
+    generator_level_definitions,
     muon_calibration,
     muon_efficiencies_binned,
     muon_efficiencies_smooth,
     muon_prefiring,
     muon_selections,
     pileup,
-    syst_tools,
+    systematics,
     theory_corrections,
-    theory_tools,
     theoryAgnostic_tools,
     unfolding_tools,
     vertex,
 )
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.helicity_utils_polvar import makehelicityWeightHelper_polvar
-from wremnants.histmaker_tools import (
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.helicity_utils_polvar import (
+    makehelicityWeightHelper_polvar,
+)
+from wremnants.production.histmaker_tools import (
     aggregate_groups,
     define_norm_weight_nRecoVtx,
     get_run_lumi_edges,
@@ -43,7 +43,7 @@ from wums import logging
 parser.add_argument(
     "--mtCut",
     type=int,
-    default=common.get_default_mtcut(analysis_label),
+    default=binning.get_default_mtcut(analysis_label),
     help="Value for the transverse mass cut in the event selection",
 )  # 40 for Wmass, thus be 45 here (roughly half the boson mass)
 parser.add_argument(
@@ -83,6 +83,11 @@ parser.add_argument(
     "--flipEventNumberSplitting",
     action="store_true",
     help="Flip even with odd event numbers to consider the positive or negative muon as the W-like muon",
+)
+parser.add_argument(
+    "--addAxisSignUt",
+    action="store_true",
+    help="Add another fit axis with the sign of the uT recoil projection",
 )
 parser.add_argument(
     "--useTnpMuonVarForSF",
@@ -146,6 +151,7 @@ datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
+    aux=args.auxiliaryProcs,
     nanoVersion="v9",
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,
@@ -153,7 +159,7 @@ datasets = getDatasets(
 )
 
 # dilepton invariant mass cuts
-mass_min, mass_max = common.get_default_mz_window()
+mass_min, mass_max = binning.get_default_mz_window()
 
 # transverse boson mass cut
 mtw_min = args.mtCut
@@ -200,7 +206,7 @@ if args.fillHistNonTrig:
             overflow=False,
             underflow=False,
         )
-    nominal_axes = [axis_eta, axis_pt, common.axis_charge]
+    nominal_axes = [axis_eta, axis_pt, binning.axis_charge]
     nominal_cols = ["nonTrigMuons_eta0", "nonTrigMuons_pt0", "nonTrigMuons_charge0"]
 else:
     axis_pt = hist.axis.Regular(
@@ -211,12 +217,24 @@ else:
         overflow=False,
         underflow=False,
     )
-    nominal_axes = [axis_eta, axis_pt, common.axis_charge]
+    nominal_axes = [axis_eta, axis_pt, binning.axis_charge]
     nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
+
+axis_ut_analysis = hist.axis.Regular(
+    2, -2, 2, underflow=False, overflow=False, name="utAngleSign"
+)  # used only to separate positive/negative uT for now
+if args.addAxisSignUt:
+    nominal_axes.append(axis_ut_analysis)
+    nominal_cols.append(
+        "nonTrigMuons_angleSignUt0"
+        if args.fillHistNonTrig
+        else "trigMuons_angleSignUt0"
+    )
 
 # for isoMt region validation and related tests
 # use very high upper edge as a proxy for infinity (cannot exploit overflow bins in the fit)
 # can probably use numpy infinity, but this is compatible with the root conversion
+# FIXME: now we can probably use overflow bins in the fit
 axis_mtCat = hist.axis.Variable(
     [0, int(args.mtCut / 2.0), args.mtCut, 1000],
     name="mt",
@@ -227,8 +245,6 @@ axis_isoCat = hist.axis.Variable(
     [0, 0.15, 0.3, 100], name="relIso", underflow=False, overflow=False
 )
 
-nominal_axes = [axis_eta, axis_pt, common.axis_charge]
-nominal_cols = ["trigMuons_eta0", "trigMuons_pt0", "trigMuons_charge0"]
 if args.addIsoMtAxes:
     nominal_axes.extend([axis_mtCat, axis_isoCat])
     nominal_cols.extend(["transverseMass", "trigMuons_relIso0"])
@@ -243,7 +259,7 @@ if args.unfolding:
     unfolding_cols = {}
     for level in args.unfoldingLevels:
 
-        a, c = differential.get_pt_eta_charge_axes(
+        a, c = binning.get_unfolding_pt_eta_charge_axes(
             level,
             npt_unfolding,
             min_pt_unfolding,
@@ -268,14 +284,14 @@ if args.unfolding:
         unfolding_corr_helper = unfolding_tools.reweight_to_fitresult(args.fitresult)
 
 if args.theoryAgnostic:
-    theoryAgnostic_axes, theoryAgnostic_cols = differential.get_theoryAgnostic_axes(
+    theoryAgnostic_axes, theoryAgnostic_cols = binning.get_theoryAgnostic_axes(
         ptV_bins=args.theoryAgnosticGenPtVbinEdges,
         absYV_bins=args.theoryAgnosticGenAbsYVbinEdges,
         ptV_flow=args.poiAsNoi,
         absYV_flow=args.poiAsNoi,
         wlike=True,
     )
-    axis_helicity = helicity_utils.axis_helicity_multidim
+    axis_helicity = binning.axis_helicity_multidim
     # the following just prepares the existence of the group for out-of-acceptance signal, but doesn't create or define the histogram yet
     if not args.poiAsNoi or (
         args.theoryAgnosticPolVar and args.theoryAgnosticSplitOOA
@@ -284,7 +300,6 @@ if args.theoryAgnostic:
 
 # axes for mT measurement
 axis_mt = hist.axis.Regular(200, 0.0, 200.0, name="mt", underflow=False, overflow=True)
-axis_eta_mT = hist.axis.Variable([-2.4, 2.4], name="eta")
 
 # define helpers
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
@@ -292,7 +307,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
 )
 
 theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args, corrs=["qcdScale", "alphaS", "pdf"]
+    args.pdfs, args.theoryCorr, corrs=["qcdScale", "alphaS", "pdf"]
 )
 
 # extra axes which can be used to label tensor_axes
@@ -370,7 +385,14 @@ diff_weights_helper = (
     mc_jpsi_crctn_unc_helper,
     data_jpsi_crctn_unc_helper,
 ) = muon_calibration.make_jpsi_crctn_helpers(
-    args, calib_filepaths, make_uncertainty_helper=True
+    calib_filepaths,
+    muon_corr_mc=args.muonCorrMC,
+    muon_corr_data=args.muonCorrData,
+    scale_var_method=args.muonScaleVariation,
+    scale_A=args.scale_A,
+    scale_e=args.scale_e,
+    scale_M=args.scale_M,
+    make_uncertainty_helper=True,
 )
 z_non_closure_parametrized_helper, z_non_closure_binned_helper = (
     muon_calibration.make_Z_non_closure_helpers(
@@ -410,7 +432,7 @@ bias_helper = (
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.vprocs], theory_corrs
+    [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
 )
 
 # helpers for muRmuF MiNNLO polynomial variations
@@ -436,7 +458,7 @@ if args.theoryAgnosticPolVar:
 
 # recoil initialization
 if not args.noRecoil:
-    from wremnants import recoil_tools
+    from wremnants.production import recoil_tools
 
     recoilHelper = recoil_tools.Recoil("highPU", args, flavor="mumu")
 
@@ -444,8 +466,8 @@ if not args.noRecoil:
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
-    isW = dataset.name in common.wprocs
-    isZ = dataset.name in common.zprocs
+    isW = dataset.name in samples.wprocs
+    isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
     theory_helpers = None
@@ -585,7 +607,7 @@ def build_graph(df, dataset):
                     break
 
     if isZ:
-        df = theory_tools.define_prefsr_vars(df)
+        df = generator_level_definitions.define_prefsr_vars(df)
         df = df.Define(
             "qtOverQ", "ptVgen/massVgen"
         )  # FIXME: should there be a protection against mass=0 and what value to use?
@@ -901,7 +923,7 @@ def build_graph(df, dataset):
 
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
-        df = theory_tools.define_theory_weights_and_corrs(
+        df = theory_corrections.define_theory_weights_and_corrs(
             df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
         )
 
@@ -939,7 +961,7 @@ def build_graph(df, dataset):
             "nonTrigMuons_charge0",
         ]
         df = recoilHelper.recoil_Z(
-            df, results, dataset, common.zprocs_recoil, leps_uncorr, leps_corr
+            df, results, dataset, samples.zprocs_recoil, leps_uncorr, leps_corr
         )  # produces corrected MET as MET_corr_rec_pt/phi
     else:
         df = df.Alias("MET_corr_rec_pt", "MET_pt")
@@ -949,10 +971,12 @@ def build_graph(df, dataset):
     ###########
     # utility plots of transverse mass, with or without recoil corrections
     ###########
+    muonKey = "nonTrigMuons" if args.fillHistNonTrig else "trigMuons"
+    muonAntiKey = "trigMuons" if args.fillHistNonTrig else "nonTrigMuons"
     met_vars = ("MET_pt", "MET_phi")
     df = df.Define(
         "transverseMass_uncorr",
-        f"wrem::get_mt_wlike(trigMuons_pt0, trigMuons_phi0, nonTrigMuons_pt0, nonTrigMuons_phi0, {', '.join(met_vars)})",
+        f"wrem::get_mt_wlike({muonKey}_pt0, {muonKey}_phi0, {muonAntiKey}_pt0, {muonAntiKey}_phi0, {', '.join(met_vars)})",
     )
     results.append(
         df.HistoBoost(
@@ -965,11 +989,11 @@ def build_graph(df, dataset):
     met_vars = ("MET_corr_rec_pt", "MET_corr_rec_phi")
     df = df.Define(
         "met_wlike_TV2",
-        f"wrem::get_met_wlike(nonTrigMuons_pt0, nonTrigMuons_phi0, {', '.join(met_vars)})",
+        f"wrem::get_met_wlike({muonAntiKey}_pt0, {muonAntiKey}_phi0, {', '.join(met_vars)})",
     )
     df = df.Define(
         "transverseMass",
-        "wrem::get_mt_wlike(trigMuons_pt0, trigMuons_phi0, met_wlike_TV2)",
+        f"wrem::get_mt_wlike({muonKey}_pt0, {muonKey}_phi0, met_wlike_TV2)",
     )
     results.append(
         df.HistoBoost("transverseMass", [axis_mt], ["transverseMass", "nominal_weight"])
@@ -989,6 +1013,13 @@ def build_graph(df, dataset):
             ["met_wlike_TV2_pt", "nominal_weight"],
         )
     )
+    if args.addAxisSignUt:
+        # use Wlike met instead of only the second lepton, for consistency with the W,
+        # also because the relevant quantity should be the recoil rather than the boson
+        df = df.Define(
+            f"{muonKey}_angleSignUt0",
+            f"wrem::zqtproj0_angleSign({muonKey}_pt0, {muonKey}_phi0, met_wlike_TV2_pt, met_wlike_TV2.Phi())",
+        )
     ###########
 
     df = df.Define("passWlikeMT", f"transverseMass >= {mtw_min}")
@@ -1068,10 +1099,10 @@ def build_graph(df, dataset):
                 [
                     axis_eta_trig,
                     axis_pt_trig,
-                    common.axis_charge,
+                    binning.axis_charge,
                     axis_eta_nonTrig,
                     axis_pt_nonTrig,
-                    common.axis_passMT,
+                    binning.axis_passMT,
                 ],
                 [
                     "trigMuons_eta0",
@@ -1086,7 +1117,7 @@ def build_graph(df, dataset):
         else:
             nominal_bothMuons = df.HistoBoost(
                 "nominal_bothMuons",
-                [*axes, axis_eta_nonTrig, axis_pt_nonTrig, common.axis_passMT],
+                [*axes, axis_eta_nonTrig, axis_pt_nonTrig, binning.axis_passMT],
                 [
                     *cols,
                     "nonTrigMuons_eta0",
@@ -1119,7 +1150,7 @@ def build_graph(df, dataset):
             6, 0, 2.4, name="abseta", overflow=False, underflow=False
         )
         cols_vertexZstudy = [
-            "trigMuons_eta0",
+            "trigMuons_abseta0",
             "trigMuons_passIso0",
             "passWlikeMT",
             "absDiffGenRecoVtx_z",
@@ -1129,8 +1160,8 @@ def build_graph(df, dataset):
             "nominal_vertexZstudy",
             [
                 axis_abseta,
-                common.axis_passIso,
-                common.axis_passMT,
+                binning.axis_passIso,
+                binning.axis_passMT,
                 axis_absDiffGenRecoVtx_z,
                 axis_prefsrWpt,
             ],
@@ -1209,7 +1240,7 @@ def build_graph(df, dataset):
         results.append(
             df.HistoBoost(
                 "trigMuons_vertexZ0_uncorr",
-                [axis_vertexZ0, common.axis_charge],
+                [axis_vertexZ0, binning.axis_charge],
                 [
                     "trigMuons_vertexZ0",
                     "trigMuons_charge0",
@@ -1220,14 +1251,14 @@ def build_graph(df, dataset):
         results.append(
             df.HistoBoost(
                 "trigMuons_vertexZ0_noVtx",
-                [axis_vertexZ0, common.axis_charge],
+                [axis_vertexZ0, binning.axis_charge],
                 ["trigMuons_vertexZ0", "trigMuons_charge0", "nominal_weight_noVtx"],
             )
         )
         results.append(
             df.HistoBoost(
                 "trigMuons_vertexZ0",
-                [axis_vertexZ0, common.axis_charge],
+                [axis_vertexZ0, binning.axis_charge],
                 ["trigMuons_vertexZ0", "trigMuons_charge0", "nominal_weight"],
             )
         )
@@ -1251,7 +1282,7 @@ def build_graph(df, dataset):
                 [
                     hist.axis.Regular(200, -10, 10, name="trigMuons_dpt"),
                     hist.axis.Regular(200, -10, 10, name="nonTrigMuons_dpt"),
-                    common.axis_charge,
+                    binning.axis_charge,
                 ],
                 [
                     "trigMuons_deltaPt_corrMinusTnp",
@@ -1274,7 +1305,7 @@ def build_graph(df, dataset):
                 [
                     hist.axis.Regular(120, -3.0, 3.0, name="trigMuons_deta"),
                     hist.axis.Regular(120, -3.0, 3.0, name="nonTrigMuons_deta"),
-                    common.axis_charge,
+                    binning.axis_charge,
                 ],
                 [
                     "trigMuons_deltaEta_corrMinusTnp",
@@ -1287,9 +1318,7 @@ def build_graph(df, dataset):
 
     if args.poiAsNoi and isZ:
         if args.theoryAgnostic and not hasattr(dataset, "out_of_acceptance"):
-            noiAsPoiHistName = Datagroups.histName(
-                "nominal", syst="yieldsTheoryAgnostic"
-            )
+            noiAsPoiHistName = common.hist_name("nominal", syst="yieldsTheoryAgnostic")
             logger.debug(
                 f"Creating special histogram '{noiAsPoiHistName}' for theory agnostic to treat POIs as NOIs"
             )
@@ -1310,7 +1339,10 @@ def build_graph(df, dataset):
                     "nominal_weight",
                 ]
                 # assume to have same coeffs for plus and minus (no reason for it not to be the case)
-                if dataset.name == "ZmumuPostVFP" or dataset.name == "ZtautauPostVFP":
+                if (
+                    dataset.name == "Zmumu_2016PostVFP"
+                    or dataset.name == "Ztautau_2016PostVFP"
+                ):
                     helpers_class = muRmuFPolVar_helpers_Z
                     process_name = "Z"
                 for coeffKey in helpers_class.keys():
@@ -1323,7 +1355,7 @@ def build_graph(df, dataset):
                         helperQ,
                         theoryAgnostic_helpers_cols,
                     )
-                    noiAsPoiWithPolHistName = Datagroups.histName(
+                    noiAsPoiWithPolHistName = common.hist_name(
                         "nominal", syst=f"muRmuFPolVar{process_name}_{coeffKey}"
                     )
                     results.append(
@@ -1335,9 +1367,9 @@ def build_graph(df, dataset):
                             storage=hist.storage.Double(),
                         )
                     )
-        if args.unfolding and dataset.name == "ZmumuPostVFP":
+        if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
             for level in args.unfoldingLevels:
-                noiAsPoiHistName = Datagroups.histName(
+                noiAsPoiHistName = common.hist_name(
                     "nominal", syst=f"{level}_yieldsUnfolding"
                 )
                 logger.debug(
@@ -1356,7 +1388,7 @@ def build_graph(df, dataset):
 
     if not dataset.is_data and not args.onlyMainHistograms:
 
-        df = syst_tools.add_muon_efficiency_unc_hists(
+        df = systematics.add_muon_efficiency_unc_hists(
             results,
             df,
             muon_efficiency_helper_stat,
@@ -1368,7 +1400,7 @@ def build_graph(df, dataset):
             smooth3D=args.smooth3dsf,
         )
         for es in common.muonEfficiency_altBkgSyst_effSteps:
-            df = syst_tools.add_muon_efficiency_unc_hists_altBkg(
+            df = systematics.add_muon_efficiency_unc_hists_altBkg(
                 results,
                 df,
                 muon_efficiency_helper_syst_altBkg[es],
@@ -1379,7 +1411,7 @@ def build_graph(df, dataset):
                 step=es,
             )
         if args.validateVetoSF:
-            df = syst_tools.add_muon_efficiency_veto_unc_hists(
+            df = systematics.add_muon_efficiency_veto_unc_hists(
                 results,
                 df,
                 muon_efficiency_veto_helper_stat,
@@ -1391,7 +1423,7 @@ def build_graph(df, dataset):
 
         if era == "2016PostVFP" and args.addRunAxis and not args.randomizeDataByRun:
             # to simplify the code, use helper with largest uncertainty for all eras when splitting data
-            df = syst_tools.add_L1Prefire_unc_hists(
+            df = systematics.add_L1Prefire_unc_hists(
                 results,
                 df,
                 axes,
@@ -1400,7 +1432,7 @@ def build_graph(df, dataset):
                 helper_syst=muon_prefiring_helper_syst_BG,
             )
         else:
-            df = syst_tools.add_L1Prefire_unc_hists(
+            df = systematics.add_L1Prefire_unc_hists(
                 results,
                 df,
                 axes,
@@ -1413,7 +1445,7 @@ def build_graph(df, dataset):
         # on the Z samples (but can still use it for dummy muon scale)
         if isWorZ:
 
-            df = syst_tools.add_theory_hists(
+            df = systematics.add_theory_hists(
                 results,
                 df,
                 args,

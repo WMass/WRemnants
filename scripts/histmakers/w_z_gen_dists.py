@@ -4,21 +4,24 @@ import hist
 import numpy as np
 
 import narf
-from utilities import common, differential, parsing
-from wremnants import (
+from wremnants.production import (
+    generator_level_definitions,
     helicity_utils,
-    syst_tools,
+    systematics,
     theory_corrections,
-    theory_tools,
     unfolding_tools,
 )
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
+    aggregate_groups,
+    scale_to_data,
+    write_analysis_output,
+)
+from wremnants.utilities import binning, common, parsing, samples
 from wums import boostHistHelpers as hh
 from wums import logging
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 parser.add_argument(
@@ -45,12 +48,6 @@ parser.add_argument(
     "--genPtBinningAsReco",
     action="store_true",
     help="Use unfolding binning to produce the gen results",
-)
-parser.add_argument(
-    "--useCorrByHelicityBinning",
-    action="store_true",
-    help="Use finer absY binning to produce the gen results."
-    "Used in particular to produce the smooth PDF corrections.",
 )
 parser.add_argument(
     "--singleLeptonHists",
@@ -98,24 +95,30 @@ parser.add_argument(
     help="Add axis to store info if the event has an outgoing charm quark",
 )
 parser.add_argument(
+    "--addBottomAxis",
+    action="store_true",
+    help="Add axis to store info if the event has outgoing bottom quarks at LHE level",
+)
+parser.add_argument(
     "--finePtVBinning",
     action="store_true",
-    help="Use 1 GeV binning for ptVgen (e.g., for theory corrections)",
+    help="Use 0.5 GeV binning for ptVgen (e.g., for theory corrections)",
 )
 parser.add_argument(
     "--centralBosonPDFWeight",
     action="store_true",
     help="Apply PDF reweighting using boson parameterized corrections",
 )
-
-
-parser = parsing.set_parser_default(parser, "filterProcs", common.vprocs)
+parser = parsing.set_parser_default(parser, "filterProcs", samples.vprocs)
+parser = parsing.set_parser_default(parser, "era", "13TeVGen")
+parser = parsing.set_parser_default(parser, "aggregateGroups", [])
 args = parser.parse_args()
 
 if not args.theoryCorrections:
     parser = parsing.set_parser_default(parser, "theoryCorr", [])
     parser = parsing.set_parser_default(parser, "ewTheoryCorr", [])
 args = parser.parse_args()
+
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
@@ -126,10 +129,10 @@ datasets = getDatasets(
     extended="msht20an3lo" not in args.pdfs,
     nanoVersion="v9",
     base_path=args.dataPath,
-    mode=analysis_label,
+    era=args.era,
 )
 
-logger.debug(f"Will process samples {[d.name for d in datasets]}")
+logger.info(f"Will process samples {[d.name for d in datasets]}")
 
 axis_ygen = hist.axis.Regular(10, -5.0, 5.0, name="y")
 col_rapidity = "yVgen" if args.signedY else "absYVgen"
@@ -162,8 +165,27 @@ axis_chargel_gen = hist.axis.Regular(
     overflow=False,
 )
 
+# fine mass bins for studies
+# axis_massZgen = hist.axis.Variable(
+#     [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 13000],
+#     name="massVgen",
+#     underflow=False,
+#     overflow=False,
+# )
+
+# axis_massWgen = hist.axis.Variable([4.0, 13000.0], name="massVgen")
+axis_massWgen = hist.axis.Variable([0, 75, 80, 85, 120.0, 13000], name="massVgen")
+axis_massZgen = hist.axis.Variable([60.0, 120.0, 13000], name="massVgen")
+
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
-corr_helpers = theory_corrections.load_corr_helpers(common.vprocs, theory_corrs)
+procsWithTheoryCorr = [d.name for d in datasets if d.name in samples.vprocs]
+if len(procsWithTheoryCorr) and len(theory_corrs):
+    corr_helpers = theory_corrections.load_corr_helpers(
+        procsWithTheoryCorr, theory_corrs
+    )
+else:
+    corr_helpers = {}
+
 
 corrs = []
 if args.helicity and args.propagatePDFstoHelicity:
@@ -171,7 +193,7 @@ if args.helicity and args.propagatePDFstoHelicity:
 if args.centralBosonPDFWeight:
     corrs.append("pdf_central")
 theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args, procs=["Z", "W"], corrs=corrs
+    args.pdfs, args.theoryCorr, procs=["Z", "W"], corrs=corrs
 )
 
 
@@ -186,45 +208,34 @@ def build_graph(df, dataset):
     isW = dataset.name.startswith("W") and dataset.name[1] not in [
         "W",
         "Z",
-    ]  # in common.wprocs
+    ]  # in samples.wprocs
     isZ = dataset.name.startswith("Z") and dataset.name[1] not in [
         "W",
         "Z",
-    ]  # in common.zprocs
+    ]  # in samples.zprocs
 
     if isW or isZ:
         theory_helpers = theory_helpers_procs[dataset.name[0]]
     else:
         theory_helpers = {}
 
-    if args.addCharmAxis:
-        axis_massWgen = hist.axis.Variable(
-            [4.0, 13000.0], name="massVgen", underflow=True, overflow=False
-        )
-    else:
-        axis_massWgen = hist.axis.Regular(
-            120, 0, 120.0, name="massVgen", underflow=True, overflow=True
-        )
-
-    axis_massZgen = hist.axis.Regular(12, 60.0, 120.0, name="massVgen")
-
-    theoryAgnostic_axes, _ = differential.get_theoryAgnostic_axes(
+    theoryAgnostic_axes, _ = binning.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
     )
     axis_ptV_thag = theoryAgnostic_axes[0]
     axis_yV_thag = theoryAgnostic_axes[1]
 
-    if args.useUnfoldingBinning:
+    if args.useUnfoldingBinning and "Z" in dataset.name:
         unfolding_axes, unfolding_cols, unfolding_selections = (
-            differential.get_dilepton_axes(
+            binning.get_unfolding_dilepton_axes(
                 ["ptVGen", "absYVGen"],
                 {
-                    "ptll": common.get_dilepton_ptV_binning(fine=False),
-                    "yll": (common.yll_10quantiles_binning),
+                    "ptll": binning.ptZ_binning,
+                    "yll": binning.yll_20quantiles_binning,
                 },
                 "prefsr",
                 add_out_of_acceptance_axis=False,
-                rebin_pt=not args.genPtBinningAsReco,
+                rebin_pt=None if args.genPtBinningAsReco else unfolding_tools.rebin_pt,
             )
         )
         axis_absYVgen = hist.axis.Variable(
@@ -237,20 +248,6 @@ def build_graph(df, dataset):
             name="ptVgen",
             underflow=False,
         )
-
-        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
-    elif args.useCorrByHelicityBinning:
-        axis_absYVgen = hist.axis.Variable(
-            common.absYVgen_binning_corr,
-            name="absYVgen",
-            underflow=False,
-        )
-        axis_ptVgen = hist.axis.Variable(
-            common.ptVgen_binning_corr,
-            name="ptVgen",
-            underflow=False,
-        )
-        axis_massZgen = hist.axis.Regular(1, 60.0, 120.0, name="massVgen")
     elif args.useTheoryAgnosticBinning:
         axis_absYVgen = hist.axis.Variable(
             axis_yV_thag.edges,  # same axis as theory agnostic norms
@@ -263,31 +260,23 @@ def build_graph(df, dataset):
             underflow=False,
         )
     else:
+        if args.finePtVBinning:
+            edges_ptV = np.append(np.arange(0, 100.5, 0.5), 13000.0)
+        else:
+            edges_ptV = (
+                binning.ptZgen_binning_corr if isZ else binning.ptWgen_binning_corr
+            )
+        edges_absYV = (
+            binning.absYZgen_binning_corr if isZ else binning.absYWgen_binning_corr
+        )
+
         axis_absYVgen = hist.axis.Variable(
-            [
-                0.0,
-                0.25,
-                0.5,
-                0.75,
-                1.0,
-                1.25,
-                1.5,
-                1.75,
-                2.0,
-                2.25,
-                2.5,
-                2.75,
-                3.0,
-                3.25,
-                3.5,
-                4.0,
-                5.0,
-            ],  # this is the same binning as hists from theory corrections
+            edges_absYV,
             name="absYVgen",
             underflow=False,
         )
         axis_ptVgen = hist.axis.Variable(
-            (*common.get_dilepton_ptV_binning(fine=args.finePtVBinning), 13000.0),
+            edges_ptV,
             name="ptVgen",
             underflow=False,
         )
@@ -301,17 +290,38 @@ def build_graph(df, dataset):
     elif "NNLOPS" in dataset.name:
         weight_expr = f"{weight_expr}*LHEScaleWeightAltSet1[4]"
 
+    is_zbb_sample = dataset.name.startswith("Zbb")
+    has_unknown_altset1 = "UnknownWeightAltSet1" in [
+        str(c) for c in df.GetColumnNames()
+    ]
+    if is_zbb_sample and has_unknown_altset1:
+        df = df.Define("unknown_weight0", "UnknownWeightAltSet1[0]")
+    else:
+        df = df.Define("unknown_weight0", "1.0f")
+        if is_zbb_sample:
+            logger.warning(
+                f"Dataset {dataset.name} is missing UnknownWeightAltSet1, leaving extra study weight at 1"
+            )
+
+    # Keep generator normalization (weight_sum) independent of this study weight.
+    if not is_zbb_sample:
+        df = df.DefinePerSample("extra_weight", "1.0")
+    else:
+        df = df.Define("extra_weight", "unknown_weight0")
+
     df = df.Define("weight", weight_expr)
     df = df.DefinePerSample("unity", "1.")
     # This sum should happen before any change of the weight
     weightsum = df.SumAndCount("weight")
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
-    df = theory_tools.define_theory_weights_and_corrs(
+    df = theory_corrections.define_theory_weights_and_corrs(
         df, dataset.name, corr_helpers, args, theory_helpers
     )
 
-    if isZ:
+    if isZ or dataset.group in [
+        "DYlowMass",
+    ]:
         nominal_axes = [
             axis_massZgen,
             axis_rapidity,
@@ -343,6 +353,46 @@ def build_graph(df, dataset):
         df = df.Define(
             "charm",
             "Sum(abs(LHEPart_pdgId[LHEPart_status==1])==4) == 1 && Sum(abs(LHEPart_pdgId[LHEPart_status==1])==5) != 1",
+        )
+
+    if args.addBottomAxis:
+        axis_bottom = hist.axis.Regular(
+            2, -0.5, 1.5, underflow=False, overflow=False, name="bottom_sel"
+        )
+        nominal_axes = [*nominal_axes, axis_bottom]
+        nominal_cols = [*nominal_cols, "bottom_sel"]
+
+        df = df.Define(
+            "n_lhe_fin_bottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==1]==5)",
+        )
+        df = df.Define(
+            "n_lhe_fin_antibottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==1]==-5)",
+        )
+        df = df.Define(
+            "n_lhe_fin_bbbar",
+            "n_lhe_fin_bottom + n_lhe_fin_antibottom",
+        )
+        df = df.Define(
+            "n_lhe_init_bottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==-1]==5)",
+        )
+        df = df.Define(
+            "n_lhe_init_antibottom",
+            "Sum(LHEPart_pdgId[LHEPart_status==-1]==-5)",
+        )
+        df = df.Define(
+            "n_lhe_init_bbbar",
+            "n_lhe_init_bottom + n_lhe_init_antibottom",
+        )
+        df = df.Define(
+            "n_lhe_bbbar",
+            "n_lhe_init_bbbar + n_lhe_fin_bbbar",
+        )
+        df = df.Define(
+            "bottom_sel",
+            "(n_lhe_bbbar > 0)",
         )
 
     if args.addHelicityAxis:
@@ -384,9 +434,8 @@ def build_graph(df, dataset):
             df, dataset.name, gen_levels, mode="w_mass" if isW else "z_wlike"
         )
 
-        lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
-
         for level in gen_levels:
+            lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
             lep_cols = [
                 f"{level}Lep_absEta",
                 f"{level}Lep_pt",
@@ -397,6 +446,9 @@ def build_graph(df, dataset):
             if args.addCharmAxis:
                 lep_axes = [*lep_axes, axis_charm]
                 lep_cols = [*lep_cols, "charm"]
+            if args.addBottomAxis:
+                lep_axes = [*lep_axes, axis_bottom]
+                lep_cols = [*lep_cols, "bottom_sel"]
 
             results.append(
                 df.HistoBoost(
@@ -409,7 +461,7 @@ def build_graph(df, dataset):
 
     if not args.skipEWHists and (isW or isZ) and "Zmumu_powheg-weak" in dataset.name:
         if isZ:
-            massBins = theory_tools.make_ew_binning(
+            massBins = binning.make_bw_binning(
                 mass=91.1535,
                 width=2.4932,
                 initialStep=0.10,
@@ -417,15 +469,15 @@ def build_graph(df, dataset):
                 bin_edges_high=[100, 110, 120, 140, 160, 200],
             )
         else:
-            massBins = theory_tools.make_ew_binning(
+            massBins = binning.make_bw_binning(
                 mass=80.3815, width=2.0904, initialStep=0.010
             )
 
         # LHE level
-        df = syst_tools.define_weak_weights(df, dataset.name)
+        df = systematics.define_weak_weights(df, dataset.name)
         axis_lheMV = hist.axis.Variable(massBins, name="massVlhe", underflow=False)
         axis_lhePtV = hist.axis.Variable(
-            common.ptV_binning, underflow=False, name="ptVlhe"
+            binning.ptV_binning, underflow=False, name="ptVlhe"
         )
         axis_lheAbsYV = hist.axis.Regular(50, 0, 5, underflow=False, name="absYVlhe")
         axis_lheYV = hist.axis.Regular(100, -5.0, 5.0, name="YVlhe")
@@ -440,7 +492,7 @@ def build_graph(df, dataset):
         axis_lhePhiStar = hist.axis.Regular(
             8, -np.pi, np.pi, circular=True, name="phiStarlhe"
         )
-        axis_weak = hist.axis.StrCategory(syst_tools.weakWeightNames(), name="weak")
+        axis_weak = hist.axis.StrCategory(systematics.weakWeightNames(), name="weak")
         axis_helicity = helicity_utils.axis_helicity
 
         results.append(
@@ -475,7 +527,7 @@ def build_graph(df, dataset):
                 storage=hist.storage.Weight(),
             )
         )
-        syst_tools.add_weakweights_hist(
+        systematics.add_weakweights_hist(
             results,
             df,
             [axis_lheMV, axis_lheCosThetaStar],
@@ -576,7 +628,7 @@ def build_graph(df, dataset):
         and "GenPart_status" in df.GetColumnNames()
     ):
         if isZ:
-            massBins = theory_tools.make_ew_binning(
+            massBins = binning.make_bw_binning(
                 mass=91.1535,
                 width=2.4932,
                 initialStep=0.010,
@@ -584,14 +636,14 @@ def build_graph(df, dataset):
                 bin_edges_high=[120],
             )
         else:
-            massBins = theory_tools.make_ew_binning(
+            massBins = binning.make_bw_binning(
                 mass=80.3815, width=2.0904, initialStep=0.010
             )
 
         # pre FSR
         axis_genMV = hist.axis.Variable(massBins, name="massVgen", underflow=False)
         axis_genPtV = hist.axis.Variable(
-            common.ptV_binning, underflow=False, name="ptVgen"
+            binning.ptV_binning, underflow=False, name="ptVgen"
         )
         axis_genAbsYV = hist.axis.Regular(50, 0, 5, name="absYVgen")
         results.append(
@@ -622,7 +674,7 @@ def build_graph(df, dataset):
         # post FSR, pre tau decay
         axis_ewMll = hist.axis.Variable(massBins, name="ewMll", underflow=False)
         axis_ewPtll = hist.axis.Variable(
-            common.ptV_binning, underflow=False, name="ewPTll"
+            binning.ptV_binning, underflow=False, name="ewPTll"
         )
         axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name="ewAbsYll")
         results.append(
@@ -653,10 +705,10 @@ def build_graph(df, dataset):
         # dressed
         axis_ewMll = hist.axis.Variable(massBins, name="ewMll", underflow=False)
         axis_ewPtll = hist.axis.Variable(
-            common.ptV_binning, underflow=False, name="ewPTll"
+            binning.ptV_binning, underflow=False, name="ewPTll"
         )
         axis_ewAbsYll = hist.axis.Regular(50, 0, 5, name="ewAbsYll")
-        df = theory_tools.define_dressed_vars(df, mode=mode)
+        df = generator_level_definitions.define_dressed_vars(df, mode=mode)
         results.append(
             df.HistoBoost(
                 "dressed_MllPTll",
@@ -897,9 +949,9 @@ def build_graph(df, dataset):
         and "winhac" not in dataset.name
         and "LHEScaleWeight" in df.GetColumnNames()
         and "LHEPdfWeight" in df.GetColumnNames()
+        and not args.onlyMainHistograms
     ):
-
-        df = syst_tools.add_theory_hists(
+        df = systematics.add_theory_hists(
             results,
             df,
             args,
@@ -912,7 +964,7 @@ def build_graph(df, dataset):
             propagateToHelicity=args.propagatePDFstoHelicity,
         )
 
-        if not dataset.name.startswith("WtoNMu_MN"):
+        if not dataset.name.startswith(("WtoNMuMass", "WtoMuNuSMEFT")):
             helicity_axes = nominal_axes[:-1] if args.addHelicityAxis else nominal_axes
             helicity_cols = nominal_cols[:-2] if args.addHelicityAxis else nominal_cols
 
@@ -920,7 +972,7 @@ def build_graph(df, dataset):
                 helicity_axes = helicity_axes[:-1]
                 helicity_cols = helicity_cols[:-1]
 
-            df = syst_tools.add_helicity_hists(
+            df = systematics.add_helicity_hists(
                 results,
                 df,
                 dataset.name,
@@ -937,6 +989,16 @@ def build_graph(df, dataset):
         storage=hist.storage.Weight(),
     )
     results.append(nominal_gen)
+
+    if dataset.name.startswith("Zbb"):
+        results.append(
+            df.HistoBoost(
+                "unknown_weight0",
+                [hist.axis.Regular(120, 0.0, 3.0, name="unknown_weight0")],
+                ["unknown_weight0", "unity"],
+                storage=hist.storage.Weight(),
+            )
+        )
 
     nominal_gen_pdf_uncorr = df.HistoBoost(
         "nominal_gen_pdf_uncorr",
@@ -958,6 +1020,12 @@ def build_graph(df, dataset):
 
 
 resultdict = narf.build_and_run(datasets, build_graph)
+if len(args.aggregateGroups) > 0:
+    if not args.noScaleToData:
+        scale_to_data(
+            resultdict
+        )  # weight to cross section / sum(weights) * lumi with lumi=1 w/o data
+    aggregate_groups(datasets, resultdict, args.aggregateGroups)
 write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args
 )
@@ -970,29 +1038,20 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
     helicity_xsecs_out = {}
     for dataset in datasets:
         name = dataset.name
-        if "nominal_gen_helicity_xsecs_scale" not in resultdict[name]["output"]:
-            logger.warning(
-                f"Failed to find nominal_gen_helicity_xsecs_scale hist for proc {name}. Skipping!"
-            )
-            continue
         for var in ["", "lhe", "hardProcess", "postShower", "postBeamRemnants"]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             if var == "":
                 suffix = ""
             else:
                 suffix = f"_{var}"
 
-            helicity_xsecs = resultdict[name]["output"][
-                f"nominal_gen_helicity_xsecs_scale{suffix}"
-            ].get()
+            histname = f"nominal_gen_helicity_xsecs_scale{suffix}"
+            if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
+                continue
+
+            helicity_xsecs = resultdict[name]["output"][histname].get()
 
             key = f"{name[0]}{suffix}"
 
@@ -1015,17 +1074,11 @@ if not args.addHelicityAxis and not args.skipHelicityXsecs:
             "CT18alphaS002",
             "NNPDF40alphaS001",
         ]:
-            if name not in [
-                "ZmumuPostVFP",
-                "Zee_MiNNLO",
-                "Zmumu_MiNNLO",
-                "WplusmunuPostVFP",
-                "WminusmunuPostVFP",
-            ]:
-                continue
-
             histname = f"nominal_gen_helicity_nominal_gen_pdf{var}"
             if histname not in resultdict[name]["output"].keys():
+                logger.warning(
+                    f"Failed to find '{histname}' hist for proc '{name}'. Skipping!"
+                )
                 continue
 
             helicity_xsecs = resultdict[name]["output"][histname].get()

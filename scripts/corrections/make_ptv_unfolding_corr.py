@@ -5,9 +5,9 @@ import hist
 import lz4.frame
 import numpy as np
 
-from utilities import common
-from utilities.io_tools import input_tools
-from wremnants import theory_corrections
+from wremnants.production import theory_corrections
+from wremnants.utilities import common
+from wremnants.utilities.io_tools import base_io, input_tools
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
@@ -58,7 +58,7 @@ args = parser.parse_args()
 
 logger = logging.setup_logger("make_ptv_unfolding_corr", 4 if args.debug else 3)
 
-genh = input_tools.read_and_scale(args.genFile, "ZmumuPostVFP", "nominal_gen")
+genh = input_tools.read_and_scale(args.genFile, "Zmumu_2016PostVFP", "nominal_gen")
 
 unfolded_res = pickle.load(open(args.unfoldingFile, "rb"))
 unfolded_datah = unfolded_res["results"]["pmaskedexp"]["chan_13TeV"]["Z"][
@@ -137,8 +137,8 @@ output_dict = {
 }
 
 meta_dict = {
-    "unfolding": input_tools.get_metadata(args.unfoldingFile),
-    "gen": input_tools.get_metadata(args.genFile),
+    "unfolding": base_io.get_metadata(args.unfoldingFile),
+    "gen": base_io.get_metadata(args.genFile),
 }
 
 fname = "data"

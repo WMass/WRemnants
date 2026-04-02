@@ -8,7 +8,7 @@ from matplotlib.patches import Polygon
 
 import rabbit.io_tools
 from scripts.plotting import plot_decorr_params as pdp
-from utilities import parsing
+from wremnants.utilities import parsing
 from wums import logging, output_tools, plot_tools
 
 if __name__ == "__main__":
