@@ -141,7 +141,6 @@ def make_pulls_and_constraints(sub, logger=None, verbose=4):
     if logger == None:
         logger = logging.setup_logger(os.path.basename(__file__), verbose)
 
-    # TODO: use a common path
     basePath = data_dir + "/hepdata/SMP_23_002/"
 
     # tag name : {file name, matrix name inside file}
@@ -253,7 +252,6 @@ def make_cross_section(sub, logger=None, verbose=4):
     if logger == None:
         logger = logging.setup_logger(os.path.basename(__file__), verbose)
 
-    # TODO: use a common path
     basePath = data_dir + "hepdata/SMP_23_002/"
     input_dict = {
         "W_pt": {
@@ -388,20 +386,8 @@ def make_mass_summary(sub, logger=None, verbose=4):
     if logger == None:
         logger = logging.setup_logger(os.path.basename(__file__), verbose)
 
-    # TODO: use a common path
     basePath = data_dir + "/hepdata/SMP_23_002/"
     input_dict = {
-        # obsolete plot
-        # "W_ptW_modeling": {
-        #     "file": "W/Wmass_modeling_summary.root",
-        #     "hist": "mass_summary",
-        #     "desc": "Comparison of the nominal $\\mathit{m}_{W}$ measurement and its uncertainty (total or only from $\\mathit{p}_{T}^{W}$ modeling), with the alternative measurements using different approaches to the $\\mathit{p}_{T}^{W}$ modeling and its uncertainty.",
-        #     "indepVarTitle": "$\\mathit{p}_{T}^{W}$ model",
-        #     "observable": "M",
-        #     "addImage": True,
-        #     "reference": "Fig A12",
-        # },
-        #
         "Zwlike_ptZ_modeling": {
             "file": "Zwlike/Wlike_modeling_summary_PerBinStatCorrUnc.root",
             "hist": "mass_summary",
@@ -557,17 +543,6 @@ if __name__ == "__main__":
         outdir += "/"
     if outdir and not os.path.exists(outdir):
         os.makedirs(outdir)
-
-    ### message might be obsolete, latest singularity should work
-    # logger.warning("\n\n")
-    # logger.warning(
-    #     r"To save PNG images for some plots and convert them within hepdata_lib"
-    # )
-    # logger.warning(r"you need to work within the following singularity image")
-    # logger.warning(
-    #     r"/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v38_patch0"
-    # )
-    # logger.warning("\n\n")
 
     if not args.skipCovariance:
         logger.warning("Preparing covariance matrices as root files")
