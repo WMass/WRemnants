@@ -443,9 +443,14 @@ if args.unfolding:
             args.fitresult, channel="ch1_masked"
         )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args.pdfs, args.theoryCorr, procs=["Z", "W"]
-)
+if args.skipByHelicityCorrection:
+    helicity_smoothing_helpers_procs = (
+        theory_corrections.make_helicity_smoothing_helpers(
+            args.pdfs, args.theoryCorr, procs=["Z", "W"]
+        )
+    )
+else:
+    helicity_smoothing_helpers_procs = {}
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = binning.get_theoryAgnostic_axes(
@@ -643,25 +648,26 @@ if args.theoryAgnosticPolVar:
         filePath=args.theoryAgnosticFilePath,
     )
 
-# Helper for muR and muF as polynomial variations
-muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
-    genVcharge=-1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
-    genVcharge=1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
-    genVcharge=0,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
+if args.theoryAgnostic:
+    # Helper for muR and muF as polynomial variations
+    muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
+        genVcharge=-1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
+        genVcharge=1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
+        genVcharge=0,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
 
 # recoil initialization
 if not args.noRecoil:
@@ -705,9 +711,10 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
-    theory_helpers = {}
-    if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+    if dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
+    else:
+        helicity_smoothing_helpers = {}
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -803,7 +810,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            theory_helpers,
+            helicity_smoothing_helpers,
             [],
             [],
             base_name="gen",
@@ -860,7 +867,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -881,7 +888,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -898,7 +905,7 @@ def build_graph(df, dataset):
         elif dataset.name == "Zmumu_2016PostVFP":
             if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
                 df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, theory_helpers
+                    args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
                 )
 
                 if not unfolder_z.poi_as_noi:
@@ -1306,7 +1313,11 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         if (
@@ -1842,7 +1853,7 @@ def build_graph(df, dataset):
                     nominal_cols,
                 )
 
-    if isWorZ and not hasattr(dataset, "out_of_acceptance"):
+    if isWorZ and args.theoryAgnostic and not hasattr(dataset, "out_of_acceptance"):
         theoryAgnostic_helpers_cols = [
             "qtOverQ",
             "absYVgen",
@@ -2071,7 +2082,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=True,

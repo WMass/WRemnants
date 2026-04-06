@@ -182,7 +182,7 @@ def add_xnorm_histograms(
     args,
     dataset_name,
     corr_helpers,
-    theory_helpers,
+    helicity_smoothing_helpers,
     unfolding_axes,
     unfolding_cols,
     base_name="xnorm",
@@ -193,7 +193,11 @@ def add_xnorm_histograms(
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
 
     df_xnorm = theory_corrections.define_theory_weights_and_corrs(
-        df_xnorm, dataset_name, corr_helpers, args, theory_helpers=theory_helpers
+        df_xnorm,
+        dataset_name,
+        corr_helpers,
+        args,
+        helicity_smoothing_helpers=helicity_smoothing_helpers,
     )
 
     df_xnorm = df_xnorm.Define("xnorm", "0.5")
@@ -231,7 +235,7 @@ def add_xnorm_histograms(
         args,
         dataset_name,
         corr_helpers,
-        theory_helpers,
+        helicity_smoothing_helpers,
         xnorm_axes,
         xnorm_cols,
         base_name=base_name,
@@ -436,7 +440,7 @@ class UnfolderZ:
         )
 
     def add_gen_histograms(
-        self, args, df, results, dataset, corr_helpers, theory_helpers={}
+        self, args, df, results, dataset, corr_helpers, helicity_smoothing_helpers={}
     ):
         df = define_gen_level(
             df, dataset.name, self.unfolding_levels, mode=self.analysis_label
@@ -487,7 +491,7 @@ class UnfolderZ:
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
                     [
                         c
@@ -508,7 +512,7 @@ class UnfolderZ:
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
                     [
                         c

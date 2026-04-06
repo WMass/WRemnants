@@ -204,9 +204,14 @@ def common_parser(analysis_label=""):
         help="Add EW theory corrections without modifying the default theoryCorr list. Will be appended to args.theoryCorr",
     )
     parser.add_argument(
+        "--skipByHelicityCorrection",
+        action="store_true",
+        help="Apply the QCD corrections and uncertainties from MiNNLO event weights, otherwise use by-helicity reweighting",
+    )
+    parser.add_argument(
         "--skipHelicity",
         action="store_true",
-        help="Skip the qcdScaleByHelicity histogram (it can be huge)",
+        help="Skip the qcdScaleByHelicity histogram production (it can be huge)",
     )
     parser.add_argument(
         "--noRecoil", action="store_true", help="Don't apply recoild correction"
