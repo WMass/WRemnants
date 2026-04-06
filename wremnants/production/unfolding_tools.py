@@ -498,6 +498,7 @@ class UnfolderZ:
                         for c in self.unfolding_cols[level]
                         if c != f"{level}_acceptance"
                     ],
+                    add_helicity_axis=self.add_helicity_axis,
                     base_name=f"{level}_full",
                 )
 
