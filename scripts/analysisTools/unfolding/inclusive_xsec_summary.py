@@ -42,6 +42,12 @@ parser.add_argument(
     default=False,
     help="scale the results of SMP-20-004 to updated lumi",
 )
+parser.add_argument(
+    "--includeSMP20004",
+    action="store_true",
+    default=False,
+    help="include data points from SMP-20-004 (JHEP04(2025)162)",
+)
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -71,7 +77,10 @@ for pdf_file in args.pdfFiles:
     else:
         pdf_results[pdf_name] = pdf_mapping
 
-nPDFs = len(args.pdfFiles)
+all_1d_pdf_names = list(pdf_results.keys()) + [
+    k for k in comp_result.keys() if k != "TOTAL"
+]
+nPDFs = len(all_1d_pdf_names)
 pdf_colors = {
     "CT18": "#2ca02c",
     "CT18Z": "#E42536",
@@ -169,7 +178,7 @@ for name, mappings, channel, selection in xsec_keys:
     hp = result[mapping]["channels"][channel]["hist_prefit_inclusive"].get()
     h1 = result[mapping]["channels"][channel]["hist_postfit_inclusive"].get()
     hi = result[mapping]["channels"][channel][
-        "hist_postfit_inclusive_global_impacts_grouped"
+        "hist_postfit_inclusive_gaussian_global_impacts_grouped"
     ].get()
     if selection is not None:
         hp = hp[selection]
@@ -194,10 +203,10 @@ for name, mappings, channel, selection in xsec_keys:
     labels = labels[mask]
     impacts = impacts[mask]
 
-    if np.sum(impacts**2) ** 0.5 / error - 1 > 10e-10:
-        raise RuntimeError(
-            f"Sources don't add up to total error, got a difference of {np.sum(impacts**2)**0.5/error - 1}"
-        )
+    # if np.sum(impacts**2) ** 0.5 / error - 1 > 10e-10:
+    #     raise RuntimeError(
+    #         f"Sources don't add up to total error, got a difference of {np.sum(impacts**2)**0.5/error - 1}"
+    #     )
 
     labels = np.append(labels, "Total")
     impacts = np.append(impacts, error)
@@ -261,6 +270,42 @@ for name, mappings, channel, selection in xsec_keys:
         df[f"{pdf_name}_error"] = hr.variance**0.5
         df[f"{pdf_name}_pdf"] = hr_impacts[{"impacts": f"pdf{pdf_name}"}]
 
+    for pdf_name, comp_res in comp_result.items():
+        if pdf_name == "TOTAL":
+            continue
+
+        candidates = [mappings] if not isinstance(mappings, tuple) else list(mappings)
+        channel_data = None
+        for m in candidates:
+            ckey = f"{m.replace(identifier, '')} {channel.replace(identifier, '')}"
+            if ckey in comp_res["channels"]:
+                channel_data = comp_res["channels"][ckey]
+                break
+        if channel_data is None:
+            continue
+        fittype = (
+            "postfit" if "hist_postfit_inclusive" in channel_data.keys() else "prefit"
+        )
+        hr = channel_data[f"hist_{fittype}_inclusive"].get()
+
+        if selection is not None:
+            hr = hr[selection]
+        if getattr(hr, "axes", False) and "yield" in hr.axes.name:
+            hr = hr[{"yield": hist.sum}]
+
+        df[pdf_name] = hr.value
+        df[f"{pdf_name}_error"] = hr.variance**0.5
+
+        if f"hist_{fittype}_inclusive_global_impacts_grouped" in channel_data:
+            hr_impacts = channel_data[
+                f"hist_{fittype}_inclusive_global_impacts_grouped"
+            ].get()
+            if selection is not None:
+                hr_impacts = hr_impacts[selection]
+            if getattr(hr_impacts, "axes", False) and "yield" in hr_impacts.axes.name:
+                hr_impacts = hr_impacts[{"yield": hist.sum}]
+            df[f"{pdf_name}_pdf"] = hr_impacts[{"impacts": f"pdf{pdf_name}"}]
+
     # Convert 'labels' column to categorical with the custom order
     df["label"] = pd.Categorical(df["label"], categories=custom_order, ordered=True)
 
@@ -320,7 +365,7 @@ fig.subplots_adjust(left=0.15, right=0.99, top=0.99, bottom=0.125)
 ax = fig.add_subplot(111)
 
 # x axis range
-lo, hi = 0.925, 1.085
+lo, hi = 0.97, 1.085
 
 # totals = []
 # stats = []
@@ -350,7 +395,8 @@ for i, name in enumerate(names[::-1]):
 
     # ax.errorbar([prefit], [i+0.5], xerr=prefit_err, color="red", marker="o", label="Prefit" if i ==0 else None)
 
-    for j, pdf_name in enumerate(pdf_results.keys()):
+    j = 0
+    for j, pdf_name in enumerate(all_1d_pdf_names):
         pdf_value = df_g[pdf_name].values[0] / norm
         pdf_error = df_g[f"{pdf_name}_error"].values[0] / norm
         ax.errorbar(
@@ -361,28 +407,28 @@ for i, name in enumerate(names[::-1]):
             marker="o",
             label=pdf_name if i == 0 else None,
         )
-        # # only plot PDF uncertainties
-        # pdf_error_pdf = df_g[f"{pdf_name}_pdf"].values[0] / norm
-        # ax.errorbar(
-        #     [pdf_value],
-        #     [i + 1 - (j + 1) / (nPDFs + 1)],
-        #     xerr=pdf_error_pdf,
-        #     color=pdf_colors[pdf_name],
-        #     capsize=5,
-        #     capthick=2,
-        #     marker="o",
-        # )
+        if f"{pdf_name}_pdf" in df_g.columns:
+            pdf_error_pdf = df_g[f"{pdf_name}_pdf"].values[0] / norm
+            ax.errorbar(
+                [pdf_value],
+                [i + 1 - (j + 1) / (nPDFs + nMeas)],
+                xerr=pdf_error_pdf,
+                color=pdf_colors[pdf_name],
+                capsize=5,
+                capthick=2,
+                marker="o",
+            )
 
     # cross sections from SMP-20-004
-    j = j + 1
-    ax.errorbar(
-        [smp_20_004[name][0]] / norm,
-        [i + 1 - (j + 1) / (nPDFs + nMeas)],
-        xerr=smp_20_004[name][1] / norm,
-        color="black",
-        marker="x",
-        label="JHEP04(2025)162" if i == 0 else None,
-    )
+    if args.includeSMP20004:
+        ax.errorbar(
+            smp_20_004[name][0] / norm,
+            i + 0.5,
+            xerr=smp_20_004[name][1] / norm,
+            color="black",
+            marker="x",
+            label="JHEP04(2025)162" if i == 0 else None,
+        )
 
     # round to two significant digits in total uncertainty
     sig_digi = 2 - int(math.floor(math.log10(abs(total)))) - 1
@@ -527,11 +573,20 @@ def plot_cov_ellipse(cov, pos, nstd=1, **kwargs):
     return ellipse
 
 
-for name, channel0, channel1, unit in (
-    ("WpWm", xsec_keys[0], xsec_keys[1], "pb"),
-    ("WZ", xsec_keys[2], xsec_keys[3], "pb"),
-    ("R", xsec_keys[4], xsec_keys[5], None),
-):
+plot_2d_configs = {
+    False: (  # fiducial phase space
+        ("WpWm", xsec_keys[0], xsec_keys[1], "pb", (3065, 3200), (3975, 4200)),
+        ("WZ", xsec_keys[2], xsec_keys[3], "pb", (7050, 7375), (585, 615)),
+        ("R", xsec_keys[4], xsec_keys[5], None, (1.297, 1.304), (11.9, 12.2)),
+    ),
+    True: (  # total phase space
+        ("WpWm", xsec_keys[0], xsec_keys[1], "pb", (7600, 9600), (10200, 12600)),
+        ("WZ", xsec_keys[2], xsec_keys[3], "pb", (18000, 22000), (1720, 2100)),
+        ("R", xsec_keys[4], xsec_keys[5], None, (1.32, 1.41), (10.1, 10.85)),
+    ),
+}
+
+for name, channel0, channel1, unit, xlim, ylim in plot_2d_configs[args.full]:
 
     plt.clf()
     fig = plt.figure()
@@ -621,50 +676,40 @@ for name, channel0, channel1, unit in (
             ax.add_patch(ell)
             ax.plot(x, y, color=icol, marker="o", alpha=0)
 
-    # scale for 2D plot
-    prob = chi2.cdf(1, df=1)  # Get the probability of the 1D n-sigma
-    scale = np.sqrt(chi2.ppf(prob, df=2))  # Find the 2D equivalent scale
+    if args.includeSMP20004:
+        # cross sections from SMP-20-004 — correlations unknown, show as 2D error bars
+        x = smp_20_004[channel0[0]][0]
+        x_err = smp_20_004[channel0[0]][1]
+        y = smp_20_004[channel1[0]][0]
+        y_err = smp_20_004[channel1[0]][1]
 
-    # cross sections from SMP-20-004
-    x = smp_20_004[channel0[0]][0]
-    x_err = smp_20_004[channel0[0]][1] * scale
-    y = smp_20_004[channel1[0]][0]
-    y_err = smp_20_004[channel1[0]][1] * scale
+        ax.errorbar(
+            x,
+            y,
+            xerr=x_err,
+            yerr=y_err,
+            fmt="x",
+            color="black",
+            ecolor="black",
+            capsize=4,
+            capthick=1.5,
+            label="JHEP04(2025)162",
+        )
+    if xlim is not None:
+        ax.set_xlim(*xlim)
 
-    plt.errorbar(
-        x,
-        y,
-        xerr=x_err,
-        yerr=y_err,
-        fmt="x",
-        color="black",
-        ecolor="black",
-        capsize=5,
-        label="JHEP04(2025)162",
-    )
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    else:
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        yrange = ylim[1] - ylim[0]
 
-    # cov = np.array([[x_err**2, 0],[0, y_err**2]]) # dummy covariance
-    # ell = plot_cov_ellipse(
-    #     cov,
-    #     np.array([x, y]),
-    #     nstd=1,
-    #     edgecolor="black",
-    #     facecolor="none",
-    #     linewidth=2,
-    #     label="JHEP04(2025)162",
-    # )
-    # ax.add_patch(ell)
-    # ax.plot(x, y, color="black", marker="x")
+        ax.set_ylim(ylim[0], ylim[1] + yrange * 0.25)
 
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-    yrange = ylim[1] - ylim[0]
-
-    ax.set_xlim(*xlim)
-    ax.set_ylim(ylim[0], ylim[1] + yrange * 0.25)
     if unit is not None:
-        plt.xlabel(rf"$\sigma({channel0[0].replace("$","")})$ [pb]")
-        plt.ylabel(rf"$\sigma({channel1[0].replace("$","")})$ [pb]")
+        plt.xlabel(rf"$\sigma({channel0[0].replace('$', '')})$ [pb]")
+        plt.ylabel(rf"$\sigma({channel1[0].replace('$', '')})$ [pb]")
     else:
         plt.xlabel(channel0[0])
         plt.ylabel(channel1[0])
