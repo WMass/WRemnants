@@ -716,14 +716,19 @@ def make_parser(parser=None, argv=None):
         help="Scale the PDF hessian uncertainties by this factor (by default take the value in the pdfInfo map)",
     )
     parser.add_argument(
-        "--pdfUncFromCorr",
+        "--pdfUncFromUncorr",
         action="store_true",
-        help="Take PDF uncertainty from correction hist (requires having run that correction)",
+        help="Take PDF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--asUncFromUncorr",
         action="store_true",
         help="Take alpha_S uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+    )
+    parser.add_argument(
+        "--minnloUncFromUncorr",
+        action="store_true",
+        help="Take minnlo muR-muF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--scaleMinnloScale",
@@ -1632,6 +1637,8 @@ def setup(
             decorwidth=decorwidth,
         )
 
+    add_theory_uncertainties = not stat_only and not args.noTheoryUnc
+
     # this appears within doStatOnly because technically these nuisances should be part of it
     if isPoiAsNoi:
         if isTheoryAgnostic:
@@ -1718,7 +1725,7 @@ def setup(
         )
 
     if ("zwidth" in args.noi and not wmass) or (
-        not datagroups.xnorm and not stat_only and not args.noTheoryUnc
+        not datagroups.xnorm and add_theory_uncertainties
     ):
         # Variation from EW fit (mostly driven by alphas unc.)
         datagroups.addSystematic(
@@ -1738,7 +1745,7 @@ def setup(
         )
 
     # TODO: move closer to W mass uncertainty?
-    if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
+    if wmass and ("wwidth" in args.noi or add_theory_uncertainties):
         rabbit_helpers.add_W_width_uncertainty(
             datagroups,
             signal_samples_forMass,
@@ -1747,7 +1754,7 @@ def setup(
             label=label,
         )
 
-    if "sin2thetaW" in args.noi or (not stat_only and not args.noTheoryUnc):
+    if "sin2thetaW" in args.noi or add_theory_uncertainties:
         datagroups.addSystematic(
             "sin2thetaWeightZ",
             name=f"Sin2thetaZ0p00003",
@@ -1764,7 +1771,7 @@ def setup(
             passToFakes=passSystToFakes,
         )
 
-    if "alphaS" in args.noi or (not stat_only and not args.noTheoryUnc):
+    if "alphaS" in args.noi or add_theory_uncertainties:
         theorySystSamples = ["signal_samples_inctau"]
         if wmass:
             if args.helicityFitTheoryUnc:
@@ -1788,8 +1795,9 @@ def setup(
             np_model=args.npUnc,
             tnp_scale=args.scaleTNP,
             mirror_tnp=False,
-            pdf_from_corr=args.pdfUncFromCorr,
+            pdf_from_corr=not args.pdfUncFromUncorr,
             as_from_corr=not args.asUncFromUncorr,
+            minnlo_from_corr=not args.minnloUncFromUncorr,
             scale_pdf_unc=args.scalePdf,
             samples=theorySystSamples,
             minnlo_unc=args.minnloScaleUnc,
@@ -1797,16 +1805,14 @@ def setup(
             from_hels=not args.noTheoryCorrsViaHelicities,
             theory_symmetrize=args.symmetrizeTheoryUnc,
             pdf_symmetrize=args.symmetrizePdfUnc,
+            helicity_fit_unc=args.helicityFitTheoryUnc,
         )
 
         theory_helper.add_pdf_alphas_variation(
             noi="alphaS" in args.noi,
         )
-
-        if not stat_only and not args.noTheoryUnc:
-            theory_helper.add_all_theory_unc(
-                helicity_fit_unc=args.helicityFitTheoryUnc,
-            )
+        if add_theory_uncertainties:
+            theory_helper.add_all_theory_unc()
 
     if stat_only:
         # print a card with only mass weights
@@ -1815,7 +1821,7 @@ def setup(
         )
         return datagroups
 
-    if not args.noTheoryUnc:
+    if add_theory_uncertainties:
         if wmass and not datagroups.xnorm:
             if args.massConstraintModeZ == "automatic":
                 constrainMassZ = True

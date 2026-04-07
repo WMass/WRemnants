@@ -73,7 +73,7 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        self.corr_hist_name = (corr_hists[0] + "_Corr") if corr_hists else None
+        self.corr_hist_name = (corr_hists[0] + "_Corr") if corr_hists else ""
 
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -109,6 +109,7 @@ class TheoryHelper(object):
         mirror_tnp=True,
         as_from_corr=True,
         pdf_from_corr=False,
+        minnlo_from_corr=True,
         pdf_operation=None,
         samples=[],
         scale_pdf_unc=-1.0,
@@ -117,6 +118,7 @@ class TheoryHelper(object):
         from_hels=False,
         theory_symmetrize="quadratic",
         pdf_symmetrize="quadratic",
+        helicity_fit_unc=False,
     ):
 
         self.set_resum_unc_type(resumUnc)
@@ -128,11 +130,12 @@ class TheoryHelper(object):
         self.tnp_scale = tnp_scale
         self.mirror_tnp = mirror_tnp
         self.pdf_from_corr = pdf_from_corr
-        self.as_from_corr = pdf_from_corr or as_from_corr
+        self.as_from_corr = as_from_corr
+        self.minnlo_from_corr = minnlo_from_corr
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
         self.samples = samples
-        self.helicity_fit_unc = False
+        self.helicity_fit_unc = helicity_fit_unc
         self.minnlo_scale = minnlo_scale
         self.from_hels = from_hels
 
@@ -140,10 +143,10 @@ class TheoryHelper(object):
         self.theory_symmetrize = convert_none(theory_symmetrize)
         self.pdf_symmetrize = convert_none(pdf_symmetrize)
 
-    def add_all_theory_unc(self, helicity_fit_unc=False):
-        self.helicity_fit_unc = helicity_fit_unc
+    def add_all_theory_unc(self):
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
+        self.add_fixed_order_unc()
         if "nnlojet" in self.corr_hist_name:
             self.add_stat_unc()
         # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
@@ -254,6 +257,7 @@ class TheoryHelper(object):
                     transition=self.transitionUnc,
                 )
 
+    def add_fixed_order_unc(self):
         if self.minnlo_unc and self.minnlo_unc not in ["none", None]:
             # sigma_-1 uncertainty is covered by scetlib-dyturbo uncertainties if they are used
             helicities_to_exclude = None if self.resumUnc == "minnlo" else [-1]
@@ -266,7 +270,7 @@ class TheoryHelper(object):
                         # orthogonality of chebychev polynomials means that there is no
                         # double counting with fully correlated uncertainty
                         scale_inclusive = 1.0
-                    else:
+                    elif "Pt" in self.minnlo_unc:
                         fine_pt_binning = binning.ptV_binning[::2]
                         nptfine = len(fine_pt_binning) - 1
                         scale_inclusive = np.sqrt((nptfine - 1) / nptfine)
@@ -279,6 +283,8 @@ class TheoryHelper(object):
                             scale=self.minnlo_scale,
                             symmetrize=self.theory_symmetrize,
                         )
+                    else:
+                        scale_inclusive = 1.0
 
                     self.add_minnlo_scale_uncertainty(
                         sample_group,
@@ -293,7 +299,6 @@ class TheoryHelper(object):
         self,
         sample_group,
         extra_name="",
-        use_hel_hist=True,
         rebin_pt=None,
         helicities_to_exclude=None,
         pt_min=None,
@@ -306,49 +311,44 @@ class TheoryHelper(object):
             )
             return
 
-        helicity = "Helicity" in self.minnlo_unc
-        pt_binned = "Pt" in self.minnlo_unc
-        scale_hist = (
-            "qcdScale" if not (helicity or use_hel_hist) else "qcdScaleByHelicity"
-        )
-        if "helicity" in scale_hist.lower():
-            use_hel_hist = True
+        group_name = f"QCDscale{self.sample_label(sample_group)}"
+        base_name = f"{group_name}{extra_name}"
 
-        # All possible syst_axes
+        pt_binned = "Pt" in self.minnlo_unc
         # TODO: Move the axes to common and refer to axis_chargeVgen etc by their name attribute, not just
         # assuming the name is unchanged
         obs = self.datagroups.fit_axes
         pt_ax = "ptVgen" if "ptVgen" not in obs else "ptVgenAlt"
 
-        syst_axes = [pt_ax, "vars"]
-        syst_ax_labels = ["PtV", "var"]
-        format_with_values = ["edges", "center"]
+        if self.minnlo_from_corr:
+            scale_hist = "qcdScaleByHelicity"
 
-        group_name = f"QCDscale{self.sample_label(sample_group)}"
-        base_name = f"{group_name}{extra_name}"
+            syst_axes = ["vars"]
+            syst_ax_labels = ["var"]
 
-        skip_entries = []
-        preop_map = {}
+            skip_entries = []
+            # skip nominal
+            skip_entries.append({"vars": "nominal"})
+            # skip pythia shower and kt variations since they are handled elsewhere
+            skip_entries.append({"vars": "pythia_shower_kt"})
 
-        # skip nominal
-        skip_entries.append({"vars": "nominal"})
+            # All possible syst_axes
+            syst_axes = [pt_ax, *syst_axes]
+            syst_ax_labels = ["PtV", *syst_ax_labels]
+            format_with_values = ["edges", "center"]
 
-        # skip pythia shower and kt variations since they are handled elsewhere
-        skip_entries.append({"vars": "pythia_shower_kt"})
-
-        if helicities_to_exclude:
-            for helicity in helicities_to_exclude:
-                skip_entries.append({"vars": f"helicity_{helicity}_Down"})
-                skip_entries.append({"vars": f"helicity_{helicity}_Up"})
+            if helicities_to_exclude:
+                for helicity in helicities_to_exclude:
+                    skip_entries.append({"vars": f"helicity_{helicity}_Down"})
+                    skip_entries.append({"vars": f"helicity_{helicity}_Up"})
+        else:
+            scale_hist = "qcdScale"
 
         # NOTE: The map needs to be keyed on the base procs not the group names, which is
         # admittedly a bit nasty
         expanded_samples = self.datagroups.getProcGroupNames([sample_group])
         logger.debug(f"using {scale_hist} histogram for QCD scale systematics")
         logger.debug(f"expanded_samples: {expanded_samples}")
-
-        preop_map = {}
-        preop_args = {}
 
         if pt_binned:
             signal_samples = self.datagroups.procGroups["signal_samples"]
@@ -382,29 +382,34 @@ class TheoryHelper(object):
                 pt_idx = np.argmax(binning >= pt_min)
                 skip_entries.extend([{pt_ax: complex(0, x)} for x in binning[:pt_idx]])
 
-            func = (
+            preop = (
                 syst_tools.gen_hist_to_variations
                 if pt_ax == "ptVgenAlt"
                 else syst_tools.hist_to_variations
             )
-            preop_map = {proc: func for proc in expanded_samples}
-            preop_args["gen_axes"] = [pt_ax]
-            preop_args["rebin_axes"] = [pt_ax]
-            preop_args["rebin_edges"] = [binning]
+
+            preop_args = {
+                "gen_axes": [pt_ax],
+                "rebin_axes": [pt_ax],
+                "rebin_edges": [binning],
+            }
             if pt_ax == "ptVgenAlt":
                 preop_args["gen_obs"] = ["ptVgen"]
+        else:
+            preop = None
+            preop_args = {}
 
         # Skip MiNNLO unc.
-        if self.resumUnc and not (pt_binned or helicity):
+        if self.resumUnc and not (pt_binned or "Helicity" in self.minnlo_unc):
             logger.warning(
                 "Without pT or helicity splitting, only the SCETlib uncertainty will be applied!"
             )
-        else:
+        elif self.minnlo_from_corr:
             # FIXME Maybe put W and Z nuisances in the same group
             group_name += f"MiNNLO"
             self.datagroups.addSystematic(
                 scale_hist,
-                preOpMap=preop_map,
+                preOpMap=preop,
                 preOpArgs=preop_args,
                 symmetrize=symmetrize,
                 processes=[sample_group],
@@ -425,6 +430,40 @@ class TheoryHelper(object):
                 scale=scale,
                 name=base_name,  # Needed to allow it to be called multiple times
             )
+        else:
+            # vary muR or muF one at a time
+            for var, other in [["muRfact", "muFfact"], ["muFfact", "muRfact"]]:
+                group_name += f"MiNNLO"
+                self.datagroups.addSystematic(
+                    scale_hist,
+                    preOp=lambda h, *args, **kwargs: (
+                        preop(h[{other: 1}], *args, **kwargs)
+                        if preop
+                        else h[{other: 1}]
+                    ),
+                    preOpArgs=preop_args,
+                    symmetrize=symmetrize,
+                    processes=[sample_group],
+                    groups=[
+                        group_name,
+                        "QCDscale",
+                        "angularCoeffs",
+                        "theory",
+                        "theory_qcd",
+                    ],
+                    splitGroup={},
+                    systAxes=[var],
+                    systNameReplace=[
+                        [f"{var}0p5", f"{var}Down"],
+                        [f"{var}2", f"{var}Up"],
+                    ],
+                    skipEntries=[{var: 1}],
+                    baseName=base_name + "_",
+                    formatWithValue=["center"],
+                    passToFakes=self.propagate_to_fakes,
+                    scale=scale,
+                    name=base_name,  # Needed to allow it to be called multiple times
+                )
 
     def add_helicity_shower_kt_uncertainty(self):
         # select the proper variation and project over gen pt unless it is one of the fit variables
