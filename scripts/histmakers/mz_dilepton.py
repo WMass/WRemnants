@@ -538,7 +538,7 @@ def build_graph(df, dataset):
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
-    if dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
         helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
     else:
         helicity_smoothing_helpers = {}
@@ -583,6 +583,7 @@ def build_graph(df, dataset):
         cols = [*cols, "run"]
 
     if args.unfolding and dataset.group == "Zmumu":
+        print(f"name = {dataset.name}; group = {dataset.group}")
         df = unfolder_z.add_gen_histograms(
             args,
             df,

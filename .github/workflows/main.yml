@@ -996,7 +996,7 @@ jobs:
           mkdir -p $ALPHAS_OUTDIR
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_HIST_FILE --fitvar "$ALPHAS_FITVAR" --lumiScale $LUMI_SCALE --realData \
-            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --pdfUncFromCorr
+            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars
 
       - name: alphaS Z reco fit (${{ matrix.mode }})
         run: >-
@@ -1418,7 +1418,7 @@ jobs:
             --fitvar "ptll-yll-cosThetaStarll_quantile-phiStarll_quantile" "eta-pt-charge" \
             --lumiScale $LUMI_SCALE $LUMI_SCALE \
             -o $ALPHAS_OUTDIR --noi alphaS wmass --postfix reco \
-            --npUnc LatticeEigvars --pdfUncFromCorr
+            --npUnc LatticeEigvars
 
       - name: alphaS WZ reco fit
         run: >-
@@ -1467,7 +1467,7 @@ jobs:
             --genAxes "ptVGen-absYVGen-helicitySig" \
             --scaleNormXsecHistYields "0.05" --allowNegativeExpectation \
             --realData --systematicType normal --postfix unfolding \
-            --npUnc LatticeEigvars --pdfUncFromCorr \
+            --npUnc LatticeEigvars \
             --rebin 2 2 # this is for CI only! needed for max_files=100
 
       - name: alphaS Z unfolding fit

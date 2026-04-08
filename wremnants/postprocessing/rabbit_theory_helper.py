@@ -409,7 +409,7 @@ class TheoryHelper(object):
             group_name += f"MiNNLO"
             self.datagroups.addSystematic(
                 scale_hist,
-                preOpMap=preop,
+                preOp=preop,
                 preOpArgs=preop_args,
                 symmetrize=symmetrize,
                 processes=[sample_group],

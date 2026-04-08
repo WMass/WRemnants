@@ -727,10 +727,8 @@ def build_graph(df, dataset):
     isW = dataset.group in ["Wmunu", "Wtaunu"]
     isBSM = dataset.name.startswith("WtoNMu")
     isWmunu = isBSM or dataset.group in ["Wmunu"]
-    isZ = dataset.group in [
-        "Zmumu",
-        "Ztautau",
-    ]
+    isZ = dataset.group in ["Zmumu", "Ztautau"]
+    isZmumu = dataset.group in ["Zmumu"]
     isZveto = isZ or dataset.group in ["DYlowMass"]
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"
@@ -740,7 +738,7 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
-    if dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
         helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
     else:
         helicity_smoothing_helpers = {}
@@ -931,21 +929,19 @@ def build_graph(df, dataset):
                         cols = [*nominal_cols, *unfolding_cols[level]]
                         break
 
-        elif dataset.name == "Zmumu_2016PostVFP":
-            if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
-                df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
-                )
-
-                if not unfolder_z.poi_as_noi:
-                    axes = [
-                        *nominal_axes,
-                        *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
-                    ]
-                    cols = [
-                        *nominal_cols,
-                        *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
-                    ]
+        elif isZmumu:
+            df = unfolder_z.add_gen_histograms(
+                args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
+            )
+            if not unfolder_z.poi_as_noi:
+                axes = [
+                    *nominal_axes,
+                    *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+                ]
+                cols = [
+                    *nominal_cols,
+                    *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+                ]
 
     if isWorZ:
         df = generator_level_definitions.define_prefsr_vars(df)

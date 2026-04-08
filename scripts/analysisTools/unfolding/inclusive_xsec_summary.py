@@ -48,6 +48,15 @@ parser.add_argument(
     default=False,
     help="include data points from SMP-20-004 (JHEP04(2025)162)",
 )
+parser.add_argument(
+    "--theoryFiles",
+    type=str,
+    nargs="*",
+    default=[],
+    help="Theory prediction files in LABEL:filepath format. "
+    "Supports DYTURBO 1D txt files and NNLOjet cross.dat files. "
+    "Multiple files with the same label are combined into one prediction set.",
+)
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -145,6 +154,223 @@ smp_20_004 = {
     r"$\mathrm{W/Z}$": [10.491, 0.0864002314811714],
 }
 
+# Map xsec_key display names to internal process keys
+_name_to_proc = {
+    r"$\mathrm{W}^{-}$": "wm",
+    r"$\mathrm{W}^{+}$": "wp",
+    r"$\mathrm{W}$": "w",
+    r"$\mathrm{Z}$": "z",
+    r"$\mathrm{W}^{+}/\mathrm{W}^{-}$": "wp_wm",
+    r"$\mathrm{W/Z}$": "wz",
+}
+
+theory_colors = {
+    "DYTURBO": "#ff7f0e",
+    "NNLOjet": "#1f77b4",
+    "SCETlib+DYTurbo": "#9467bd",
+}
+
+
+def _detect_process(path):
+    """Detect W-/W+/Z from file path (filename or parent directories)."""
+    parts = path.replace("\\", "/").split("/")
+    for part in reversed(parts):
+        p = part.lower()
+        if p.startswith("results_wm") or p.startswith("wm") or "wminus" in p:
+            return "wm"
+        if p.startswith("results_wp") or p.startswith("wp") or "wplus" in p:
+            return "wp"
+        if (
+            (p.startswith("results_z") or p.startswith("z"))
+            and "wm" not in p
+            and "wp" not in p
+        ):
+            return "z"
+    raise ValueError(f"Cannot detect process (z/wm/wp) from path: {path}")
+
+
+def _parse_dyturbo_1d(path):
+    """Read total cross section from DYTURBO 1D rapidity file (last summary line).
+    Returns (central_fb, unc_up_fb, unc_dn_fb); no scale variations in 1D files."""
+    last = None
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            if s and not s.startswith("#"):
+                last = s
+    cols = last.split()
+    return float(cols[2]), 0.0, 0.0
+
+
+def _parse_nnlojet_cross(path):
+    """Parse NNLOjet cross.dat and return (central_fb, unc_up_fb, unc_dn_fb).
+    Scale uncertainty is symmetric (quadrature of muR and muF half-ranges)."""
+    labels, data = None, None
+    with open(path) as f:
+        for line in f:
+            s = line.strip()
+            if s.startswith("#labels:"):
+                labels = s[len("#labels:") :].split()
+            elif not s.startswith("#") and s:
+                data = np.array(s.split(), dtype=float)
+    col = {lbl.split("[")[0]: i for i, lbl in enumerate(labels)}
+    vals = np.array([data[col[f"tot_scale0{i+1}"]] for i in range(7)])
+    central = vals[3]  # scale04 = (muR=1, muF=1)
+    delta_muR = (vals[5] - vals[1]) / 2  # (scale06 - scale02) / 2
+    delta_muF = (vals[2] - vals[4]) / 2  # (scale03 - scale05) / 2
+    unc = np.sqrt(delta_muR**2 + delta_muF**2)
+    return central, unc, unc
+
+
+def _parse_matrix_radish(path):
+    """Parse MATRIX+RadISH pT distribution file and return (central_fb, unc_up_fb, unc_dn_fb).
+    Columns: bin_idx, central, stat, scale_down, stat, scale_up, stat.
+    Total cross section = sum of bins × bin width (1 GeV). Last row is a duplicate, skipped.
+    """
+    data = np.loadtxt(path)
+    bins = data[:-1]  # drop last duplicate row
+    bin_width = bins[1, 0] - bins[0, 0]  # should be 1 GeV
+    central = np.sum(bins[:, 1]) * bin_width
+    down = np.sum(bins[:, 3]) * bin_width
+    up = np.sum(bins[:, 5]) * bin_width
+    return central, up - central, central - down
+
+
+def _parse_theory_file(path):
+    with open(path) as f:
+        first = f.readline().strip()
+    if first.startswith("#labels: tot_scale01"):
+        return _parse_nnlojet_cross(path)
+    elif first.startswith("#ylo yhi PDF0"):
+        return _parse_dyturbo_1d(path)
+    elif not first.startswith("#"):
+        # No header: assume MATRIX_RadISH 7-column pT distribution
+        cols = first.split()
+        if len(cols) == 7:
+            return _parse_matrix_radish(path)
+    raise ValueError(f"Unknown theory file format: {path}")
+
+
+_SCETLIB_SCALE_VARS = [
+    "mufdown",
+    "mufup",
+    "kappaFO0.5-kappaf2.",
+    "kappaFO2.-kappaf0.5",
+    "mufdown-kappaFO0.5-kappaf2.",
+    "mufup-kappaFO2.-kappaf0.5",
+]
+
+
+def _parse_scetlib_pkl(path):
+    """Parse a SCETlib+DYTurbo pkl.lz4 correction file.
+
+    Returns dict: proc -> (central_pb, unc_up_pb, unc_dn_pb).
+    CorrZ files produce {'z': ...}, CorrW files produce {'wm': ..., 'wp': ...}.
+    Scale uncertainty = asymmetric quadrature of the 6 scale variation deviations.
+    """
+    import pickle
+
+    import lz4.frame
+
+    with lz4.frame.open(path, "rb") as f:
+        data = pickle.load(f)
+
+    results = {}
+    for boson_key in [k for k in data if k in ("Z", "W")]:
+        sub = data[boson_key]
+        hist_key = next(k for k in sub if k.endswith("_hist"))
+        h = sub[hist_key]
+        vars_list = list(h.axes["vars"])
+        vals = h.view(flow=True)["value"]
+        # Axes: Q(underflow+1data+overflow), absY(no underflow, +overflow),
+        #       qT(underflow+data+overflow), charge(no flow), vars(no underflow, +overflow)
+        # Q data bin is always index 1 in the flow array.
+        q_slice = 1
+
+        def _sum_proc(charge_idx, var_idx):
+            return float(np.sum(vals[q_slice, :, :, charge_idx, var_idx]))
+
+        pdf0_idx = vars_list.index("pdf0")
+
+        if boson_key == "Z":
+            central = _sum_proc(0, pdf0_idx)
+            deltas = np.array(
+                [
+                    _sum_proc(0, vars_list.index(sv)) - central
+                    for sv in _SCETLIB_SCALE_VARS
+                    if sv in vars_list
+                ]
+            )
+            unc_up = float(np.sqrt(np.sum(np.where(deltas > 0, deltas, 0) ** 2)))
+            unc_dn = float(np.sqrt(np.sum(np.where(deltas < 0, deltas, 0) ** 2)))
+            results["z"] = (central, unc_up, unc_dn)
+        elif boson_key == "W":
+            # charge axis: index 0 = W- (charge < 0), index 1 = W+
+            for ci, proc in [(0, "wm"), (1, "wp")]:
+                central = _sum_proc(ci, pdf0_idx)
+                deltas = np.array(
+                    [
+                        _sum_proc(ci, vars_list.index(sv)) - central
+                        for sv in _SCETLIB_SCALE_VARS
+                        if sv in vars_list
+                    ]
+                )
+                unc_up = float(np.sqrt(np.sum(np.where(deltas > 0, deltas, 0) ** 2)))
+                unc_dn = float(np.sqrt(np.sum(np.where(deltas < 0, deltas, 0) ** 2)))
+                results[proc] = (central, unc_up, unc_dn)
+
+    return results
+
+
+# Build theory_predictions: label -> proc -> (central_pb, unc_up_pb, unc_dn_pb)
+theory_predictions = {}
+for tf in args.theoryFiles:
+    label, path = tf.split(":", 1)
+    if path.endswith(".pkl.lz4"):
+        # SCETlib+DYTurbo: one file may contain multiple processes
+        multi = _parse_scetlib_pkl(path)
+        for proc, (c, u, d) in multi.items():
+            theory_predictions.setdefault(label, {})[proc] = (c, u, d)
+    else:
+        proc = _detect_process(path)
+        central_fb, unc_up_fb, unc_dn_fb = _parse_theory_file(path)
+        theory_predictions.setdefault(label, {})[proc] = (
+            central_fb / 1e3,
+            unc_up_fb / 1e3,
+            unc_dn_fb / 1e3,
+        )
+
+# Compute derived quantities (W, W+/W-, W/Z) from per-process values
+for preds in theory_predictions.values():
+    if "wm" in preds and "wp" in preds:
+        wm, wm_u, wm_d = preds["wm"]
+        wp, wp_u, wp_d = preds["wp"]
+        preds["w"] = (wm + wp, np.sqrt(wm_u**2 + wp_u**2), np.sqrt(wm_d**2 + wp_d**2))
+        r = wp / wm
+        preds["wp_wm"] = (
+            r,
+            (
+                r * np.sqrt((wp_u / wp) ** 2 + (wm_u / wm) ** 2)
+                if wp > 0 and wm > 0
+                else 0.0
+            ),
+            (
+                r * np.sqrt((wp_d / wp) ** 2 + (wm_d / wm) ** 2)
+                if wp > 0 and wm > 0
+                else 0.0
+            ),
+        )
+    if "w" in preds and "z" in preds:
+        w, w_u, w_d = preds["w"]
+        z, z_u, z_d = preds["z"]
+        r = w / z
+        preds["wz"] = (
+            r,
+            r * np.sqrt((w_u / w) ** 2 + (z_u / z) ** 2) if w > 0 and z > 0 else 0.0,
+            r * np.sqrt((w_d / w) ** 2 + (z_d / z) ** 2) if w > 0 and z > 0 else 0.0,
+        )
+
+nTheory = len(theory_predictions)
 nMeas = 1
 
 lumi = meta["meta_info_input"]["channel_info"]["ch0"]["lumi"]
@@ -365,11 +591,12 @@ fig.subplots_adjust(left=0.15, right=0.99, top=0.99, bottom=0.125)
 ax = fig.add_subplot(111)
 
 # x axis range
-lo, hi = 0.97, 1.085
+lo, hi = 0.97, 1.115
 
 # totals = []
 # stats = []
 norms = []
+_theory_labels_added = set()
 for i, name in enumerate(names[::-1]):
     df_g = df.loc[df["name"] == name]
 
@@ -395,13 +622,14 @@ for i, name in enumerate(names[::-1]):
 
     # ax.errorbar([prefit], [i+0.5], xerr=prefit_err, color="red", marker="o", label="Prefit" if i ==0 else None)
 
+    nSlots = nPDFs + nTheory + nMeas
     j = 0
     for j, pdf_name in enumerate(all_1d_pdf_names):
         pdf_value = df_g[pdf_name].values[0] / norm
         pdf_error = df_g[f"{pdf_name}_error"].values[0] / norm
         ax.errorbar(
             [pdf_value],
-            [i + 1 - (j + 1) / (nPDFs + nMeas)],
+            [i + 1 - (j + 1) / nSlots],
             xerr=pdf_error,
             color=pdf_colors[pdf_name],
             marker="o",
@@ -411,13 +639,35 @@ for i, name in enumerate(names[::-1]):
             pdf_error_pdf = df_g[f"{pdf_name}_pdf"].values[0] / norm
             ax.errorbar(
                 [pdf_value],
-                [i + 1 - (j + 1) / (nPDFs + nMeas)],
+                [i + 1 - (j + 1) / nSlots],
                 xerr=pdf_error_pdf,
                 color=pdf_colors[pdf_name],
                 capsize=5,
                 capthick=2,
                 marker="o",
             )
+
+    proc = _name_to_proc.get(name)
+    for k, (theo_label, preds) in enumerate(theory_predictions.items()):
+        if proc not in preds:
+            continue
+        central_pb, unc_up_pb, unc_dn_pb = preds[proc]
+        color = next(
+            (v for key, v in theory_colors.items() if theo_label.startswith(key)),
+            f"C{k + 5}",
+        )
+        legend_label = theo_label if theo_label not in _theory_labels_added else None
+        if legend_label is not None:
+            _theory_labels_added.add(theo_label)
+        has_unc = unc_up_pb > 0 or unc_dn_pb > 0
+        ax.errorbar(
+            [central_pb / norm],
+            [i + 1 - (nPDFs + k + 1) / nSlots],
+            xerr=[[unc_dn_pb / norm], [unc_up_pb / norm]] if has_unc else None,
+            color=color,
+            marker="^",
+            label=legend_label,
+        )
 
     # cross sections from SMP-20-004
     if args.includeSMP20004:
@@ -536,10 +786,44 @@ if args.postfix:
     outname += f"_{args.postfix}"
 plot_tools.save_pdf_and_png(outdir, outname)
 
+xsec_summary = {}
+for name, mappings, channel, selection in xsec_keys:
+    df_g = df.loc[df["name"] == name]
+    value = df_g["value"].values[0]
+    total = df_g.loc[df_g["label"] == "Total"]["impact"].values[0]
+    stat = df_g.loc[df_g["label"] == "stat"]["impact"].values[0]
+
+    entry = {
+        "value": value,
+        "stat": stat,
+        "total": total,
+    }
+
+    for pdf_name in all_1d_pdf_names:
+        if pdf_name in df_g.columns:
+            pdf_entry = {
+                "value": df_g[pdf_name].values[0],
+                "total": df_g[f"{pdf_name}_error"].values[0],
+            }
+            if f"{pdf_name}_pdf" in df_g.columns:
+                pdf_entry["pdf"] = df_g[f"{pdf_name}_pdf"].values[0]
+            entry[pdf_name] = pdf_entry
+
+    if args.includeSMP20004:
+        entry["JHEP04(2025)162"] = {
+            "value": smp_20_004[name][0],
+            "total": smp_20_004[name][1],
+        }
+
+    xsec_summary[name] = entry
+
 output_tools.write_index_and_log(
     outdir,
     outname,
-    analysis_meta_info={"CombinetfOutput": meta["meta_info"]},
+    analysis_meta_info={
+        "CombinetfOutput": meta["meta_info"],
+        "xsec_summary": xsec_summary,
+    },
     args=args,
 )
 
