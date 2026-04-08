@@ -361,14 +361,20 @@ if args.unfolding:
 muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = (
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
-procs = [
-    p
-    for p, grp in (("W", samples.wprocs), ("Z", samples.zprocs))
-    if any(d.name in grp for d in datasets)
-]
-theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args.pdfs, args.theoryCorr, procs=procs
-)
+
+if args.skipByHelicityCorrection:
+    helicity_smoothing_helpers_procs = {}
+else:
+    procs = [
+        p
+        for p, grp in (("W", samples.wprocs), ("Z", samples.zprocs))
+        if any(d.name in grp for d in datasets)
+    ]
+    helicity_smoothing_helpers_procs = (
+        theory_corrections.make_helicity_smoothing_helpers(
+            args.pdfs, args.theoryCorr, procs=procs
+        )
+    )
 
 # extra axes which can be used to label tensor_axes
 if args.binnedScaleFactors:
@@ -532,9 +538,10 @@ def build_graph(df, dataset):
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
-    theory_helpers = {}
-    if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
+    else:
+        helicity_smoothing_helpers = {}
 
     cvh_helper = data_calibration_helper if dataset.is_data else mc_calibration_helper
     jpsi_helper = data_jpsi_crctn_helper if dataset.is_data else mc_jpsi_crctn_helper
@@ -576,8 +583,14 @@ def build_graph(df, dataset):
         cols = [*cols, "run"]
 
     if args.unfolding and dataset.group == "Zmumu":
+        print(f"name = {dataset.name}; group = {dataset.group}")
         df = unfolder_z.add_gen_histograms(
-            args, df, results, dataset, corr_helpers, theory_helpers=theory_helpers
+            args,
+            df,
+            results,
+            dataset,
+            corr_helpers,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         if not unfolder_z.poi_as_noi:
@@ -598,7 +611,11 @@ def build_graph(df, dataset):
         df_gen = df
         df_gen = df_gen.DefinePerSample("exp_weight", "1.0")
         df_gen = theory_corrections.define_theory_weights_and_corrs(
-            df_gen, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df_gen,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         for obs in auxiliary_gen_axes:
@@ -613,7 +630,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 [all_axes[obs]],
                 [obs],
                 base_name=f"gen_{obs}",
@@ -921,7 +938,11 @@ def build_graph(df, dataset):
         logger.debug(f"Experimental weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         results.append(
@@ -1059,7 +1080,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         obs_axes,
                         obs,
                         base_name=obs_name,
@@ -1081,7 +1102,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [all_axes[obs]],
                     [obs],
                     base_name=f"nominal_{obs}",
@@ -1282,7 +1303,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=False,
