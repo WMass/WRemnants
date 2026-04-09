@@ -1611,7 +1611,7 @@ jobs:
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-w-histmaker, alphas-wz-reco, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
+    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
     if: always()
     steps:
       - env:
