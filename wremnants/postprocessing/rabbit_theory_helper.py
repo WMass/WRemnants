@@ -547,7 +547,7 @@ class TheoryHelper(object):
         self.datagroups.addSystematic(
             histname=self.corr_hist_name,
             processes=processes,
-            groups=["theory"],
+            groups=["fo_stat", "pTModeling", "theory"],
             systAxes=[self.syst_ax],
             passToFakes=self.propagate_to_fakes,
             preOp=lambda h: h[
@@ -823,7 +823,7 @@ class TheoryHelper(object):
         if self.np_model in ["LatticeEigvars", "LatticeNoConstraints"]:
             np_map = {
                 "lambda2": ["0.0", "0.5"],
-                "delta_lambda2": ["0.105", "0.145"],
+                "delta_lambda2": ["-0.02", "0.02"],
                 "lambda4": ["0.01", "0.16"],
             }
         elif "Lambda" in self.np_model:
@@ -877,7 +877,7 @@ class TheoryHelper(object):
         if self.np_model in ["LatticeEigvars", "LatticeNoConstraints"]:
             np_map = {
                 "lambda2": ["0.0", "0.5"],
-                "delta_lambda2": ["0.105", "0.145"],
+                "delta_lambda2": ["-0.02", "0.02"],
                 "lambda4": ["0.01", "0.16"],
             }
         elif "Lambda" in self.np_model:
