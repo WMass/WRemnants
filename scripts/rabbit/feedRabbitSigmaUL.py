@@ -294,10 +294,34 @@ def add_pdf_variations(args, writer, pdf_name):
         )
 
 
+def add_ew_isr_variation(args, writer):
+    ew_isr_name = "pythiaew_ISR"
+    corrh_num = theory_corrections.load_corr_hist(
+        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}CorrZ.pkl.lz4",
+        "Z",
+        f"{ew_isr_name}_num",
+    )
+    corrh_den = theory_corrections.load_corr_hist(
+        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}CorrZ.pkl.lz4",
+        "Z",
+        f"{ew_isr_name}_den",
+    )
+    print(corrh_num)
+    writer.add_scale_systematic(
+        [corrh_num, corrh_den],
+        f"{ew_isr_name}_Corr",
+        PROCESS_NAME,
+        SIGMAUL_CHANNEL,
+        kfactor=2,
+        mirror=True,
+        symmetrize="average",
+        groups=["theory_ew", "theory"],
+    )
+
+
 def output_name(args):
     name = args.outname
     name += f"_{args.predGenerator}"
-    name += f"_{args.pdfs[0]}"
     name += f"_{'_'.join(args.nois)}"
     if args.postfix:
         name += f"_{args.postfix}"
@@ -378,12 +402,25 @@ def make_parser():
     return parser
 
 
+def _validate_args(args):
+    """
+    Make sure the the first PDF (the only one used) matches the args.predGenerator.
+    TODO: at some point, we should have a dataclass for each theory correction that specifies which PDF it belongs to, so we don't have to rely on string parsing of the generator name.
+    """
+    if args.pdfs[0].lower() not in args.predGenerator.lower():
+        raise ValueError(
+            f"Make sure the that the PDF you pass (--pdfs) matches the --predGenerator name."
+        )
+
+
 def main():
     parser = make_parser()
     args = parser.parse_args()
     args.fitresultMapping = _join_cli_tokens(args.fitresultMapping)
     args.channelSigmaUL = _join_cli_tokens(args.channelSigmaUL)
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+    _validate_args(args)
 
     writer = SigmaULTheoryFitWriter(
         sparse=args.sparse,
@@ -408,6 +445,9 @@ def main():
 
     logger.info("Adding PDF variations")
     add_pdf_variations(args, writer, pdf_name)
+
+    logger.info("Adding EW ISR variation")
+    add_ew_isr_variation(args, writer)
 
     outfolder = args.outfolder or "./"
     meta = build_output_metadata(args, input_meta)

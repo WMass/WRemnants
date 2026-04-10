@@ -1824,8 +1824,16 @@ def setup(
                 passToFakes=passSystToFakes,
             )
 
-        if inputBaseName != "prefsr":
-            # make prefsr and EW free definition
+        if inputBaseName == "prefsr":
+            # ISR only for pre-FSR
+            rabbit_helpers.add_electroweak_uncertainty(
+                datagroups,
+                [*args.isrUnc],
+                samples="single_v_samples",
+                flavor=datagroups.flavor,
+                passSystToFakes=passSystToFakes,
+            )
+        else:
             rabbit_helpers.add_electroweak_uncertainty(
                 datagroups,
                 [*args.ewUnc, *args.fsrUnc, *args.isrUnc],
