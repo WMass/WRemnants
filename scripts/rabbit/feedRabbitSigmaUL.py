@@ -297,16 +297,15 @@ def add_pdf_variations(args, writer, pdf_name):
 def add_ew_isr_variation(args, writer):
     ew_isr_name = "pythiaew_ISR"
     corrh_num = theory_corrections.load_corr_hist(
-        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}CorrZ.pkl.lz4",
+        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}_CorrZ.pkl.lz4",
         "Z",
         f"{ew_isr_name}_num",
     )
     corrh_den = theory_corrections.load_corr_hist(
-        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}CorrZ.pkl.lz4",
+        f"{common.data_dir}/TheoryCorrections/{ew_isr_name}_CorrZ.pkl.lz4",
         "Z",
         f"{ew_isr_name}_den",
     )
-    print(corrh_num)
     writer.add_scale_systematic(
         [corrh_num, corrh_den],
         f"{ew_isr_name}_Corr",
