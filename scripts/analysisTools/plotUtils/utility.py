@@ -991,6 +991,7 @@ def drawCorrelationPlot(
     invertPalette=False,
     canvasSize="700,625",
     passCanvas=None,
+    topMargin=0.1,
     bottomMargin=0.1,
     plotError=False,
     plotRelativeError=False,
@@ -1074,6 +1075,7 @@ def drawCorrelationPlot(
     canvas.SetTicky(1)
     canvas.SetLeftMargin(leftMargin)
     canvas.SetRightMargin(rightMargin)
+    canvas.SetTopMargin(topMargin)
     canvas.SetBottomMargin(bottomMargin)
     canvas.cd()
 
