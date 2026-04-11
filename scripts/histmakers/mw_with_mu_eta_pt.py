@@ -312,13 +312,13 @@ axis_mtCat = hist.axis.Variable(
     ),
     name="mt",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
     binning.get_binning_fakes_relIso(high_iso_bins=False),
     name="relIso",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axes_abcd = [axis_mtCat, axis_isoCat]
 

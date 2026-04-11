@@ -1552,13 +1552,15 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
                 # min and max (in application region) for transformation of bernstain polynomials into interval [0,1]
                 axis_x_min = h[{self.name_x: self.sel_x}].axes[self.name_x].edges[0]
                 if self.name_x == "mt":
-                    # mt does not have an upper bound, cap at 100
+                    # mt may extend to infinity; use the last finite edge for the regressor
                     edges = (
                         self.rebin_x
                         if self.rebin_x is not None
                         else h.axes[self.name_x].edges
                     )
-                    axis_x_max = extend_edges(h.axes[self.name_x].traits, edges)[-1]
+                    all_edges = extend_edges(h.axes[self.name_x].traits, edges)
+                    finite_edges = all_edges[np.isfinite(all_edges)]
+                    axis_x_max = finite_edges[-1] if len(finite_edges) > 0 else 100.0
                 elif self.name_x in ["iso", "relIso", "relJetLeptonDiff", "dxy"]:
                     # iso and dxy have a finite lower and upper bound in the application region
                     axis_x_max = self.abcd_thresholds[self.name_x][1]
