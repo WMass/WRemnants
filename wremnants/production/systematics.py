@@ -31,7 +31,7 @@ def add_syst_hist(
     axes,
     cols,
     tensor_name=None,
-    tensor_axes=[],
+    tensor_axes=None,
     addhelicity=False,
     propagateToHelicity=False,
     nhelicity=6,
@@ -53,7 +53,9 @@ def add_syst_hist(
           2) templates corresponding to each helicity cross section differential in relevant quantities that are sensitive to polarization (e.g. cos(theta*), phi*, lepton eta)
             -> Reweight event by event via "helWeight_tensor"
     """
-    if not isinstance(tensor_axes, (list, tuple)):
+    if tensor_axes is None:
+        tensor_axes = []
+    elif not isinstance(tensor_axes, (list, tuple)):
         tensor_axes = [tensor_axes]
     if addhelicity:
         if len(tensor_axes) == 0:

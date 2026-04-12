@@ -402,10 +402,10 @@ def define_postfsr_vars(df, mode=None):
             else:
                 df = df.Alias("postfsrMET_pt", "MET_fiducialGenPt")
                 df = df.Alias("postfsrMET_phi", "MET_fiducialGenPhi")
-                df = df.Define(
-                    "postfsrPTV",
-                    "wrem::pt_2(postfsrLep_pt, postfsrLep_phi, postfsrMET_pt, postfsrMET_phi)",
-                )
+            df = df.Define(
+                "postfsrPTV",
+                "wrem::pt_2(postfsrLep_pt, postfsrLep_phi, postfsrMET_pt, postfsrMET_phi)",
+            )
 
             df = df.Define(
                 "postfsrMT",

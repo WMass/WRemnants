@@ -345,6 +345,7 @@ def rebin_pt(edges):
     if len(new_edges) % 2:
         # in case it's an odd number of edges, last two bins are overflow
         edges = edges[:-1]
+        new_edges = np.array([*edges[:2], *edges[3::2]])
     return new_edges
 
 
@@ -475,9 +476,12 @@ class UnfolderZ:
                     self.unfolding_corr_helper,
                     [*self.unfolding_corr_helper.hist.axes.name[:-1], "unity"],
                 )
+                # fitresult reweighting only supported for a single unfolding level
+                # (enforced in __init__); use index 0 explicitly rather than relying
+                # on loop-variable persistence from the select_fiducial_space loop above
                 df = df.Define(
                     "central_weight",
-                    f"{level}_acceptance ? unfoldingWeight_tensor(0) : unity",
+                    f"{self.unfolding_levels[0]}_acceptance ? unfoldingWeight_tensor(0) : unity",
                 )
 
             for level in self.unfolding_levels:
