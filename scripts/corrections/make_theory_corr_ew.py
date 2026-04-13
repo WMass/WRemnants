@@ -46,6 +46,12 @@ parser.add_argument(
     help="axes to project to",
 )
 parser.add_argument(
+    "--proc",
+    required=True,
+    type=str,
+    help="String to append to output file name to distinguish different corrections, e.g. 'horace' or 'winhac'",
+)
+parser.add_argument(
     "--outname", type=str, default=None, help="Output name for correction file"
 )
 parser.add_argument(

@@ -16,6 +16,11 @@ LATTICE_CORRELATED_NP_UNCERTAINTIES = [
         "delta_lambda2-0.02",
         "chargeVgenNP0scetlibNPDelta_Lambda2",
     ],
+    # [
+    #     "delta_lambda20.105",
+    #     "delta_lambda20.145",
+    #     "chargeVgenNP0scetlibNPDelta_Lambda2",
+    # ],
 ]
 
 STANDARD_GAMMA_NP_UNCERTAINTIES = [

@@ -272,14 +272,32 @@ def add_resummation_and_np_variations(args, writer):
         )
 
 
-def add_pdf_variations(args, writer, pdf_name):
+def add_pdf_variations(args, writer, pdf_name, pdf_scale: float | None = None):
     pdf_var_key = _pdfvars_generator_name(args.predGenerator)
+    keys_to_load = [pdf_var_key]
+
+    pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", args.pdfs[0])
+    pdfName = pdfInfo["name"]
+
+    if pdf_scale is not None:
+        scale = pdf_scale
+    else:
+        scale = pdfInfo.get("inflation_factor_alphaS", 1)
+        scale = pdfInfo.get("scale", 1) * scale
+
+    pdf_var_key_ext = None
+    if pdfName == "pdfHERAPDF20":
+        pdf_var_key_ext = pdf_var_key.replace("HERAPDF20", "HERAPDF20EXT")
+        keys_to_load.append(pdf_var_key_ext)
+
     corr_helpers = theory_corrections.load_corr_helpers(
         ["Z"],
-        [pdf_var_key],
+        keys_to_load,
         make_tensor=False,
         minnlo_ratio=False,
     )
+
+    pdf_groups = [pdf_name, f"{pdf_name}NoAlphaS", "theory", "theory_qcd"]
 
     h = corr_helpers["Z"][pdf_var_key]
     for ivar in range(1, len(h.axes[-1]), 2):
@@ -289,9 +307,44 @@ def add_pdf_variations(args, writer, pdf_name):
             PROCESS_NAME,
             SIGMAUL_CHANNEL,
             symmetrize="quadratic",
-            kfactor=1 / 1.645,
-            groups=[pdf_name, f"{pdf_name}NoAlphaS", "theory", "theory_qcd"],
+            kfactor=scale,
+            groups=pdf_groups,
         )
+
+    if pdf_var_key_ext is not None:
+        h_ext = corr_helpers["Z"][pdf_var_key_ext]
+        extInfo = theory_utils.pdfMap["herapdf20ext"]
+        n_entries = extInfo["entries"]
+        n_sym = 3
+        n_asym_entries = n_entries - n_sym
+
+        ext_suffix = "HERAPDF20EXT"
+
+        # Asymmetric hessian variations
+        for ivar in range(1, n_asym_entries, 2):
+            writer.add_systematic(
+                [h_ext[{"vars": ivar + 1}], h_ext[{"vars": ivar}]],
+                f"pdf{int((ivar + 1) / 2)}{ext_suffix}",
+                PROCESS_NAME,
+                SIGMAUL_CHANNEL,
+                symmetrize="quadratic",
+                kfactor=scale,
+                groups=pdf_groups,
+            )
+
+        # Symmetric hessian variations (mirrored)
+        n_asym_pairs = (n_asym_entries - 1) // 2
+        for j, ivar in enumerate(range(n_asym_entries, n_entries)):
+            writer.add_systematic(
+                h_ext[{"vars": ivar}],
+                f"pdf{n_asym_pairs + j + 1}{ext_suffix}",
+                PROCESS_NAME,
+                SIGMAUL_CHANNEL,
+                symmetrize="quadratic",
+                kfactor=scale,
+                mirror=True,
+                groups=pdf_groups,
+            )
 
 
 def add_ew_isr_variation(args, writer):
@@ -398,6 +451,12 @@ def make_parser():
         default="normal",
         help="Probability density for systematic variations.",
     )
+    parser.add_argument(
+        "--pdfScale",
+        type=float,
+        default=None,
+        help="Manually set the scale factor for PDF variations (overrides any scale specified in the theory corrections metadata).",
+    )
     return parser
 
 
@@ -439,11 +498,11 @@ def main():
     logger.info("Adding direct-theory sigmaUL systematics from %s", args.predGenerator)
     add_resummation_and_np_variations(args, writer)
 
-    logger.info("Adding lattice-corrected b/c quark-mass variations")
+    logger.info("Adding b/c quark-mass variations")
     add_bc_quark_mass_variations(writer)
 
     logger.info("Adding PDF variations")
-    add_pdf_variations(args, writer, pdf_name)
+    add_pdf_variations(args, writer, pdf_name, args.pdfScale)
 
     logger.info("Adding EW ISR variation")
     add_ew_isr_variation(args, writer)
