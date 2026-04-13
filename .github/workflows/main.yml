@@ -998,7 +998,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_HIST_FILE --fitvar "$ALPHAS_FITVAR" --lumiScale $LUMI_SCALE --realData \
             -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --pdfUncFromCorr \
-            --axlim ptll 0 44
+            --axlim ptll 0j 44j
 
       - name: alphaS Z reco fit (${{ matrix.mode }})
         run: >-
