@@ -1500,7 +1500,7 @@ jobs:
           echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptVGen_absYVGen_theoryfitViaMC" >> $GITHUB_ENV
-          echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_ct18z_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_PLOT_DIR=${WEB_DIR}/${PLOT_DIR}/alpha_s" >> $GITHUB_ENV
 
       - uses: actions/checkout@v5
