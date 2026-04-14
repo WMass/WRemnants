@@ -106,7 +106,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
 
         super().add_systematic(h, name, process, channel, **kwargs)
 
-    def add_scale_systematic(
+    def add_shape_systematic(
         self,
         h,
         name,
@@ -114,7 +114,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         channel,
         rebin_pt=True,
         rebin_y=True,
-        normalize=True,
+        normalize=False,
         apply_postOp=True,
         format=True,
         **kwargs,

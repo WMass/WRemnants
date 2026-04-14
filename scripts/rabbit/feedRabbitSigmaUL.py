@@ -181,7 +181,14 @@ def add_alphas_variation(args, writer, pdf_name):
     )
 
 
-def add_bc_quark_mass_variations(writer):
+def add_pdf_bc_quark_mass_variations(args, writer, logger, pdf_name):
+
+    if pdf_name == theory_utils.pdfMap["herapdf20"]["name"] and not args.noHERAPDF20EXT:
+        logger.info(
+            "Skipping PDF b/c quark-mass variations since using HERAPDF20EXT already includes them."
+        )
+        return
+
     corr_helpers = theory_corrections.load_corr_helpers(
         ["Z"],
         [helper_name for helper_name, *_ in BC_QUARK_MASS_VARIATIONS],
@@ -191,9 +198,7 @@ def add_bc_quark_mass_variations(writer):
 
     for helper_name, nuisance_name, down_var, up_var in BC_QUARK_MASS_VARIATIONS:
         h = corr_helpers["Z"][helper_name]
-        # Use the same multiplicative construction as add_scale_systematic:
-        # nominal * (quark_mass_var / quark_mass_nominal).
-        writer.add_scale_systematic(
+        writer.add_shape_systematic(
             [
                 h[{"vars": up_var}],
                 h[{"vars": down_var}],
@@ -272,21 +277,22 @@ def add_resummation_and_np_variations(args, writer):
         )
 
 
-def add_pdf_variations(args, writer, pdf_name, pdf_scale: float | None = None):
+def add_pdf_variations(args, writer, logger, pdf_name, scale_pdf: float | None = None):
     pdf_var_key = _pdfvars_generator_name(args.predGenerator)
     keys_to_load = [pdf_var_key]
 
     pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", args.pdfs[0])
     pdfName = pdfInfo["name"]
 
-    if pdf_scale is not None:
-        scale = pdf_scale
+    if scale_pdf is not None:
+        scale = scale_pdf
     else:
         scale = pdfInfo.get("inflation_factor_alphaS", 1)
         scale = pdfInfo.get("scale", 1) * scale
+    logger.debug(f"Using scale {scale}.")
 
     pdf_var_key_ext = None
-    if pdfName == "pdfHERAPDF20":
+    if pdfName == "pdfHERAPDF20" and not args.noHERAPDF20EXT:
         pdf_var_key_ext = pdf_var_key.replace("HERAPDF20", "HERAPDF20EXT")
         keys_to_load.append(pdf_var_key_ext)
 
@@ -359,7 +365,7 @@ def add_ew_isr_variation(args, writer):
         "Z",
         f"{ew_isr_name}_den",
     )
-    writer.add_scale_systematic(
+    writer.add_shape_systematic(
         [corrh_num, corrh_den],
         f"{ew_isr_name}_Corr",
         PROCESS_NAME,
@@ -371,11 +377,33 @@ def add_ew_isr_variation(args, writer):
     )
 
 
+def add_mb_fo_variations(args, writer):
+    mb_fo_name = "MiNNLO_Zbb"
+    numh = theory_corrections.load_corr_hist(
+        f"{common.data_dir}/TheoryCorrections/{mb_fo_name}_CorrZ.pkl.lz4",
+        "Z",
+        f"{mb_fo_name}_hist",
+    )
+    denh = theory_corrections.load_corr_hist(
+        f"{common.data_dir}/TheoryCorrections/{mb_fo_name}_CorrZ.pkl.lz4",
+        "Z",
+        f"minnlo_ref_hist",
+    )
+    writer.add_shape_systematic(
+        [numh[{"vars": "mb_up"}], denh[{"vars": "mb_up"}]],
+        "mb_fo",
+        PROCESS_NAME,
+        SIGMAUL_CHANNEL,
+        mirror=True,
+        groups=["bcQuarkMass", "theory"],
+    )
+
+
 def output_name(args):
     name = args.outname
     name += f"_{args.predGenerator}"
     name += f"_{'_'.join(args.nois)}"
-    if args.postfix:
+    if args.postfix and len(args.postfix) > 0:
         name += f"_{args.postfix}"
     return name
 
@@ -452,10 +480,15 @@ def make_parser():
         help="Probability density for systematic variations.",
     )
     parser.add_argument(
-        "--pdfScale",
+        "--scalePdf",
         type=float,
         default=None,
         help="Manually set the scale factor for PDF variations (overrides any scale specified in the theory corrections metadata).",
+    )
+    parser.add_argument(
+        "--noHERAPDF20EXT",
+        action="store_true",
+        help="Exclude the HERAPDF20EXT variations (only applicable if using a HERAPDF20-based PDF). Useful for comparing to simultaneous PDF and alphaS fit, where this parametrization isn't available.",
     )
     return parser
 
@@ -498,11 +531,14 @@ def main():
     logger.info("Adding direct-theory sigmaUL systematics from %s", args.predGenerator)
     add_resummation_and_np_variations(args, writer)
 
-    logger.info("Adding b/c quark-mass variations")
-    add_bc_quark_mass_variations(writer)
+    logger.info("Adding PDF b/c quark-mass variations")
+    add_pdf_bc_quark_mass_variations(args, writer, logger, pdf_name)
+
+    logger.info("Adding mb FO variations")
+    add_mb_fo_variations(args, writer)
 
     logger.info("Adding PDF variations")
-    add_pdf_variations(args, writer, pdf_name, args.pdfScale)
+    add_pdf_variations(args, writer, logger, pdf_name, args.scalePdf)
 
     logger.info("Adding EW ISR variation")
     add_ew_isr_variation(args, writer)
