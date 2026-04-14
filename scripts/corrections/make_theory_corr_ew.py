@@ -46,7 +46,7 @@ parser.add_argument(
     help="axes to project to",
 )
 parser.add_argument(
-    "--proc",
+    "--postfix",
     required=True,
     type=str,
     help="String to append to output file name to distinguish different corrections, e.g. 'horace' or 'winhac'",
@@ -253,7 +253,7 @@ for name, corr_dict in corrh.items():
     outname = name.replace("-", "")
     if args.postfix:
         outname += f"_{args.postfix}"
-    outfile = f"{args.outpath}/{outname}Corr{args.proc}.pkl.lz4"
+    outfile = f"{args.outpath}/{outname}Corr{args.postfix}.pkl.lz4"
 
     if "Zmumu" in corr_dict:
         output_tools.write_lz4_pkl_output(
