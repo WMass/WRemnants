@@ -225,7 +225,7 @@ def build_graph(df, dataset):
     axis_ptV_thag = theoryAgnostic_axes[0]
     axis_yV_thag = theoryAgnostic_axes[1]
 
-    if args.useUnfoldingBinning and "Z" in dataset.name:
+    if (args.useUnfoldingBinning or args.fiducial) and (isW or isZ):
         unfolding_axes, unfolding_cols, unfolding_selections = (
             binning.get_unfolding_dilepton_axes(
                 ["ptVGen", "absYVGen"],
@@ -415,25 +415,13 @@ def build_graph(df, dataset):
         nominal_axes += [axis_helicitygen]
         nominal_cols += ["helicity_idxs", "helicity_moments"]
 
-    mode = f'{"z" if isZ else "w"}_{analysis_label}'
-    if args.fiducial is not None:
-        if isZ and args.fiducial == "singlelep":
-            mode += "_wlike"
-
-        df = unfolding_tools.select_fiducial_space(
-            df,
-            mode=mode,
-            fiducial=args.fiducial,
-            unfolding=True,
-            selections=unfolding_selections,
-        )
-
-    if args.singleLeptonHists and (isW or isZ):
+    if args.singleLeptonHists or args.fiducial:
         gen_levels = ["prefsr", "postfsr"]
         df = unfolding_tools.define_gen_level(
             df, dataset.name, gen_levels, mode="w_mass" if isW else "z_wlike"
         )
 
+    if args.singleLeptonHists and (isW or isZ):
         for level in gen_levels:
             lep_axes = [axis_absetal_gen, axis_ptl_gen, axis_mt_gen, axis_chargel_gen]
             lep_cols = [
@@ -458,6 +446,20 @@ def build_graph(df, dataset):
                     storage=hist.storage.Weight(),
                 )
             )
+
+    mode = f'{"z" if isZ else "w"}_{analysis_label}'
+    if args.fiducial is not None:
+        if isZ and args.fiducial == "singlelep":
+            mode += "_wlike"
+
+        df = unfolding_tools.select_fiducial_space(
+            df,
+            mode=mode,
+            fiducial=args.fiducial,
+            unfolding=True,
+            selections=unfolding_selections,
+            gen_level="prefsr",
+        )
 
     if not args.skipEWHists and (isW or isZ) and "Zmumu_powheg-weak" in dataset.name:
         if isZ:

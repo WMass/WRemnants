@@ -73,7 +73,13 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        self.corr_hist_name = (corr_hists[0] + "_Corr") if corr_hists else None
+        if len(corr_hists) > 1 and corr_hists[1].startswith(corr_hists[0] + "_"):
+            self._corr_sep = "_"
+        else:
+            self._corr_sep = ""
+        self.corr_hist_name = (
+            (corr_hists[0] + self._corr_sep + "Corr") if corr_hists else None
+        )
 
         self.syst_ax = "vars"
         self.corr_hist = None
@@ -144,7 +150,7 @@ class TheoryHelper(object):
         self.helicity_fit_unc = helicity_fit_unc
         self.add_nonpert_unc(model=self.np_model)
         self.add_resum_unc(scale=self.tnp_scale)
-        if "nnlojet" in self.corr_hist_name:
+        if self.corr_hist_name and "nnlojet" in self.corr_hist_name:
             self.add_stat_unc()
         # additional uncertainty for effect of shower and intrinsic kt on angular coeffs
         self.add_helicity_shower_kt_uncertainty()
@@ -972,29 +978,24 @@ class TheoryHelper(object):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
-        scale = scale if scale != -1.0 else self.pdf_inflation_factor(pdfInfo)
+        scale = (
+            scale
+            if scale != -1.0
+            else theory_utils.pdf_inflation_factor(pdfInfo, self.args.noi)
+        )
         pdf_hist = pdfName
         pdf_hist_ext = None
 
         if self.pdf_from_corr:
-            pdf_corr_hist = f"{self.corr_hist_name.replace('Corr', 'pdfvars_Corr')}"
+            pdf_corr_hist = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfvars' + self._corr_sep + 'Corr')}"
             if pdf_corr_hist.replace(
-                "_Corr", ""
+                self._corr_sep + "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
                 raise RuntimeError(
                     f"PDF correction histogram {pdf_corr_hist} not found in metadata. "
                     "Cannot add PDF uncertainty from corrections!"
                 )
             pdf_hist = pdf_corr_hist
-            if pdfName == "pdfHERAPDF20":
-                pdf_hist_ext = pdf_hist.replace("HERAPDF20", "HERAPDF20EXT")
-                if pdf_hist_ext.replace(
-                    "_Corr", ""
-                ) not in self.datagroups.args_from_metadata("theoryCorr"):
-                    raise RuntimeError(
-                        f"PDF correction histogram {pdf_hist_ext} not found in metadata. "
-                        "Cannot add HERAPDF20ext uncertainty from corrections!"
-                    )
         elif pdfName == "pdfHERAPDF20":
             pdf_hist_ext = pdf_hist.replace("pdfHERAPDF20", "pdfHERAPDF20ext")
 
@@ -1078,16 +1079,19 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            asname = f"{self.corr_hist_name.replace('Corr', 'pdfas_Corr')}"
+            asname = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfas' + self._corr_sep + 'Corr')}"
             # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
-            if asname.replace("_Corr", "") not in self.datagroups.args_from_metadata(
-                "theoryCorr"
-            ):
-                asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                if asname.replace("_Corr", "") in self.datagroups.args_from_metadata(
-                    "theoryCorr"
-                ):
+            if asname.replace(
+                self._corr_sep + "Corr", ""
+            ) not in self.datagroups.args_from_metadata("theoryCorr"):
+                if self._corr_sep == "_":
+                    asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
+                else:
+                    asname = "scetlib_dyturboCT18Z_pdfasCorr"
+                if asname.replace(
+                    self._corr_sep + "Corr", ""
+                ) in self.datagroups.args_from_metadata("theoryCorr"):
                     logger.warning(
                         f"AlphaS correction histogram {asname} not found in theoryCorrs. "
                         "Falling back to default alphaS corrections scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfasCorr."
@@ -1263,16 +1267,3 @@ class TheoryHelper(object):
             passToFakes=self.propagate_to_fakes,
             outNames=_quark_mass_outnames("pdfMSHT20mcrange"),
         )
-
-    def pdf_inflation_factor(self, infoMap):
-        """Return the PDF uncertainty inflation factor for given nuisance parameters."""
-
-        if self.args.noi == ["wmass"] or self.args.noi == ["wmass", "wwidth"]:
-            return infoMap.get("inflation_factor_wmass", 1)
-        elif self.args.noi == ["alphaS"]:
-            return infoMap.get("inflation_factor_alphaS", 1)
-        else:
-            logger.debug(
-                f"No inflation factor defined for nuisance parameters {self.args.noi}, returning 1."
-            )
-            return 1

@@ -733,6 +733,21 @@ def add_mb_fo_uncertainty(
     )
 
 
+def _ew_corr_hist_name(datagroups, ewUnc):
+    """Return the correct histogram name for an EW correction, detecting whether
+    the file uses the new '{ewUnc}_Corr' or old '{ewUnc}Corr' naming convention.
+    Returns None if neither is found (correction not present in this file)."""
+    for proc_data in datagroups.results.values():
+        if not isinstance(proc_data, dict) or "output" not in proc_data:
+            continue
+        available = proc_data["output"]
+        if any(k.endswith(f"_{ewUnc}_Corr") for k in available):
+            return f"{ewUnc}_Corr"
+        if any(k.endswith(f"_{ewUnc}Corr") for k in available):
+            return f"{ewUnc}Corr"
+    return None
+
+
 def add_electroweak_uncertainty(
     datagroups,
     ewUncs,
@@ -747,11 +762,17 @@ def add_electroweak_uncertainty(
     w_samples = [p for p in all_samples if p[0] == "W"]
 
     for ewUnc in ewUncs:
+        ew_hist = _ew_corr_hist_name(datagroups, ewUnc)
+        if ew_hist is None:
+            logger.warning(
+                f"EW correction histogram for {ewUnc} not found in file, skipping."
+            )
+            continue
         if "renesanceEW" in ewUnc:
             if w_samples:
                 # add renesance (virtual EW) uncertainty on W samples
                 datagroups.addSystematic(
-                    f"{ewUnc}_Corr",
+                    ew_hist,
                     processes=w_samples,
                     preOp=lambda h: h[{"var": ["nlo_ew_virtual"]}],
                     labelsByAxis=[f"renesanceEWCorr"],
@@ -764,10 +785,10 @@ def add_electroweak_uncertainty(
         elif ewUnc == "powhegFOEW":
             if z_samples:
                 datagroups.addSystematic(
-                    f"{ewUnc}_Corr",
+                    ew_hist,
                     preOp=lambda h: h[{"weak": ["weak_ps", "weak_aem"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}_Corr"],
+                    labelsByAxis=[ew_hist],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -776,10 +797,10 @@ def add_electroweak_uncertainty(
                     name="ewScheme",
                 )
                 datagroups.addSystematic(
-                    f"{ewUnc}_Corr",
+                    ew_hist,
                     preOp=lambda h: h[{"weak": ["weak_default"]}],
                     processes=z_samples,
-                    labelsByAxis=[f"{ewUnc}_Corr"],
+                    labelsByAxis=[ew_hist],
                     scale=1.0,
                     systAxes=["weak"],
                     mirror=True,
@@ -821,12 +842,12 @@ def add_electroweak_uncertainty(
                 preOp = lambda h: h[{"systIdx": s[1:2]}]
 
             datagroups.addSystematic(
-                f"{ewUnc}_Corr",
+                ew_hist,
                 systAxes=["systIdx"],
                 mirror=True,
                 passToFakes=passSystToFakes,
                 processes=samples,
-                labelsByAxis=[f"{ewUnc}_Corr"],
+                labelsByAxis=[ew_hist],
                 scale=scale,
                 preOp=preOp,
                 groups=[f"theory_ew_{ewUnc}", "theory_ew", "theory"],
