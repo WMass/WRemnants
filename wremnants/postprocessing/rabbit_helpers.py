@@ -712,7 +712,7 @@ def add_mb_fo_uncertainty(
     if passToFakes is not None:
         passSystToFakes = passToFakes
 
-    corr_hist_name = "MiNNLO_Zbb_Corr"
+    corr_hist_name = f"{datagroups.nominalName}_MiNNLO_Zbb_Corr"
     processes_expanded = datagroups.expandProcesses(processes)
     processes_with_corr = []
 

@@ -997,7 +997,7 @@ jobs:
           mkdir -p $ALPHAS_OUTDIR
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_HIST_FILE --fitvar "$ALPHAS_FITVAR" --lumiScale $LUMI_SCALE --realData \
-            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --axlim ptll 0 44
+            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --axlim ptll 0j 44j
 
       - name: alphaS Z reco fit (${{ matrix.mode }})
         run: >-
@@ -1499,7 +1499,7 @@ jobs:
           echo "ALPHAS_Z_HIST=${WREMNANTS_OUTDIR}/alpha_s/mz_dilepton.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT=${WREMNANTS_OUTDIR}/alpha_s/alpha_s_z_gen_fit_fitresult.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_Z_GENFIT_DIR=${WREMNANTS_OUTDIR}/alpha_s/ZMassDilepton_ptVGen_absYVGen_theoryfitViaMC" >> $GITHUB_ENV
-          echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_ct18z_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
+          echo "ALPHAS_Z_DIRECT_THEORY_INPUT=${WREMNANTS_OUTDIR}/alpha_s/direct_sigmaul_carrot_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_alphaS_direct_sigmaul.hdf5" >> $GITHUB_ENV
           echo "ALPHAS_PLOT_DIR=${WEB_DIR}/${PLOT_DIR}/alpha_s" >> $GITHUB_ENV
 
       - uses: actions/checkout@v5
