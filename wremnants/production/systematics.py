@@ -31,7 +31,7 @@ def add_syst_hist(
     axes,
     cols,
     tensor_name=None,
-    tensor_axes=[],
+    tensor_axes=None,
     addhelicity=False,
     propagateToHelicity=False,
     nhelicity=6,
@@ -53,7 +53,9 @@ def add_syst_hist(
           2) templates corresponding to each helicity cross section differential in relevant quantities that are sensitive to polarization (e.g. cos(theta*), phi*, lepton eta)
             -> Reweight event by event via "helWeight_tensor"
     """
-    if not isinstance(tensor_axes, (list, tuple)):
+    if tensor_axes is None:
+        tensor_axes = []
+    elif not isinstance(tensor_axes, (list, tuple)):
         tensor_axes = [tensor_axes]
     if addhelicity:
         if len(tensor_axes) == 0:
@@ -1347,7 +1349,7 @@ def add_theory_hists(
     args,
     dataset_name,
     corr_helpers,
-    theory_helpers,
+    helicity_smoothing_helpers,
     axes,
     cols,
     base_name="nominal",
@@ -1418,21 +1420,21 @@ def add_theory_hists(
 
     if for_wmass or isZ:
 
-        if theory_helpers.get("qcdScale") is not None:
+        if helicity_smoothing_helpers.get("qcdScale") is not None:
             logger.debug(f"Make QCD scale histograms for {dataset_name}")
             # there is no W backgrounds for the Wlike, make QCD scale histograms only for Z
             # should probably remove the charge here, because the Z only has a single charge and the pt distribution does not depend on which charged lepton is selected
             add_qcdScaleByHelicityUnc_hist(
                 results,
                 df,
-                theory_helpers.get("qcdScale"),
+                helicity_smoothing_helpers.get("qcdScale"),
                 scale_axes,
                 scale_cols,
                 **info,
             )
 
-        if theory_helpers.get("pdf") is not None:
-            pdf_helpers = theory_helpers.get("pdf")
+        if helicity_smoothing_helpers.get("pdf") is not None:
+            pdf_helpers = helicity_smoothing_helpers.get("pdf")
             for pdf in args.pdfs:
                 pdf_name = theory_utils.pdfMap[pdf]["name"]
                 if pdf_name not in pdf_helpers.keys():
@@ -1453,7 +1455,7 @@ def add_theory_hists(
                     cols,
                     **info,
                 )
-        for pdf_name, pdf_from_corr_helper in theory_helpers.get(
+        for pdf_name, pdf_from_corr_helper in helicity_smoothing_helpers.get(
             "pdf_from_corr", {}
         ).items():
             logger.debug(
@@ -1470,7 +1472,7 @@ def add_theory_hists(
                 **info,
             )
 
-        for k, v in theory_helpers.get("alphaS", {}).items():
+        for k, v in helicity_smoothing_helpers.get("alphaS", {}).items():
             logger.debug(
                 f"Make alphaS uncertainty by helicity histogram for {dataset_name} and alphaS from correction {k}"
             )

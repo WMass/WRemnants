@@ -152,9 +152,9 @@ class HistselectorABCD(object):
         # or if abcdExplicitAxisEdges is provided from outside
         self.abcd_thresholds = {
             "pt": [26, 28, 30],
-            "mt": [0, 40] if self.ABCDmode == "simple" else [0, 20, 40],
+            "mt": [0, 40, np.inf] if self.ABCDmode == "simple" else [0, 20, 40, np.inf],
             "iso": [0, 4, 8, 12],
-            "relIso": [0, 0.15, 0.3, 0.45],
+            "relIso": [0, 0.15, np.inf],
             "relJetLeptonDiff": [0, 0.2, 0.35, 0.5],
             "dxy": [0, 0.01, 0.02, 0.03],
         }
@@ -401,6 +401,23 @@ class SignalSelectorABCD(HistselectorABCD):
     # signal region selection
     def get_hist(self, h, is_nominal=False):
         return self.get_hist_passX_passY(h)
+
+
+class OnesSelector(object):
+    """
+    Don't actually select anything, just set the values of the histogram to ones
+    This is e.g. to perform the ABCD method in the simultaneous fit of all regions to data
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    # signal region selection
+    def get_hist(self, h, is_nominal=False):
+        h_new = h.copy()
+        h_new.values()[...] = np.ones_like(h.values())
+        h_new.variances()[...] = np.zeros_like(h.values())
+        return h_new
 
 
 class FakeSelectorSimpleABCD(HistselectorABCD):
@@ -810,6 +827,11 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
         regressor.solve(x, y, w)
 
         logger.debug("Reduce is " + str(reduce))
+
+        # Always save params before (optional) reduction so the dump can access
+        # per-region polynomial coefficients for both signal_region=False and
+        # signal_region=True calls.
+        self._params_before_reduce = regressor.params.copy()
 
         if reduce:
             # add up parameters from smoothing of individual sideband regions
@@ -1552,13 +1574,15 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
                 # min and max (in application region) for transformation of bernstain polynomials into interval [0,1]
                 axis_x_min = h[{self.name_x: self.sel_x}].axes[self.name_x].edges[0]
                 if self.name_x == "mt":
-                    # mt does not have an upper bound, cap at 100
+                    # mt may extend to infinity; use the last finite edge for the regressor
                     edges = (
                         self.rebin_x
                         if self.rebin_x is not None
                         else h.axes[self.name_x].edges
                     )
-                    axis_x_max = extend_edges(h.axes[self.name_x].traits, edges)[-1]
+                    all_edges = extend_edges(h.axes[self.name_x].traits, edges)
+                    finite_edges = all_edges[np.isfinite(all_edges)]
+                    axis_x_max = finite_edges[-1] if len(finite_edges) > 0 else 100.0
                 elif self.name_x in ["iso", "relIso", "relJetLeptonDiff", "dxy"]:
                     # iso and dxy have a finite lower and upper bound in the application region
                     axis_x_max = self.abcd_thresholds[self.name_x][1]

@@ -232,17 +232,14 @@ if args.addAxisSignUt:
     )
 
 # for isoMt region validation and related tests
-# use very high upper edge as a proxy for infinity (cannot exploit overflow bins in the fit)
-# can probably use numpy infinity, but this is compatible with the root conversion
-# FIXME: now we can probably use overflow bins in the fit
 axis_mtCat = hist.axis.Variable(
-    [0, int(args.mtCut / 2.0), args.mtCut, 1000],
+    [0, int(args.mtCut / 2.0), args.mtCut, np.inf],
     name="mt",
     underflow=False,
     overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
-    [0, 0.15, 0.3, 100], name="relIso", underflow=False, overflow=False
+    [0, 0.15, 0.3, np.inf], name="relIso", underflow=False, overflow=False
 )
 
 if args.addIsoMtAxes:
@@ -306,7 +303,7 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr, corrs=["qcdScale", "alphaS", "pdf"]
 )
 
@@ -470,9 +467,9 @@ def build_graph(df, dataset):
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
-    theory_helpers = None
+    helicity_smoothing_helpers = None
     if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -596,7 +593,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
                     base_name=level,
@@ -924,7 +921,11 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
     results.append(
@@ -1451,7 +1452,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=False,

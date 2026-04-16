@@ -192,7 +192,7 @@ if args.helicity and args.propagatePDFstoHelicity:
     corrs.append("qcdScale")
 if args.centralBosonPDFWeight:
     corrs.append("pdf_central")
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr, procs=["Z", "W"], corrs=corrs
 )
 
@@ -215,9 +215,9 @@ def build_graph(df, dataset):
     ]  # in samples.zprocs
 
     if isW or isZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
     else:
-        theory_helpers = {}
+        helicity_smoothing_helpers = {}
 
     theoryAgnostic_axes, _ = binning.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
@@ -316,7 +316,7 @@ def build_graph(df, dataset):
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     df = theory_corrections.define_theory_weights_and_corrs(
-        df, dataset.name, corr_helpers, args, theory_helpers
+        df, dataset.name, corr_helpers, args, helicity_smoothing_helpers
     )
 
     if isZ or dataset.group in [
@@ -957,7 +957,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            theory_helpers,
+            helicity_smoothing_helpers,
             nominal_axes,
             nominal_cols,
             base_name="nominal_gen",

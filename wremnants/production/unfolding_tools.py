@@ -41,9 +41,9 @@ def define_gen_level(df, dataset_name, gen_levels=["prefsr", "postfsr"], mode="w
 
     singlelep = mode[0] == "w" or "wlike" in mode
 
-    if "prefsr" in gen_levels:
-        df = generator_level_definitions.define_prefsr_vars(df)
+    df = generator_level_definitions.define_prefsr_vars(df)
 
+    if "prefsr" in gen_levels:
         # # needed for fiducial phase space definition
         df = df.Alias("prefsrV_mass", "massVgen")
         df = df.Alias("prefsrV_pt", "ptVgen")
@@ -182,7 +182,7 @@ def add_xnorm_histograms(
     args,
     dataset_name,
     corr_helpers,
-    theory_helpers,
+    helicity_smoothing_helpers,
     unfolding_axes,
     unfolding_cols,
     base_name="xnorm",
@@ -193,7 +193,11 @@ def add_xnorm_histograms(
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
 
     df_xnorm = theory_corrections.define_theory_weights_and_corrs(
-        df_xnorm, dataset_name, corr_helpers, args, theory_helpers=theory_helpers
+        df_xnorm,
+        dataset_name,
+        corr_helpers,
+        args,
+        helicity_smoothing_helpers=helicity_smoothing_helpers,
     )
 
     df_xnorm = df_xnorm.Define("xnorm", "0.5")
@@ -231,7 +235,7 @@ def add_xnorm_histograms(
         args,
         dataset_name,
         corr_helpers,
-        theory_helpers,
+        helicity_smoothing_helpers,
         xnorm_axes,
         xnorm_cols,
         base_name=base_name,
@@ -341,6 +345,7 @@ def rebin_pt(edges):
     if len(new_edges) % 2:
         # in case it's an odd number of edges, last two bins are overflow
         edges = edges[:-1]
+        new_edges = np.array([*edges[:2], *edges[3::2]])
     return new_edges
 
 
@@ -436,7 +441,7 @@ class UnfolderZ:
         )
 
     def add_gen_histograms(
-        self, args, df, results, dataset, corr_helpers, theory_helpers={}
+        self, args, df, results, dataset, corr_helpers, helicity_smoothing_helpers={}
     ):
         df = define_gen_level(
             df, dataset.name, self.unfolding_levels, mode=self.analysis_label
@@ -454,25 +459,6 @@ class UnfolderZ:
             )
         else:
             for level in self.unfolding_levels:
-                # add full phase space histograms for inclusive cross section
-                df_full = df.Filter(f"{level}V_mass > 60")
-                df_full = df_full.Filter(f"{level}V_mass < 120")
-                add_xnorm_histograms(
-                    results,
-                    df_full,
-                    args,
-                    dataset.name,
-                    corr_helpers,
-                    theory_helpers,
-                    [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
-                    [
-                        c
-                        for c in self.unfolding_cols[level]
-                        if c != f"{level}_acceptance"
-                    ],
-                    base_name=f"{level}_full",
-                )
-
                 df = select_fiducial_space(
                     df,
                     level,
@@ -483,17 +469,42 @@ class UnfolderZ:
                     **self.cutsmap,
                 )
 
-                if self.unfolding_corr_helper:
-                    logger.debug("Apply reweighting based on unfolded result")
-                    df = df.Define(
-                        "unfoldingWeight_tensor",
-                        self.unfolding_corr_helper,
-                        [*self.unfolding_corr_helper.hist.axes.name[:-1], "unity"],
-                    )
-                    df = df.Define(
-                        "central_weight",
-                        f"{level}_acceptance ? unfoldingWeight_tensor(0) : unity",
-                    )
+            if self.unfolding_corr_helper:
+                logger.debug("Apply reweighting based on unfolded result")
+                df = df.Define(
+                    "unfoldingWeight_tensor",
+                    self.unfolding_corr_helper,
+                    [*self.unfolding_corr_helper.hist.axes.name[:-1], "unity"],
+                )
+                # fitresult reweighting only supported for a single unfolding level
+                # (enforced in __init__); use index 0 explicitly rather than relying
+                # on loop-variable persistence from the select_fiducial_space loop above
+                df = df.Define(
+                    "central_weight",
+                    f"{self.unfolding_levels[0]}_acceptance ? unfoldingWeight_tensor(0) : unity",
+                )
+
+            for level in self.unfolding_levels:
+                # add full phase space histograms for inclusive cross section,
+                #   the mass cuts has to be preFSR to compare to SMP-20-004
+                df_full = df.Filter("massVgen > 60")
+                df_full = df_full.Filter("massVgen < 120")
+                add_xnorm_histograms(
+                    results,
+                    df_full,
+                    args,
+                    dataset.name,
+                    corr_helpers,
+                    helicity_smoothing_helpers,
+                    [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
+                    [
+                        c
+                        for c in self.unfolding_cols[level]
+                        if c != f"{level}_acceptance"
+                    ],
+                    add_helicity_axis=self.add_helicity_axis,
+                    base_name=f"{level}_full",
+                )
 
                 if self.poi_as_noi:
                     df_xnorm = df.Filter(f"{level}_acceptance")
@@ -506,7 +517,7 @@ class UnfolderZ:
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in self.unfolding_axes[level] if a.name != "acceptance"],
                     [
                         c
