@@ -11,10 +11,13 @@ PARTON_FLAVOR_NAMES = {
     "uv": "u_{V}",
     "1": "d",
     "-1": r"\bar{d}",
+    "dbar": r"\bar{d}",
     "2": "u",
     "-2": r"\bar{u}",
+    "ubar": r"\bar{u}",
     "3": "s",
     "-3": r"\bar{s}",
+    "sbar": r"\bar{s}",
     "dv": "d_{v}",
     "rs": "r_{s}",
 }
@@ -60,17 +63,32 @@ def make_pdf_plot(
 
     # Formatting
     flav_label = PARTON_FLAVOR_NAMES.get(str(flavor), flavor)
-    ax1.set_ylabel(f"$x {flav_label}(x, Q^2)$", fontsize=16)
-    ax1.set_title(f"PDF Comparison at $Q = {Q_scale}$ GeV", fontsize=14)
+    ax1.set_ylabel(f"$x {flav_label}(x, Q^2)$", fontsize=32)
     ax1.legend(loc="upper left")
-    ax1.grid(True, which="both", alpha=0.3)
+    ax1.tick_params(labelsize=24)
+    ax1.text(
+        0.98,
+        0.95,
+        f"$Q = {Q_scale}$ GeV",
+        transform=ax1.transAxes,
+        fontsize=20,
+        ha="right",
+        va="top",
+    )
+    if args and args.yRange:
+        ax1.set_ylim(*args.yRange)
+    else:
+        ymin, ymax = ax1.get_ylim()
+        ax1.set_ylim(ymin, ymax * 1.2)
 
     ax2.axhline(1.0, color="black", lw=1, ls="--")
-    ax2.set_ylabel("Ratio to central", fontsize=14)
-    ax2.set_xlabel(r"$x$", fontsize=12)
+    ax2.set_ylabel("Ratio", fontsize=28)
+    ax2.set_xlabel(r"$x$", fontsize=24)
+    ax2.tick_params(labelsize=24)
     ax2.set_xscale("log")
-    ax2.set_ylim(0.8, 1.2)
-    ax2.grid(True, which="both", alpha=0.3)
+    ax2.set_xlim(1e-4, 1.0)
+    ratio_range = args.ratioRange if args and args.ratioRange else [0.8, 1.2]
+    ax2.set_ylim(*ratio_range)
 
     outfile = f"pdf_{flavor}_Q{int(Q_scale)}"
     if args and args.postfix:
@@ -109,6 +127,22 @@ def main():
     )
     parser.add_argument("-o", "--outpath", required=True, help="Output directory")
     parser.add_argument("--colors", nargs="+", help="List of colors")
+    parser.add_argument(
+        "--ratioRange",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("YMIN", "YMAX"),
+        help="Y-axis range for the ratio panel (default: 0.8 1.2)",
+    )
+    parser.add_argument(
+        "--yRange",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("YMIN", "YMAX"),
+        help="Y-axis range for the main plot panel (default: auto)",
+    )
     parser.add_argument(
         "--lhapdf-path",
         default="/scratch/submit/cms/wmass/PostfitPDF/",

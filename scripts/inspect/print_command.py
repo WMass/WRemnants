@@ -2,6 +2,8 @@ import argparse
 import os
 import pathlib
 
+import h5py
+
 from wremnants.utilities.io_tools import base_io
 from wums import logging
 
@@ -61,6 +63,23 @@ def print_command_from_dict(infile):
                     )
                 else:
                     logger.info(f"{k}: {v}")
+    elif args.infile.endswith(".hdf5"):
+        with h5py.File(args.infile, "r") as f:
+            if "command" in f.attrs:
+                if not args.all:
+                    logger.info(f.attrs["command"])
+                    if args.timestamp:
+                        logger.info("Timestamp: " + f.attrs.get("time", ""))
+                    if args.hash:
+                        logger.info("Git hash: " + f.attrs.get("git_hash", ""))
+                    if args.diff:
+                        logger.info("Git diff: " + f.attrs.get("git_diff", ""))
+                else:
+                    for k in ["command", "time", "git_hash", "git_diff"]:
+                        if k in f.attrs:
+                            logger.info(f"{k}: {f.attrs[k]}")
+            else:
+                logger.warning("No command metadata found in file.")
     else:
         from wremnants.postprocessing.datagroups.datagroups import Datagroups
 

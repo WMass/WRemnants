@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 
 from wremnants.postprocessing.postfit_pdf_helper import RabbitPostfitPdfHelper
-from wums import logging
+from wums import logging, output_tools
 
 parser = argparse.ArgumentParser(
     description="Write the postfit PDF covariance matrix and pulls to a simple HDF5 file."
@@ -42,6 +42,8 @@ logger.info(
     f"Writing covariance matrix ({cov_matrix.shape}), {len(labels)} labels, and pulls to {args.output}"
 )
 
+meta_info = output_tools.make_meta_info_dict(args=args)
+
 with h5py.File(args.output, "w") as f:
     f.create_dataset("covariance", data=cov_matrix)
     f.create_dataset("pulls", data=pulls)
@@ -51,5 +53,9 @@ with h5py.File(args.output, "w") as f:
     f.attrs["pdf_name"] = pdf_helper.pdf_name
     f.attrs["pdf_scale"] = pdf_helper.pdf_scale
     f.attrs["pdf_symm"] = pdf_helper.pdf_symm
+    f.attrs["command"] = meta_info.get("command", "")
+    f.attrs["time"] = meta_info.get("time", "")
+    f.attrs["git_hash"] = meta_info.get("git_hash", "")
+    f.attrs["git_diff"] = meta_info.get("git_diff", "")
 
 logger.info("Done.")

@@ -167,11 +167,16 @@ class RabbitPostfitPdfHelper(PostfitPdfHelper):
             # Read scaling and symmetrization settings from the fit metadata
             fit_args = input_meta.get("meta_info", {}).get("args", {})
             self.pdf_symm = fit_args.get("symmetrizePdfUnc")
-            raw_scale = fit_args.get("scalePdf", 1.0)
+            raw_scale = fit_args.get("scalePdf", -1)
             if raw_scale == -1:
-                self.pdf_scale = theory_utils.pdf_inflation_factor(
-                    pdf_info, fit_args.get("noi")
-                )
+                # 'noi' is not stored directly in fit_args; infer from fit flags
+                noi = fit_args.get("noi")
+                if noi is None:
+                    if fit_args.get("fitAlphaS", False):
+                        noi = ["alphaS"]
+                    else:
+                        noi = ["wmass"]
+                self.pdf_scale = theory_utils.pdf_inflation_factor(pdf_info, noi)
                 logger.info(
                     f"Using default inflation factor from theory_utils: {self.pdf_scale}"
                 )
