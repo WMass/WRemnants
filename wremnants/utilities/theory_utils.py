@@ -256,7 +256,7 @@ def pdfNamesAsymHessian(entries, pdfset=""):
 def valid_theory_corrections():
     corr_files = glob.glob(common.data_dir + "TheoryCorrections/*Corr*.pkl.lz4")
     matches = [
-        re.match(r"(^.*)_Corr[W|Z|BSM]\.pkl\.lz4", os.path.basename(c))
+        re.match(r"(^.*?)(?:_?Corr(?:W|Z|BSM))\.pkl\.lz4", os.path.basename(c))
         for c in corr_files
     ]
     return [m[1] for m in matches if m] + ["none"]
@@ -267,7 +267,8 @@ def valid_ew_theory_corrections():
         common.data_dir + "TheoryCorrections/*[eE][wW]*Corr*.pkl.lz4"
     )
     matches = [
-        re.match(r"(^.*)Corr[W|Z]\.pkl\.lz4", os.path.basename(c)) for c in corr_files
+        re.match(r"(^.*?)(?:_?Corr(?:W|Z))\.pkl\.lz4", os.path.basename(c))
+        for c in corr_files
     ]
     return [m[1] for m in matches if m] + ["none"]
 

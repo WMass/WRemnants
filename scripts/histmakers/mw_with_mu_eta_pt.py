@@ -152,6 +152,12 @@ parser.add_argument(
     action="store_true",
     help="When not applying muon scale corrections (--muonCorrData none / --muonCorrMC none), require at list that the CVH corrected variables are valid",
 )
+parser.add_argument(
+    "--muRmuFPolVar",
+    action="store_true",
+    help="Store additional histograms using polynomial variations for muR and muF (standard binned variations are still produced).",
+)
+
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -460,7 +466,6 @@ if args.theoryAgnostic:
         args.theoryAgnosticPolVar and args.theoryAgnosticSplitOOA
     ):  # this splitting is not needed for the normVar version of the theory agnostic
         datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Wmunu")
-        datasets = unfolding_tools.add_out_of_acceptance(datasets, group="Zmumu")
         groups_to_aggregate.append("WmunuOOA")
 
 # axes for study of fakes
@@ -469,6 +474,14 @@ axis_mt_fakes = hist.axis.Regular(
 )
 axis_dphi_fakes = hist.axis.Regular(
     8, 0.0, np.pi, name="DphiMuonMet", underflow=False, overflow=False
+)
+axis_dxybs = hist.axis.Regular(
+    int(args.dxybs / 0.002),
+    0.0,
+    args.dxybs,
+    name="dxybs",
+    underflow=False,
+    overflow=True,
 )
 axis_hasjet_fakes = hist.axis.Boolean(
     name="hasJets"
@@ -481,6 +494,22 @@ mTStudyForFakes_axes = [
     axis_passIso,
     axis_hasjet_fakes,
     axis_dphi_fakes,
+]
+mTStudyForFakes_axes_dxybs = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_dxybs,
+    axis_passIso,
+    axis_passMT,
+]
+mTStudyForFakes_axes_uTAngleCosine = [
+    axis_eta,
+    axis_pt,
+    axis_charge,
+    axis_mt_fakes,
+    axis_passIso,
+    axis_uTAngleCosine,
 ]
 
 axis_met = hist.axis.Regular(
@@ -574,7 +603,14 @@ diff_weights_helper = (
     jpsi_crctn_MC_unc_helper,
     jpsi_crctn_data_unc_helper,
 ) = muon_calibration.make_jpsi_crctn_helpers(
-    args, calib_filepaths, make_uncertainty_helper=True
+    calib_filepaths,
+    muon_corr_mc=args.muonCorrMC,
+    muon_corr_data=args.muonCorrData,
+    scale_var_method=args.muonScaleVariation,
+    scale_A=args.scale_A,
+    scale_e=args.scale_e,
+    scale_M=args.scale_M,
+    make_uncertainty_helper=True,
 )
 
 z_non_closure_parametrized_helper, z_non_closure_binned_helper = (
@@ -637,24 +673,25 @@ if args.theoryAgnosticPolVar:
     )
 
 # Helper for muR and muF as polynomial variations
-muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
-    genVcharge=-1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
-    genVcharge=1,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
-muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
-    genVcharge=0,
-    fileTag=args.muRmuFPolVarFileTag,
-    filePath=args.muRmuFPolVarFilePath,
-    noUL=True,
-)
+if args.muRmuFPolVar:
+    muRmuFPolVar_helpers_minus = makehelicityWeightHelper_polvar(
+        genVcharge=-1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_plus = makehelicityWeightHelper_polvar(
+        genVcharge=1,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
+    muRmuFPolVar_helpers_Z = makehelicityWeightHelper_polvar(
+        genVcharge=0,
+        fileTag=args.muRmuFPolVarFileTag,
+        filePath=args.muRmuFPolVarFilePath,
+        noUL=True,
+    )
 
 # recoil initialization
 if not args.noRecoil:
@@ -960,6 +997,8 @@ def build_graph(df, dataset):
         nMuons=1,
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
+        staPtCut=args.vetoRecoStaPt,
+        dxybsCut=args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
     df = muon_selections.select_good_muons(
@@ -1079,7 +1118,7 @@ def build_graph(df, dataset):
         if args.selectVetoEventsMC:
             # in principle a gen muon with eta = 2.401 might still be matched to a reco muon with eta < 2.4, same for pt, so this condition is potentially fragile, but it is just for test plots
             df = df.Filter("Sum(postfsrMuons_inAcc) >= 2")
-        if not args.noVetoSF:
+        if not args.noVetoSF or args.scaleDYvetoFraction > 0.0:
             df = df.Define(
                 "hasMatchDR2idx",
                 "wrem::hasMatchDR2idx_closest(goodMuons_eta0,goodMuons_phi0,GenPart_eta[postfsrMuons_inAcc],GenPart_phi[postfsrMuons_inAcc],0.09)",
@@ -1342,13 +1381,10 @@ def build_graph(df, dataset):
         df = df.Alias("MET_corr_rec_phi", f"{met}_phi")
 
     df = df.Define(
-        "goodMuons_utReco",
-        "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
-    )
-    df = df.Define(
         "goodMuons_angleSignUt0",
         "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
     )
+
     df = df.Define(
         "goodMuons_angleCosineUt0",
         "wrem::zqtproj0_angleCosine(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
@@ -1367,10 +1403,52 @@ def build_graph(df, dataset):
         "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
     )
 
+    # Define dedicated systematics from scaling/smearing met_pt and smearing met_phi.
+    # The used values are derived looking at template variations, but not optimized.
+    # Their size can be customized in setupRabbit.py with the 'scale' argument of datagroups.addSystematic()
+    df = df.Define(
+        "scaleMET_pt",
+        "wrem::get_scaled_smeared_variable(run, luminosityBlock, event, MET_corr_rec_pt, 1.01, 0.0)",
+    )
+    df = df.Define(
+        "smearMET_pt",
+        "wrem::get_scaled_smeared_variable(run, luminosityBlock, event, MET_corr_rec_pt, 1.0, 0.05)",
+    )
+    df = df.Define(
+        "smearMET_phi",
+        "wrem::get_scaled_smeared_variable(run, luminosityBlock, event, MET_corr_rec_phi, 1.0, 0.02, 1, 1)",
+    )
+    df = df.Define(
+        "transverseMass_scaleMET_pt",
+        "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, scaleMET_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define(
+        "transverseMass_smearMET_pt",
+        "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, smearMET_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define(
+        "transverseMass_smearMET_phi",
+        "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, smearMET_phi)",
+    )
+    df = df.Define(
+        "goodMuons_angleSignUt_scaleMET_pt0",
+        "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, scaleMET_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define(
+        "goodMuons_angleSignUt_smearMET_pt0",
+        "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, smearMET_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define(
+        "goodMuons_angleSignUt_smearMET_phi0",
+        "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, smearMET_phi)",
+    )
+
     df = df.Define("hasCleanJet", "Sum(goodCleanJetsNoPt && Jet_pt > 30) >= 1")
     df = df.Define(
-        "deltaPhiMuonMet", "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))"
+        "goodMuons_dphiMuMet0",
+        "std::abs(wrem::deltaPhi(goodMuons_phi0,MET_corr_rec_phi))",
     )
+    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
         # would move the following in a function but there are too many dependencies on axes defined in the main loop
@@ -1451,7 +1529,7 @@ def build_graph(df, dataset):
                     "passIso",
                     "nJetsClean",
                     "leadjetPt",
-                    "deltaPhiMuonMet",
+                    "goodMuons_dphiMuMet0",
                     "nominal_weight",
                 ],
             )
@@ -1635,6 +1713,13 @@ def build_graph(df, dataset):
         # instead of passIso in mTStudyForFakes
         # df = df.Define("passIsoAlt", "(goodMuons_pfRelIso04_all0 * Muon_pt[goodMuons][0] / goodMuons_jetpt0) < 0.12")
         # df = df.Define("passIsoAlt", "(Muon_vtxAgnPfRelIso04_chg[goodMuons][0] * Muon_pt[goodMuons][0]) < 5.0")
+
+        # Defined as Threshold - |dxybs| so that for signal it peaks at Threshold instead of 0
+        # for convenience in the later study
+        df = df.Define(
+            "goodMuons_dxybs0", f"{args.dxybs} - abs(Muon_dxybs[goodMuons][0])"
+        )
+
         mTStudyForFakes = df.HistoBoost(
             "mTStudyForFakes",
             mTStudyForFakes_axes,
@@ -1645,20 +1730,179 @@ def build_graph(df, dataset):
                 "transverseMass",
                 "passIso",
                 "hasCleanJet",
-                "deltaPhiMuonMet",
+                "goodMuons_dphiMuMet0",
                 "nominal_weight",
             ],
         )
         results.append(mTStudyForFakes)
 
+        mTStudyForFakes_dxybs = df.HistoBoost(
+            "mTStudyForFakes_dxybs",
+            mTStudyForFakes_axes_dxybs,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "goodMuons_dxybs0",
+                "passIso",
+                "passMT",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakes_dxybs)
+
+        mTStudyForFakes_uTAngleCosine = df.HistoBoost(
+            "mTStudyForFakes_uTAngleCosine",
+            mTStudyForFakes_axes_uTAngleCosine,
+            [
+                "goodMuons_eta0",
+                "goodMuons_pt0",
+                "goodMuons_charge0",
+                "transverseMass",
+                "passIso",
+                "goodMuons_angleCosineUt0",
+                "nominal_weight",
+            ],
+        )
+        results.append(mTStudyForFakes_uTAngleCosine)
+
+        df = df.Define(
+            "goodMuons_utReco0",
+            "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
+        )
+        if not dataset.is_data:
+            # the following can differ from goodMuons_uT0 which uses the gen boson (so both gen muon and neutrino)
+            df = df.Define(
+                "goodMuons_utGenMet0",
+                "wrem::zqtproj0(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
+            )
+            df = df.Define(
+                "goodMuons_utReso0",
+                "(goodMuons_utGenMet0 != 0) ? (goodMuons_utReco0 / goodMuons_utGenMet0) : 0.0",
+            )
+            df = df.Define(
+                "goodMuons_angleCosineUtGenMet0",
+                "wrem::zqtproj0_angleCosine(goodMuons_pt0, goodMuons_phi0, GenMET_pt, GenMET_phi)",
+            )
+            ut_bins = (
+                *np.arange(-40, -19, 5),
+                *np.arange(-18, 21, 2),
+                *np.arange(25, 51, 5),
+                *np.arange(60, 101, 10),
+            )
+            axis_ut_recoMet = hist.axis.Variable(
+                ut_bins, name="ut_recoMet", underflow=True, overflow=True
+            )
+            axis_ut_genMet = hist.axis.Variable(
+                ut_bins, name="ut_genMet", underflow=True, overflow=True
+            )
+            axis_ut_reso = hist.axis.Regular(
+                100, -2, 2, name="ut_reso", underflow=True, overflow=True
+            )
+            axis_uTAngleCosineGenMet = hist.axis.Regular(
+                20,
+                -1,
+                1,
+                name="uTAngleCosineGenMet",
+                overflow=False,
+                underflow=False,
+            )
+            #
+            etaPtUtGenUt = df.HistoBoost(
+                "etaPtUtGenUt",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_recoMet,
+                    axis_ut_genMet,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_utReco0",
+                    "goodMuons_utGenMet0",
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtGenUt)
+            #
+            etaPtUtAngleCosineGenUtAngleCosine = df.HistoBoost(
+                "etaPtUtAngleCosineGenUtAngleCosine",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_uTAngleCosine,
+                    axis_uTAngleCosineGenMet,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_angleCosineUt0",
+                    "goodMuons_angleCosineUtGenMet0",
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtAngleCosineGenUtAngleCosine)
+            #
+            etaPtUtResoUt = df.HistoBoost(
+                "etaPtUtResoUt",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_recoMet,
+                    axis_ut_reso,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_utReco0",
+                    "goodMuons_utReso0",
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtResoUt)
+            #
+            etaPtUtResoGenUt = df.HistoBoost(
+                "etaPtUtResoGenUt",
+                [
+                    axis_eta,
+                    axis_pt,
+                    axis_ut_genMet,
+                    axis_ut_reso,
+                    axis_passIso,
+                    axis_passMT,
+                ],
+                [
+                    "goodMuons_eta0",
+                    "goodMuons_pt0",
+                    "goodMuons_utGenMet0",
+                    "goodMuons_utReso0",
+                    "passIso",
+                    "passMT",
+                    "nominal_weight",
+                ],
+            )
+            results.append(etaPtUtResoGenUt)
+            #
+
     # add filter of deltaPhi(muon,met) before other histograms (but after histogram mTStudyForFakes)
     if args.dphiMuonMetCut > 0.0 and not args.makeMCefficiency:
         dphiMuonMetCut = args.dphiMuonMetCut * np.pi
         df = df.Filter(
-            f"deltaPhiMuonMet > {dphiMuonMetCut}"
+            f"goodMuons_dphiMuMet0 > {dphiMuonMetCut}"
         )  # pi/4 was found to be a good threshold for signal with mT > 40 GeV
-
-    df = df.Define("passMT", f"transverseMass >= {mtw_min}")
 
     if auxiliary_histograms:
 
@@ -1688,7 +1932,7 @@ def build_graph(df, dataset):
             df.HistoBoost(
                 "deltaPhiMuonMet",
                 [axis_phi, *axes_fakerate],
-                ["deltaPhiMuonMet", *columns_fakerate, "nominal_weight"],
+                ["goodMuons_dphiMuMet0", *columns_fakerate, "nominal_weight"],
             )
         )
         results.append(
@@ -1835,7 +2079,7 @@ def build_graph(df, dataset):
                     nominal_cols,
                 )
 
-    if isWorZ and not hasattr(dataset, "out_of_acceptance"):
+    if args.muRmuFPolVar and isWorZ and not hasattr(dataset, "out_of_acceptance"):
         theoryAgnostic_helpers_cols = [
             "qtOverQ",
             "absYVgen",
@@ -1886,18 +2130,19 @@ def build_graph(df, dataset):
         unweighted = df.HistoBoost("unweighted", axes, cols)
         results.append(unweighted)
 
-    nominal_withUt = df.HistoBoost(
-        "nominal_withUt",
-        [*axes, axis_ut_fine],
-        [*cols, "goodMuons_utReco", "nominal_weight"],
-    )
-    results.append(nominal_withUt)
-    nominal_withUtAngleCosine = df.HistoBoost(
-        "nominal_withUtAngleCosine",
-        [*axes, axis_uTAngleCosine],
-        [*cols, "goodMuons_angleCosineUt0", "nominal_weight"],
-    )
-    results.append(nominal_withUtAngleCosine)
+    if auxiliary_histograms:
+        nominal_withUt = df.HistoBoost(
+            "nominal_withUt",
+            [*axes, axis_ut_fine],
+            [*cols, "goodMuons_utReco0", "nominal_weight"],
+        )
+        results.append(nominal_withUt)
+        nominal_withUtAngleCosine = df.HistoBoost(
+            "nominal_withUtAngleCosine",
+            [*axes, axis_uTAngleCosine],
+            [*cols, "goodMuons_angleCosineUt0", "nominal_weight"],
+        )
+        results.append(nominal_withUtAngleCosine)
 
     if dataset.is_data:
         nominal = df.HistoBoost("nominal", axes, cols)
@@ -1912,6 +2157,46 @@ def build_graph(df, dataset):
                 ["nominal_weight"],
                 storage=hist.storage.Double(),
             )
+        )
+
+        cols_scaleMET_pt = [
+            x.replace("transverseMass", "transverseMass_scaleMET_pt").replace(
+                "goodMuons_angleSignUt0", "goodMuons_angleSignUt_scaleMET_pt0"
+            )
+            for x in cols
+        ]
+        cols_smearMET_pt = [
+            x.replace("transverseMass", "transverseMass_smearMET_pt").replace(
+                "goodMuons_angleSignUt0", "goodMuons_angleSignUt_smearMET_pt0"
+            )
+            for x in cols
+        ]
+        cols_smearMET_phi = [
+            x.replace("transverseMass", "transverseMass_smearMET_phi").replace(
+                "goodMuons_angleSignUt0", "goodMuons_angleSignUt_smearMET_phi0"
+            )
+            for x in cols
+        ]
+        systematics.add_syst_hist(
+            results,
+            df,
+            "nominal_scaleMET_pt",
+            axes,
+            [*cols_scaleMET_pt, "nominal_weight"],
+        )
+        systematics.add_syst_hist(
+            results,
+            df,
+            "nominal_smearMET_pt",
+            axes,
+            [*cols_smearMET_pt, "nominal_weight"],
+        )
+        systematics.add_syst_hist(
+            results,
+            df,
+            "nominal_smearMET_phi",
+            axes,
+            [*cols_smearMET_phi, "nominal_weight"],
         )
 
         if args.makeMCefficiency:

@@ -265,6 +265,7 @@ def getDatasets(
         is_data = info.get("group", "") == "Data"
 
         prod_tags = data_tags if is_data else mc_tags
+
         nfiles = maxFiles
         if type(maxFiles) == dict:
             nfiles = maxFiles[sample] if sample in maxFiles else -1

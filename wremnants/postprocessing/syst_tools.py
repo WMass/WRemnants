@@ -7,7 +7,7 @@ import lz4.frame
 import numpy as np
 import pandas as pd
 
-from wremnants.postprocessing import pdf_tools
+from wremnants.postprocessing import pdf_tools, rabbit_helpers
 from wremnants.utilities import binning, samples, theory_utils
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -1013,3 +1013,138 @@ def symmetrize_unc_matrix(matrix, labels, symm_type):
         )
 
     return matrix
+
+
+def fake_nonclosure_byAxis(
+    h,
+    *args,
+    axesToDecorrNames=["eta"],
+    variation_size=0.1,
+    keepConstantAxisBin={},
+    fakeselector=None,
+    **kwargs,
+):
+
+    # with keepConstantAxisBin one can keep a range of bins untouched by passing slice(start, stop)
+    # e.g. keepConstantAxisBin={"utAngleSign": slice(1, 2)}, maybe also by values with complex numbers
+
+    logger.info(
+        f"Doing decorr nonclosure with keepConstantAxisBin={keepConstantAxisBin}"
+    )
+    # enforce expectation for optional arguments, extra positional arguments are rejected
+    if args:
+        raise TypeError(f"Unexpected positional arguments: {args}")
+
+    hnom = fakeselector.get_hist(h, *args, **kwargs)
+    hvar = (1 + variation_size) * hnom
+    if keepConstantAxisBin:
+        ax_names = [n for n in hvar.axes.name]
+        idxs = [slice(None)] * hvar.ndim
+        for name in keepConstantAxisBin.keys():
+            if name not in ax_names:
+                raise ValueError(
+                    f"In fake_nonclosure_byAxis(): axis '{name}' not found in hvar, valid names are {ax_names}"
+                )
+            ax_index = ax_names.index(name)
+            idxs[ax_index] = keepConstantAxisBin[name]
+        hvar.values()[tuple(idxs)] = hnom.values()[tuple(idxs)]
+
+    hvar = rabbit_helpers.decorrelateByAxes(hvar, hnom, axesToDecorrNames)
+
+    return hvar
+
+
+def add_nonprompt_transfer_factor_variations(
+    h, corr_file, corr_histName, selection, varIdxs=[0]
+):
+
+    with lz4.frame.open(corr_file) as f:
+        corrs = pickle.load(f)
+    boost_corr = corrs[corr_histName]
+
+    if len(varIdxs) > 0:
+        varIDaxis = hist.axis.Regular(
+            len(varIdxs), -0.5, -0.5 + len(varIdxs), flow=False, name="varTF"
+        )
+        axes = [*h.axes, varIDaxis, binning.down_up_axis]
+        selVar = selection + [slice(None), slice(None)]
+    else:
+        axes = [*h.axes, binning.down_up_axis]
+        varIdxs.append(-1)
+        selVar = selection + [slice(None)]
+
+    hVar = hist.Hist(
+        *axes,
+        storage=hist.storage.Weight(),
+    )
+
+    for iv in varIdxs:
+
+        if iv != -1:
+            boost_corr_slice = boost_corr[..., iv]
+            selVar[-2] = iv
+        else:
+            boost_corr_slice = boost_corr
+
+        hUp = hh.multiplyHists(
+            h[tuple(selection)], boost_corr_slice, flow=False, allowBroadcast=False
+        )
+        hDown = hh.mirrorHist(hUp, h[tuple(selection)])
+
+        hVar.values()[tuple(selVar)] = np.stack(
+            [hDown.values(flow=False), hUp.values(flow=False)], axis=-1
+        )
+        hVar.variances()[tuple(selVar)] = np.stack(
+            [hDown.variances(flow=False), hUp.variances(flow=False)], axis=-1
+        )
+
+    return hVar
+
+
+def fake_transferFactor_ptSyst(
+    h,
+    axesToDecorrNames=[],
+    altHistName="fakeCorr_altStat",
+    varIdxs=[0],
+    correctionFile="",
+    fakeselector=None,
+    fakeTransferAxis="",
+    *args,
+    **kwargs,
+):
+    hnom = fakeselector.get_hist(h, *args, **kwargs)
+
+    ax_names = [n for n in hnom.axes.name]
+    sel_var = [slice(None)] * hnom.ndim
+    sel_const = [slice(None)] * hnom.ndim
+    sel_var[ax_names.index(fakeTransferAxis)] = 0
+    sel_const[ax_names.index(fakeTransferAxis)] = 1
+
+    hvar = add_nonprompt_transfer_factor_variations(
+        hnom.copy(),
+        correctionFile,
+        altHistName,
+        sel_var,
+        varIdxs=varIdxs,
+    )
+
+    hvar_utPlus = hnom.copy()[tuple(sel_const)]
+
+    if varIdxs[0] != -1:
+        hvar.values()[
+            tuple([*sel_const, slice(None), slice(None)])
+        ] = hvar_utPlus.values()[..., None, None]
+    else:
+        hvar.values()[tuple([*sel_const, slice(None)])] = hvar_utPlus.values()[
+            ..., None
+        ]
+
+    if len(axesToDecorrNames) > 0:
+        hvar = rabbit_helpers.decorrelateByAxes(
+            hvar,
+            hnom,
+            axesToDecorrNames,
+            newDecorrAxesNames=[f"{x}_decorr" for x in axesToDecorrNames],
+        )
+
+    return hvar

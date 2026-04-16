@@ -180,10 +180,14 @@ def load_corr_helpers(
             else:
                 label = proc[0]
 
-            fname = f"{base_dir}/{generator}_Corr{label}.pkl.lz4"
-            if not os.path.isfile(fname):
+            candidate_fnames = [
+                f"{base_dir}/{generator}_Corr{label}.pkl.lz4",
+                f"{base_dir}/{generator}Corr{label}.pkl.lz4",
+            ]
+            fname = next((f for f in candidate_fnames if os.path.isfile(f)), None)
+            if fname is None:
                 logger.warning(
-                    f"Did not find correction file {fname} for process {proc}, generator {generator}. No correction will be applied for this process!"
+                    f"Did not find correction file {candidate_fnames[0]} for process {proc}, generator {generator}. No correction will be applied for this process!"
                 )
                 continue
             logger.debug(f"Make theory correction helper for file: {fname}")
