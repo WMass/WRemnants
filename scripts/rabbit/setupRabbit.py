@@ -583,7 +583,15 @@ def make_parser(parser=None, argv=None):
         type=str,
         help="Set the mode for the fake estimation",
         default="extended1D",
-        choices=["mc", "closure", "simple", "extrapolate", "extended1D", "extended2D"],
+        choices=[
+            "none",
+            "mc",
+            "closure",
+            "simple",
+            "extrapolate",
+            "extended1D",
+            "extended2D",
+        ],
     )
     parser.add_argument(
         "--forceGlobalScaleFakes",
@@ -1334,38 +1342,49 @@ def setup(
     if args.qcdProcessName:
         datagroups.fakeName = args.qcdProcessName
 
-    abcdExplicitAxisEdges = {}
-    if len(args.ABCDedgesByAxis):
-        for item in args.ABCDedgesByAxis:
-            ax_name, ax_edges = item.split("=")
-            abcdExplicitAxisEdges[ax_name] = [float(x) for x in ax_edges.split(",")]
-
     if wmass and not datagroups.xnorm:
-        datagroups.fakerate_axes = args.fakerateAxes
-        # datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
-        # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
-        histselector_kwargs = dict(
-            mode=args.fakeEstimation,
-            smoothing_mode=args.fakeSmoothingMode,
-            smoothingOrderSpectrum=args.fakeSmoothingOrder,
-            smoothingPolynomialSpectrum=args.fakeSmoothingPolynomial,
-            mcCorr=args.fakeMCCorr,
-            integrate_x="mt" not in fitvar,
-            forceGlobalScaleFakes=args.forceGlobalScaleFakes,
-            abcdExplicitAxisEdges=abcdExplicitAxisEdges,
-            fakeTransferAxis=(
-                args.fakeTransferAxis
-                if args.fakeTransferAxis in args.fakerateAxes
-                else ""
-            ),
-            fakeTransferCorrFileName=args.fakeTransferCorrFileName,
-            histAxesRemovedBeforeFakes=(
-                [str(x[0]) for x in args.presel] if args.presel else []
-            ),
-        )
-        datagroups.set_histselectors(
-            datagroups.getNames(), inputBaseName, **histselector_kwargs
-        )
+        if args.fakeEstimation not in [None, "none"]:
+            abcdExplicitAxisEdges = {}
+            if len(args.ABCDedgesByAxis):
+                for item in args.ABCDedgesByAxis:
+                    ax_name, ax_edges = item.split("=")
+                    abcdExplicitAxisEdges[ax_name] = [
+                        float(x) for x in ax_edges.split(",")
+                    ]
+
+            datagroups.fakerate_axes = args.fakerateAxes
+            # datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
+            # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
+            histselector_kwargs = dict(
+                mode=args.fakeEstimation,
+                smoothing_mode=args.fakeSmoothingMode,
+                smoothingOrderSpectrum=args.fakeSmoothingOrder,
+                smoothingPolynomialSpectrum=args.fakeSmoothingPolynomial,
+                mcCorr=args.fakeMCCorr,
+                integrate_x="mt" not in fitvar,
+                forceGlobalScaleFakes=args.forceGlobalScaleFakes,
+                abcdExplicitAxisEdges=abcdExplicitAxisEdges,
+                fakeTransferAxis=(
+                    args.fakeTransferAxis
+                    if args.fakeTransferAxis in args.fakerateAxes
+                    else ""
+                ),
+                fakeTransferCorrFileName=args.fakeTransferCorrFileName,
+                histAxesRemovedBeforeFakes=(
+                    [str(x[0]) for x in args.presel] if args.presel else []
+                ),
+            )
+            datagroups.set_histselectors(
+                datagroups.getNames(), inputBaseName, **histselector_kwargs
+            )
+        else:
+            from wremnants.postprocessing import histselections as sel
+
+            g = datagroups.fakeName
+            members = datagroups.groups[g].members[:]
+            if len(members) == 0:
+                raise RuntimeError(f"No member found for group {g}")
+            datagroups.groups[g].histselector = sel.OnesSelector()
 
     logger.debug(f"Making datacards with these processes: {datagroups.getProcesses()}")
 
