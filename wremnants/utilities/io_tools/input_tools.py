@@ -275,13 +275,32 @@ def read_nnlojet_file(
     return h * 1e-3
 
 
-def read_nnlojet_ybin(refname, ybins, charge=None):
+def resolve_nnlojet_ybin_filename(refname, ybins):
     format_decimal = lambda x: (
         "0" if x == 0 else f"{round(x, 1+(x % 1 in [0.25, 0.75]))}".replace(".", "p")
     )
+
+    def alternate_decimal(value):
+        formatted = format_decimal(value)
+        return formatted[:-1] if formatted.endswith("p0") else formatted
+
+    bounds = tuple(format_decimal(y) for y in ybins)
+    candidates = [
+        f"{refname}__{bounds[0]}__{bounds[1]}.dat",
+        f"{refname}__{alternate_decimal(ybins[0])}__{bounds[1]}.dat",
+        f"{refname}__{bounds[0]}__{alternate_decimal(ybins[1])}.dat",
+        f"{refname}__{alternate_decimal(ybins[0])}__{alternate_decimal(ybins[1])}.dat",
+    ]
+    for candidate in dict.fromkeys(candidates):
+        if os.path.isfile(candidate):
+            return candidate
+    return candidates[0]
+
+
+def read_nnlojet_ybin(refname, ybins, charge=None):
     yax = hist.axis.Variable(ybins, name="Y")
     return read_nnlojet_file(
-        f"{refname}__{format_decimal(ybins[0])}__{format_decimal(ybins[1])}.dat",
+        resolve_nnlojet_ybin_filename(refname, ybins),
         other_axes=[yax],
         charge=charge,
     )
