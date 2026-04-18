@@ -105,13 +105,22 @@ def dump_smoothing_params(
     outpath, fakeselector, datagroups, inputBaseName, meta_data_dict=None, postfix=""
 ):
     """
-    Re-fit the linearized smoothing polynomial for the nominal fake histogram
-    (without the region reduction step) and save the per-region polynomial
-    coefficients in the SmoothExtendedABCD power-series basis to *outpath*.
+    Dump the per-region Chebyshev polynomial coefficients of the nominal fake
+    histogram smoothing fit, in the layout expected by SmoothExtendedABCD as
+    ``initial_params``.
+
+    Both the WRemnants spectrum regressor and SmoothExtendedABCD now use the
+    same Chebyshev basis (T_k of the first kind, with x̃ ∈ [-1, 1] via the
+    axis edges), so the regressor coefficients are passed through directly,
+    with a projection of ``log(bin_width)`` added so the exported coefficients
+    predict yields per bin, not rates per unit of the smoothing axis (the
+    regressor fits ``log(data_rate) = log(data_yield / bin_width)``). In the
+    simultaneous (extended)ABCD fit the nonprompt process is filled with
+    ``OnesSelector``, so ``mc_template = 1`` and the polynomial must carry the
+    full absolute scale; the Chebyshev intercept (T_0) is therefore kept.
 
     The saved array has shape (5 * n_outer * (order+1),) with the layout
-    [A_params, B_params, C_params, Ax_params, Bx_params], matching the
-    internal layout expected by SmoothExtendedABCD as initial_params.
+    [A_params, B_params, C_params, Ax_params, Bx_params].
 
     Flat ABCD index ordering for the 5 regions with signal_region=False
     (FakeSelector1DExtendedABCD, with flow=True, after y-axis flip so tight iso is last):
@@ -172,28 +181,17 @@ def dump_smoothing_params(
         axis=1,
     )  # (n_outer, 5, order+1)
 
-    # The regressor was fit with polynomial=chebyshev, normalised x to [-1,1]
-    # via x_cheby = 2*(x - center)/(max-min).
-    # The SmoothExtendedABCD model uses a power-series basis normalised to [0,1]
-    # via x_norm = (x - x_min)/(x_max - x_min).
-    # Conversion: evaluate the Chebyshev polynomial at the model's x_norm points
-    # and refit with the power-series Vandermonde.
+    # Both bases now agree (Chebyshev T_k, x̃ ∈ [-1, 1] via the axis edges).
+    # The regressor fits log(data_rate) = log(data_yield / bin_width); the model
+    # evaluates yield = exp(poly) * mc. With mc = 1 (OnesSelector in the
+    # simultaneous ABCD fit) the target coefficients are those of
+    # log(data_yield) = log_rate + log(bin_width). The log(bin_width)
+    # contribution is projected onto the Chebyshev basis and added.
     smooth_ax = h_fakes.axes[fakeselector.smoothing_axis_name]
-    x_centers = np.array(smooth_ax.centers)
     bin_widths = np.array(smooth_ax.widths)
-    x_min_model = float(x_centers.min())
-    x_max_model = float(x_centers.max())
-    x_norm = (
-        (x_centers - x_min_model) / (x_max_model - x_min_model)
-        if x_max_model > x_min_model
-        else np.zeros_like(x_centers)
-    )
-
-    # Transform x_centers to the regressor's Chebyshev domain [-1, 1]
-    x_cheby = reg.transform_x(x_centers)  # shape (n_smooth,)
-
-    # Evaluate Chebyshev polynomials T_k at x_cheby: shape (n_smooth, order+1)
+    x_cheby = reg.transform_x(np.array(smooth_ax.centers))
     n_smooth = len(x_cheby)
+
     T = np.zeros((n_smooth, order + 1))
     T[:, 0] = 1.0
     if order >= 1:
@@ -201,22 +199,10 @@ def dump_smoothing_params(
     for k in range(2, order + 1):
         T[:, k] = 2.0 * x_cheby * T[:, k - 1] - T[:, k - 2]
 
-    # Evaluate regressor log-rate at each pt bin: (n_outer, 5, n_smooth)
-    log_rate = np.einsum("oak,sk->oas", params_model, T)
+    # Chebyshev coefficients of log(bin_width) on the smoothing grid, shape (order+1,)
+    log_bw_coeffs = np.linalg.lstsq(T, np.log(bin_widths), rcond=None)[0]
 
-    # The regressor fits log(data_yield / bin_width).
-    # The model (with mc = ones) predicts yield = exp(-q), so:
-    #   q(x) = -log(data_yield) = -(log_rate + log(bin_width))
-    log_yield = log_rate + np.log(bin_widths)  # broadcast over (n_outer, 5, n_smooth)
-    target = -log_yield  # q values to represent as a power series
-
-    # Build power-series Vandermonde for x_norm: shape (n_smooth, order+1)
-    V = np.column_stack([x_norm**k for k in range(order + 1)])
-
-    # Solve V @ q_coeffs = target for each (outer, abcd) in least-squares sense
-    target_mat = target.transpose(2, 0, 1).reshape(n_smooth, n_outer_flat * 5)
-    q_mat = np.linalg.lstsq(V, target_mat, rcond=None)[0]  # (order+1, n_outer*5)
-    q_model = q_mat.T.reshape(n_outer_flat, 5, order + 1)  # (n_outer, 5, order+1)
+    q_model = params_model + log_bw_coeffs[np.newaxis, np.newaxis, :]
 
     # Flatten to model's layout [A_block, B_block, C_block, Ax_block, Bx_block]
     # Each block: n_outer × (order+1) in C-order
