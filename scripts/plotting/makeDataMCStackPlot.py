@@ -385,7 +385,15 @@ elif args.selection:
         axis, value = selection.split("=")
         if value.startswith("["):
             parts = [
-                translate[p] if p in translate else int(p) if p != str() else None
+                (
+                    translate[p]
+                    if p in translate
+                    else (
+                        complex(0, float(p.split("j")[0]))
+                        if "j" in p
+                        else int(p) if p != str() else None
+                    )
+                )
                 for p in value[1:-1].split(":")
             ]
             select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
@@ -612,7 +620,7 @@ for h in args.hists:
         xlabel = xlabel.replace(r"\mu", "e")
 
     if args.customXlabel is not None:
-        xlabel = r"{args.customXlabel}"
+        xlabel = rf"{args.customXlabel}"
 
     fig = plot_tools.makeStackPlotWithRatio(
         histInfo,
