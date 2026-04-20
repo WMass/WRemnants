@@ -4,6 +4,7 @@ import re
 
 import lz4.frame
 
+from wremnants.production import theory_corrections
 from wremnants.utilities import common, parsing
 from wums import logging, output_tools
 
@@ -91,6 +92,15 @@ def main():
         else "MC_data_ratio"
     )
     rescale_corr = rescale[proc][rescale_corr_name]
+    try:
+        refcorr, rescale_corr = theory_corrections.rebin_corr_hists(
+            [refcorr, rescale_corr],
+            ndim=min(refcorr.ndim, rescale_corr.ndim) - 1,
+        )
+    except ValueError as e:
+        raise ValueError(
+            f"Could not rebin histograms {refcorr.shape} and {rescale_corr.shape} to a common binning"
+        ) from e
 
     if refcorr.shape[:-1] != rescale_corr.shape[:-1]:
         raise ValueError(

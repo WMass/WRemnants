@@ -578,6 +578,7 @@ def read_matched_scetlib_nnlojet_hist(
     zero_nons_bins=0,
     coeff=None,
     smooth_nnlojet=False,
+    mass_edges=None,
 ):
     hresum, hfo_sing = read_scetlib_resum_and_fosing(
         scetlib_resum,
@@ -596,6 +597,28 @@ def read_matched_scetlib_nnlojet_hist(
         )
     else:
         nnlojeth = read_nnlojet_file(nnlojet_fo, axnames=axes, charge=charge)
+
+    if "Q" in axes and "Q" not in nnlojeth.axes.name:
+        if mass_edges is None:
+            raise ValueError(
+                "Requested axis 'Q' for matched NNLOjet input, but the raw NNLOjet histogram "
+                "does not contain a Q axis. Pass explicit edges with --nnlojetMassEdges, "
+                "for example '--nnlojetMassEdges 60 120'."
+            )
+        if len(mass_edges) != 2 or mass_edges[0] >= mass_edges[1]:
+            raise ValueError(
+                f"Invalid NNLOjet mass edges {mass_edges}; expected two increasing values"
+            )
+
+        insert_idx = hfo_sing.axes.name.index("Q")
+        qax = hist.axis.Variable(mass_edges, name="Q", flow=False)
+        new_axes = list(nnlojeth.axes)
+        new_axes.insert(insert_idx, qax)
+        nnlojeth = hist.Hist(
+            *new_axes,
+            storage=nnlojeth.storage_type(),
+            data=np.expand_dims(nnlojeth.view(flow=True), insert_idx),
+        )
 
     if smooth_nnlojet:
         if "Y" in axes:
@@ -618,7 +641,10 @@ def read_matched_scetlib_hist(
     hfo,
     zero_nons_bins=0,
 ):
-    for ax in ["Y", "Q"]:
+    # Rebin shared physics axes to the common edge intersection so a coarser
+    # fixed-order input can be combined with finer SCETlib histograms without
+    # interpolation.
+    for ax in ["Y", "Q", "qT"]:
         if ax in set(hfo.axes.name).intersection(set(hfo_sing.axes.name)).intersection(
             set(hresum.axes.name)
         ):

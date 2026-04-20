@@ -101,6 +101,12 @@ theory_corr_weight_map = {
     "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N4p0LL_N3LO_pdfas": make_theory_corr_weight_info(
         "ct18z", alphas=True, renorm=True
     ),
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N3p1LL_N3LO_pdfas": make_theory_corr_weight_info(
+        "msht20an3lo", alphas=True, renorm=True
+    ),
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N4p0LL_N3LO_pdfas": make_theory_corr_weight_info(
+        "msht20an3lo", alphas=True, renorm=True
+    ),
     "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
         "ct18", alphas=True, renorm=True
     ),
@@ -139,6 +145,12 @@ theory_corr_weight_map = {
     ),
     "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N4p0LL_N3LO_pdfvars": make_theory_corr_weight_info(
         "ct18z"
+    ),
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N3p1LL_N3LO_pdfvars": make_theory_corr_weight_info(
+        "msht20an3lo"
+    ),
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N4p0LL_N3LO_pdfvars": make_theory_corr_weight_info(
+        "msht20an3lo"
     ),
     "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "ct18"
