@@ -18,8 +18,12 @@ THEORY_PREDS = {
     "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfas": {"pdf": "ct18z"},
     "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N3p1LL_N3LO_pdfas": {"pdf": "ct18z"},
     "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N4p0LL_N3LO_pdfas": {"pdf": "ct18z"},
-    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N3p1LL_N3LO_pdfas": {"pdf": "msht20an3lo"},
-    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N4p0LL_N3LO_pdfas": {"pdf": "msht20an3lo"},
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N3p1LL_N3LO_pdfas": {
+        "pdf": "msht20an3lo"
+    },
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N4p0LL_N3LO_pdfas": {
+        "pdf": "msht20an3lo"
+    },
     "scetlib_nnlojet_CT18Z_N3p1LL_N3LO_pdfas": {"pdf": "ct18z"},
     "scetlib_nnlojet_CT18Z_N4p0LL_N3LO_pdfas": {"pdf": "ct18z"},
     "scetlib_nnlojet_MSHT20an3lo_N4p0LL_N3LO_pdfas": {"pdf": "msht20an3lo"},
