@@ -184,7 +184,7 @@ parser.add_argument(
 parser.add_argument(
     "--fakeTransferCorrFileName",
     type=str,
-    default="fakeTransferTemplates",
+    default="fakeTransferTemplates_smoothTF",
     help="""                                                                                                                  
     Name of pkl.lz4 file (without extension) with pTmu correction for the shape of data-driven fakes.                         
     Currently used only when utAngleSign is a fakerate axis (detected automatically), since the shape                         
@@ -223,6 +223,12 @@ parser.add_argument(
     nargs="*",
     default=[],
     help="Horizontal axis edges where to plot vertical lines",
+)
+parser.add_argument(
+    "--customXlabel",
+    type=str,
+    help="Set this label for the x axis (Latex format supported), otherwise it is inferred from the plotted axis.",
+    default=None,
 )
 
 subparsers = parser.add_subparsers(dest="variation")
@@ -379,7 +385,15 @@ elif args.selection:
         axis, value = selection.split("=")
         if value.startswith("["):
             parts = [
-                translate[p] if p in translate else int(p) if p != str() else None
+                (
+                    translate[p]
+                    if p in translate
+                    else (
+                        complex(0, float(p.split("j")[0]))
+                        if "j" in p
+                        else int(p) if p != str() else None
+                    )
+                )
                 for p in value[1:-1].split(":")
             ]
             select[axis] = hist.tag.Slicer()[parts[0] : parts[1] : parts[2]]
@@ -605,6 +619,9 @@ for h in args.hists:
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")
 
+    if args.customXlabel is not None:
+        xlabel = rf"{args.customXlabel}"
+
     fig = plot_tools.makeStackPlotWithRatio(
         histInfo,
         prednames,
@@ -646,8 +663,9 @@ for h in args.hists:
         width_scale=(
             args.customFigureWidth
             if args.customFigureWidth
-            else 1.25 if len(h.split("-")) == 1 else 1
+            else 1.25 if len(h.split("-")) > 1 else 1
         ),
+        automatic_scale=args.customFigureWidth is None,
         legPos=args.legPos,
         leg_padding=args.legPadding,
         lowerLeg=not args.noLowerLeg,
