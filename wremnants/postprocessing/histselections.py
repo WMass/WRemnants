@@ -246,11 +246,18 @@ class HistselectorABCD(object):
         self.smoothing_axis_min = edges[0]
         self.smoothing_axis_max = edges[-1]
 
-    def get_selection_edges(self, axis_name, upper_bound=False, hist_axis_edges=None):
+    def get_selection_edges(self, axis_name, upper_bound=False, hist_axis=None):
         # returns edges from pass to fail regions [x0, x1, x2, x3] e.g. x=[x0,x1], dx=[x1,x2], d2x=[x2,x3]
         if axis_name in self.abcd_thresholds:
             ts = self.abcd_thresholds[axis_name]
-            if hist_axis_edges is not None:
+            if hist_axis is not None:
+                hist_axis_edges = list(hist_axis.edges)
+                # treat underflow / overflow as explicit edge with +/- np.inf
+                if hist_axis.traits.overflow:
+                    hist_axis_edges.append(np.inf)
+                if hist_axis.traits.underflow:
+                    hist_axis_edges.insert(0, -np.inf)
+
                 if len(ts) == len(hist_axis_edges):
                     # consistent number of edges: take them from axis
                     ts = [x for x in hist_axis_edges]
@@ -258,23 +265,18 @@ class HistselectorABCD(object):
                         f"ABCD method: using edges {ts} for axis {axis_name}"
                     )
                 elif len(ts) < len(hist_axis_edges):
-                    if all(tsi in hist_axis_edges for i, tsi in enumerate(ts)):
+                    if all(tsi in hist_axis_edges for tsi in ts):
                         # more edges in axis, but default ones are a subset: keep edges from default
                         logger.warning(
                             f"ABCD method: using subset of edges {ts} for axis {axis_name}, out of {hist_axis_edges}"
                         )
                     else:
-                        logger.warning(
-                            f"Axis {axis_name} has inconsistent edges ({hist_axis_edges}): expected {ts}"
-                        )
-                        logger.warning(
-                            f"Please, explicitly provide the edges to be used for ABCD method."
-                        )
-                        raise RuntimeError(
-                            f"Inconsistent edges for ABCD method with axis {axis_name}."
-                        )
+                        raise RuntimeError(f"""
+                            Axis {axis_name} has inconsistent edges ({hist_axis_edges}): expected {ts}.
+                            Please, explicitly provide the edges to use for ABCD method.
+                            """)
                 else:
-                    if all(xi in ts for i, xi in enumerate(hist_axis_edges)):
+                    if all(xi in ts for xi in hist_axis_edges):
                         # less edges in axis, but subset of default ones: use them filling remaining elements with None
                         ts = [x for x in hist_axis_edges]
                         ts.extend([None] * (len(ts) - len(hist_axis_edges)))
@@ -283,15 +285,10 @@ class HistselectorABCD(object):
                         )
                     else:
                         # less edges in axis but also inconsistent: request the user to explicitly provide what to use
-                        logger.warning(
-                            f"ABCD method: axis {axis_name} has less edges ({hist_axis_edges}) than expected ({ts})"
-                        )
-                        logger.warning(
-                            f"and inconsistent too. Please, explicitly provide the edges to use"
-                        )
-                        raise RuntimeError(
-                            f"Inconsistent edges for ABCD method with axis {axis_name}."
-                        )
+                        raise RuntimeError(f"""
+                            Axis {axis_name} has less edges ({hist_axis_edges}) than expected ({ts}) and inconsistent too. 
+                            Please, explicitly provide the edges to use for ABCD method.
+                            """)
 
             if axis_name in ["mt", "pt"]:
                 # low: failing, high: passing, no upper bound
@@ -357,7 +354,7 @@ class HistselectorABCD(object):
             self.sel_dx = 0
         else:
             x0, x1, x2, x3 = self.get_selection_edges(
-                self.name_x, hist_axis_edges=self.axis_x.edges
+                self.name_x, hist_axis=self.axis_x
             )
             s = hist.tag.Slicer()
             do = hist.sum if self.integrate_x else None
@@ -378,7 +375,7 @@ class HistselectorABCD(object):
             y0, y1, y2, y3 = self.get_selection_edges(
                 self.name_y,
                 upper_bound=self.upper_bound_y,
-                hist_axis_edges=self.axis_y.edges,
+                hist_axis=self.axis_y,
             )
             s = hist.tag.Slicer()
             self.sel_y = (
@@ -1342,9 +1339,7 @@ class FakeSelector1DExtendedABCD(FakeSelectorSimpleABCD):
 
     # set slices object for selection of sideband regions
     def set_selections_x(self, integrate_x=True):
-        x0, x1, x2, x3 = self.get_selection_edges(
-            self.name_x, hist_axis_edges=self.axis_x.edges
-        )
+        x0, x1, x2, x3 = self.get_selection_edges(self.name_x, hist_axis=self.axis_x)
         s = hist.tag.Slicer()
         do = hist.sum if integrate_x else None
         self.sel_x = (
@@ -1618,7 +1613,7 @@ class FakeSelector2DExtendedABCD(FakeSelector1DExtendedABCD):
         y0, y1, y2, y3 = self.get_selection_edges(
             self.name_y,
             upper_bound=self.upper_bound_y,
-            hist_axis_edges=self.axis_y.edges,
+            hist_axis=self.axis_y,
         )
         s = hist.tag.Slicer()
         self.sel_y = (
