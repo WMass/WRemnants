@@ -128,12 +128,27 @@ def parse_args():
         help="Data set to process",
         default=["13TeVGen"],
     )
+    parser.add_argument(
+        "--nnlojetMassEdges",
+        nargs=2,
+        type=float,
+        default=None,
+        help="Explicit Q-axis edges to attach for NNLOjet inputs when Q is requested but not present in the raw NNLOjet histogram",
+    )
     args = parser.parse_args()
 
     return args
 
 
-def read_corr(procName, generator, corrFiles, axes, qt_cutoff=1.0, smooth=None):
+def read_corr(
+    procName,
+    generator,
+    corrFiles,
+    axes,
+    qt_cutoff=1.0,
+    smooth=None,
+    nnlojet_mass_edges=None,
+):
     logger = logging.child_logger("read_corr")
     charge = 0 if procName[0] == "Z" else (1 if "Wplus" in procName else -1)
     corr_file = corrFiles[0]
@@ -162,9 +177,11 @@ def read_corr(procName, generator, corrFiles, axes, qt_cutoff=1.0, smooth=None):
             fo_func = getattr(input_tools, f"read_matched_scetlib_{fo_generator}_hist")
 
             # TODO: Should probably be more general...
-            smooth_args = {}
+            fo_args = {}
             if smooth == "fo_sing":
-                smooth_args = {"smooth_nnlojet": True}
+                fo_args["smooth_nnlojet"] = True
+            if fo_generator == "nnlojet":
+                fo_args["mass_edges"] = nnlojet_mass_edges
             numh = fo_func(
                 resumf,
                 nnlo_singf,
@@ -174,7 +191,7 @@ def read_corr(procName, generator, corrFiles, axes, qt_cutoff=1.0, smooth=None):
                 zero_nons_bins=slice(
                     0j, complex(0, qt_cutoff)
                 ),  # set bins with qT < qtCutoff GeV to 0
-                **smooth_args,
+                **fo_args,
             )
         else:
             nons = "auto"
@@ -294,6 +311,7 @@ def main():
                 args.axes,
                 qt_cutoff=args.qtCutoff,
                 smooth=args.smooth,
+                nnlojet_mass_edges=args.nnlojetMassEdges,
             )
             for procName, corr_file in filesByProc.items()
         ]
