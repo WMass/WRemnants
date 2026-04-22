@@ -1377,7 +1377,9 @@ def setup(
                 ),
                 fakeTransferCorrFileName=args.fakeTransferCorrFileName,
                 histAxesRemovedBeforeFakes=(
-                    [str(x[0]) for x in args.presel] if args.presel else []
+                    [str(x[0].split(":")[0]) for x in args.presel]
+                    if args.presel
+                    else []
                 ),
             )
             datagroups.set_histselectors(
