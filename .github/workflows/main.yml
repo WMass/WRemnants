@@ -323,7 +323,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/WMass.hdf5 -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/ 
           -t -1 --doImpacts --globalImpacts --saveHists --computeHistErrors --saveHistsPerProcess --computeVariations --computeHistImpacts
-          --allowNegativePOI --binByBinStatMode full -m Difference Wmunu_BSM_masked Wmunu_masked
+          --allowNegativeParam --binByBinStatMode full -m Difference Wmunu_BSM_masked Wmunu_masked
           -m Project ch0 pt -m Project ch0 eta -m Normalize ch0 pt 
 
       - name: bsm rabbit limits
