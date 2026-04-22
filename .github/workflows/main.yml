@@ -763,7 +763,7 @@ jobs:
       - name: wlike rabbit setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
-          -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr
+          -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr --pdfUncFromUncorr
 
       - name: wlike rabbit fit asimov
         run: >- 

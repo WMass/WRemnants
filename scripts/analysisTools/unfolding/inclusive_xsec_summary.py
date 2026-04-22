@@ -139,20 +139,22 @@ xsec_keys = [
     ),
 ]
 
-if args.scaleToNewLumi:
-    # old lumi / new lumi
-    scale = 0.199269742 / 0.204602332
-else:
-    scale = 1
-
 smp_20_004 = {
-    r"$\mathrm{W}^{-}$": [8670 * scale, 215.63858652847824],
-    r"$\mathrm{W}^{+}$": [11800 * scale, 288.09720581775866],
-    r"$\mathrm{W}$": [20480 * scale, 499.8999899979995],
-    r"$\mathrm{Z}$": [1952 * scale, 48.63126566315131],
-    r"$\mathrm{W}^{+}/\mathrm{W}^{-}$": [1.3615, 0.009570788891204319],
-    r"$\mathrm{W/Z}$": [10.491, 0.0864002314811714],
+    r"$\mathrm{W}^{-}$": [8670, 215.63858652847824],
+    r"$\mathrm{W}^{+}$": [11800, 288.09720581775866],
+    r"$\mathrm{W}$": [20480, 499.8999899979995],
+    r"$\mathrm{Z}$": [1952, 48.63126566315131],
 }
+
+if args.scaleToNewLumi:
+    # old lumi uncertainty 2.3%
+    # new lumi uncertainty 0.9%
+    for k, v in smp_20_004.items():
+        smp_20_004[k] = [v[0], v[0] * ((v[1] / v[0]) ** 2 - 0.023**2 + 0.009**2) ** 0.5]
+
+smp_20_004[r"$\mathrm{W}^{+}/\mathrm{W}^{-}$"] = [1.3615, 0.009570788891204319]
+smp_20_004[r"$\mathrm{W/Z}$"] = [10.491, 0.0864002314811714]
+
 
 # Map xsec_key display names to internal process keys
 _name_to_proc = {
