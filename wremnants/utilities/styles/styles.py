@@ -441,6 +441,7 @@ nuisance_grouping = {
     "alphaS": common_groups
     + [
         "pdfCT18ZNoAlphaS",
+        "pdfHERAPDF20NoAlphaS",
         "resumTNP",
         "resumNonpert",
         "resumTransition",
@@ -630,6 +631,7 @@ impact_labels = {
     "pdfMSHT20AlphaS": "<i>α</i><sub>S</sub> PDF",
     "pdfCT18ZAlphaS": "<i>α</i><sub>S</sub> PDF",
     "pdfCT18ZNoAlphaS": "PDF",
+    "pdfHERAPDF20NoAlphaS": "PDF",
     "pTModeling": "<i>p</i><sub>T</sub><sup>V</sup> modelling",
     "resum": "Resummation",
     "resumTNP": "TNP",
