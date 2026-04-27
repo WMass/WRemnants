@@ -275,13 +275,32 @@ def read_nnlojet_file(
     return h * 1e-3
 
 
-def read_nnlojet_ybin(refname, ybins, charge=None):
+def resolve_nnlojet_ybin_filename(refname, ybins):
     format_decimal = lambda x: (
         "0" if x == 0 else f"{round(x, 1+(x % 1 in [0.25, 0.75]))}".replace(".", "p")
     )
+
+    def alternate_decimal(value):
+        formatted = format_decimal(value)
+        return formatted[:-1] if formatted.endswith("p0") else formatted
+
+    bounds = tuple(format_decimal(y) for y in ybins)
+    candidates = [
+        f"{refname}__{bounds[0]}__{bounds[1]}.dat",
+        f"{refname}__{alternate_decimal(ybins[0])}__{bounds[1]}.dat",
+        f"{refname}__{bounds[0]}__{alternate_decimal(ybins[1])}.dat",
+        f"{refname}__{alternate_decimal(ybins[0])}__{alternate_decimal(ybins[1])}.dat",
+    ]
+    for candidate in dict.fromkeys(candidates):
+        if os.path.isfile(candidate):
+            return candidate
+    return candidates[0]
+
+
+def read_nnlojet_ybin(refname, ybins, charge=None):
     yax = hist.axis.Variable(ybins, name="Y")
     return read_nnlojet_file(
-        f"{refname}__{format_decimal(ybins[0])}__{format_decimal(ybins[1])}.dat",
+        resolve_nnlojet_ybin_filename(refname, ybins),
         other_axes=[yax],
         charge=charge,
     )
@@ -559,6 +578,7 @@ def read_matched_scetlib_nnlojet_hist(
     zero_nons_bins=0,
     coeff=None,
     smooth_nnlojet=False,
+    mass_edges=None,
 ):
     hresum, hfo_sing = read_scetlib_resum_and_fosing(
         scetlib_resum,
@@ -577,6 +597,28 @@ def read_matched_scetlib_nnlojet_hist(
         )
     else:
         nnlojeth = read_nnlojet_file(nnlojet_fo, axnames=axes, charge=charge)
+
+    if "Q" in axes and "Q" not in nnlojeth.axes.name:
+        if mass_edges is None:
+            raise ValueError(
+                "Requested axis 'Q' for matched NNLOjet input, but the raw NNLOjet histogram "
+                "does not contain a Q axis. Pass explicit edges with --nnlojetMassEdges, "
+                "for example '--nnlojetMassEdges 60 120'."
+            )
+        if len(mass_edges) != 2 or mass_edges[0] >= mass_edges[1]:
+            raise ValueError(
+                f"Invalid NNLOjet mass edges {mass_edges}; expected two increasing values"
+            )
+
+        insert_idx = hfo_sing.axes.name.index("Q")
+        qax = hist.axis.Variable(mass_edges, name="Q", flow=False)
+        new_axes = list(nnlojeth.axes)
+        new_axes.insert(insert_idx, qax)
+        nnlojeth = hist.Hist(
+            *new_axes,
+            storage=nnlojeth.storage_type(),
+            data=np.expand_dims(nnlojeth.view(flow=True), insert_idx),
+        )
 
     if smooth_nnlojet:
         if "Y" in axes:
@@ -599,7 +641,10 @@ def read_matched_scetlib_hist(
     hfo,
     zero_nons_bins=0,
 ):
-    for ax in ["Y", "Q"]:
+    # Rebin shared physics axes to the common edge intersection so a coarser
+    # fixed-order input can be combined with finer SCETlib histograms without
+    # interpolation.
+    for ax in ["Y", "Q", "qT"]:
         if ax in set(hfo.axes.name).intersection(set(hfo_sing.axes.name)).intersection(
             set(hresum.axes.name)
         ):

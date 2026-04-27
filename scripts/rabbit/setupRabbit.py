@@ -730,6 +730,12 @@ def make_parser(parser=None, argv=None):
         help="Scale the minnlo qcd scale uncertainties by this factor",
     )
     parser.add_argument(
+        "--scaleNPLambda4",
+        default=1.0,
+        type=float,
+        help="Scale the nonperturbative lambda4 uncertainty by this factor",
+    )
+    parser.add_argument(
         "--symmetrizeTheoryUnc",
         default="quadratic",
         type=str,
@@ -1352,7 +1358,7 @@ def setup(
             ),
             fakeTransferCorrFileName=args.fakeTransferCorrFileName,
             histAxesRemovedBeforeFakes=(
-                [str(x[0]) for x in args.presel] if args.presel else []
+                [str(x[0].split(":")[0]) for x in args.presel] if args.presel else []
             ),
         )
         datagroups.set_histselectors(
@@ -1777,6 +1783,7 @@ def setup(
             pdf_from_corr=args.pdfUncFromCorr,
             as_from_corr=not args.asUncFromUncorr,
             scale_pdf_unc=args.scalePdf,
+            scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
             minnlo_unc=args.minnloScaleUnc,
             minnlo_scale=args.scaleMinnloScale,
