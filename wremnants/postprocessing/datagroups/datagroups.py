@@ -128,6 +128,14 @@ class Datagroups(object):
         # if the histograms should be normalized to cross section (otherwise expected events)
         self.xnorm = xnorm
 
+        # if True, force systematics added via addSystematic to be written
+        # to the tensor without symmetrization, regardless of the per-call
+        # `symmetrize` argument. If `force_asymmetric_patterns` is None, all
+        # systematics are affected; otherwise only nuisance names matched
+        # (via re.search) by any compiled pattern in the list are affected.
+        self.force_asymmetric = False
+        self.force_asymmetric_patterns = None
+
         self.writer = None
 
     def get_members_from_results(self, startswith=[], not_startswith=[], is_data=False):
@@ -1470,6 +1478,22 @@ class Datagroups(object):
 
                 logger.debug(f"Add systematic {var_name}")
 
+                effective_symmetrize = symmetrize
+                if self.force_asymmetric and effective_symmetrize is not None:
+                    patterns = getattr(self, "force_asymmetric_patterns", None)
+                    if patterns is None or any(p.search(var_name) for p in patterns):
+                        match_info = (
+                            "all systematics"
+                            if patterns is None
+                            else f"matched pattern(s) {[p.pattern for p in patterns if p.search(var_name)]}"
+                        )
+                        logger.info(
+                            f"force_asymmetric: overriding symmetrize="
+                            f"{effective_symmetrize!r} -> None for systematic "
+                            f"{var_name} ({match_info})"
+                        )
+                        effective_symmetrize = None
+
                 if lastAction is not None:
                     if lastActionRequiresNomi:
                         hnom = self.groups[proc].hists[self.nominalName]
@@ -1491,7 +1515,7 @@ class Datagroups(object):
                     self.channel,
                     groups=matched_groups,
                     mirror=mirror,
-                    symmetrize=symmetrize,
+                    symmetrize=effective_symmetrize,
                     kfactor=scale,
                     noi=noi,
                     constrained=not noConstraint,

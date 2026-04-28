@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import math
+import re
 import sys
 
 import hist
@@ -737,6 +738,18 @@ def make_parser(parser=None, argv=None):
         help="Symmetrization type for minnlo scale variations",
     )
     parser.add_argument(
+        "--noSymmetrize",
+        nargs="*",
+        default=None,
+        metavar="REGEX",
+        help="Write shape systematics to the tensor as asymmetric "
+        "uncertainties, overriding any per-systematic symmetrize setting "
+        "(including --symmetrizeTheoryUnc and --symmetrizePdfUnc). "
+        "If passed with no argument, all systematics are forced asymmetric. "
+        "If one or more regex patterns are given, only nuisance names "
+        "matching any of the patterns (re.search) are forced asymmetric.",
+    )
+    parser.add_argument(
         "--symmetrizePdfUnc",
         default="quadratic",
         type=str,
@@ -1128,6 +1141,14 @@ def setup(
 
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
+    if args.noSymmetrize is None:
+        datagroups.force_asymmetric = False
+        datagroups.force_asymmetric_patterns = None
+    else:
+        datagroups.force_asymmetric = True
+        datagroups.force_asymmetric_patterns = (
+            [re.compile(p) for p in args.noSymmetrize] if args.noSymmetrize else None
+        )
 
     preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:
