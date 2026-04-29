@@ -48,6 +48,7 @@ def get_values_and_impacts_as_panda(
     df = pd.DataFrame(
         {"Name": poi_names, "value": poi_values, "err_Total": totals, **uncertainties}
     )
+    print(df)
     return df
 
 
@@ -114,6 +115,8 @@ if __name__ == "__main__":
     )
 
     parser = parsing.set_parser_default(parser, "legCols", 1)
+    parser = parsing.set_parser_default(parser, "logoPos", 0)
+    parser = parsing.set_parser_default(parser, "legPos", (1.01, 0))
 
     args = parser.parse_args()
     logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -171,7 +174,8 @@ if __name__ == "__main__":
         df["yticks"] = [f"bin {i}" for i in df["bin_idx"].values]
 
     scale = args.poiScale
-    xlabel = r"$\Delta\alpha_S$"
+    impact_label = "Global impacts" if args.globalImpacts else "Traditional impacts"
+    xlabel = r"$\Delta\alpha_S$" + f" ({impact_label})"
 
     val = df["value"].values
     err = df["err_Total"].values
@@ -206,25 +210,29 @@ if __name__ == "__main__":
         logger.info(f"nll_inclusive = {nll_inclusive}; nll = {nll}")
 
         chi2_stat = 2 * (nll_inclusive - nll)
-        chi2_label = r"\mathit{\chi}^2/\mathit{ndf}"
+        chi2_label = r"\chi^2/\mathrm{ndf}"
         if args.result == "asimov":
             chi2_stat = 0
         elif not args.data:
             chi2_stat += ndf
-            chi2_label = f"<{chi2_label}>"
+            chi2_label = rf"\langle {chi2_label} \rangle"
 
         p_value = 1 - chi2.cdf(chi2_stat, ndf)
         logger.info(f"ndf = {ndf}; Chi2 = {chi2_stat}; p-value={p_value}")
 
-        plot_tools.wrap_text(
-            [
-                f"${chi2_label} = {str(round(chi2_stat, 1))}/{ndf}$",
-                rf"$\mathit{{p}} = {str(round(p_value * 100))}\,\%$",
-            ],
-            ax1,
-            0.06,
-            0.15,
-            text_size=args.legSize,
+        ax1.text(
+            1.01,
+            0.8,
+            "\n".join(
+                [
+                    rf"${chi2_label} = {chi2_stat:.1f}/{ndf}$",
+                    rf"$\mathit{{p}} = {p_value * 100:.0f}\,\%$",
+                ]
+            ),
+            ha="left",
+            va="center",
+            transform=ax1.transAxes,
+            fontsize=args.legSize,
         )
 
         c = dfInclusive["value"].values[0]
@@ -313,15 +321,21 @@ if __name__ == "__main__":
         loc=args.logoPos,
         text_size=args.cmsDecorSize,
     )
-    plot_tools.addLegend(
-        ax1,
-        ncols=args.legCols,
-        loc=args.legPos,
-        text_size=args.legSize,
-        extra_handles=extra_handles,
-        extra_labels=["Inclusive"],
-        custom_handlers=["tripleband"],
-    )
+    leg_args = {
+        "ax": ax1,
+        "ncols": args.legCols,
+        "loc": args.legPos,
+        "text_size": args.legSize,
+    }
+    if args.infileInclusive:
+        leg_args.update(
+            {
+                "extra_handles": extra_handles,
+                "extra_labels": ["Inclusive"],
+                "custom_handlers": ["tripleband"],
+            }
+        )
+    plot_tools.addLegend(**leg_args)
 
     outfile = "alphaS_rapidity_decorr"
     if args.postfix:
