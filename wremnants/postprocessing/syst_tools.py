@@ -902,6 +902,9 @@ def hist_to_variations(
         # all the axes have already been projected out, nothing else to do
         return hist_in
 
+    if "vars" not in hist_in.axes.name:
+        return hist_in
+
     nom_hist = hist_in[{"vars": 0}]
     nom_hist_sum = nom_hist[gen_sum_expr]
 

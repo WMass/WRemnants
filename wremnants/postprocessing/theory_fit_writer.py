@@ -83,16 +83,18 @@ class SigmaULTheoryFitWriter(TensorWriter):
         return True
 
     def set_reference(self, channel, h, lumi=1.0, scale=1.0, postOp=None):
+        ptV_name = self.get_ptV_axis_name(h)
+        absYV_name = self.get_absYV_axis_name(h)
         self.ref[channel] = {
             "h": h,
             "lumi": lumi,
             "scale": scale,
             "postOp": postOp,
-            "ptV_name": self.get_ptV_axis_name(h),
-            "absYV_name": self.get_absYV_axis_name(h),
+            "ptV_name": ptV_name,
+            "absYV_name": absYV_name,
             "chargeV_name": self.get_charge_axis_name(h),
-            "ptV_bins": h.axes[self.get_ptV_axis_name(h)].edges,
-            "absYV_bins": h.axes[self.get_absYV_axis_name(h)].edges,
+            "ptV_bins": h.axes[ptV_name].edges,
+            "absYV_bins": h.axes[absYV_name].edges,
         }
         self.logger.debug("Initialized channel %s with parameters", channel)
         self.logger.debug(pprint.pformat(self.ref[channel]))
@@ -310,13 +312,13 @@ class SigmaULTheoryFitWriter(TensorWriter):
         for name in ["ptVgen", "ptVGen", "qT"]:
             if name in h.axes.name:
                 return name
-        self.logger.debug("Did not find pT axis. Available axes: %s", h.axes.name)
+        raise ValueError(f"Did not find pT axis. Available axes: {list(h.axes.name)}")
 
     def get_absYV_axis_name(self, h):
         for name in ["absYVgen", "absYVGen", "absY"]:
             if name in h.axes.name:
                 return name
-        self.logger.debug("Did not find absY axis. Available axes: %s", h.axes.name)
+        raise ValueError(f"Did not find absY axis. Available axes: {list(h.axes.name)}")
 
     def get_charge_axis_name(self, h):
         for name in ["chargeVgen", "charge", "qGen"]:

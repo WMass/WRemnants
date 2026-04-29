@@ -138,11 +138,13 @@ columns_fakerate = [
     "transverseMass",
 ]  ## was transverseMass
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr
 )
-axis_ptVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["ptVgen"]
-axis_chargeVgen = theory_helpers_procs["W"]["qcdScale"].hist.axes["chargeVgen"]
+axis_ptVgen = helicity_smoothing_helpers_procs["W"]["qcdScale"].hist.axes["ptVgen"]
+axis_chargeVgen = helicity_smoothing_helpers_procs["W"]["qcdScale"].hist.axes[
+    "chargeVgen"
+]
 
 groups_to_aggregate = args.aggregateGroups
 
@@ -190,9 +192,9 @@ def build_graph(df, dataset):
     results = []
     isQCDMC = dataset.group == "QCD"
 
-    theory_helpers = None
+    helicity_smoothing_helpers = None
     if dataset.name in samples.vprocs:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -246,7 +248,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
                     base_name=level,
@@ -416,7 +418,11 @@ def build_graph(df, dataset):
 
         df = df.Define("exp_weight", "SFMC")
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
     else:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -524,7 +530,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     a,
                     c,
                     base_name=n,

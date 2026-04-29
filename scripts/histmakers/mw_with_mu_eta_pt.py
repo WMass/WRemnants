@@ -312,13 +312,13 @@ axis_mtCat = hist.axis.Variable(
     ),
     name="mt",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
     binning.get_binning_fakes_relIso(high_iso_bins=False),
     name="relIso",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axes_abcd = [axis_mtCat, axis_isoCat]
 
@@ -449,9 +449,14 @@ if args.unfolding:
             args.fitresult, channel="ch1_masked"
         )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args.pdfs, args.theoryCorr, procs=["Z", "W"]
-)
+if args.skipByHelicityCorrection:
+    helicity_smoothing_helpers_procs = {}
+else:
+    helicity_smoothing_helpers_procs = (
+        theory_corrections.make_helicity_smoothing_helpers(
+            args.pdfs, args.theoryCorr, procs=["Z", "W"]
+        )
+    )
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = binning.get_theoryAgnostic_axes(
@@ -722,10 +727,8 @@ def build_graph(df, dataset):
     isW = dataset.group in ["Wmunu", "Wtaunu"]
     isBSM = dataset.name.startswith("WtoNMu")
     isWmunu = isBSM or dataset.group in ["Wmunu"]
-    isZ = dataset.group in [
-        "Zmumu",
-        "Ztautau",
-    ]
+    isZ = dataset.group in ["Zmumu", "Ztautau"]
+    isZmumu = dataset.group in ["Zmumu"]
     isZveto = isZ or dataset.group in ["DYlowMass"]
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"
@@ -735,9 +738,10 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
-    theory_helpers = {}
-    if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
+    else:
+        helicity_smoothing_helpers = {}
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -833,7 +837,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            theory_helpers,
+            helicity_smoothing_helpers,
             [],
             [],
             base_name="gen",
@@ -890,7 +894,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -911,7 +915,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -925,21 +929,19 @@ def build_graph(df, dataset):
                         cols = [*nominal_cols, *unfolding_cols[level]]
                         break
 
-        elif dataset.name == "Zmumu_2016PostVFP":
-            if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
-                df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, theory_helpers
-                )
-
-                if not unfolder_z.poi_as_noi:
-                    axes = [
-                        *nominal_axes,
-                        *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
-                    ]
-                    cols = [
-                        *nominal_cols,
-                        *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
-                    ]
+        elif isZmumu:
+            df = unfolder_z.add_gen_histograms(
+                args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
+            )
+            if not unfolder_z.poi_as_noi:
+                axes = [
+                    *nominal_axes,
+                    *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+                ]
+                cols = [
+                    *nominal_cols,
+                    *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+                ]
 
     if isWorZ:
         df = generator_level_definitions.define_prefsr_vars(df)
@@ -1338,7 +1340,11 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         if (
@@ -2349,7 +2355,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=True,

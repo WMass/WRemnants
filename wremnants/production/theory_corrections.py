@@ -405,7 +405,9 @@ def define_pdf_columns(df, dataset_name, pdfs, noAltUnc):
     return df
 
 
-def define_central_pdf_weight_from_helicities(df, dataset_name, pdf, theory_helpers):
+def define_central_pdf_weight_from_helicities(
+    df, dataset_name, pdf, helicity_smoothing_helpers
+):
 
     logger.info("Using PDF weights from helicities for the central PDF weight")
     pdf_name = theory_utils.pdfMap[pdf]["name"]
@@ -415,7 +417,7 @@ def define_central_pdf_weight_from_helicities(df, dataset_name, pdf, theory_help
         df = df.DefinePerSample("unity", "1.")
     df = df.Define(
         tensorName,
-        theory_helpers["pdf_central"],
+        helicity_smoothing_helpers["pdf_central"],
         [
             "massVgen",
             "absYVgen",
@@ -455,7 +457,9 @@ def define_central_pdf_weight(df, dataset_name, pdf):
     )
 
 
-def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_helpers={}):
+def define_theory_weights_and_corrs(
+    df, dataset_name, helpers, args, helicity_smoothing_helpers={}
+):
     if "LHEPart_status" in df.GetColumnNames():
         df = generator_level_definitions.define_lhe_vars(df)
 
@@ -480,15 +484,15 @@ def define_theory_weights_and_corrs(df, dataset_name, helpers, args, theory_help
 
     df = df.DefinePerSample("theory_weight_truncate", "10.")
     if (
-        theory_helpers
-        and "pdf_central" in theory_helpers.keys()
-        and theory_helpers["pdf_central"] is not None
+        helicity_smoothing_helpers
+        and "pdf_central" in helicity_smoothing_helpers.keys()
+        and helicity_smoothing_helpers["pdf_central"] is not None
     ):
         df = define_central_pdf_weight_from_helicities(
             df,
             dataset_name,
             args.pdfs[0] if len(args.pdfs) >= 1 else None,
-            theory_helpers,
+            helicity_smoothing_helpers,
         )
     else:  # if no boson-parametrized weights are available
         df = define_central_pdf_weight(
@@ -1058,19 +1062,19 @@ def make_corr_by_helicity(
     return corr_coeffs
 
 
-def make_theory_helpers(
+def make_helicity_smoothing_helpers(
     pdfs,
     theory_corr=[],
     procs=["Z", "W"],
     corrs=["qcdScale", "pdf", "pdf_from_corr", "alphaS", "pdf_central"],
 ):
 
-    theory_helpers_procs = {p: {} for p in procs}
+    helicity_smoothing_helpers_procs = {p: {} for p in procs}
 
-    for proc in theory_helpers_procs.keys():
+    for proc in helicity_smoothing_helpers_procs.keys():
 
         if "qcdScale" in corrs:
-            theory_helpers_procs[proc]["qcdScale"] = (
+            helicity_smoothing_helpers_procs[proc]["qcdScale"] = (
                 make_qcd_uncertainty_helper_by_helicity(
                     is_z=proc == "Z",
                     rebin_ptVgen=False,
@@ -1079,7 +1083,7 @@ def make_theory_helpers(
             )
 
         if "pdf" in corrs:
-            theory_helpers_procs[proc]["pdf"] = (
+            helicity_smoothing_helpers_procs[proc]["pdf"] = (
                 make_pdfs_uncertainties_helper_by_helicity(
                     proc=proc,
                     pdfs=pdfs,
@@ -1087,7 +1091,7 @@ def make_theory_helpers(
             )
         if "pdf_from_corr" in corrs:
             pdf_from_corrs = [x + "_Corr" for x in theory_corr if "pdfvar" in x]
-            theory_helpers_procs[proc]["pdf_from_corr"] = (
+            helicity_smoothing_helpers_procs[proc]["pdf_from_corr"] = (
                 make_pdfs_from_corrs_uncertainties_helper_by_helicity(
                     proc=proc,
                     pdfs_from_corrs=pdf_from_corrs,
@@ -1095,14 +1099,14 @@ def make_theory_helpers(
             )
         if "alphaS" in corrs:
             as_vars = [x + "_Corr" for x in theory_corr if "pdfas" in x]
-            theory_helpers_procs[proc]["alphaS"] = (
+            helicity_smoothing_helpers_procs[proc]["alphaS"] = (
                 make_alphaS_uncertainties_helper_by_helicity(
                     proc=proc,
                     as_vars=as_vars,
                 )
             )
         if "pdf_central" in corrs:
-            theory_helpers_procs[proc]["pdf_central"] = (
+            helicity_smoothing_helpers_procs[proc]["pdf_central"] = (
                 make_uncertainty_helper_by_helicity(
                     proc=proc,
                     nom=theory_utils.pdfMap[pdfs[0]]["name"],
@@ -1113,7 +1117,7 @@ def make_theory_helpers(
                 )
             )
 
-    return theory_helpers_procs
+    return helicity_smoothing_helpers_procs
 
 
 def make_qcd_uncertainty_helper_by_helicity(
