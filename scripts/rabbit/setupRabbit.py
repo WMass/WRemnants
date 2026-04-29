@@ -482,6 +482,11 @@ def make_parser(parser=None, argv=None):
         help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
     )
     parser.add_argument(
+        "--fitAlphaSRapidityDecorr",
+        action="store_true",
+        help="Decorrelate alphaS POI by rapidity bins, fitting independent alphaS per rapidity bin",
+    )
+    parser.add_argument(
         "--decorrRebin",
         type=int,
         nargs="*",
@@ -1846,6 +1851,7 @@ def setup(
 
         theory_helper.add_pdf_alphas_variation(
             noi="alphaS" in args.noi,
+            fitAlphaSRapidityDecorr=args.fitAlphaSRapidityDecorr,
         )
 
         if not stat_only and not args.noTheoryUnc:

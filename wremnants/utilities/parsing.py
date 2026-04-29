@@ -811,7 +811,7 @@ def plot_parser():
         help="Base path for output",
     )
     parser.add_argument(
-        "-f", "--outfolder", type=str, default="./test", help="Subfolder for output"
+        "-f", "--outfolder", type=str, default=".", help="Subfolder for output"
     )
     parser.add_argument(
         "-p", "--postfix", type=str, help="Postfix for output file name"
