@@ -2,11 +2,19 @@ import glob
 import os
 import re
 
+import lhapdf
+import numpy as np
+
+from rabbit import io_tools
 from wremnants.utilities import common, samples
+from wums import logging
+
+logger = logging.child_logger(__name__)
 
 pdfMap = {
     "nnpdf31": {
         "name": "pdfNNPDF31",
+        "lha_name": "NNPDF31_nnlo_hessian_pdfas",
         "branch": "LHEPdfWeight",
         "combine": "symHessian",
         "entries": 101,
@@ -17,6 +25,7 @@ pdfMap = {
     },
     "ct18": {
         "name": "pdfCT18",
+        "lha_name": "CT18NNLO",
         "branch": "LHEPdfWeightAltSet11",
         "combine": "asymHessian",
         "entries": 59,
@@ -32,6 +41,7 @@ pdfMap = {
     },
     "nnpdf30": {
         "name": "pdfNNPDF30",
+        "lha_name": "NNPDF30_nnlo_as_0118_hessian",
         "branch": "LHEPdfWeightAltSet7",
         "combine": "symHessian",
         "entries": 101,
@@ -46,6 +56,7 @@ pdfMap = {
     },
     "nnpdf40": {
         "name": "pdfNNPDF40",
+        "lha_name": "NNPDF40_nnlo_hessian_pdfas",
         "branch": "LHEPdfWeightAltSet3",
         "combine": "symHessian",
         "entries": 51,
@@ -60,6 +71,7 @@ pdfMap = {
     },
     "pdf4lhc21": {
         "name": "pdfPDF4LHC21",
+        "lha_name": "PDF4LHC21_40_pdfas",
         "branch": "LHEPdfWeightAltSet10",
         "combine": "symHessian",
         "entries": 41,
@@ -74,6 +86,7 @@ pdfMap = {
     },
     "msht20": {
         "name": "pdfMSHT20",
+        "lha_name": "MSHT20nnlo_as118",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 65,
@@ -88,6 +101,7 @@ pdfMap = {
     },
     "msht20mcrange": {
         "name": "pdfMSHT20mcrange",
+        "lha_name": "MSHT20nnlo_mcrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 9,
@@ -95,6 +109,7 @@ pdfMap = {
     },
     "msht20mbrange": {
         "name": "pdfMSHT20mbrange",
+        "lha_name": "MSHT20nnlo_mbrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 7,
@@ -102,6 +117,7 @@ pdfMap = {
     },
     "msht20mcrange_renorm": {
         "name": "pdfMSHT20mcrange",
+        "lha_name": "MSHT20nnlo_mcrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 9,
@@ -110,6 +126,7 @@ pdfMap = {
     },
     "msht20mbrange_renorm": {
         "name": "pdfMSHT20mbrange",
+        "lha_name": "MSHT20nnlo_mbrange_nf5",
         "branch": "LHEPdfWeightAltSet12",
         "combine": "asymHessian",
         "entries": 7,
@@ -118,6 +135,7 @@ pdfMap = {
     },
     "msht20an3lo": {
         "name": "pdfMSHT20an3lo",
+        "lha_name": "MSHT20an3lo_as118",
         "branch": "LHEPdfWeightAltSet24",
         "combine": "asymHessian",
         "entries": 105,
@@ -132,6 +150,7 @@ pdfMap = {
     },
     "ct18z": {
         "name": "pdfCT18Z",
+        "lha_name": "CT18ZNNLO",
         "branch": "LHEPdfWeightAltSet11",
         "combine": "asymHessian",
         "entries": 59,
@@ -148,6 +167,7 @@ pdfMap = {
     },
     "atlasWZj20": {
         "name": "pdfATLASWZJ20",
+        "lha_name": "ATLASepWZVjet20-EIG",
         "branch": "LHEPdfWeightAltSet19",
         "combine": "asymHessian",
         "entries": 60,
@@ -158,6 +178,7 @@ pdfMap = {
     },
     "herapdf20": {
         "name": "pdfHERAPDF20",
+        "lha_name": "HERAPDF20_NNLO_EIG",
         "branch": "LHEPdfWeightAltSet20",
         "combine": "asymHessian",
         "entries": 29,
@@ -172,6 +193,7 @@ pdfMap = {
     },
     "herapdf20ext": {
         "name": "pdfHERAPDF20ext",
+        "lha_name": "HERAPDF20_NNLO_VAR",
         "branch": "LHEPdfWeightAltSet21",
         "combine": "asymHessian",
         "entries": 14,
@@ -319,3 +341,142 @@ def sin2thetaWeightNames(matches=None, proc=""):
     ]
 
     return [x if not matches or any(y in x for y in matches) else "" for x in names]
+
+
+# A subset of the options (can be extended) taken from
+# https://gist.github.com/bendavid/601286f2fc8d89b30d7c20d108782a76#file-plotpdf-py-L782-L823
+def eval_pdf(pdf, flav, x, q):
+    flav_map = {
+        "g": 21,
+        "d": 1,
+        "dbar": -1,
+        "u": 2,
+        "ubar": -2,
+        "s": 3,
+        "sbar": -3,
+        "c": 4,
+        "cbar": -4,
+        "b": 5,
+        "bbar": -5,
+    }
+    if flav in flav_map:
+        flav = flav_map[flav]
+    # Try to convert string digits to int for PDG IDs
+    try:
+        if (
+            isinstance(flav, int)
+            or flav.isdigit()
+            or (flav.startswith("-") and flav[1:].isdigit())
+        ):
+            return pdf.xfxQ(int(flav), x, q)
+    except AttributeError:
+        pass
+
+    if flav == "uv":
+        return pdf.xfxQ(2, x, q) - pdf.xfxQ(-2, x, q)
+    elif flav == "dv":
+        return pdf.xfxQ(1, x, q) - pdf.xfxQ(-1, x, q)
+    elif flav == "rs":
+        denom = pdf.xfxQ(-1, x, q) + pdf.xfxQ(-2, x, q)
+        return (pdf.xfxQ(3, x, q) + pdf.xfxQ(-3, x, q)) / denom if denom != 0 else 0
+    else:
+        raise NotImplementedError(f"Flavor type {flav} is unsupported")
+
+
+def pdf_data_from_lhapdf(pdf_name, flavor, Q, x_range):
+    pdf_set = lhapdf.getPDFSet(pdf_name)
+    members = pdf_set.mkPDFs()
+    # Calculate values for all members (exclude alpha_s members if present)
+    all_vals = np.array(
+        [
+            [eval_pdf(m, flavor, x, Q) for x in x_range]
+            for m in members[: pdf_set.errorInfo.nmemCore + 1]
+        ]
+    )
+    return all_vals
+
+
+def pdf_inflation_factor(infoMap, noi):
+    """Return the PDF uncertainty inflation factor for given nuisance parameters."""
+
+    if noi == ["wmass"] or noi == ["wmass", "wwidth"]:
+        return infoMap.get("inflation_factor_wmass", 1)
+    elif noi == ["alphaS"]:
+        return infoMap.get("inflation_factor_alphaS", 1)
+    else:
+        logger.debug(
+            f"No inflation factor defined for nuisance parameters {noi}, returning 1."
+        )
+        return 1
+
+
+def read_vals_and_errors_from_fit(fitresult_file, fit_types, chan):
+    fitresult = io_tools.get_fitresult(fitresult_file)
+    values = []
+    errors = []  # Will store list of [err, err] to match asymmetric format
+    for fit in fit_types:
+        h = fitresult["mappings"]["BaseMapping"]["channels"][chan][
+            f"hist_{fit}_inclusive"
+        ].get()
+        val = h.values()
+        err = np.sqrt(h.variances())
+        values.append(val)
+        # Symmetrical fits are treated as [err, err] for consistency
+        errors.append([err, err])
+    return values, errors
+
+
+def read_pdf_vals_and_errors(flavor, Q_scale, x_range, pdf_sets):
+    values = []
+    errors = []
+    for name in pdf_sets:
+        pdf_set = lhapdf.getPDFSet(name)
+        vals = pdf_data_from_lhapdf(name, flavor, Q_scale, x_range)
+        central = vals[0]
+        variations = vals[1:]  # All members except central
+
+        scale_err = 1 / 1.645 if pdf_set.errorConfLevel == 90 else 1.0
+        if scale_err != 1.0:
+            logger.info(
+                f"Scaling error by {scale_err:.3f} to convert from 90% CL to 68% CL"
+            )
+
+        if "symmhessian" in pdf_set.errorType.lower():
+            # Standard symmetric Hessian
+            err = np.sqrt(np.sum((variations - central) ** 2, axis=0)) * scale_err
+            err_down = err_up = err
+        # Check if set is asymmetric Hessian (even/odd members)
+        # Common for CT, MSHT. Usually nmemCore is even.
+        elif (
+            "hessian" in pdf_set.errorType.lower()
+            and pdf_set.errorInfo.nmemCore % 2 == 0
+        ):
+            # Odd indices (1, 3, 5...) are usually 'down', even (2, 4, 6...) are 'up'
+            # In vals[1:], index 0 is member 1, index 1 is member 2
+            down_vars = variations[0::2]
+            up_vars = variations[1::2]
+
+            err_down = (
+                np.sqrt(
+                    np.sum(
+                        np.maximum(0, central - down_vars) ** 2
+                        + np.maximum(0, up_vars - central) ** 2,
+                        axis=0,
+                    )
+                )
+                * scale_err
+            )
+            err_up = (
+                np.sqrt(
+                    np.sum(
+                        np.maximum(0, down_vars - central) ** 2
+                        + np.maximum(0, central - up_vars) ** 2,
+                        axis=0,
+                    )
+                )
+                * scale_err
+            )
+
+        values.append(central)
+        errors.append([err_down, err_up])
+    return values, errors
