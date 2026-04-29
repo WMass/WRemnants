@@ -4,6 +4,7 @@ import hist
 import numpy as np
 
 from wremnants.postprocessing import syst_tools
+from wremnants.postprocessing.rabbit_helpers import decorrelateByAxes
 from wremnants.postprocessing.theory_variation_labels import (
     BC_QUARK_MASS_VARIATIONS,
     LATTICE_GAMMA_NP_UNCERTAINTIES,
@@ -1078,7 +1079,7 @@ class TheoryHelper(object):
                     **tmp_pdf_args,
                 )
 
-    def add_pdf_alphas_variation(self, noi=False):
+    def add_pdf_alphas_variation(self, noi=False, fitAlphaSRapidityDecorr=False):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
@@ -1146,6 +1147,42 @@ class TheoryHelper(object):
         else:
             as_args["systNameReplace"] = as_replace
             as_args["skipEntries"] = [{"alphasVar": "as0118"}]
+
+        if fitAlphaSRapidityDecorr:
+            rapidity_axes = {"yll", "absYVGen", "absEtaGen", "absY", "yVGen"}
+            rapidity_axis = next(
+                (v for v in self.datagroups.fit_axes if v in rapidity_axes), None
+            )
+            if rapidity_axis is None:
+                raise ValueError(
+                    f"Cannot decorrelate alphaS by rapidity: no rapidity axis found in fit variables {self.datagroups.fit_axes}"
+                )
+            new_name = f"{rapidity_axis}_decorr"
+            as_args["systAxes"] = [*as_args["systAxes"], new_name]
+            as_args["name"] = "pdfAlphaSDecorrRapidity"
+            as_args["group"] = "pdfAlphaSDecorr"
+            as_args["isPoiHistDecorr"] = 1
+            as_args["actionRequiresNomi"] = True
+            as_args["action"] = decorrelateByAxes
+            as_args["actionArgs"] = dict(
+                axesToDecorrNames=[rapidity_axis],
+                newDecorrAxesNames=[new_name],
+                axlim=[],
+                rebin=[],
+                absval=[],
+            )
+            # outNames is positional (fixed length 3) and can't handle the
+            # expanded rapidity bins; switch to systNameReplace + skipEntries
+            # which work with any number of variations
+            if self.as_from_corr:
+                as_args.pop("outNames")
+                if as_range == "002":
+                    as_corr_replace = [("0116", "Down"), ("0120", "Up")]
+                elif as_range == "001":
+                    as_corr_replace = [("0117", "Down"), ("0119", "Up")]
+                as_args["systNameReplace"] = as_corr_replace
+                as_args["skipEntries"] = [{"vars": ".*0118"}]
+
         logger.info(f"Using alphaS variation {asname}, applying scaling of {scale}")
         self.datagroups.addSystematic(**as_args)
 
