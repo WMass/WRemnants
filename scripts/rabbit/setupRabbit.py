@@ -750,6 +750,19 @@ def make_parser(parser=None, argv=None):
         "matching any of the patterns (re.search) are forced asymmetric.",
     )
     parser.add_argument(
+        "--scaleParams",
+        nargs="*",
+        default=None,
+        metavar="REGEX=FACTOR",
+        help="Inflate the prior on shape systematics whose per-direction "
+        "name (e.g. <name>Up / <name>Down) matches REGEX (re.search) by "
+        "FACTOR. Equivalent to multiplying the systematic's kfactor by "
+        "FACTOR (same mechanism LatticeNoConstraints uses internally). "
+        "Multiple REGEX=FACTOR pairs may be supplied. Overlapping "
+        "patterns matching the same nuisance name raise an error. "
+        "Example: --scaleParams 'lambda4=5' 'mb_up|pdfMSHT20mbrange=10'",
+    )
+    parser.add_argument(
         "--symmetrizePdfUnc",
         default="quadratic",
         type=str,
@@ -1149,6 +1162,29 @@ def setup(
         datagroups.force_asymmetric_patterns = (
             [re.compile(p) for p in args.noSymmetrize] if args.noSymmetrize else None
         )
+
+    # --scaleParams: list of (compiled regex, factor) pairs applied at
+    # add_systematic time. Mirrors the --noSymmetrize wiring.
+    scale_params_pairs = []
+    if args.scaleParams:
+        for s in args.scaleParams:
+            if "=" not in s:
+                raise ValueError(
+                    f"--scaleParams entries must be of form REGEX=FACTOR; got '{s}'"
+                )
+            regex_str, factor_str = s.rsplit("=", 1)
+            try:
+                factor = float(factor_str)
+            except ValueError:
+                raise ValueError(
+                    f"--scaleParams FACTOR must be a float; got '{factor_str}' in '{s}'"
+                )
+            scale_params_pairs.append((re.compile(regex_str), factor))
+        logger.info(
+            f"--scaleParams: {len(scale_params_pairs)} pattern(s) registered: "
+            + ", ".join(f"'{p.pattern}'×{f}" for p, f in scale_params_pairs)
+        )
+    datagroups.scale_params_patterns = scale_params_pairs
 
     preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:

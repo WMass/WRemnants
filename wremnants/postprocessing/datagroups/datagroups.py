@@ -136,6 +136,14 @@ class Datagroups(object):
         self.force_asymmetric = False
         self.force_asymmetric_patterns = None
 
+        # List of (compiled regex, float factor) pairs. For each systematic
+        # variation written via addSystematic, if its per-direction name
+        # (e.g. <name>Up / <name>Down) matches a pattern (re.search), its
+        # kfactor is multiplied by the corresponding factor. At most one
+        # pattern may match a given var_name; overlapping matches raise
+        # ValueError.
+        self.scale_params_patterns = []
+
         self.writer = None
 
     def get_members_from_results(self, startswith=[], not_startswith=[], is_data=False):
@@ -1494,6 +1502,26 @@ class Datagroups(object):
                         )
                         effective_symmetrize = None
 
+                # --scaleParams: multiply kfactor for matching nuisances.
+                # At most one pattern may match a given var_name; overlap is
+                # an error (specify a more precise regex if needed).
+                effective_scale = scale
+                scale_patterns = getattr(self, "scale_params_patterns", [])
+                matched = [(p, f) for p, f in scale_patterns if p.search(var_name)]
+                if len(matched) > 1:
+                    raise ValueError(
+                        f"scaleParams: var_name {var_name!r} matched multiple "
+                        f"patterns: {[p.pattern for p, _ in matched]}. "
+                        "Tighten the regexes so each var_name matches at most one."
+                    )
+                if matched:
+                    pat, fac = matched[0]
+                    effective_scale = scale * fac
+                    logger.info(
+                        f"scaleParams: {var_name} kfactor {scale} -> "
+                        f"{effective_scale} (pattern '{pat.pattern}' x {fac})"
+                    )
+
                 if lastAction is not None:
                     if lastActionRequiresNomi:
                         hnom = self.groups[proc].hists[self.nominalName]
@@ -1516,7 +1544,7 @@ class Datagroups(object):
                     groups=matched_groups,
                     mirror=mirror,
                     symmetrize=effective_symmetrize,
-                    kfactor=scale,
+                    kfactor=effective_scale,
                     noi=noi,
                     constrained=not noConstraint,
                     add_to_data_covariance=self.isAbsorbedNuisance(name),
