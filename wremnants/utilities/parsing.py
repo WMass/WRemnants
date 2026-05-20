@@ -419,8 +419,13 @@ def common_parser(analysis_label=""):
         )
         parser.add_argument(
             "--muonScaleVariation",
-            choices=["smearingWeightsGaus", "smearingWeightsSplines", "massWeights"],
-            default="smearingWeightsSplines",
+            choices=[
+                "smearingWeightsGaus",
+                "smearingWeightsSplines",
+                "massWeights",
+                "onnxReweight",
+            ],
+            default="onnxReweight",
             help="method to generate nominal muon scale variation histograms",
         )
         parser.add_argument(

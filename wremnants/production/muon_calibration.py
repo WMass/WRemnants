@@ -19,8 +19,17 @@ logger = logging.child_logger(__name__)
 
 narf.clingutils.Declare('#include "muon_calibration.hpp"')
 narf.clingutils.Declare('#include "lowpu_utils.hpp"')
+narf.clingutils.Declare('#include "shift_smear_reweight_helpers.hpp"')
 
 data_dir = common.data_dir
+
+# Default ONNX model for the shift+smear-reweight uncertainty helpers
+# (mlp-factored architecture, muon_source-conditioned, single-file
+# inline-weights export). Produced by
+# scripts/corrections/muon_calibration/shift_smear_reweight_export.py.
+default_shift_smear_reweight_onnx = (
+    f"{data_dir}/calibration/shift_smear_reweight_mlp_factored_combined.onnx"
+)
 
 
 def make_muon_calibration_helpers(
@@ -298,6 +307,8 @@ def make_muon_smearing_helpers(
     filenamemc=f"{data_dir}/calibration/resolutionMC_LBL_JZ_deltaphim_Apr3.root",
     override_d=None,
     dummy_vars=False,
+    onnx_path=default_shift_smear_reweight_onnx,
+    onnx_nslots=None,
 ):
     # this helper smears muon pT to match the resolution in data
 
@@ -415,9 +426,27 @@ def make_muon_smearing_helpers(
     hvar = narf.hist_to_pyroot_boost(hvar, tensor_rank=2)
 
     helper = ROOT.wrem.SmearingHelperParametrized[type(hnom)](ROOT.std.move(hnom))
-    helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[
-        type(hnom), type(hvar), nvar
-    ](helper, ROOT.std.move(hvar))
+    if onnx_path is not None:
+        # ONNX-backed drop-in: same nominal smearer + ONNX-backed
+        # uncertainty helper.  The new uncertainty helper consumes gen
+        # kinematics in addition to reco -- see add_resolution_uncertainty
+        # for the matching column list.  All preprocessing (mean/std on
+        # y/c, std on u/σ) is baked into the ONNX, so the C++ helper
+        # passes everything in physical units and no preproc.json is
+        # needed at runtime.
+        n = int(onnx_nslots) if onnx_nslots is not None else (
+            ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1
+        )
+        helper_var = ROOT.wrem.SmearingUncertaintyReweightHelper[
+            type(hnom), type(hvar), nvar
+        ](
+            helper, ROOT.std.move(hvar),
+            str(onnx_path), max(int(n), 1),
+        )
+    else:
+        helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[
+            type(hnom), type(hvar), nvar
+        ](helper, ROOT.std.move(hvar))
 
     helper_var.tensor_axes = [axis_res_var]
 
@@ -437,15 +466,37 @@ def add_resolution_uncertainty(
     if smearing_uncertainty_helper is None:
         return df
 
-    df = df.Define(
-        "muonResolutionSyst_weights",
-        smearing_uncertainty_helper,
-        [
+    # The new ONNX-backed uncertainty helper needs the full gen-matched
+    # (reco pt/η/φ/charge, gen pt/η/φ/charge) tuple to feed the
+    # network's y / c. Detect by C++ class so the routing stays in sync
+    # with the helper type itself rather than a separate marker.
+    if _is_onnx_reweight_helper(smearing_uncertainty_helper):
+        df = _define_muon_source_for_onnx_helper(df, reco_sel_GF)
+        cols = [
+            f"{reco_sel_GF}_recoPt",
+            f"{reco_sel_GF}_recoEta",
+            f"{reco_sel_GF}_recoPhi",
+            f"{reco_sel_GF}_recoCharge",
+            f"{reco_sel_GF}_genPt",
+            f"{reco_sel_GF}_genEta",
+            f"{reco_sel_GF}_genPhi",
+            f"{reco_sel_GF}_genCharge",
+            f"{reco_sel_GF}_muon_source",
+            f"{reco_sel_GF}_response_weight",
+            "nominal_weight",
+        ]
+    else:
+        cols = [
             f"{reco_sel_GF}_recoPt",
             f"{reco_sel_GF}_recoEta",
             f"{reco_sel_GF}_response_weight",
             "nominal_weight",
-        ],
+        ]
+
+    df = df.Define(
+        "muonResolutionSyst_weights",
+        smearing_uncertainty_helper,
+        cols,
     )
 
     var_axes = smearing_uncertainty_helper.tensor_axes
@@ -532,17 +583,52 @@ def make_jpsi_crctn_helper(filepath):
     return jpsi_crctn_helper
 
 
+def _define_muon_source_for_onnx_helper(df, reco_sel_GF):
+    """Define ``{reco_sel_GF}_muon_source`` — an ``RVec<int>`` of
+    ``Muon_genPartFlav`` values for the gen-matched reco muons,
+    needed by the ONNX-reweight helpers (Jpsi scale and resolution
+    uncertainty) as the per-muon class tag. The C++ helper applies
+    the post-mapping rule (``genPartFlav == 15 -> 15, else 1``) and
+    the ORT graph remaps the {1, 15, 443} integer codes to the
+    compact {-1, 0, +1} representation the network was trained on.
+
+    Guarded against multiple definition since both
+    ``add_resolution_uncertainty`` and ``add_jpsi_crctn_stats_unc_hists``
+    may want the column on the same dataframe.
+    """
+    col = f"{reco_sel_GF}_muon_source"
+    if col in df.GetColumnNames():
+        return df
+    return df.Define(
+        col,
+        f"ROOT::VecOps::RVec<int>(Muon_genPartFlav[{reco_sel_GF}])",
+    )
+
+
+def _is_onnx_reweight_helper(helper):
+    """True iff ``helper`` is one of the ONNX-backed reweight helpers
+    declared in ``shift_smear_reweight_helpers.hpp`` (which carry the
+    full reco+gen+φ kinematics through the trained network).  Used by
+    the Define call sites to switch column lists; ``False`` on the
+    analytic helpers and on anything else."""
+    name = type(helper).__cpp_name__ if helper is not None else ""
+    return name.startswith("wrem::JpsiCorrectionsUncReweightHelper") or \
+        name.startswith("wrem::SmearingUncertaintyReweightHelper")
+
+
 def make_jpsi_crctn_unc_helper(
     filepath_correction,
     scale_A=1.0,
     scale_e=1.0,
     scale_M=1.0,
     isW=True,
-    scale_var_method="smearingWeightsSplines",
+    scale_var_method="onnxReweight",
     include_covariance=True,
     central=False,
     central_eta_min=-1.4,
     central_eta_max=1.4,
+    onnx_path=default_shift_smear_reweight_onnx,
+    onnx_nslots=None,
 ):
 
     f = ROOT.TFile.Open(filepath_correction)
@@ -660,6 +746,26 @@ def make_jpsi_crctn_unc_helper(
         helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
             type(hist_scale_params_unc_cpp).__cpp_name__
         ](ROOT.std.move(hist_scale_params_unc_cpp))
+    elif scale_var_method == "onnxReweight":
+        # Trained shift+smear-reweight (mlp-factored) backed drop-in.
+        # ``onnx_path`` points at the combined ONNX produced by
+        # scripts/corrections/muon_calibration/shift_smear_reweight_export.py.
+        # The ONNX has y/c mean+std and u/σ std normalisation baked in,
+        # so no preproc.json is needed at runtime -- the C++ helper
+        # passes everything in physical r_κ / δλ / δφ units.
+        if onnx_path is None:
+            raise ValueError(
+                "scale_var_method='onnxReweight' requires onnx_path=..."
+            )
+        n = int(onnx_nslots) if onnx_nslots is not None else (
+            ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1
+        )
+        helper = ROOT.wrem.JpsiCorrectionsUncReweightHelper[
+            type(hist_scale_params_unc_cpp).__cpp_name__
+        ](
+            ROOT.std.move(hist_scale_params_unc_cpp),
+            str(onnx_path), max(int(n), 1),
+        )
     elif scale_var_method == "massWeights":
         nweights = 21 if isW else 23
         helper = ROOT.wrem.JpsiCorrectionsUncHelper_massWeights[
@@ -1317,10 +1423,23 @@ def add_jpsi_crctn_stats_unc_hists(
                 dummy_mu_scale_var=args.dummyMuScaleVar,
                 dummy_var_mag=args.muonCorrMag,
             )
-        df = df.Define(
-            "muonScaleSyst_responseWeights_tensor_splines",
-            jpsi_unc_helper,
-            [
+        if _is_onnx_reweight_helper(jpsi_unc_helper):
+            df = _define_muon_source_for_onnx_helper(df, reco_sel_GF)
+            splines_cols = [
+                f"{reco_sel_GF}_recoPt",
+                f"{reco_sel_GF}_recoEta",
+                f"{reco_sel_GF}_recoPhi",
+                f"{reco_sel_GF}_recoCharge",
+                f"{reco_sel_GF}_genPt",
+                f"{reco_sel_GF}_genEta",
+                f"{reco_sel_GF}_genPhi",
+                f"{reco_sel_GF}_genCharge",
+                f"{reco_sel_GF}_muon_source",
+                f"{reco_sel_GF}_response_weight",
+                "nominal_weight",
+            ]
+        else:
+            splines_cols = [
                 f"{reco_sel_GF}_recoPt",
                 f"{reco_sel_GF}_recoEta",
                 f"{reco_sel_GF}_recoCharge",
@@ -1329,7 +1448,11 @@ def add_jpsi_crctn_stats_unc_hists(
                 f"{reco_sel_GF}_genCharge",
                 f"{reco_sel_GF}_response_weight",
                 "nominal_weight",
-            ],
+            ]
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_splines",
+            jpsi_unc_helper,
+            splines_cols,
         )
         if args.validationHists:
             muonScaleSyst_responseWeights_splines = df.HistoBoost(

@@ -60,6 +60,11 @@ from train_muon_response_flow import (  # noqa: E402
     _multiindex_to_axis_degrees,
     evaluate_joint,
 )
+from train_shift_smear_reweight import (  # noqa: E402
+    _LOG_W_CLAMP,
+    _pack_sigma_outer,
+    _sigma_pack_indices,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +86,11 @@ class ReweightPolyheadInference(nn.Module):
         target_std: torch.Tensor,
         cond_mean: torch.Tensor,
         cond_std: torch.Tensor,
+        muon_source_idx: int = -1,
     ):
         super().__init__()
         self.polyhead = polyhead
+        self.muon_source_idx = int(muon_source_idx)
         self.register_buffer("target_mean", target_mean)
         self.register_buffer("target_std", target_std)
         self.register_buffer("cond_mean", cond_mean)
@@ -92,6 +99,7 @@ class ReweightPolyheadInference(nn.Module):
     def forward(
         self, y_raw: torch.Tensor, c_raw: torch.Tensor,
     ) -> torch.Tensor:
+        c_raw = _remap_muon_source_inplace(c_raw, self.muon_source_idx)
         y_std = (y_raw - self.target_mean) / self.target_std
         c_std = (c_raw - self.cond_mean) / self.cond_std
         return self.polyhead(y_std, c_std)
@@ -123,9 +131,11 @@ class CombinedInference(nn.Module):
         target_std: torch.Tensor,
         cond_mean: torch.Tensor,
         cond_std: torch.Tensor,
+        muon_source_idx: int = -1,
     ):
         super().__init__()
         self.polyhead = polyhead
+        self.muon_source_idx = int(muon_source_idx)
         self.register_buffer("target_mean", target_mean)
         self.register_buffer("target_std", target_std)
         self.register_buffer("cond_mean", cond_mean)
@@ -138,6 +148,7 @@ class CombinedInference(nn.Module):
         u: torch.Tensor,
         sigma: torch.Tensor,
     ) -> torch.Tensor:
+        c_raw = _remap_muon_source_inplace(c_raw, self.muon_source_idx)
         y_std = (y_raw - self.target_mean) / self.target_std
         c_std = (c_raw - self.cond_mean) / self.cond_std
         coefs = self.polyhead(y_std, c_std)              # [B, n_basis]
@@ -156,6 +167,209 @@ class CombinedInference(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Per-muon ``muon_source`` remap baked into the graph.
+#
+# The trainer compacts the raw integer code {1 = prompt W/Z muon,
+# 15 = secondary from a τ decay, 443 = J/ψ leg} into {-1, 0, +1}
+# before standardising (see ``arrow_shard_loader._MUON_SOURCE_CODES``).
+# We want callers (the C++ ``Muon_genPartFlav`` plumbing) to pass the
+# *raw* integer in physical units; the graph does the remap as part
+# of the preproc so there is one less convention for the C++ side to
+# track. The mapping is exclusive (each row is exactly one of 1/15/
+# 443), so ``+1 * (ms==443) - 1 * (ms==1)`` reproduces the compact
+# code without a ``where``-chain.
+# ---------------------------------------------------------------------------
+
+def _remap_muon_source_inplace(
+    c_raw: torch.Tensor, muon_source_idx: int,
+) -> torch.Tensor:
+    """Return a new tensor identical to ``c_raw`` except column
+    ``muon_source_idx`` is remapped from the raw {1, 15, 443} codes
+    to compact {-1, 0, +1} via a concat (export-friendly, no
+    in-place mutation of caller buffers)."""
+    if muon_source_idx < 0:
+        return c_raw
+    idx = muon_source_idx
+    ms_raw = c_raw[:, idx:idx + 1]
+    is_jpsi = (ms_raw == 443).to(c_raw.dtype)
+    is_prompt = (ms_raw == 1).to(c_raw.dtype)
+    # +1 for J/ψ, -1 for prompt W/Z, 0 for τ-decay (== 15) or anything
+    # else — matches the trainer's ``_MUON_SOURCE_CODES`` table.
+    ms_compact = is_jpsi - is_prompt
+    return torch.cat([c_raw[:, :idx], ms_compact, c_raw[:, idx + 1:]], dim=1)
+
+
+def _muon_source_idx(stats) -> int:
+    """Return the index of ``muon_source`` in ``stats.cond_names``,
+    or -1 if the model wasn't trained with it (back-compat)."""
+    names = list(getattr(stats, "cond_names", None) or ())
+    return names.index("muon_source") if "muon_source" in names else -1
+
+
+def _onnx_inline_external_data(path: str) -> bool:
+    """If ``path`` was written with external-data sidecars (the dynamo
+    exporter spills weights above ~1 KB by default), absorb the
+    sidecars back into the protobuf so the result is a single self-
+    contained .onnx. No-op when there is no external data.
+
+    Sidecar files referenced by the original model are removed after
+    the inline rewrite. Returns ``True`` if a rewrite was performed,
+    ``False`` if the model was already inline.
+    """
+    import onnx
+
+    base_dir = os.path.dirname(os.path.abspath(path)) or "."
+    # First, inspect *without* loading external bytes — that gives us
+    # the exact set of sidecar paths to clean up after the rewrite.
+    m_meta = onnx.load(path, load_external_data=False)
+    sidecars = set()
+    for init in m_meta.graph.initializer:
+        if init.data_location == onnx.TensorProto.EXTERNAL:
+            for d in init.external_data:
+                if d.key == "location":
+                    sidecars.add(os.path.join(base_dir, d.value))
+    if not sidecars:
+        return False
+    # Reload with external data inlined into the protobuf, then save
+    # back as a single file.
+    m = onnx.load(path)  # default: load_external_data=True
+    onnx.save(m, path, save_as_external_data=False)
+    for s in sidecars:
+        try:
+            os.remove(s)
+        except OSError:
+            pass
+    return True
+
+
+class CombinedInferenceMLP(nn.Module):
+    """``forward(y_raw, c_raw, u_raw, sigma_raw) → log_r`` for the
+    ``mlp`` / ``mlp-factored`` archs.
+
+    Mirrors :class:`CombinedInference` but routes the head through the
+    MLP/factored-MLP heads instead of the polynomial. The graph carries
+    the full preprocessing — y/c mean+std, u/σ std (no mean: they're
+    deltas in target space) — so the caller passes everything in
+    physical target units and no ``preproc.json`` is needed at runtime.
+    ``sigma_pack`` is built inside the graph from the standardised
+    ``sigma``.
+
+    Output is the final ``log_r`` after the trained positivity wrap
+    (``exp`` -> a symmetric clamp at ``±_LOG_W_CLAMP``) so the C++ side
+    just calls ``exp(log_r)`` to get the alt-weight directly. The
+    factored arch's head structurally vanishes at ``(u, σ) = (0, 0)``,
+    so no dual-forward subtraction is needed; the unfactored ``mlp``
+    arch does need it and that's handled here.
+
+    Shapes (all float32):
+        y_raw      [B, F]              (physical r_κ, δλ, δφ)
+        c_raw      [B, n_cond]         (physical log p_T, charge, λ, sφ, cφ)
+        u_raw      [B, N_var, F]       (physical Δy = δr_κ, δλ, δφ)
+        sigma_raw  [B, N_var, F]       (physical σ in the same units)
+        log_r      [B, N_var]
+    """
+
+    def __init__(
+        self,
+        head: nn.Module,
+        target_mean: torch.Tensor,
+        target_std: torch.Tensor,
+        cond_mean: torch.Tensor,
+        cond_std: torch.Tensor,
+        is_factored: bool,
+        shift_only: bool,
+        positivity_clamp: float = _LOG_W_CLAMP,
+        muon_source_idx: int = -1,
+    ):
+        super().__init__()
+        self.head = head
+        self.is_factored = bool(is_factored)
+        self.shift_only = bool(shift_only)
+        self.positivity_clamp = float(positivity_clamp)
+        n_features = int(target_mean.shape[0])
+        self.n_features = n_features
+        # Index of ``muon_source`` inside ``c_raw``; -1 means the model
+        # was trained without it and the remap is a no-op. Static int
+        # (not a buffer) — torch.export specialises on it.
+        self.muon_source_idx = int(muon_source_idx)
+        self.register_buffer("target_mean", target_mean)
+        self.register_buffer("target_std", target_std)
+        self.register_buffer("cond_mean", cond_mean)
+        self.register_buffer("cond_std", cond_std)
+        if not self.shift_only:
+            iu, ju = _sigma_pack_indices(n_features)
+            self.register_buffer("sigma_pack_iu", iu)
+            self.register_buffer("sigma_pack_ju", ju)
+        else:
+            # Stash zero-length tensors so torch.export sees consistent
+            # state regardless of branch; never actually indexed.
+            self.register_buffer(
+                "sigma_pack_iu", torch.zeros(0, dtype=torch.long),
+            )
+            self.register_buffer(
+                "sigma_pack_ju", torch.zeros(0, dtype=torch.long),
+            )
+
+    def forward(
+        self,
+        y_raw: torch.Tensor,
+        c_raw: torch.Tensor,
+        u_raw: torch.Tensor,
+        sigma_raw: torch.Tensor,
+    ) -> torch.Tensor:
+        # Remap ``muon_source`` from the raw integer code (1, 15, 443)
+        # to the compact {-1, 0, +1} the trainer saw. No-op if the
+        # model wasn't trained with the column.
+        c_raw = _remap_muon_source_inplace(c_raw, self.muon_source_idx)
+        # Full preproc inside the graph. y / c get mean+std (absolute
+        # observables); u / σ get std-only (they're deltas / magnitudes
+        # in target space, so the mean is meaningless).
+        y_std = (y_raw - self.target_mean) / self.target_std
+        c_std = (c_raw - self.cond_mean) / self.cond_std
+        u = u_raw / self.target_std
+        sigma = sigma_raw / self.target_std
+        # Trunk runs once per event; broadcast across N_var.
+        e = self.head.trunk_forward(y_std, c_std)              # [B, d_emb]
+        e_b = e.unsqueeze(1).expand(-1, u.shape[1], -1)        # [B, N_var, d_emb]
+
+        if self.shift_only:
+            sigma_pack = sigma.new_zeros(
+                (u.shape[0], u.shape[1], 0),
+            )
+        else:
+            sigma_pack = _pack_sigma_outer(
+                sigma, self.sigma_pack_iu, self.sigma_pack_ju,
+            )                                                  # [B, N_var, n_pack]
+
+        d = self.head.head_forward(e_b, u, sigma_pack)         # [B, N_var]
+        if not self.is_factored:
+            # Unfactored mlp head doesn't vanish at the origin; subtract
+            # ``head(e, 0, 0)`` to recover the trainer's effective d.
+            u_zero = torch.zeros_like(u)
+            sp_zero = torch.zeros_like(sigma_pack)
+            d0 = self.head.head_forward(e_b, u_zero, sp_zero)
+            d = d - d0
+
+        # Optional analytic-Gaussian baseline (additive contribution).
+        gb = getattr(self.head, "gauss_baseline", None)
+        if gb is not None:
+            from train_shift_smear_reweight import gauss_baseline_log_r
+            mu_g, L_g = gb(c_std)
+            mu_g_b = mu_g.unsqueeze(1).expand(-1, u.shape[1], -1)
+            L_g_b = L_g.unsqueeze(1).expand(-1, u.shape[1], -1, -1)
+            y_std_b = y_std.unsqueeze(1).expand(-1, u.shape[1], -1)
+            d = d + gauss_baseline_log_r(y_std_b, mu_g_b, L_g_b, u, sigma)
+
+        # Positivity wrap == "exp": a symmetric clamp on the log so
+        # ``exp(log_r)`` stays finite. ±_LOG_W_CLAMP matches the
+        # diagnostic path; the trainer's BCE loss uses inf-clamp but
+        # the deployment safety clamp is always the finite one.
+        return d.clamp(
+            min=-self.positivity_clamp, max=self.positivity_clamp,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Helpers (shared with flow_polyhead_export)
 # ---------------------------------------------------------------------------
 
@@ -163,9 +377,23 @@ def _decompose_linear(ep):
     aten = torch.ops.aten
 
     def _linear_decomp(input, weight, bias=None):
+        # ``aten.linear`` is rank-agnostic but the prim ``aten.mm`` /
+        # ``aten.addmm`` are 2D-only. For N-D inputs (e.g. the MLP
+        # head's ``[B, N_var, d_emb]`` after broadcasting across
+        # variations) reshape to 2D, run the matmul, then reshape
+        # back — for 2D inputs the reshapes are identity.
+        orig_shape = list(input.shape)
+        out_features = weight.shape[0]
+        if len(orig_shape) == 2:
+            if bias is None:
+                return aten.mm.default(input, weight.permute(1, 0))
+            return aten.addmm.default(bias, input, weight.permute(1, 0))
+        in_2d = input.reshape(-1, orig_shape[-1])
         if bias is None:
-            return aten.mm.default(input, weight.permute(1, 0))
-        return aten.addmm.default(bias, input, weight.permute(1, 0))
+            out_2d = aten.mm.default(in_2d, weight.permute(1, 0))
+        else:
+            out_2d = aten.addmm.default(bias, in_2d, weight.permute(1, 0))
+        return out_2d.reshape(orig_shape[:-1] + [out_features])
 
     return ep.run_decompositions({aten.linear.default: _linear_decomp})
 
@@ -422,6 +650,19 @@ def parse_args():
         "toolchain. Off by default.",
     )
     p.add_argument("--opset", type=int, default=17)
+    p.add_argument(
+        "--inline-weights",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="After ``torch.onnx.export``, absorb any external-data "
+        "sidecar (``*.onnx.data`` / ``*.weight``) back into the "
+        ".onnx protobuf so the model ships as a single self-"
+        "contained file. The dynamo exporter spills weights above a "
+        "small threshold into a sidecar by default; this option "
+        "reload+resaves them inline and removes the sidecars. "
+        "Subject to the 2 GB protobuf limit. Default on; pass "
+        "``--no-inline-weights`` to keep the sidecar layout.",
+    )
     p.add_argument("--validate-n", type=int, default=128)
     p.add_argument("--validate-tol", type=float, default=1e-4)
     p.add_argument(
@@ -464,22 +705,22 @@ def _default_paths(args):
 def _build_wrapper(checkpoint_path):
     """Load checkpoint via the diagnostic loader (handles both old and
     current model_config schemas) and wrap it for export.
+
+    Returns ``(wrapper, model, arch, stats, n_features, n_cond)``.
+    ``wrapper`` is the trunk-only export form. For ``polyhead`` it is
+    :class:`ReweightPolyheadInference` and ``forward(y, c) -> coefs``;
+    for ``mlp`` / ``mlp-factored`` the trunk-only form is meaningless
+    (the head is an MLP, not a polynomial) so ``wrapper`` is ``None``
+    and ``main`` only emits the combined (y, c, u, σ) variant.
     """
     from train_muon_response_flow import PreprocStats
     model, arch, stats, _ = load_model_from_checkpoint(
         checkpoint_path, device="cpu",
     )
-    if arch != "polyhead":
+    if arch not in ("polyhead", "mlp", "mlp-factored"):
         raise SystemExit(
-            f"--checkpoint arch={arch!r}; only 'polyhead' is supported "
-            "by this exporter. For 'mlp' / 'mlp-factored' arches use "
-            "the combined-MLP exporter "
-            "(scripts/corrections/muon_calibration/"
-            "train_shift_reweight_mlp_export.py for legacy shift-only "
-            "MLP; or the bench_mlp_combined_export.py pattern adapted "
-            "to whichever head class the checkpoint carries — "
-            "ReweightMLP_B for 'mlp' or ReweightMLPFactored for "
-            "'mlp-factored')."
+            f"--checkpoint arch={arch!r}; supported archs are "
+            "'polyhead', 'mlp', and 'mlp-factored'."
         )
     if stats is None:
         # Fall back to preproc.json next to the checkpoint.
@@ -504,16 +745,23 @@ def _build_wrapper(checkpoint_path):
     cond_std = torch.tensor(
         list(stats.cond_std), dtype=torch.float32,
     )
-    wrapper = ReweightPolyheadInference(
-        polyhead=model.eval(),
-        target_mean=target_mean,
-        target_std=target_std,
-        cond_mean=cond_mean,
-        cond_std=cond_std,
-    ).eval()
+    if arch == "polyhead":
+        wrapper = ReweightPolyheadInference(
+            polyhead=model.eval(),
+            target_mean=target_mean,
+            target_std=target_std,
+            cond_mean=cond_mean,
+            cond_std=cond_std,
+            muon_source_idx=_muon_source_idx(stats),
+        ).eval()
+    else:
+        # Trunk-only form is polyhead-specific; mlp / mlp-factored only
+        # support the combined export.
+        wrapper = None
+        model.eval()
     n_features = int(target_mean.shape[0])
     n_cond = int(cond_mean.shape[0])
-    return wrapper, model, stats, n_features, n_cond
+    return wrapper, model, arch, stats, n_features, n_cond
 
 
 def main():
@@ -548,32 +796,48 @@ def main():
     )
 
     print(f"loading checkpoint {args.checkpoint}")
-    wrapper, polyhead, stats, n_features, n_cond = _build_wrapper(
+    wrapper, model, arch, stats, n_features, n_cond = _build_wrapper(
         args.checkpoint,
     )
-    print(
-        f"polyhead: n_basis={polyhead.n_basis} "
-        f"(pu={polyhead._n_pure_u} ps={polyhead._n_pure_s} "
-        f"cr={polyhead._n_cross}) "
-        f"max_deg_u={polyhead.max_deg_u} "
-        f"max_deg_sigma={polyhead.max_deg_sigma} "
-        f"max_cross_deg={polyhead.max_cross_deg} "
-        f"basis={getattr(polyhead, 'basis', 'monomial')}"
-    )
+    print(f"arch={arch}  n_features={n_features}  n_cond={n_cond}")
 
-    # Always emit the sidecar (cheap; needed for both ORT and AOTI).
-    _emit_indices_sidecar(polyhead, stats, args.indices_output)
+    is_polyhead = (arch == "polyhead")
+    is_factored = (arch == "mlp-factored") or bool(
+        getattr(model, "is_factored", False)
+    )
+    shift_only = bool(getattr(model, "shift_only", False))
+
+    if is_polyhead:
+        polyhead = model
+        print(
+            f"polyhead: n_basis={polyhead.n_basis} "
+            f"(pu={polyhead._n_pure_u} ps={polyhead._n_pure_s} "
+            f"cr={polyhead._n_cross}) "
+            f"max_deg_u={polyhead.max_deg_u} "
+            f"max_deg_sigma={polyhead.max_deg_sigma} "
+            f"max_cross_deg={polyhead.max_cross_deg} "
+            f"basis={getattr(polyhead, 'basis', 'monomial')}"
+        )
+
+        # Always emit the sidecar (cheap; needed for both ORT and AOTI).
+        _emit_indices_sidecar(polyhead, stats, args.indices_output)
+    else:
+        print(
+            f"mlp head: is_factored={is_factored} shift_only={shift_only} "
+            "(trunk-only export not applicable; emitting combined only)"
+        )
 
     B = args.batch
     B_trace = max(B, 2) if args.dynamic_batch else B
     y = torch.randn(B_trace, n_features)
     c = torch.randn(B_trace, n_cond)
-    with torch.no_grad():
-        ref = wrapper(y, c)
-    print(f"eager: joint_coefs={tuple(ref.shape)}")
+    if is_polyhead:
+        with torch.no_grad():
+            ref = wrapper(y, c)
+        print(f"eager: joint_coefs={tuple(ref.shape)}")
 
-    # ---------- AOTI ----------
-    if args.output:
+    # ---------- AOTI (trunk-only, polyhead only) ----------
+    if args.output and is_polyhead:
         os.makedirs(
             os.path.dirname(os.path.abspath(args.output)) or ".",
             exist_ok=True,
@@ -674,8 +938,8 @@ def main():
                 f"{ev_s:.1f} ev/s  ({n} iters)"
             )
 
-    # ---------- ONNX ----------
-    if args.onnx_output:
+    # ---------- ONNX (trunk-only, polyhead only) ----------
+    if args.onnx_output and is_polyhead:
         os.makedirs(
             os.path.dirname(os.path.abspath(args.onnx_output)) or ".",
             exist_ok=True,
@@ -700,6 +964,10 @@ def main():
             do_constant_folding=True,
             export_params=True,
         )
+        if args.inline_weights and _onnx_inline_external_data(args.onnx_output):
+            print(
+                "  external-data sidecars absorbed -> single-file .onnx"
+            )
         size_mb = os.path.getsize(args.onnx_output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
 
@@ -712,13 +980,47 @@ def main():
     # ---------- Combined AOTI / ONNX share the same wrapper ----------
     combined = None
     if args.combined_output or args.combined_onnx_output:
-        combined = CombinedInference(
-            polyhead=polyhead,
-            target_mean=wrapper.target_mean,
-            target_std=wrapper.target_std,
-            cond_mean=wrapper.cond_mean,
-            cond_std=wrapper.cond_std,
-        ).eval()
+        # Build PreprocStats-derived buffers (the polyhead wrapper
+        # carries them; for mlp we have to derive them from ``stats``).
+        ms_idx = _muon_source_idx(stats)
+        if is_polyhead:
+            buffers = dict(
+                target_mean=wrapper.target_mean,
+                target_std=wrapper.target_std,
+                cond_mean=wrapper.cond_mean,
+                cond_std=wrapper.cond_std,
+            )
+            combined = CombinedInference(
+                polyhead=model, muon_source_idx=ms_idx, **buffers,
+            ).eval()
+        else:
+            buffers = dict(
+                target_mean=torch.tensor(
+                    list(stats.target_mean), dtype=torch.float32,
+                ),
+                target_std=torch.tensor(
+                    list(stats.target_std), dtype=torch.float32,
+                ),
+                cond_mean=torch.tensor(
+                    list(stats.cond_mean), dtype=torch.float32,
+                ),
+                cond_std=torch.tensor(
+                    list(stats.cond_std), dtype=torch.float32,
+                ),
+            )
+            combined = CombinedInferenceMLP(
+                head=model,
+                is_factored=is_factored,
+                shift_only=shift_only,
+                muon_source_idx=ms_idx,
+                **buffers,
+            ).eval()
+        if ms_idx >= 0:
+            print(
+                f"muon_source remap baked in: c_raw[:, {ms_idx}] "
+                f"will be mapped {{1, 15, 443}} -> {{-1, 0, +1}} "
+                f"inside the graph"
+            )
         # Eager smoke check at a non-trivial (B, N_var). Both dims
         # must be > 1 to avoid torch.export specializing them.
         B_ex, N_ex = max(B_trace, 2), 4
@@ -729,7 +1031,7 @@ def main():
         with torch.no_grad():
             d_e = combined(y_e, c_e, u_e, s_e)
         print(
-            f"\ncombined eager: d={tuple(d_e.shape)} "
+            f"\ncombined eager: out={tuple(d_e.shape)} "
             f"(B={B_ex}, N_var={N_ex})"
         )
 
@@ -743,12 +1045,17 @@ def main():
         )
         batch_dim = torch.export.Dim("batch", min=1, max=2**20)
         nvar_dim  = torch.export.Dim("nvar",  min=1, max=2**20)
-        dynamic_shapes_combined = {
-            "y_raw":  {0: batch_dim},
-            "c_raw":  {0: batch_dim},
-            "u":      {0: batch_dim, 1: nvar_dim},
-            "sigma":  {0: batch_dim, 1: nvar_dim},
-        }
+        # Positional tuple (matches both ``CombinedInference`` and
+        # ``CombinedInferenceMLP``, whose 3rd/4th args are ``u``/``sigma``
+        # vs ``u_raw``/``sigma_raw`` respectively — torch.export's dict
+        # form keys on the parameter names, so a tuple sidesteps the
+        # name mismatch).
+        dynamic_shapes_combined = (
+            {0: batch_dim},
+            {0: batch_dim},
+            {0: batch_dim, 1: nvar_dim},
+            {0: batch_dim, 1: nvar_dim},
+        )
         print(
             f"torch.export.export combined "
             f"(dynamic batch+nvar, B={B_ex}, N_var={N_ex}) ..."
@@ -852,6 +1159,12 @@ def main():
             do_constant_folding=True,
             export_params=True,
         )
+        if args.inline_weights and _onnx_inline_external_data(
+            args.combined_onnx_output,
+        ):
+            print(
+                "  external-data sidecars absorbed -> single-file .onnx"
+            )
         size_mb = os.path.getsize(args.combined_onnx_output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
 

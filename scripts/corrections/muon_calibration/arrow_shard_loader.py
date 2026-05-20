@@ -42,16 +42,108 @@ import torch.utils.data as torch_data
 _RAW_FEATURE_COLUMNS = (
     "eta_reco", "phi_reco", "eta_gen", "phi_gen",
     "kappa_reco", "kappa_gen", "nominal_weight",
+    # ``muon_source`` is an int32 column on the shards (1, 15 or 443)
+    # but enters the loader as a float feature in the cond vector.
+    "muon_source",
 )
 
 
 _TARGET_NAMES = ("r_kappa", "dlambda", "dphi")
 _COND_NAMES = (
     "log_pt_gen", "charge", "lambda_gen", "sin_phi_gen", "cos_phi_gen",
+    "muon_source",
 )
 
 
 _WEIGHT_MODES = ("abs", "keep", "drop")
+
+
+# Per-class mapping for the per-muon ``muon_source`` integer (mirrors
+# ``train_muon_response_flow._MUON_SOURCE_CODES``):
+#   1   -> -1   (W/Z prompt)
+#   15  ->  0   (W/Z τ-decay)
+#   443 -> +1   (J/ψ sentinel)
+_MUON_SOURCE_CODES = {1: -1.0, 15: 0.0, 443: 1.0}
+
+
+def _muon_source_to_compact(ms: np.ndarray) -> np.ndarray:
+    """Map raw ``muon_source`` int codes to ``float32`` values in
+    ``{-1, 0, +1}``. Unknown values map to NaN."""
+    ms_arr = np.asarray(ms)
+    out = np.full(ms_arr.shape, np.nan, dtype=np.float32)
+    for raw, code in _MUON_SOURCE_CODES.items():
+        out[ms_arr == raw] = code
+    return out
+
+
+# Cond features whose ``(x-μ)/σ`` standardisation we force to be a
+# no-op via mean=0, std=1 in the PreprocStats: ``charge`` is already a
+# clean ±1 binary and ``muon_source`` was just remapped to {-1, 0, +1}.
+_PASSTHROUGH_COND_FEATURES = ("charge", "muon_source")
+
+
+# ---------------------------------------------------------------------------
+# Train / val / holdout split derived from contiguous ranges of record
+# batches inside each shard. The sharder has already globally shuffled
+# rows so a per-shard contiguous range is statistically uniform across
+# splits.
+#
+#   batches [0,                  n_train_rb)            -> train
+#   batches [n_train_rb,         n_train_rb + n_val_rb) -> val
+#   batches [n_train_rb + n_val_rb, n_total_rb)         -> holdout
+#
+# The trainer reads only its split's record batches (random-access via
+# the Arrow IPC file footer), so the val / holdout passes pay roughly
+# their split's fraction of the per-shard I/O cost — *not* a full
+# shard scan. The diagnostic script applies the same per-shard slice
+# (with split="holdout") so the model is evaluated on record batches
+# never touched at training time.
+# ---------------------------------------------------------------------------
+_SPLIT_NAMES = ("train", "val", "holdout", "all")
+DEFAULT_VAL_FRACTION = 0.1
+DEFAULT_HOLDOUT_FRACTION = 0.1
+
+
+def split_batch_range(
+    n_record_batches: int,
+    split: str,
+    val_fraction: float = DEFAULT_VAL_FRACTION,
+    holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
+) -> tuple[int, int]:
+    """Return ``(start, stop)`` record-batch indices in
+    ``[0, n_record_batches)`` for the requested split. Splits are
+    contiguous, disjoint, and cover the full range — train / val /
+    holdout sizes round down, holdout absorbs any rounding remainder
+    so the three together always sum to ``n_record_batches``.
+
+    ``split="all"`` returns the full range. Any other value raises."""
+    if split == "all":
+        return 0, int(n_record_batches)
+    if split not in _SPLIT_NAMES:
+        raise ValueError(
+            f"split must be one of {_SPLIT_NAMES}, got {split!r}"
+        )
+    if not (0.0 <= val_fraction < 1.0):
+        raise ValueError(
+            f"val_fraction must be in [0, 1), got {val_fraction!r}"
+        )
+    if not (0.0 <= holdout_fraction < 1.0):
+        raise ValueError(
+            f"holdout_fraction must be in [0, 1), got {holdout_fraction!r}"
+        )
+    if val_fraction + holdout_fraction >= 1.0:
+        raise ValueError(
+            f"val_fraction + holdout_fraction must be < 1.0, "
+            f"got {val_fraction} + {holdout_fraction}"
+        )
+    n_val = int(n_record_batches * val_fraction)
+    n_holdout = int(n_record_batches * holdout_fraction)
+    n_train = n_record_batches - n_val - n_holdout
+    if split == "train":
+        return 0, n_train
+    if split == "val":
+        return n_train, n_train + n_val
+    return n_train + n_val, n_record_batches  # "holdout"
 
 
 class TimedLoader:
@@ -363,16 +455,18 @@ def count_rows(shard_files: Sequence[str]) -> List[int]:
 
 
 def _per_batch_target_cond(cols: dict):
-    """Return (target [N, 3], cond [N, 5], weight [N]) in fp32 from
-    the raw fp32 columns of one Arrow record batch.
+    """Return (target [N, 3], cond [N, n_cond], weight [N]) in fp32
+    from the raw columns of one Arrow record batch.
 
     Mirrors :func:`compute_targets_and_conditioning` exactly:
 
     * ``r_kappa = kappa_reco / kappa_gen - 1``
     * ``dlambda = arctan(sinh(eta_reco)) - arctan(sinh(eta_gen))``
     * ``dphi = atan2(sin(phi_r - phi_g), cos(phi_r - phi_g))``
-    * conditioning: log_pt_gen (from kappa_gen+eta_gen),
-      sign(kappa_gen), lambda_gen, sin/cos(phi_gen).
+    * conditioning (in :data:`_COND_NAMES` order):
+      ``log_pt_gen, charge, lambda_gen, sin_phi_gen, cos_phi_gen,
+      muon_source`` -- the last is the per-muon class tag (1, 15 or
+      443) cast to float32 before standardisation downstream.
     """
     eta_r = cols["eta_reco"]
     phi_r = cols["phi_reco"]
@@ -380,6 +474,7 @@ def _per_batch_target_cond(cols: dict):
     phi_g = cols["phi_gen"]
     kappa_r = cols["kappa_reco"]
     kappa_g = cols["kappa_gen"]
+    muon_source = cols["muon_source"]
 
     lam_r = np.arctan(np.sinh(eta_r))
     lam_g = np.arctan(np.sinh(eta_g))
@@ -396,10 +491,17 @@ def _per_batch_target_cond(cols: dict):
     cond = np.stack(
         [
             log_pt_gen,
+            # ``charge`` stays ±1 and is left un-standardised
+            # downstream (see _PASSTHROUGH_COND_FEATURES).
             np.sign(kappa_g),
             lam_g,
             np.sin(phi_g),
             np.cos(phi_g),
+            # ``muon_source``: compact {-1, 0, +1} code rather than the
+            # raw {1, 15, 443} integers; the linear standardisation
+            # would otherwise collapse prompt/τ together and stretch
+            # J/ψ far out.
+            _muon_source_to_compact(muon_source),
         ],
         axis=1,
     ).astype(np.float32)
@@ -484,12 +586,19 @@ def _stats_chunk(arg):
     return n_kept, t_sum, t_sq, c_sum, c_sq, w_sum, abs_w_sum, n_filt
 
 
-def _enumerate_chunks(shard_files, batches_per_chunk: int, weight_mode: str):
-    """Build a list of (shard, batch_start, batch_stop, weight_mode)
-    work items. File-format shards expose ``num_record_batches``
-    (cheap, footer read); stream-format shards have to be walked to
-    count, which we do once here. Each shard's batches are split
-    into ``ceil(n_batches / batches_per_chunk)`` chunks."""
+def _enumerate_chunks(
+    shard_files, batches_per_chunk: int, weight_mode: str,
+    split: str = "train",
+    val_fraction: float = DEFAULT_VAL_FRACTION,
+    holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
+):
+    """Build a list of ``(shard, batch_start, batch_stop, weight_mode)``
+    work items, restricted to the requested split's contiguous
+    record-batch range inside each shard. File-format shards expose
+    ``num_record_batches`` (cheap, footer read); stream-format shards
+    have to be walked to count, which we do once here. Each shard's
+    split-range is then split into ``ceil(n_split_batches /
+    batches_per_chunk)`` chunks."""
     out = []
     for path in shard_files:
         src, reader = _open_ipc(path)
@@ -503,8 +612,13 @@ def _enumerate_chunks(shard_files, batches_per_chunk: int, weight_mode: str):
             src.close()
         if n_b == 0:
             continue
-        for start in range(0, n_b, batches_per_chunk):
-            stop = min(start + batches_per_chunk, n_b)
+        lo, hi = split_batch_range(
+            n_b, split, val_fraction, holdout_fraction,
+        )
+        if hi <= lo:
+            continue
+        for start in range(lo, hi, batches_per_chunk):
+            stop = min(start + batches_per_chunk, hi)
             out.append((path, start, stop, weight_mode))
     return out
 
@@ -514,6 +628,9 @@ def _compute_stats_robust(
     sample_rows: int,
     weight_mode: str,
     progress: bool,
+    split: str = "train",
+    val_fraction: float = DEFAULT_VAL_FRACTION,
+    holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
 ):
     """Sample-based robust location + scale: ``median`` for the
     location, ``1.4826 * MAD`` for the scale. Reads up to
@@ -541,7 +658,20 @@ def _compute_stats_robust(
             break
         src, reader = _open_ipc(path)
         try:
-            for batch in _iter_record_batches(reader):
+            # Restrict to the split's record-batch range. File-format
+            # shards expose ``num_record_batches`` via the footer
+            # (cheap); stream-format shards have to be walked, which
+            # forces a fall-back to "all" since we can't randomly
+            # skip ahead in a stream.
+            if isinstance(reader, ipc.RecordBatchFileReader):
+                n_b = reader.num_record_batches
+                lo, hi = split_batch_range(
+                    n_b, split, val_fraction, holdout_fraction,
+                )
+                batches_iter = (reader.get_batch(i) for i in range(lo, hi))
+            else:
+                batches_iter = _iter_record_batches(reader)
+            for batch in batches_iter:
                 if n_total >= sample_rows:
                     break
                 cols = _read_raw_columns(batch)
@@ -594,6 +724,12 @@ def _compute_stats_robust(
     c_mad = np.median(np.fabs(c_arr64 - c_median), axis=0)
     c_std = 1.4826 * c_mad
     c_std = np.where(c_std > 1e-6, c_std, 1.0)
+    # Force pass-through (no standardisation) on the categorical cond
+    # features -- see _PASSTHROUGH_COND_FEATURES.
+    for i, name in enumerate(_COND_NAMES):
+        if name in _PASSTHROUGH_COND_FEATURES:
+            c_median[i] = 0.0
+            c_std[i] = 1.0
 
     abs_w_mean = float(np.fabs(w_arr.astype(np.float64, copy=False)).mean())
 
@@ -623,6 +759,10 @@ def _compute_stats_robust(
 
 def compute_stats_streaming(
     shard_files: Sequence[str],
+    *,
+    split: str = "train",
+    val_fraction: float = DEFAULT_VAL_FRACTION,
+    holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
     max_rows: int = -1,
     n_workers: int = 0,
     batches_per_chunk: int = 32,
@@ -658,6 +798,10 @@ def compute_stats_streaming(
         raise ValueError(
             f"weight_mode must be one of {_WEIGHT_MODES}, got {weight_mode!r}"
         )
+    if split not in _SPLIT_NAMES:
+        raise ValueError(
+            f"split must be one of {_SPLIT_NAMES}, got {split!r}"
+        )
     if robust:
         # Dispatch to the sample-based median + 1.4826·MAD path.
         # Tail mass (e.g. r_kappa charge-mismeasurement peak) doesn't
@@ -666,6 +810,9 @@ def compute_stats_streaming(
         # perturbation is meant to span ~1 typical-event width.
         return _compute_stats_robust(
             shard_files, int(robust_sample_rows), weight_mode, progress,
+            split=split,
+            val_fraction=val_fraction,
+            holdout_fraction=holdout_fraction,
         )
     if n_workers <= 0:
         n_workers = max(1, (os.cpu_count() or 1))
@@ -678,7 +825,12 @@ def compute_stats_streaming(
             + (f", capped at {max_rows:,} rows" if max_rows > 0 else "")
         )
 
-    tasks = _enumerate_chunks(shard_files, batches_per_chunk, weight_mode)
+    tasks = _enumerate_chunks(
+        shard_files, batches_per_chunk, weight_mode,
+        split=split,
+        val_fraction=val_fraction,
+        holdout_fraction=holdout_fraction,
+    )
     if not tasks:
         raise RuntimeError("compute_stats_streaming: no record batches found")
 
@@ -731,6 +883,12 @@ def compute_stats_streaming(
     c_var = np.maximum(c_sq / n_total - c_mean * c_mean, 0.0)
     c_std = np.sqrt(c_var)
     c_std = np.where(c_std > 1e-6, c_std, 1.0)
+    # Force pass-through (no standardisation) on the categorical cond
+    # features -- see _PASSTHROUGH_COND_FEATURES.
+    for i, name in enumerate(_COND_NAMES):
+        if name in _PASSTHROUGH_COND_FEATURES:
+            c_mean[i] = 0.0
+            c_std[i] = 1.0
 
     # Normalisation scale: mean(|w|). Robust to MC@NLO-style signed
     # weights (where mean(w) can be near zero from cancellation) while
@@ -785,10 +943,14 @@ class ArrowShardLoader(torch_data.IterableDataset):
 
     * **Per-rank partition**: shards are dealt out round-robin to
       ranks via ``shard_files[rank::world_size]``.
-    * **Train/val split**: each record batch is sliced contiguously
-      — first ``val_fraction`` of rows go to val, rest to train. The
-      shards are already globally shuffled by the bucket-shuffle
-      pass, so this is unbiased.
+    * **Train/val/holdout split**: each split occupies a contiguous
+      range of record-batch indices within every shard (driven by
+      :func:`split_batch_range`). Train iterates the first ~80 % of
+      record batches per shard, val the next ~10 %, holdout the
+      last ~10 %. The sharder has already globally shuffled rows so
+      a per-shard range is statistically uniform across splits —
+      and each split's loader pays only its fraction of the
+      per-shard I/O and decompression cost.
     * **Per-epoch shuffle**: shard read-order is permuted; within
       each emitted training batch (accumulated from many record
       batches) rows are permuted again before yielding. Strong
@@ -817,8 +979,9 @@ class ArrowShardLoader(torch_data.IterableDataset):
         world_size: int,
         rank: int,
         batch_size: int,
-        split: str = "train",                  # "train" | "val" | "all"
-        val_fraction: float = 0.1,
+        split: str = "train",                  # "train" | "val" | "holdout" | "all"
+        val_fraction: float = DEFAULT_VAL_FRACTION,
+        holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
         shuffle: bool = True,
         pin_memory: bool = True,
         drop_last: bool = True,
@@ -828,8 +991,10 @@ class ArrowShardLoader(torch_data.IterableDataset):
         shard_row_counts: Sequence[int] | None = None,
         num_workers_hint: int = 1,
     ):
-        if split not in ("train", "val", "all"):
-            raise ValueError(f"split must be train|val|all, got {split!r}")
+        if split not in _SPLIT_NAMES:
+            raise ValueError(
+                f"split must be one of {_SPLIT_NAMES}, got {split!r}"
+            )
         if weight_mode not in _WEIGHT_MODES:
             raise ValueError(
                 f"weight_mode must be one of {_WEIGHT_MODES}, got {weight_mode!r}"
@@ -851,6 +1016,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
         self.batch_size = int(batch_size)
         self.split = split
         self.val_fraction = float(val_fraction)
+        self.holdout_fraction = float(holdout_fraction)
         self.shuffle = bool(shuffle)
         self.pin_memory = bool(pin_memory) and torch.cuda.is_available()
         self.drop_last = bool(drop_last)
@@ -883,13 +1049,18 @@ class ArrowShardLoader(torch_data.IterableDataset):
                 count_rows(self.my_shards) if self.my_shards else []
             )
         my_rows = sum(per_shard_rows)
-        frac = (
-            1.0 - self.val_fraction
-            if split == "train"
-            else self.val_fraction
-            if split == "val"
-            else 1.0
-        )
+        # Row-count estimate matches the per-shard contiguous record-
+        # batch range each split actually iterates. Train rounds up
+        # (its range absorbs the int-rounding remainder); val and
+        # holdout floor at their respective fractions.
+        if split == "train":
+            frac = 1.0 - self.val_fraction - self.holdout_fraction
+        elif split == "val":
+            frac = self.val_fraction
+        elif split == "holdout":
+            frac = self.holdout_fraction
+        else:  # "all"
+            frac = 1.0
         my_rows_split = int(my_rows * frac)
         # Always round up: with multiple DataLoader workers the
         # actual yielded count can EXCEED a floor-divided estimate,
@@ -922,11 +1093,15 @@ class ArrowShardLoader(torch_data.IterableDataset):
         return x_t, c_t, w_t
 
     def _ensure_layout(self):
-        """Populate ``self._layout`` (list of ``(shard_idx, batch_idx)``
-        pairs across this rank's shards). Reads only IPC footers /
-        message counts — no record-batch decompression. Cached after
-        the first call; cheap to compute even at 32 shards × 4 500
-        batches each (~ms)."""
+        """Populate ``self._layout`` — the list of
+        ``(shard_idx, batch_idx)`` pairs this loader's split occupies
+        across this rank's shards. Each shard's record-batch range
+        is restricted to the contiguous slice corresponding to
+        ``self.split`` (via :func:`split_batch_range`), so the
+        DataLoader-worker partition and the standalone iteration
+        path both touch *only* the split's record batches. Reads
+        only IPC footers / message counts — no record-batch
+        decompression. Cached after the first call."""
         if self._layout is not None:
             return
         layout = []
@@ -941,7 +1116,11 @@ class ArrowShardLoader(torch_data.IterableDataset):
                 if hasattr(reader, "close"):
                     reader.close()
                 src.close()
-            for b in range(n_b):
+            lo, hi = split_batch_range(
+                n_b, self.split,
+                self.val_fraction, self.holdout_fraction,
+            )
+            for b in range(lo, hi):
                 layout.append((s_idx, b))
         self._layout = layout
 
@@ -1080,7 +1259,29 @@ class ArrowShardLoader(torch_data.IterableDataset):
         )
 
         if chunks is None:
-            chunks = [(i, None) for i in range(len(self.my_shards))]
+            # Standalone path (no DataLoader workers): build the
+            # split's per-shard contiguous batch-index range up
+            # front. Mirrors what ``_partition_for_worker`` /
+            # ``_ensure_layout`` would do, but keeps the chunk list
+            # tied to *each* shard's full split range (not subdivided
+            # across DataLoader workers).
+            chunks = []
+            for s_idx, path in enumerate(self.my_shards):
+                src, reader = _open_ipc(path)
+                try:
+                    n_b = _num_record_batches(reader)
+                    if n_b < 0:
+                        n_b = sum(1 for _ in reader)
+                finally:
+                    if hasattr(reader, "close"):
+                        reader.close()
+                    src.close()
+                lo, hi = split_batch_range(
+                    n_b, self.split,
+                    self.val_fraction, self.holdout_fraction,
+                )
+                if hi > lo:
+                    chunks.append((s_idx, list(range(lo, hi))))
         else:
             # Defensive copy — we shuffle this list in place below.
             chunks = list(chunks)
@@ -1147,24 +1348,11 @@ class ArrowShardLoader(torch_data.IterableDataset):
                     if n == 0:
                         continue
 
-                    # Train/val split (contiguous per record batch).
-                    n_val = int(n * self.val_fraction)
-                    if self.split == "train":
-                        target = target[n_val:]
-                        cond = cond[n_val:]
-                        w = w[n_val:]
-                    elif self.split == "val":
-                        target = target[:n_val]
-                        cond = cond[:n_val]
-                        w = w[:n_val]
-                    n = target.shape[0]
-                    if n == 0:
-                        continue
-
-                    # Filter rows: target/cond must be finite, weight
-                    # mode applies its own keep mask (abs: drop w==0
-                    # & non-finite; keep: drop only non-finite; drop:
-                    # drop w<=0 & non-finite).
+                    # Only finite-ness + weight policy filters here;
+                    # the train / val / holdout split is already
+                    # applied at the record-batch level upstream (the
+                    # caller hands us exactly the batches assigned to
+                    # ``self.split``).
                     target_finite = (
                         np.isfinite(target).all(axis=1)
                         & np.isfinite(cond).all(axis=1)

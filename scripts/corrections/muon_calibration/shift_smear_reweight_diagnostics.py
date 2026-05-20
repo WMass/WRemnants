@@ -79,6 +79,28 @@ TARGET_NAMES = ["r_kappa", "dlambda", "dphi"]
 # Z→μμ is conventionally the first W/Z entry, hence source_id = 100.
 # Anything else falls back to ``source <id>``; the user can override or
 # extend via ``--cmp-source-labels``.
+def _apply_weight_mode(w, mode):
+    """Return ``(w_out, keep_mask)`` after applying the diagnostic's
+    ``--weight-handling`` policy. Mirrors
+    ``arrow_shard_loader._apply_weight_mode`` so the trainer and the
+    diagnostic agree on what they consider a "kept" row.
+
+    * ``abs``: ``|w|``, drop ``w == 0`` or non-finite.
+    * ``keep``: pass through unchanged, drop only non-finite.
+    * ``drop``: drop ``w <= 0`` or non-finite (legacy diagnostic).
+    """
+    finite = np.isfinite(w)
+    if mode == "abs":
+        return np.fabs(w), finite & (w != 0.0)
+    if mode == "keep":
+        return w, finite
+    if mode == "drop":
+        return w, finite & (w > 0.0)
+    raise ValueError(
+        f"--weight-handling must be one of {{abs, keep, drop}}, got {mode!r}"
+    )
+
+
 DEFAULT_SOURCE_LABELS = {
     0: r"J/$\psi$ (p$_T$>8 GeV)",
     1: r"J/$\psi$ (p$_T$<8 GeV)",
@@ -228,13 +250,13 @@ def parse_args():
     # in (pt_gen, eta_gen, charge_gen); phi_gen is integrated.
     # ------------------------------------------------------------------
     p.add_argument(
-        "--cmp-pt-min", type=float, default=25.0,
+        "--cmp-pt-min", type=float, default=12.0,
         help="Lower gen-pT (GeV) edge of the (deliberately narrow) "
         "phase-space window used for the per-source target-distribution "
         "comparison plot.",
     )
     p.add_argument(
-        "--cmp-pt-max", type=float, default=30.0,
+        "--cmp-pt-max", type=float, default=13.0,
         help="Upper gen-pT (GeV) edge of the cmp window.",
     )
     p.add_argument(
@@ -266,6 +288,11 @@ def parse_args():
         "back to the smallest source_id present if absent in the window.",
     )
     p.add_argument(
+        "--cmp-source-min-events", type=int, default=10000,
+        help="Drop sources contributing fewer than this many rows within "
+        "the per-source comparison window. Set to 0 to disable.",
+    )
+    p.add_argument(
         "--cmp-max-events", type=int, default=-1,
         help="Cap on raw muon rows *read* for the per-source target-"
         "distribution plots only. -1 (default) = all available rows. "
@@ -278,6 +305,84 @@ def parse_args():
         "--cmp-workers", type=int, default=8,
         help="Parallel shard readers (thread pool) for the per-source "
         "comparison loader.",
+    )
+    # ------------------------------------------------------------------
+    # Aggregated J/ψ vs W/Z comparison.  Two-pass streaming: pass 1
+    # builds 3D (pt_gen, eta_gen, charge_gen) histograms per group and
+    # forms a per-cell W/Z -> J/ψ reweight; pass 2 fills the target-
+    # distribution histograms for each group with the reweight applied
+    # to W/Z. Validates that the two physically-distinct calibration
+    # samples produce statistically-equivalent shapes in (r_κ, δλ, δφ)
+    # once their kinematics are matched.
+    # ------------------------------------------------------------------
+    p.add_argument(
+        "--cmp-agg-pt-min", type=float, default=10.0,
+        help="Lower gen-pT (GeV) edge of the window for the aggregated "
+        "J/ψ-vs-W/Z target-distribution plot.",
+    )
+    p.add_argument(
+        "--cmp-agg-pt-max", type=float, default=16.0,
+        help="Upper gen-pT (GeV) edge of the aggregated window.",
+    )
+    p.add_argument(
+        "--cmp-agg-eta-min", type=float, default=-2.4,
+        help="Lower gen-η edge of the aggregated window.",
+    )
+    p.add_argument(
+        "--cmp-agg-eta-max", type=float, default=2.4,
+        help="Upper gen-η edge of the aggregated window.",
+    )
+    p.add_argument(
+        "--cmp-agg-rew-eta-bins", type=int, default=24,
+        help="Number of η bins in the 3D (pt, η, charge) reweighting "
+        "histogram. The window above is split uniformly.",
+    )
+    p.add_argument(
+        "--cmp-agg-rew-pt-bins", type=int, default=12,
+        help="Number of pT bins in the reweighting histogram (default "
+        "12 → 0.5 GeV bins across the default [10, 16] GeV window).",
+    )
+    p.add_argument(
+        "--cmp-agg-range-sigma", type=float, default=5.0,
+        help="Target-distribution histogram half-range, in units of "
+        "stats.target_std around stats.target_mean (per axis).",
+    )
+    p.add_argument(
+        "--cmp-agg-n-bins", type=int, default=80,
+        help="Number of bins in each 1D target-distribution histogram.",
+    )
+    p.add_argument(
+        "--weight-handling", choices=["abs", "keep", "drop"],
+        default="abs",
+        help="How to treat MC@NLO signed event weights in every plot "
+        "and loader: ``abs`` (default; |w|, drops zero/non-finite) "
+        "matches the trainer's --weight-handling=abs and keeps every "
+        "row's magnitude; ``keep`` passes the signed weight through; "
+        "``drop`` rejects rows with w<=0 -- the historical diagnostic "
+        "behaviour, which silently removes the ~5-20%% negative-weight "
+        "fraction in MC@NLO W/Z samples and makes diagnostic plots "
+        "see a different effective sample than the trainer.",
+    )
+    p.add_argument(
+        "--split", choices=["train", "val", "holdout", "all"],
+        default="holdout",
+        help="Which contiguous per-shard record-batch slice to load "
+        "(see ``arrow_shard_loader.split_batch_range``). Default "
+        "``holdout`` — the 10%% slice never seen during training, so "
+        "the model is evaluated on novel rows. ``train`` / ``val`` "
+        "match the trainer's splits; ``all`` loads everything.",
+    )
+    p.add_argument(
+        "--split-val-fraction", type=float, default=0.1,
+        help="Fraction of each shard's record batches assigned to "
+        "the val split. Must match the trainer's --val-fraction so "
+        "the train / val / holdout slices line up.",
+    )
+    p.add_argument(
+        "--split-holdout-fraction", type=float, default=0.1,
+        help="Fraction of each shard's record batches assigned to "
+        "the holdout split. Must match the trainer's "
+        "--holdout-fraction.",
     )
     return p.parse_args()
 
@@ -694,8 +799,28 @@ def _common_predict_call(
 
 def plot_shift_closure(
     target, w_event, args, out_dir, log_r_grid_shift, target_std_per_dim,
+    *, group_mask=None, group_label=None,
 ):
-    """Per-axis shift-closure plots from a precomputed log r grid."""
+    """Per-axis shift-closure plots from a precomputed log r grid.
+
+    When ``group_mask`` is provided every per-event input (``target``,
+    ``w_event``, every entry of ``log_r_grid_shift``) is sliced to the
+    subset of events for which the mask is True, ``group_label`` is
+    appended to the figure title, and the output filename is suffixed
+    by ``"_" + group_label``. Used to test the closure separately on
+    the J/ψ and W/Z aggregated subsamples without re-running model
+    inference."""
+    if group_mask is not None:
+        m = np.asarray(group_mask, dtype=bool)
+        target = target[m]
+        w_event = np.asarray(w_event)[m]
+        log_r_grid_shift = {k: v[m] for k, v in log_r_grid_shift.items()}
+        if target.shape[0] == 0:
+            print(
+                f"  [shift_closure] group {group_label!r} empty — "
+                "skipping"
+            )
+            return
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
     factors = args.shift_factors
@@ -782,8 +907,10 @@ def plot_shift_closure(
                     max(hi_r + pad, 1.0 + pad),
                 )
 
-    fig.suptitle("MLP shift-reweight closure")
-    _save(fig, os.path.join(out_dir, "shift_closure.png"))
+    suffix = f"_{group_label}" if group_label else ""
+    label_blurb = f" ({group_label})" if group_label else ""
+    fig.suptitle(f"MLP shift-reweight closure{label_blurb}")
+    _save(fig, os.path.join(out_dir, f"shift_closure{suffix}.png"))
 
 
 # ============================================================================
@@ -793,6 +920,7 @@ def plot_shift_closure(
 def plot_smear_closure(
     target, w_event, args, out_dir, log_r_grid_smear, target_std_per_dim,
     log_r_grid_smear_via_gh=None,
+    *, group_mask=None, group_label=None,
 ):
     """Per-axis smear-closure plots.
 
@@ -809,6 +937,21 @@ def plot_smear_closure(
     two reweight curves is a diagnostic of polyhead self-consistency
     between its pure-σ and pure-u parts.
     """
+    if group_mask is not None:
+        m = np.asarray(group_mask, dtype=bool)
+        target = target[m]
+        w_event = np.asarray(w_event)[m]
+        log_r_grid_smear = {k: v[m] for k, v in log_r_grid_smear.items()}
+        if log_r_grid_smear_via_gh is not None:
+            log_r_grid_smear_via_gh = {
+                k: v[m] for k, v in log_r_grid_smear_via_gh.items()
+            }
+        if target.shape[0] == 0:
+            print(
+                f"  [smear_closure] group {group_label!r} empty — "
+                "skipping"
+            )
+            return
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
     factors = args.smear_factors
@@ -937,11 +1080,13 @@ def plot_smear_closure(
                     max(hi_r + pad, 1.0 + pad),
                 )
 
+    suffix = f"_{group_label}" if group_label else ""
+    label_blurb = f" ({group_label})" if group_label else ""
     fig.suptitle(
-        "MLP smear-reweight closure (rank-1 K=1 smeared MC; ratios "
-        "carry K=1 sampling noise)"
+        f"MLP smear-reweight closure{label_blurb} "
+        "(rank-1 K=1 smeared MC; ratios carry K=1 sampling noise)"
     )
-    _save(fig, os.path.join(out_dir, "smear_closure.png"))
+    _save(fig, os.path.join(out_dir, f"smear_closure{suffix}.png"))
 
 
 # ============================================================================
@@ -1643,7 +1788,8 @@ def _read_manifest_source_labels(paths):
 
 def _load_per_source_window(
     paths, *, pt_min, pt_max, eta_min, eta_max,
-    max_events=-1, n_workers=8,
+    max_events=-1, n_workers=8, weight_mode="abs",
+    split="all", val_fraction=0.1, holdout_fraction=0.1,
 ):
     """Parallel streaming loader specialised for the per-source target-
     distribution plots.
@@ -1682,13 +1828,23 @@ def _load_per_source_window(
         )
 
     _MAGIC = b"ARROW1"
+    from arrow_shard_loader import split_batch_range
 
     def _read_one(p):
         with pa.memory_map(p, "r") as f:
             head = f.read(len(_MAGIC))
             f.seek(0)
             if head == _MAGIC:
-                t = ipc.open_file(f).read_all()
+                reader = ipc.open_file(f)
+                lo, hi = split_batch_range(
+                    reader.num_record_batches, split,
+                    val_fraction, holdout_fraction,
+                )
+                if hi <= lo:
+                    return None, 0
+                t = pa.Table.from_batches(
+                    [reader.get_batch(i) for i in range(lo, hi)]
+                )
             else:
                 t = ipc.open_stream(f).read_all()
         eta_r = t["eta_reco"].to_numpy().astype(np.float64)
@@ -1701,6 +1857,7 @@ def _load_per_source_window(
         sid = t["source_id"].to_numpy().astype(np.int32, copy=False)
         n_block = eta_r.shape[0]
 
+        w_handled, w_mask = _apply_weight_mode(w_raw, weight_mode)
         abs_k = np.fabs(kappa_g)
         safe_k = np.where(abs_k > 0, abs_k, np.nan)
         pt_g = 1.0 / (safe_k * np.cosh(eta_g))
@@ -1709,14 +1866,14 @@ def _load_per_source_window(
             & (pt_g >= pt_min) & (pt_g <= pt_max)
             & (eta_g >= eta_min) & (eta_g <= eta_max)
             & np.isfinite(kappa_r) & np.isfinite(kappa_g)
-            & (w_raw > 0.0)
+            & w_mask
         )
         if not mask.any():
             return None, n_block
         eta_r = eta_r[mask]; phi_r = phi_r[mask]
         eta_g = eta_g[mask]; phi_g = phi_g[mask]
         kappa_r = kappa_r[mask]; kappa_g = kappa_g[mask]
-        w = w_raw[mask]; sid = sid[mask]
+        w = w_handled[mask]; sid = sid[mask]
 
         # Inline target columns from compute_targets_and_conditioning,
         # restricted to the masked rows so we never form full-shard
@@ -1856,6 +2013,35 @@ def plot_per_source_target_distributions(
                 f"{unique_sources}; comparison needs ≥2 sources — skipping"
             )
             continue
+
+        min_n = int(getattr(args, "cmp_source_min_events", 0))
+        if min_n > 0:
+            src_counts = {
+                int(s): int((src_w == s).sum()) for s in unique_sources
+            }
+            kept = [s for s in unique_sources if src_counts[int(s)] >= min_n]
+            dropped = [
+                (int(s), src_counts[int(s)])
+                for s in unique_sources if src_counts[int(s)] < min_n
+            ]
+            if dropped:
+                print(
+                    "[per-source target distributions] dropped sources "
+                    f"with <{min_n} events in {charge_mode} window: "
+                    + ", ".join(
+                        f"{_source_label(sid)} (id={sid}, N={n})"
+                        for sid, n in dropped
+                    )
+                )
+            unique_sources = kept
+            if len(unique_sources) < 2:
+                print(
+                    "[per-source target distributions] only "
+                    f"{len(unique_sources)} source(s) remaining in "
+                    f"{charge_mode} window after the "
+                    f"--cmp-source-min-events={min_n} cut; skipping"
+                )
+                continue
 
         if args.cmp_ref_source is not None:
             ref_source = int(args.cmp_ref_source)
@@ -2031,6 +2217,838 @@ def plot_per_source_target_distributions(
 
 
 # ============================================================================
+# Aggregated J/ψ vs prompt vs τ-decay target-distribution comparison
+# ============================================================================
+#
+# Two-pass streaming over the shards, classifying events by the per-
+# muon ``muon_source`` integer the snapshot writes:
+#   muon_source == 443 -> J/ψ (calibration-clean reference)
+#   muon_source == 1   -> W/Z prompt
+#   muon_source == 15  -> W/Z secondary muon from τ decay
+# Pass 1 builds weighted 3D histograms over (pt_gen, η_gen, charge_gen)
+# per group; pass 2 fills 1D target-distribution histograms with the
+# non-reference groups reweighted to J/ψ kinematics. Streaming
+# per-shard chunks keep peak memory bounded by the per-shard masked-
+# row count, not the full dataset.
+
+# Plot ordering. ``ref`` flags the kinematic reference for reweighting
+# (must be the first entry). Colours: ``main_color`` is used for the
+# group's reweighted curve and ratio; ``raw_color`` for the raw curve
+# in the kinematic-validation plot.
+_AGG_GROUPS = (
+    {"raw":  443, "name": "jpsi",   "label": r"J/$\psi$",
+     "main_color": "C0", "raw_color": "C0", "ref": True},
+    {"raw":  1,   "name": "prompt", "label": "W/Z prompt",
+     "main_color": "C1", "raw_color": "C3", "ref": False},
+    {"raw":  15,  "name": "tau",    "label": r"W/Z $\tau$-decay",
+     "main_color": "C2", "raw_color": "C4", "ref": False},
+)
+_AGG_REF_NAME = "jpsi"
+_AGG_NAMES = tuple(g["name"] for g in _AGG_GROUPS)
+_AGG_NONREF_NAMES = tuple(
+    g["name"] for g in _AGG_GROUPS if not g["ref"]
+)
+
+
+def _agg_group_masks(muon_source):
+    """Return ``{name: bool_mask}`` for the three aggregated groups,
+    classifying each row by the integer ``muon_source`` column written
+    by the snapshot."""
+    ms = np.asarray(muon_source)
+    return {g["name"]: (ms == g["raw"]) for g in _AGG_GROUPS}
+
+
+def _stream_pteta_charge_3d(
+    paths, *, pt_min, pt_max, eta_min, eta_max,
+    pt_edges, eta_edges, charge_edges,
+    n_workers=8, weight_mode="abs",
+    split="all", val_fraction=0.1, holdout_fraction=0.1,
+):
+    """Pass 1: stream shards and fill weighted 3D ``(pt, η, charge)``
+    histograms per ``muon_source`` group (J/ψ, prompt, τ).
+
+    Returns ``(H, H_w2, rows_read, n_kept)`` where:
+      * ``H``      -- ``{group_name: ndarray(n_pt, n_eta, n_ch)}``
+      * ``H_w2``   -- same shape, accumulates ``Σw²``
+      * ``rows_read``  -- total raw rows pulled off disk
+      * ``n_kept``     -- ``{group_name: int}`` count of windowed rows
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+    from train_muon_response_flow import _expand_input_paths
+    from arrow_shard_loader import split_batch_range
+
+    paths = _expand_input_paths(paths)
+    _MAGIC = b"ARROW1"
+    n_pt = len(pt_edges) - 1
+    n_eta = len(eta_edges) - 1
+    n_ch = len(charge_edges) - 1
+    shape = (n_pt, n_eta, n_ch)
+    bins = (pt_edges, eta_edges, charge_edges)
+
+    def _read_one(p):
+        with pa.memory_map(p, "r") as f:
+            head = f.read(len(_MAGIC))
+            f.seek(0)
+            if head == _MAGIC:
+                reader = ipc.open_file(f)
+                lo, hi = split_batch_range(
+                    reader.num_record_batches, split,
+                    val_fraction, holdout_fraction,
+                )
+                if hi <= lo:
+                    empty_H = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
+                    return empty_H, dict(empty_H), 0, {n: 0 for n in _AGG_NAMES}
+                t = pa.Table.from_batches(
+                    [reader.get_batch(i) for i in range(lo, hi)]
+                )
+            else:
+                t = ipc.open_stream(f).read_all()
+        eta_g = t["eta_gen"].to_numpy().astype(np.float64)
+        kappa_g = t["kappa_gen"].to_numpy().astype(np.float64)
+        w_raw = t["nominal_weight"].to_numpy().astype(np.float64)
+        ms = t["muon_source"].to_numpy().astype(np.int32, copy=False)
+        n_block = eta_g.shape[0]
+
+        w_handled, w_mask = _apply_weight_mode(w_raw, weight_mode)
+        abs_k = np.fabs(kappa_g)
+        safe_k = np.where(abs_k > 0, abs_k, np.nan)
+        pt_g = 1.0 / (safe_k * np.cosh(eta_g))
+        mask = (
+            np.isfinite(pt_g)
+            & (pt_g >= pt_min) & (pt_g <= pt_max)
+            & (eta_g >= eta_min) & (eta_g <= eta_max)
+            & np.isfinite(kappa_g) & w_mask
+        )
+        partial_H = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
+        partial_H2 = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
+        partial_kept = {n: 0 for n in _AGG_NAMES}
+        if not mask.any():
+            return partial_H, partial_H2, n_block, partial_kept
+
+        eta_g = eta_g[mask]; kappa_g = kappa_g[mask]
+        pt_g = pt_g[mask]; w = w_handled[mask]; ms = ms[mask]
+        charge_g = np.where(kappa_g >= 0, 1.0, -1.0)
+        group_masks = _agg_group_masks(ms)
+
+        for name in _AGG_NAMES:
+            gm = group_masks[name]
+            if not gm.any():
+                continue
+            coords = np.stack(
+                [pt_g[gm], eta_g[gm], charge_g[gm]], axis=1,
+            )
+            ww = w[gm]
+            partial_H[name] = np.histogramdd(coords, bins=bins, weights=ww)[0]
+            partial_H2[name] = np.histogramdd(
+                coords, bins=bins, weights=ww * ww,
+            )[0]
+            partial_kept[name] = int(gm.sum())
+        return partial_H, partial_H2, n_block, partial_kept
+
+    H = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
+    H_w2 = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
+    rows_read = 0
+    n_kept = {n: 0 for n in _AGG_NAMES}
+    with ThreadPoolExecutor(max_workers=max(1, int(n_workers))) as ex:
+        futures = {ex.submit(_read_one, p): p for p in paths}
+        for fut in as_completed(futures):
+            try:
+                pH, pH2, n_b, pk = fut.result()
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[agg pass-1] shard {futures[fut]} failed: {exc!r}"
+                )
+                continue
+            rows_read += n_b
+            for name in _AGG_NAMES:
+                H[name] += pH[name]
+                H_w2[name] += pH2[name]
+                n_kept[name] += pk[name]
+    return H, H_w2, rows_read, n_kept
+
+
+def _stream_aggregated_targets(
+    paths, *, pt_min, pt_max, eta_min, eta_max,
+    pt_edges, eta_edges, charge_edges,
+    weight_grids, target_axes_edges,
+    n_workers=8, weight_mode="abs", charge_filter=None,
+    split="all", val_fraction=0.1, holdout_fraction=0.1,
+):
+    """Pass 2: stream shards and accumulate 1D target-distribution
+    histograms per (axis × group × {raw, reweighted}). The reference
+    group (J/ψ) is filled raw only; non-reference groups (prompt, τ)
+    are filled both raw and after multiplying by their per-cell
+    reweight grid that targets the J/ψ kinematic distribution.
+
+    ``weight_grids`` is a ``{group_name: 3D ndarray}`` for the non-ref
+    groups; the ref group has no entry (its reweight is trivially 1).
+
+    Returns ``per_axis`` -- a list of length ``F`` where each element
+    is a dict keyed by ``f"{group}_h"`` / ``f"{group}_h2"`` for the
+    reweighted curves and ``f"{group}_raw_h"`` / ``f"{group}_raw_h2"``
+    for the raw curves (only the ref group skips the ``_raw_`` pair
+    since its "raw" and "reweighted" are identical)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+    from train_muon_response_flow import _expand_input_paths
+    from arrow_shard_loader import split_batch_range
+
+    paths = _expand_input_paths(paths)
+    _MAGIC = b"ARROW1"
+    F = len(target_axes_edges)
+    n_pt = len(pt_edges) - 1
+    n_eta = len(eta_edges) - 1
+    n_ch = len(charge_edges) - 1
+
+    def _empty_partial():
+        # One entry per axis: per-group raw + (for non-ref groups)
+        # reweighted histograms with their Σw² companions.
+        out = []
+        for e in target_axes_edges:
+            n = len(e) - 1
+            d = {}
+            for name in _AGG_NAMES:
+                d[f"{name}_raw_h"] = np.zeros(n, dtype=np.float64)
+                d[f"{name}_raw_h2"] = np.zeros(n, dtype=np.float64)
+                if name != _AGG_REF_NAME:
+                    d[f"{name}_h"] = np.zeros(n, dtype=np.float64)
+                    d[f"{name}_h2"] = np.zeros(n, dtype=np.float64)
+            out.append(d)
+        return out
+
+    def _read_one(p):
+        with pa.memory_map(p, "r") as f:
+            head = f.read(len(_MAGIC))
+            f.seek(0)
+            if head == _MAGIC:
+                reader = ipc.open_file(f)
+                lo, hi = split_batch_range(
+                    reader.num_record_batches, split,
+                    val_fraction, holdout_fraction,
+                )
+                if hi <= lo:
+                    return _empty_partial()
+                t = pa.Table.from_batches(
+                    [reader.get_batch(i) for i in range(lo, hi)]
+                )
+            else:
+                t = ipc.open_stream(f).read_all()
+        eta_r = t["eta_reco"].to_numpy().astype(np.float64)
+        phi_r = t["phi_reco"].to_numpy().astype(np.float64)
+        eta_g = t["eta_gen"].to_numpy().astype(np.float64)
+        phi_g = t["phi_gen"].to_numpy().astype(np.float64)
+        kappa_r = t["kappa_reco"].to_numpy().astype(np.float64)
+        kappa_g = t["kappa_gen"].to_numpy().astype(np.float64)
+        w_raw = t["nominal_weight"].to_numpy().astype(np.float64)
+        ms = t["muon_source"].to_numpy().astype(np.int32, copy=False)
+
+        w_handled, w_mask = _apply_weight_mode(w_raw, weight_mode)
+        abs_k = np.fabs(kappa_g)
+        safe_k = np.where(abs_k > 0, abs_k, np.nan)
+        pt_g = 1.0 / (safe_k * np.cosh(eta_g))
+        mask = (
+            np.isfinite(pt_g)
+            & (pt_g >= pt_min) & (pt_g <= pt_max)
+            & (eta_g >= eta_min) & (eta_g <= eta_max)
+            & np.isfinite(kappa_r) & np.isfinite(kappa_g)
+            & w_mask
+        )
+        if charge_filter is not None:
+            if charge_filter > 0:
+                mask &= (kappa_g >= 0)
+            else:
+                mask &= (kappa_g < 0)
+        partial = _empty_partial()
+        if not mask.any():
+            return partial
+
+        eta_r = eta_r[mask]; phi_r = phi_r[mask]
+        eta_g = eta_g[mask]; phi_g = phi_g[mask]
+        kappa_r = kappa_r[mask]; kappa_g = kappa_g[mask]
+        pt_g = pt_g[mask]; w = w_handled[mask]; ms = ms[mask]
+
+        # Targets inline.
+        lam_r = np.arctan(np.sinh(eta_r))
+        lam_g = np.arctan(np.sinh(eta_g))
+        r_kappa = kappa_r / kappa_g - 1.0
+        dphi = np.arctan2(
+            np.sin(phi_r - phi_g), np.cos(phi_r - phi_g),
+        )
+        dlambda = lam_r - lam_g
+        target_cols = (r_kappa, dlambda, dphi)
+
+        # Per-cell reweight lookup, shared across the non-ref groups
+        # (each group's weight_grid is a different array of identical
+        # shape).
+        charge_g = np.where(kappa_g >= 0, 1.0, -1.0)
+        pt_idx = np.clip(np.digitize(pt_g, pt_edges) - 1, 0, n_pt - 1)
+        eta_idx = np.clip(np.digitize(eta_g, eta_edges) - 1, 0, n_eta - 1)
+        ch_idx = np.clip(np.digitize(charge_g, charge_edges) - 1, 0, n_ch - 1)
+
+        group_masks = _agg_group_masks(ms)
+        for k in range(F):
+            y = target_cols[k]
+            edges = target_axes_edges[k]
+            for name in _AGG_NAMES:
+                gm = group_masks[name]
+                if not gm.any():
+                    continue
+                y_g = y[gm]
+                w_raw_g = w[gm]
+                h, _ = np.histogram(y_g, bins=edges, weights=w_raw_g)
+                h2, _ = np.histogram(
+                    y_g, bins=edges, weights=w_raw_g * w_raw_g,
+                )
+                partial[k][f"{name}_raw_h"] = h
+                partial[k][f"{name}_raw_h2"] = h2
+                if name == _AGG_REF_NAME:
+                    continue
+                rew_g = weight_grids[name][
+                    pt_idx[gm], eta_idx[gm], ch_idx[gm]
+                ]
+                w_rew = w_raw_g * rew_g
+                h_rw, _ = np.histogram(y_g, bins=edges, weights=w_rew)
+                h_rw2, _ = np.histogram(
+                    y_g, bins=edges, weights=w_rew * w_rew,
+                )
+                partial[k][f"{name}_h"] = h_rw
+                partial[k][f"{name}_h2"] = h_rw2
+        return partial
+
+    totals = _empty_partial()
+    with ThreadPoolExecutor(max_workers=max(1, int(n_workers))) as ex:
+        futures = {ex.submit(_read_one, p): p for p in paths}
+        for fut in as_completed(futures):
+            try:
+                partial = fut.result()
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[agg pass-2] shard {futures[fut]} failed: {exc!r}"
+                )
+                continue
+            for k in range(F):
+                for key in totals[k]:
+                    totals[k][key] += partial[k][key]
+    return totals
+
+
+def _plot_agg_kinematic_validation_2d(
+    H, weight_grids, pt_edges, eta_edges, charge_edges, out_dir,
+    *, charge_filter=None, ch_suffix="", ch_tag="charge integrated",
+):
+    """2D ``(pt_gen, η_gen)`` heatmaps for each ``muon_source`` group
+    summed over the (possibly filtered) charge axis. Panels: J/ψ
+    reference, then per non-ref group the (raw, reweighted) pair. All
+    panels share a single ``LogNorm`` so absolute densities are
+    directly comparable; by construction the reweighted panel of any
+    non-ref group matches the J/ψ one in every cell with non-zero
+    support."""
+    from matplotlib.colors import LogNorm
+
+    centers_ch = 0.5 * (charge_edges[:-1] + charge_edges[1:])
+    if charge_filter is None:
+        ch_keep_idx = np.arange(len(centers_ch))
+    elif charge_filter > 0:
+        ch_keep_idx = np.where(centers_ch > 0)[0]
+    else:
+        ch_keep_idx = np.where(centers_ch < 0)[0]
+
+    def _sum_ch(H3d):
+        return H3d[:, :, ch_keep_idx].sum(axis=2)
+
+    panels = []  # (title, H_2d)
+    for g in _AGG_GROUPS:
+        H2d = _sum_ch(H[g["name"]])
+        if g["ref"]:
+            panels.append((g["label"], H2d))
+            continue
+        panels.append((f"{g['label']} (raw)", H2d))
+        H_rew = _sum_ch(H[g["name"]] * weight_grids[g["name"]])
+        panels.append((f"{g['label']} (reweighted)", H_rew))
+
+    pooled = np.concatenate([p[1].ravel() for p in panels])
+    finite_pos = pooled[(pooled > 0) & np.isfinite(pooled)]
+    if finite_pos.size == 0:
+        return
+    vmax = float(finite_pos.max())
+    vmin = float(finite_pos.min())
+    norm = LogNorm(vmin=max(vmin, 1e-6 * vmax), vmax=vmax)
+
+    fig, axes = plt.subplots(
+        1, len(panels), figsize=(3.8 * len(panels), 4.2),
+        sharey=True, layout="constrained",
+    )
+    pt_edges_arr = np.asarray(pt_edges, dtype=np.float64)
+    eta_edges_arr = np.asarray(eta_edges, dtype=np.float64)
+    for ax, (title, Hp) in zip(axes, panels):
+        mesh = ax.pcolormesh(
+            eta_edges_arr, pt_edges_arr, Hp, norm=norm,
+            cmap="viridis", shading="flat",
+        )
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("eta_gen")
+    axes[0].set_ylabel("pt_gen [GeV]")
+    fig.colorbar(
+        mesh, ax=axes, shrink=0.85, label=f"Σ w ({ch_tag})",
+    )
+    fig.suptitle(
+        "Aggregated J/$\\psi$ vs prompt vs τ 2D kinematic validation  "
+        f"·  reweighted panels match J/$\\psi$ by construction  ·  {ch_tag}"
+    )
+    _save(
+        fig,
+        os.path.join(
+            out_dir,
+            f"aggregated_jpsi_vs_wz_kinematic_validation_2d{ch_suffix}.png",
+        ),
+    )
+
+
+def _plot_agg_kinematic_validation(
+    H, H_w2, weight_grids,
+    pt_edges, eta_edges, charge_edges, args, out_dir,
+    *, charge_filter=None, ch_suffix="", ch_tag="charge integrated",
+):
+    """Plot the (pt_gen, η_gen, charge_gen) marginals for J/ψ vs the
+    prompt and τ-decay raw + reweighted distributions, with the bottom
+    panel showing the per-group raw and reweighted ratios to J/ψ. By
+    construction the reweighted marginal of any non-ref group matches
+    J/ψ in every cell where that group had support; mismatches at the
+    marginal level expose cells the reweight had to discard.
+    """
+    centers_ch = 0.5 * (charge_edges[:-1] + charge_edges[1:])
+    if charge_filter is None:
+        ch_keep_idx = np.arange(len(centers_ch))
+    elif charge_filter > 0:
+        ch_keep_idx = np.where(centers_ch > 0)[0]
+    else:
+        ch_keep_idx = np.where(centers_ch < 0)[0]
+
+    def _restrict_charge(H_3d):
+        # Zero-out the dropped charge bins (keepdims so axis indices
+        # remain valid for the marginal sums below).
+        if charge_filter is None:
+            return H_3d
+        out = np.zeros_like(H_3d)
+        out[:, :, ch_keep_idx] = H_3d[:, :, ch_keep_idx]
+        return out
+
+    H_sel = {n: _restrict_charge(H[n]) for n in _AGG_NAMES}
+    H_w2_sel = {n: _restrict_charge(H_w2[n]) for n in _AGG_NAMES}
+
+    def _marg(H_3d, axis_keep):
+        other = tuple(a for a in (0, 1, 2) if a != axis_keep)
+        return H_3d.sum(axis=other)
+
+    # Pre-compute reweighted 3D content + Σw² per non-ref group.
+    H_rew = {}
+    H_rew_w2 = {}
+    for name in _AGG_NONREF_NAMES:
+        wg = weight_grids[name]
+        H_rew[name] = H_sel[name] * wg
+        H_rew_w2[name] = H_w2_sel[name] * (wg * wg)
+
+    panel_axes_all = (
+        (0, "pt_gen [GeV]", pt_edges),
+        (1, "eta_gen", eta_edges),
+        (2, "charge_gen", charge_edges),
+    )
+    # Drop the (degenerate) charge_gen panel when restricted to a
+    # single charge slice.
+    if charge_filter is None:
+        panel_axes = panel_axes_all
+    else:
+        panel_axes = panel_axes_all[:2]
+    n_cols = len(panel_axes)
+    fig, axes = plt.subplots(
+        2, n_cols, figsize=(4.8 * n_cols, 6.5),
+        sharex="col", squeeze=False,
+        gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+        layout="constrained",
+    )
+
+    for k, (axis_keep, axis_label, edges) in enumerate(panel_axes):
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        bw = edges[1:] - edges[:-1]
+
+        def _norm(h_arr, h2_arr):
+            tot = h_arr.sum()
+            if tot <= 0:
+                return np.zeros_like(h_arr), np.zeros_like(h_arr)
+            return (
+                h_arr / (tot * bw),
+                np.sqrt(np.maximum(h2_arr, 0.0)) / (tot * bw),
+            )
+
+        ax_main = axes[0][k]
+        ax_ratio = axes[1][k]
+
+        # Reference (J/ψ).
+        ref_g = _AGG_GROUPS[0]
+        h_ref_n, s_ref_n = _norm(
+            _marg(H_sel[ref_g["name"]], axis_keep),
+            _marg(H_w2_sel[ref_g["name"]], axis_keep),
+        )
+        ax_main.step(
+            centers, h_ref_n, where="mid",
+            color=ref_g["main_color"], lw=1.4, label=ref_g["label"],
+        )
+        _stepped_errorbar(
+            ax_main, centers, h_ref_n, s_ref_n, ref_g["main_color"],
+        )
+
+        # Non-reference groups: raw + reweighted.
+        for g in _AGG_GROUPS[1:]:
+            name = g["name"]
+            h_raw_n, s_raw_n = _norm(
+                _marg(H_sel[name], axis_keep),
+                _marg(H_w2_sel[name], axis_keep),
+            )
+            h_rew_n, s_rew_n = _norm(
+                _marg(H_rew[name], axis_keep),
+                _marg(H_rew_w2[name], axis_keep),
+            )
+            ax_main.step(
+                centers, h_raw_n, where="mid",
+                color=g["raw_color"], lw=1.0, linestyle=":",
+                label=f"{g['label']} (raw)",
+            )
+            _stepped_errorbar(
+                ax_main, centers, h_raw_n, s_raw_n, g["raw_color"],
+            )
+            ax_main.step(
+                centers, h_rew_n, where="mid",
+                color=g["main_color"], lw=1.2,
+                label=f"{g['label']} (rew)",
+            )
+            _stepped_errorbar(
+                ax_main, centers, h_rew_n, s_rew_n, g["main_color"],
+            )
+
+            # Bottom-panel ratios to J/ψ.
+            r_raw, e_raw = _ratio_with_err(
+                h_raw_n, s_raw_n, h_ref_n, s_ref_n,
+            )
+            r_rew, e_rew = _ratio_with_err(
+                h_rew_n, s_rew_n, h_ref_n, s_ref_n,
+            )
+            ax_ratio.step(
+                centers, r_raw, where="mid",
+                color=g["raw_color"], lw=0.9, linestyle=":",
+            )
+            _stepped_errorbar(
+                ax_ratio, centers, r_raw, e_raw, g["raw_color"],
+            )
+            ax_ratio.step(
+                centers, r_rew, where="mid",
+                color=g["main_color"], lw=1.0,
+            )
+            _stepped_errorbar(
+                ax_ratio, centers, r_rew, e_rew, g["main_color"],
+            )
+
+        ax_main.set_ylabel("p.d.f.")
+        ax_main.set_title(axis_label, fontsize=10)
+        ax_main.legend(fontsize=7)
+
+        ax_ratio.axhline(1.0, color="k", lw=0.4, alpha=0.4)
+        ax_ratio.set_ylabel(r"$/$ J/$\psi$", fontsize=8)
+        ax_ratio.set_xlabel(axis_label)
+        ax_ratio.set_ylim(0.0, 2.0)
+
+    fig.suptitle(
+        "Aggregated J/$\\psi$ vs prompt vs τ kinematic validation  ·  "
+        "reweighted marginals should match J/$\\psi$ "
+        f"(modulo J/$\\psi$-only cells)  ·  {ch_tag}"
+    )
+    _save(
+        fig,
+        os.path.join(
+            out_dir,
+            f"aggregated_jpsi_vs_wz_kinematic_validation{ch_suffix}.png",
+        ),
+    )
+
+
+def plot_aggregated_target_distributions(stats, paths, args, out_dir):
+    """Aggregate the per-muon ``muon_source`` groups (J/ψ, prompt,
+    τ-decay) and overlay the target-distribution shapes after
+    reweighting the two non-reference groups to the J/ψ
+    ``(pt_gen, η_gen, charge_gen)`` distribution.
+    """
+    # Window + reweight binning.
+    pt_min = float(args.cmp_agg_pt_min)
+    pt_max = float(args.cmp_agg_pt_max)
+    eta_min = float(args.cmp_agg_eta_min)
+    eta_max = float(args.cmp_agg_eta_max)
+    n_eta = int(args.cmp_agg_rew_eta_bins)
+    n_pt = max(1, int(args.cmp_agg_rew_pt_bins))
+    pt_edges = np.linspace(pt_min, pt_max, n_pt + 1)
+    eta_edges = np.linspace(eta_min, eta_max, n_eta + 1)
+    charge_edges = np.array([-2.0, 0.0, 2.0])
+
+    print(
+        f"[agg] window: pt∈[{pt_min:g},{pt_max:g}] GeV  "
+        f"η∈[{eta_min:g},{eta_max:g}]; reweight grid "
+        f"({n_pt} × {n_eta} × 2)"
+    )
+
+    # Pass 1: per-group 3D histograms.
+    t0 = _tic()
+    H, H_w2, rows_read, n_kept = _stream_pteta_charge_3d(
+        paths,
+        pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
+        pt_edges=pt_edges, eta_edges=eta_edges, charge_edges=charge_edges,
+        n_workers=int(args.cmp_workers),
+        weight_mode=str(args.weight_handling),
+        split=str(args.split),
+        val_fraction=float(args.split_val_fraction),
+        holdout_fraction=float(args.split_holdout_fraction),
+    )
+    t0 = _toc("agg pass-1 (pt-η-charge 3D)", t0)
+    sums = {n: float(H[n].sum()) for n in _AGG_NAMES}
+    counts_str = "  ".join(
+        f"{n}: {n_kept[n]:,} (Σw={sums[n]:.3g})" for n in _AGG_NAMES
+    )
+    print(f"[agg]   read {rows_read:,} rows; per-group kept: {counts_str}")
+    if sums[_AGG_REF_NAME] <= 0:
+        print(
+            "[agg] reference group (J/ψ) is empty in this window — "
+            "skipping aggregated plot"
+        )
+        return
+
+    # Per-cell reweight: target -> J/ψ. One grid per non-ref group.
+    H_ref = H[_AGG_REF_NAME]
+    weight_grids = {}
+    for name in _AGG_NONREF_NAMES:
+        H_g = H[name]
+        if H_g.sum() <= 0:
+            print(
+                f"[agg]   group {name!r} empty in window — its reweight "
+                "grid is identically zero"
+            )
+            weight_grids[name] = np.zeros_like(H_g)
+            continue
+        safe = np.where(H_g > 0, H_g, np.nan)
+        wg = np.where(H_g > 0, H_ref / safe, 0.0)
+        n_zero = int((H_g == 0).sum())
+        if n_zero:
+            print(
+                f"[agg]   {name}: {n_zero}/{wg.size} reweight cells "
+                "have zero support (weight set to 0)"
+            )
+        weight_grids[name] = wg
+
+    # Charge modes for the aggregated plots. ``each`` → produce a
+    # separate set for q>0 and q<0; ``both`` → integrate over charge;
+    # ``pos`` / ``neg`` → single plot for the chosen charge.
+    if args.cmp_charge == "each":
+        charge_modes = ["pos", "neg"]
+    else:
+        charge_modes = [args.cmp_charge]
+
+    _CHARGE_FILTER = {"pos": +1, "neg": -1, "both": None}
+    _CHARGE_SUFFIX = {"pos": "_qpos", "neg": "_qneg", "both": "_qboth"}
+    _CHARGE_TAG = {"pos": "q>0", "neg": "q<0", "both": "charge integrated"}
+
+    # Bin edges for the per-axis target histograms (shared across
+    # charge modes — only the fill differs).
+    means = np.asarray(stats.target_mean, dtype=np.float64)
+    stds = np.asarray(stats.target_std, dtype=np.float64)
+    nsig = float(args.cmp_agg_range_sigma)
+    n_bins = int(args.cmp_agg_n_bins)
+    target_axes_edges = [
+        np.linspace(means[k] - nsig * stds[k], means[k] + nsig * stds[k],
+                    n_bins + 1)
+        for k in range(min(3, len(means)))
+    ]
+
+    for ch_mode in charge_modes:
+        cf = _CHARGE_FILTER[ch_mode]
+        ch_suffix = _CHARGE_SUFFIX[ch_mode]
+        ch_tag = _CHARGE_TAG[ch_mode]
+        print(f"[agg] charge mode = {ch_mode} ({ch_tag})")
+
+        _plot_agg_kinematic_validation(
+            H, H_w2, weight_grids,
+            pt_edges, eta_edges, charge_edges, args, out_dir,
+            charge_filter=cf, ch_suffix=ch_suffix, ch_tag=ch_tag,
+        )
+        _plot_agg_kinematic_validation_2d(
+            H, weight_grids, pt_edges, eta_edges, charge_edges, out_dir,
+            charge_filter=cf, ch_suffix=ch_suffix, ch_tag=ch_tag,
+        )
+
+        # Pass 2 (charge-filtered).
+        t0 = _tic()
+        totals = _stream_aggregated_targets(
+            paths,
+            pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
+            pt_edges=pt_edges, eta_edges=eta_edges,
+            charge_edges=charge_edges,
+            weight_grids=weight_grids, target_axes_edges=target_axes_edges,
+            n_workers=int(args.cmp_workers),
+            weight_mode=str(args.weight_handling),
+            charge_filter=cf,
+            split=str(args.split),
+            val_fraction=float(args.split_val_fraction),
+            holdout_fraction=float(args.split_holdout_fraction),
+        )
+        _toc(f"agg pass-2 (target hists, {ch_mode})", t0)
+
+        _plot_aggregated_target_distributions_one(
+            totals, target_axes_edges, args, out_dir,
+            pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
+            n_pt=n_pt, n_eta=n_eta,
+            ch_suffix=ch_suffix, ch_tag=ch_tag,
+        )
+
+
+def _plot_aggregated_target_distributions_one(
+    totals, target_axes_edges, args, out_dir,
+    *, pt_min, pt_max, eta_min, eta_max, n_pt, n_eta,
+    ch_suffix, ch_tag,
+):
+    """Render the per-axis target-distribution plot for a single
+    charge selection. Extracted from ``plot_aggregated_target_distributions``
+    so the charge-mode loop can call it once per slice."""
+    n_cols = len(target_axes_edges)
+    for yscale, ysuffix in (("linear", ""), ("log", "_log")):
+        fig, axes = plt.subplots(
+            2, n_cols, figsize=(5.0 * n_cols, 6.8),
+            sharex="col", squeeze=False,
+            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+            layout="constrained",
+        )
+        for k in range(n_cols):
+            edges = target_axes_edges[k]
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            bw = edges[1] - edges[0]
+
+            def _norm(h, h2):
+                tot = h.sum()
+                if tot <= 0:
+                    return np.zeros_like(h), np.zeros_like(h)
+                return h / (tot * bw), np.sqrt(np.maximum(h2, 0.0)) / (tot * bw)
+
+            ax_main = axes[0][k]
+            ax_ratio = axes[1][k]
+
+            # Reference.
+            ref_g = _AGG_GROUPS[0]
+            h_ref = totals[k][f"{ref_g['name']}_raw_h"]
+            h_ref2 = totals[k][f"{ref_g['name']}_raw_h2"]
+            h_ref_n, s_ref_n = _norm(h_ref, h_ref2)
+            if h_ref.sum() <= 0:
+                continue
+            ax_main.step(
+                centers, h_ref_n, where="mid",
+                color=ref_g["main_color"], lw=1.3,
+                label=ref_g["label"],
+            )
+            _stepped_errorbar(
+                ax_main, centers, h_ref_n, s_ref_n,
+                ref_g["main_color"],
+            )
+
+            for g in _AGG_GROUPS[1:]:
+                name = g["name"]
+                h_raw = totals[k][f"{name}_raw_h"]
+                h_raw2 = totals[k][f"{name}_raw_h2"]
+                h_rew = totals[k][f"{name}_h"]
+                h_rew2 = totals[k][f"{name}_h2"]
+                tot_raw = h_raw.sum()
+                tot_rew = h_rew.sum()
+                if tot_rew <= 0 and tot_raw <= 0:
+                    continue
+                h_raw_n, s_raw_n = _norm(h_raw, h_raw2)
+                h_rew_n, s_rew_n = _norm(h_rew, h_rew2)
+
+                if tot_raw > 0:
+                    ax_main.step(
+                        centers, h_raw_n, where="mid",
+                        color=g["raw_color"], lw=0.9, linestyle=":",
+                        label=f"{g['label']} (raw)",
+                    )
+                    _stepped_errorbar(
+                        ax_main, centers, h_raw_n, s_raw_n,
+                        g["raw_color"],
+                    )
+                if tot_rew > 0:
+                    ax_main.step(
+                        centers, h_rew_n, where="mid",
+                        color=g["main_color"], lw=1.2,
+                        label=f"{g['label']} (rew → J/$\\psi$ kin.)",
+                    )
+                    _stepped_errorbar(
+                        ax_main, centers, h_rew_n, s_rew_n,
+                        g["main_color"],
+                    )
+
+                # Ratios to J/ψ.
+                if tot_raw > 0:
+                    r_raw, e_raw = _ratio_with_err(
+                        h_raw_n, s_raw_n, h_ref_n, s_ref_n,
+                    )
+                    ax_ratio.step(
+                        centers, r_raw, where="mid",
+                        color=g["raw_color"], lw=0.9, linestyle=":",
+                    )
+                    _stepped_errorbar(
+                        ax_ratio, centers, r_raw, e_raw, g["raw_color"],
+                    )
+                if tot_rew > 0:
+                    r_rew, e_rew = _ratio_with_err(
+                        h_rew_n, s_rew_n, h_ref_n, s_ref_n,
+                    )
+                    ax_ratio.step(
+                        centers, r_rew, where="mid",
+                        color=g["main_color"], lw=1.0,
+                    )
+                    _stepped_errorbar(
+                        ax_ratio, centers, r_rew, e_rew,
+                        g["main_color"],
+                    )
+
+            ax_main.set_yscale(yscale)
+            ax_main.set_ylabel("p.d.f. (weighted, unit area)")
+            ax_main.set_title(
+                TARGET_NAMES[k] if k < len(TARGET_NAMES)
+                else f"target[{k}]",
+                fontsize=10,
+            )
+            ax_main.legend(fontsize=7)
+            ax_main.axvline(0.0, color="k", lw=0.4, alpha=0.4)
+
+            ax_ratio.axhline(1.0, color="k", lw=0.4, alpha=0.4)
+            ax_ratio.set_ylabel(r"$/$ J/$\psi$", fontsize=8)
+            ax_ratio.set_xlabel(
+                TARGET_NAMES[k] if k < len(TARGET_NAMES)
+                else f"target[{k}]"
+            )
+            ax_ratio.set_ylim(0.5, 1.5)
+
+        fig.suptitle(
+            f"Aggregated J/$\\psi$ vs prompt vs τ target distributions  ·  "
+            f"pt∈[{pt_min:g},{pt_max:g}] GeV, "
+            f"η∈[{eta_min:g},{eta_max:g}], {ch_tag}; non-ref groups "
+            f"reweighted to J/$\\psi$ kinematics ({n_pt}·{n_eta}·2 grid)"
+        )
+        _save(
+            fig,
+            os.path.join(
+                out_dir,
+                f"aggregated_jpsi_vs_wz_target_distributions"
+                f"{ch_suffix}{ysuffix}.png",
+            ),
+        )
+
+
+# ============================================================================
 # main
 # ============================================================================
 
@@ -2075,11 +3093,16 @@ def main():
     print(f"loading ntuples from {len(args.input_files)} file(s)")
     t0 = _tic()
     (
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w, source_id,
+        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
+        source_id, muon_source,
     ) = load_ntuples(
         args.input_files, args.tree, args.max_muons,
         args.pt_min, args.pt_max, args.eta_max,
         threads=args.threads, max_events=args.max_events,
+        weight_mode=args.weight_handling,
+        split=args.split,
+        val_fraction=args.split_val_fraction,
+        holdout_fraction=args.split_holdout_fraction,
     )
     t0 = _toc("load_ntuples", t0)
 
@@ -2093,6 +3116,7 @@ def main():
         eta_g, phi_g = eta_g[sel], phi_g[sel]
         kappa_r, kappa_g, w = kappa_r[sel], kappa_g[sel], w[sel]
         source_id = source_id[sel]
+        muon_source = muon_source[sel]
         print(
             f"  loaded {N_raw} muon rows; subsampled to "
             f"{eta_r.shape[0]} for plotting"
@@ -2101,8 +3125,13 @@ def main():
         print(f"  loaded {N_raw} muon rows")
     t0 = _toc("subsample raw arrays", t0)
 
+    # Only feed ``muon_source`` to the conditioning if the loaded
+    # checkpoint was trained with it; older 5-cond checkpoints would
+    # mismatch in apply_preproc/n_cond otherwise.
+    use_muon_source_cond = "muon_source" in (stats.cond_names or [])
     target, cond_raw = compute_targets_and_conditioning(
         eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g,
+        muon_source=muon_source if use_muon_source_cond else None,
     )
     t0 = _toc("compute_targets_and_conditioning", t0)
 
@@ -2199,6 +3228,30 @@ def main():
     )
     t0 = _toc("plot_smear_closure", t0)
 
+    # Per-group closure plots: same model output, restricted to each
+    # ``muon_source`` aggregate (J/ψ, W/Z prompt, W/Z τ-decay)
+    # separately. All span the full loaded phase space; the split is
+    # the muon_source integer the snapshot writes (443, 1, 15).
+    group_masks = _agg_group_masks(muon_source)
+    for g in _AGG_GROUPS:
+        mask = group_masks[g["name"]]
+        if not mask.any():
+            print(f"  [closure] group {g['name']!r} empty — skipping")
+            continue
+        plot_shift_closure(
+            target, w, args, args.output,
+            log_r_grid_shift, target_std_per_dim,
+            group_mask=mask, group_label=g["name"],
+        )
+        t0 = _toc(f"plot_shift_closure[{g['name']}]", t0)
+        plot_smear_closure(
+            target, w, args, args.output,
+            log_r_grid_smear, target_std_per_dim,
+            log_r_grid_smear_via_gh=log_r_grid_smear_via_gh,
+            group_mask=mask, group_label=g["name"],
+        )
+        t0 = _toc(f"plot_smear_closure[{g['name']}]", t0)
+
     plot_closure_error_ratio(
         target, w, args, args.output,
         log_r_grid_smear, target_std_per_dim, mode="smear",
@@ -2233,6 +3286,10 @@ def main():
         eta_min=float(args.cmp_eta_min), eta_max=float(args.cmp_eta_max),
         max_events=int(args.cmp_max_events),
         n_workers=int(args.cmp_workers),
+        weight_mode=str(args.weight_handling),
+        split=str(args.split),
+        val_fraction=float(args.split_val_fraction),
+        holdout_fraction=float(args.split_holdout_fraction),
     )
     t0 = _toc("load per-source window (streaming)", t0)
     if cmp_data is None:
@@ -2254,6 +3311,15 @@ def main():
             args, args.output,
         )
         t0 = _toc("plot_per_source_target_distributions", t0)
+
+    # Aggregated J/ψ vs W/Z comparison with kinematic reweighting.
+    # Two-pass streaming over the same shards; doesn't reuse the
+    # in-memory arrays from the per-source loader because the agg
+    # window is intentionally wider.
+    plot_aggregated_target_distributions(
+        stats, args.input_files, args, args.output,
+    )
+    t0 = _toc("plot_aggregated_target_distributions", t0)
 
     if args.flow_checkpoint:
         print(f"loading flow checkpoint {args.flow_checkpoint}")

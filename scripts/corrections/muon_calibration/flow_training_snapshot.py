@@ -161,11 +161,18 @@ OUTPUT_BRANCHES = [
     "kappa_gen",
     "nominal_weight",
     "source_id",
+    # Per-muon "muon source" -- ``Muon_genPartFlav`` (1 = prompt W/Z,
+    # 15 = secondary from a τ decay) on the W/Z branch, hardcoded to
+    # 443 (J/ψ PDG id) on the J/ψ branch. Used as a conditioning input
+    # in the flow and shift+smear reweight training so the model can
+    # learn class-dependent response shapes (e.g. the slightly biased
+    # gen-matching geometry of τ-decay muons).
+    "muon_source",
 ]
 
 # Columns written as int32 (everything else is fp32). Carried through
 # the sharder so downstream code can filter/split rows by source.
-INT_BRANCHES = ("source_id",)
+INT_BRANCHES = ("source_id", "muon_source")
 
 
 class _HelpFmt(
@@ -175,6 +182,36 @@ class _HelpFmt(
     """Keep the module docstring's raw newlines, and append "(default:
     ...)" to every option's help line automatically.
     """
+
+
+def _default_shard_workers(hard_cap: int = 32):
+    """Choose a phase-1 worker count that's unlikely to exceed the
+    cgroup ``pids.max`` budget on a shared host.
+
+    ``os.cpu_count()`` returns the *machine-wide* core count (256+ on
+    a typical box) but the per-cgroup PID limit is usually 2048 with a
+    few hundred PIDs already in flight from the user's session.
+    Spawning ``cpu_count`` workers -- each its own process plus a few
+    helper threads -- routinely hits ``EAGAIN`` on ``os.fork()`` at
+    ``mp.Pool.__init__``. Cap the default to ``hard_cap=32`` (proven
+    to fit under the typical 2048-PID budget) while still allowing
+    bigger pools via ``--shard-workers N`` on hosts with a larger
+    budget.
+    """
+    cpu = os.cpu_count() or 8
+    # Best-effort cgroup pids.max read (returns "max" or an integer).
+    pids_max = None
+    for path in ("/sys/fs/cgroup/pids.max", "/sys/fs/cgroup/pids/pids.max"):
+        try:
+            with open(path) as f:
+                raw = f.read().strip()
+            if raw and raw != "max":
+                pids_max = int(raw)
+                break
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+    cgroup_cap = max(1, (pids_max // 8) if pids_max else hard_cap)
+    return max(1, min(cpu, hard_cap, cgroup_cap))
 
 
 def parse_args():
@@ -261,16 +298,17 @@ def parse_args():
         help="(--source wz only) Optional list of dataset name "
         "substrings to KEEP in addition to the default W/Z filter. "
         "If unset, all samples.wprocs + samples.zprocs are kept "
-        "(modulo --include-tau-procs).",
+        "(modulo --exclude-tau-procs).",
     )
     p.add_argument(
-        "--include-tau-procs",
+        "--exclude-tau-procs",
         action="store_true",
-        help="(--source wz only) Include Wτν / Z→ττ samples in the W/Z "
-        "snapshot. They are excluded by default because the muon "
-        "selection requires Muon_genPartFlav == 1 (prompt-only), and "
-        "these samples otherwise contribute only secondary muons from "
-        "τ decays.",
+        help="(--source wz only) Drop the Wτν / Z→ττ samples from the "
+        "W/Z snapshot. By default they are *kept*: the per-muon "
+        "selection ``Muon_genPartFlav == 1 || == 15`` accepts both "
+        "prompt and τ-decay muons, and the ``muon_source`` column "
+        "records which one each muon is so the trainer can condition "
+        "on it.",
     )
 
     # ---- W/Z calibration knobs (forwarded to define_corrected_muons) -
@@ -298,10 +336,15 @@ def parse_args():
         "the bias-helper branch in define_corrected_muons.",
     )
     p.add_argument(
-        "--noSmearing",
-        action="store_true",
-        help="(--source wz only) Disable the resolution smearing "
-        "applied during define_corrected_muons.",
+        "--smearing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply the data/MC resolution-matching smearing helper "
+        "to the reco muons of *both* the J/ψ and W/Z snapshots. On by "
+        "default so the two samples are directly comparable in the "
+        "target distributions (same LBL + cvhideal calibration chain, "
+        "same smearing). Pass --no-smearing to drop the smearing on "
+        "both paths.",
     )
 
     # ---- source_id stamp ------------------------------------------
@@ -394,11 +437,16 @@ def parse_args():
     p.add_argument(
         "--shard-workers",
         type=int,
-        default=os.cpu_count() or 8,
+        default=_default_shard_workers(),
         help="Phase-1 parallel readers for the shard pass (xrootd / "
-        "disk read + decompression). Default: ``os.cpu_count()``. "
-        "Phase 2 is separately capped at ``--shard-count`` writers "
-        "(Arrow IPC files can't be concurrently appended to).",
+        "disk read + decompression). Default: an auto-selected value "
+        "capped against the cgroup ``pids.max`` budget so the worker "
+        "pool can actually be forked (each worker is a separate "
+        "process plus a couple of threads; high values like "
+        "``os.cpu_count() == 256`` typically exceed the per-cgroup "
+        "PID limit on a shared host). Phase 2 is separately capped at "
+        "``--shard-count`` writers (Arrow IPC files can't be "
+        "concurrently appended to).",
     )
     p.add_argument(
         "--shard-count",
@@ -463,7 +511,7 @@ def _declare_jpsi_sample_helper():
     )
 
 
-def _define_jpsi_rvecs(df, source_id_base: int):
+def _define_jpsi_rvecs(df, source_id_base: int, smearing_helper=None):
     """Define the unified per-muon RVec schema on a J/psi RDataFrame.
 
     Each event becomes a 2-element RVec (mu+ first, mu- second).
@@ -473,6 +521,15 @@ def _define_jpsi_rvecs(df, source_id_base: int):
     per-sample via ``DefinePerSample`` from the chain link path:
     Pt0to8 samples get ``source_id_base + 1``, everything else
     (Pt8toInf or unrecognised) gets ``source_id_base``.
+
+    When ``smearing_helper`` is provided the reco pt is smeared with
+    the same per-(η, pt) resolution-matching helper used on the W/Z
+    branch so the two snapshots are directly comparable. The smear
+    affects only pt; (η, φ) and the gen leg are untouched. The seed
+    triplet is the J/ψ ntuple's own ``(run, lumi, event)`` branches
+    (note ``lumi``, not the NanoAOD ``luminosityBlock`` -- the J/ψ
+    calibration ntuples use the shorter name) so the same physical
+    event always gets the same smear across re-runs.
     """
     _declare_jpsi_sample_helper()
     df = df.DefinePerSample(
@@ -505,14 +562,42 @@ def _define_jpsi_rvecs(df, source_id_base: int):
     )
     # kappa = q / |p| = q / (pt * cosh(eta)). Sign-labelled legs give
     # the {+1, -1} signs; |p| reuses the same pt/eta we just defined.
-    df = df.Define(
-        "kappa_reco",
-        "ROOT::VecOps::RVec<float>{"
-        " +1.0f / (static_cast<float>(Mupluscor_pt) "
-        "          * std::cosh(static_cast<float>(Mupluscor_eta))),"
-        " -1.0f / (static_cast<float>(Muminuscor_pt) "
-        "          * std::cosh(static_cast<float>(Muminuscor_eta)))}",
-    )
+    # When the smearing helper is requested, smear the LBL-corrected
+    # pt RVec with the same data/MC resolution-matching helper used on
+    # the W/Z branch (only pt is smeared; (η, φ) are unchanged).
+    if smearing_helper is not None:
+        df = df.Define(
+            "_jpsi_recopt_pre_smear",
+            "ROOT::VecOps::RVec<float>{"
+            " static_cast<float>(Mupluscor_pt),"
+            " static_cast<float>(Muminuscor_pt)}",
+        )
+        df = df.Define(
+            "_jpsi_recopt_smeared",
+            smearing_helper,
+            [
+                # The J/ψ calibration ntuples expose ``lumi`` (not the
+                # NanoAOD ``luminosityBlock``); ``run`` and ``event``
+                # match the standard names.
+                "run", "lumi", "event",
+                "_jpsi_recopt_pre_smear", "eta_reco",
+            ],
+        )
+        df = df.Define(
+            "kappa_reco",
+            "ROOT::VecOps::RVec<float>{"
+            " +1.0f / (_jpsi_recopt_smeared[0] * std::cosh(eta_reco[0])),"
+            " -1.0f / (_jpsi_recopt_smeared[1] * std::cosh(eta_reco[1]))}",
+        )
+    else:
+        df = df.Define(
+            "kappa_reco",
+            "ROOT::VecOps::RVec<float>{"
+            " +1.0f / (static_cast<float>(Mupluscor_pt) "
+            "          * std::cosh(static_cast<float>(Mupluscor_eta))),"
+            " -1.0f / (static_cast<float>(Muminuscor_pt) "
+            "          * std::cosh(static_cast<float>(Muminuscor_eta)))}",
+        )
     df = df.Define(
         "kappa_gen",
         "ROOT::VecOps::RVec<float>{"
@@ -530,6 +615,14 @@ def _define_jpsi_rvecs(df, source_id_base: int):
     df = df.Define(
         "source_id",
         "ROOT::VecOps::RVec<int>{sample_source_id, sample_source_id}",
+    )
+    # Hardcode the J/ψ PDG id (443) as the per-muon ``muon_source``;
+    # there is no ``Muon_genPartFlav`` equivalent on the calibration
+    # ntuples, and a sentinel value distinguishes J/ψ from the
+    # ``Muon_genPartFlav`` values (1 / 15) written on the W/Z branch.
+    df = df.Define(
+        "muon_source",
+        "ROOT::VecOps::RVec<int>{443, 443}",
     )
     return df
 
@@ -623,7 +716,18 @@ def run_jpsi_snapshot(args) -> str:
     )
 
     source_id_base = 0 if args.source_id is None else int(args.source_id)
-    df = _define_jpsi_rvecs(df, source_id_base=source_id_base)
+    if args.smearing:
+        smearing_helper, _ = (
+            wremnants.production.muon_calibration.make_muon_smearing_helpers()
+        )
+        print("  applying resolution smearing helper to J/ψ reco pt")
+    else:
+        smearing_helper = None
+    df = _define_jpsi_rvecs(
+        df,
+        source_id_base=source_id_base,
+        smearing_helper=smearing_helper,
+    )
     # Print the planned per-sample assignment so the user can verify
     # the input files matched the expected Pt0to8 / Pt8toInf buckets.
     n_0to8 = sum("Pt0to8" in p for p in files)
@@ -708,11 +812,15 @@ def _define_wz_rvecs(df, dataset, args, calib_helpers, source_id: int):
         bias_helper,
     )
     df = wremnants.production.muon_selections.select_veto_muons(df, nMuons=-1)
-    # genPartFlav == 1: prompt muon (direct W/Z decay product).
-    # genPartFlav == 15: secondary muon from a τ decay -- these enter
-    # the calibration sample with a softer pT spectrum and biased gen-
-    # matching geometry, so we drop them here.
-    df = df.Define("genMatchedMuons", "Muon_genPartFlav == 1")
+    # Keep both prompt (genPartFlav == 1) and τ-decay (== 15) muons.
+    # The per-muon ``Muon_genPartFlav`` is carried through as the
+    # ``muon_source`` column so the trainer can condition on the class
+    # (and the model can learn the slightly different gen-matching
+    # geometry / softer pT spectrum of τ-decay muons).
+    df = df.Define(
+        "genMatchedMuons",
+        "Muon_genPartFlav == 1 || Muon_genPartFlav == 15",
+    )
     df = df.Define("selMuons", "vetoMuonsPre && genMatchedMuons")
 
     df = df.Define("selMuons_genPartIdx", "Muon_genPartIdx[selMuons]")
@@ -769,6 +877,13 @@ def _define_wz_rvecs(df, dataset, args, calib_helpers, source_id: int):
         "source_id",
         f"ROOT::VecOps::RVec<int>(eta_reco.size(), {int(source_id)})",
     )
+    # Per-muon ``muon_source`` = ``Muon_genPartFlav`` for the selected
+    # rows (1 = prompt, 15 = from a τ decay), cast to int. Mirrors the
+    # J/ψ branch which writes 443 (J/ψ PDG id) instead.
+    df = df.Define(
+        "muon_source",
+        "ROOT::VecOps::RVec<int>(Muon_genPartFlav[selMuons])",
+    )
 
     return df
 
@@ -798,13 +913,13 @@ def run_wz_snapshot(args) -> List[str]:
 
     # Filter: keep only W/Z MC. --filter-procs (if set) is an additional
     # name-substring whitelist on top of samples.wprocs + samples.zprocs.
-    # Tau-decay V samples (Wτν, Z→ττ) are excluded by default since the
-    # muon selection now requires Muon_genPartFlav == 1 (prompt only),
-    # which would leave these datasets with near-zero acceptance and
-    # only contributes a softer secondary-muon spectrum if kept.
-    # --include-tau-procs adds them back in.
+    # Tau-decay V samples (Wτν, Z→ττ) are now included by default; the
+    # muon selection (``Muon_genPartFlav == 1 || == 15``) accepts both
+    # prompt and τ-decay muons, and the per-muon ``muon_source`` column
+    # records which one each muon is. ``--exclude-tau-procs`` drops the
+    # τ samples if that's what you want.
     wz_names = set(samples.wprocs) | set(samples.zprocs)
-    if not args.include_tau_procs:
+    if args.exclude_tau_procs:
         tau_names = set(samples.wprocs_tau_minnlo) | set(
             samples.zprocs_tau_minnlo
         ) | set(samples.wprocs_tau_minnlo_2017G) | set(
@@ -852,12 +967,12 @@ def run_wz_snapshot(args) -> List[str]:
         _,
         _,
     ) = wremnants.production.muon_calibration.make_muon_calibration_helpers(args)
-    if args.noSmearing:
-        smearing_helper = None
-    else:
+    if args.smearing:
         smearing_helper, _ = (
             wremnants.production.muon_calibration.make_muon_smearing_helpers()
         )
+    else:
+        smearing_helper = None
     bias_helper = None  # --biasCalibration off by default
 
     pileup_helper = wremnants.production.pileup.make_pileup_helper(era=args.era)

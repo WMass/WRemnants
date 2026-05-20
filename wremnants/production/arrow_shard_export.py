@@ -85,6 +85,31 @@ def _splitmix64_bucket(
 
 
 # ---------------------------------------------------------------------------
+# Intermediate row dtype
+# ---------------------------------------------------------------------------
+
+
+def _intermediate_row_dtype(branches, int_columns, int64_columns):
+    """Build the numpy *structured* dtype used for the per-(source,
+    worker, bucket) phase-1 intermediates. Each branch is stored at
+    its native width — fp32 for ordinary columns, int32 for tag
+    columns, int64 for high-precision id columns. Packed (no
+    padding), so ``rec.tobytes()`` / ``np.fromfile(p, dtype=...)``
+    round-trip bit-for-bit."""
+    int_set = set(int_columns)
+    int64_set = set(int64_columns)
+    fields = []
+    for c in branches:
+        if c in int64_set:
+            fields.append((c, np.int64))
+        elif c in int_set:
+            fields.append((c, np.int32))
+        else:
+            fields.append((c, np.float32))
+    return np.dtype(fields)
+
+
+# ---------------------------------------------------------------------------
 # Phase 1: parallel scan + per-bucket dispatch
 # ---------------------------------------------------------------------------
 
@@ -102,8 +127,14 @@ def _phase1_worker(arg_tuple):
         flush_threshold_bytes,
         step_rows,
         seed,
+        int_columns,
+        int64_columns,
     ) = arg_tuple
-    n_cols = len(branches)
+    int_set = set(int_columns)
+    int64_set = set(int64_columns)
+    row_dtype = _intermediate_row_dtype(
+        branches, int_columns, int64_columns,
+    )
 
     src = uproot.open(snapshot_path)[tree_name]
     n_entries = int(src.num_entries)
@@ -174,12 +205,18 @@ def _phase1_worker(arg_tuple):
             source_id, event_idx_flat, muon_idx_flat, seed, n_buckets,
         )
 
-        # Flatten each RVec column to a 1D float32 array.
-        flat_cols = [
-            ak.flatten(chunk[c]).to_numpy().astype(np.float32, copy=False)
-            for c in branches
-        ]
-        flat = np.column_stack(flat_cols)
+        # Pack each RVec column into the per-row structured record at
+        # its native width. No bit-views or value-casts beyond the
+        # final dtype of each field — int64 columns survive bit-exact.
+        flat = np.empty(total, dtype=row_dtype)
+        for c in branches:
+            arr = ak.flatten(chunk[c]).to_numpy()
+            if c in int64_set:
+                flat[c] = arr.astype(np.int64, copy=False)
+            elif c in int_set:
+                flat[c] = arr.astype(np.int32, copy=False)
+            else:
+                flat[c] = arr.astype(np.float32, copy=False)
 
         # Dispatch per bucket appearing in this chunk.
         for b in np.unique(bids):
@@ -208,23 +245,31 @@ def _phase2_worker(arg_tuple):
         n_sources,
         branches,
         int_columns,
+        int64_columns,
         tmp_dir,
         shard_dir,
         batch_rows,
         seed,
     ) = arg_tuple
-    n_cols = len(branches)
     int_set = set(int_columns)
+    int64_set = set(int64_columns)
+    row_dtype = _intermediate_row_dtype(
+        branches, int_columns, int64_columns,
+    )
 
     my_buckets = list(range(worker_id, n_buckets, n_workers_phase2))
-    # Mixed-type schema: columns listed in ``int_columns`` are written
-    # as int32; everything else as float32. Phase-1 intermediates are
-    # still uniform fp32 (small ints round-trip exactly through fp32),
-    # cast back here at Arrow write time.
-    schema = pa.schema([
-        (c, pa.int32() if c in int_set else pa.float32())
-        for c in branches
-    ])
+    # ``int_columns`` -> ``pa.int32()``, ``int64_columns`` ->
+    # ``pa.int64()``, rest -> ``pa.float32()``. The phase-1
+    # intermediates are a packed structured array of the same widths,
+    # so per-field extraction is dtype-clean (no value-cast / bit-view
+    # gymnastics) at Arrow write time.
+    def _arrow_type(c):
+        if c in int64_set:
+            return pa.int64()
+        if c in int_set:
+            return pa.int32()
+        return pa.float32()
+    schema = pa.schema([(c, _arrow_type(c)) for c in branches])
     write_opts = ipc.IpcWriteOptions(
         compression="lz4_frame", use_threads=False,
     )
@@ -255,15 +300,13 @@ def _phase2_worker(arg_tuple):
                         f"s{s:02d}_w{w:04d}_b{b:05d}.bin",
                     )
                     if os.path.exists(p) and os.path.getsize(p) > 0:
-                        arr = np.fromfile(p, dtype=np.float32).reshape(
-                            -1, n_cols,
-                        )
+                        arr = np.fromfile(p, dtype=row_dtype)
                         chunks.append(arr)
             if not chunks:
                 bucket_row_counts.append((b, 0))
                 continue
 
-            rows = np.concatenate(chunks, axis=0)
+            rows = np.concatenate(chunks)
             del chunks
             perm = rng.permutation(len(rows))
             rows = rows[perm]
@@ -273,15 +316,13 @@ def _phase2_worker(arg_tuple):
             for off in range(0, n_rows_in_bucket, batch_rows):
                 sub = rows[off : off + batch_rows]
                 arrays = []
-                for i, c in enumerate(branches):
-                    col = np.ascontiguousarray(sub[:, i])
-                    if c in int_set:
-                        arrays.append(pa.array(
-                            col.astype(np.int32, copy=False),
-                            type=pa.int32(),
-                        ))
-                    else:
-                        arrays.append(pa.array(col, type=pa.float32()))
+                for c in branches:
+                    # ``sub[c]`` is already the field's native dtype;
+                    # ``ascontiguousarray`` only copies if the slice
+                    # isn't already C-contiguous (it is here since
+                    # ``rows`` was reordered by integer indexing).
+                    col = np.ascontiguousarray(sub[c])
+                    arrays.append(pa.array(col, type=_arrow_type(c)))
                 batch = pa.RecordBatch.from_arrays(arrays, schema=schema)
                 writer.write_batch(batch)
                 n_record_batches += 1
@@ -343,15 +384,19 @@ def run_sharding_pass(
 
     ``int_columns`` lists branch names to write as ``pa.int32()`` in
     the Arrow IPC output (everything else is ``pa.float32()``). The
-    per-(worker, bucket) phase-1 intermediates are still uniform
-    fp32; small ints round-trip exactly. Use for tag columns like
-    ``source_id`` that you want to keep semantically integer in the
-    final shards.
+    per-(worker, bucket) phase-1 intermediates are a *packed
+    structured numpy array* whose fields match the per-branch Arrow
+    types one-to-one (fp32 / int32, with int64 reserved for future
+    callers), so every column survives the disk round-trip at its
+    native width with no value-casts or bit-views needed.
 
     Returns a dict matching the on-disk ``manifest.json`` payload.
     """
     branches = list(branches)
     int_columns = list(int_columns)
+    int64_columns: list[str] = []  # reserved for future use; structured
+    # intermediate already supports per-field int64 if a caller wires
+    # it in. No int64 column is written by the current snapshot.
     unknown_int = [c for c in int_columns if c not in branches]
     if unknown_int:
         raise ValueError(
@@ -390,7 +435,7 @@ def run_sharding_pass(
     print(f"  tmp_dir:                 {tmp_dir}")
     print(f"  branches:                {n_cols} cols  {branches}")
     if int_columns:
-        print(f"  int columns:             {int_columns}")
+        print(f"  int32 columns:           {int_columns}")
     print(f"  n_buckets:               {n_buckets}")
     print(f"  phase-1 workers:         {n_workers}")
     print(f"  output shards:           {n_shards}")
@@ -409,6 +454,7 @@ def run_sharding_pass(
                 src_id, w, n_workers, sources[src_id], tree_name,
                 branches, n_buckets, tmp_dir,
                 flush_threshold_bytes, step_rows, seed,
+                int_columns, int64_columns,
             )
             for src_id in range(n_sources)
             for w in range(n_workers)
@@ -438,7 +484,7 @@ def run_sharding_pass(
         phase2_args = [
             (
                 s, n_shards, n_buckets, n_workers, n_sources,
-                branches, int_columns,
+                branches, int_columns, int64_columns,
                 tmp_dir, shard_dir, batch_rows, seed,
             )
             for s in range(n_shards)

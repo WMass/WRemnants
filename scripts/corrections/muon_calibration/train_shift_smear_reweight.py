@@ -2862,6 +2862,15 @@ def parse_args():
         "(legacy, ~5%% loss on W/Z).",
     )
     p.add_argument(
+        "--holdout-fraction", type=float, default=0.1,
+        help="Fraction of each shard's record batches held out from "
+        "training, never seen by the trainer. The diagnostic script "
+        "evaluates the model on this slice. Splits are contiguous "
+        "ranges of record-batch indices per shard: train = first "
+        "(1 - val - holdout), val = next val_fraction, holdout = "
+        "last holdout_fraction. Default 0.1 → 80 / 10 / 10 split.",
+    )
+    p.add_argument(
         "--data-workers", type=int, default=4,
         help="Number of background processes that feed each rank's "
         "data pipeline. 0 = run the loader inline in the trainer "
@@ -3379,6 +3388,7 @@ def main_worker(
         pin_memory=pin_memory,
         seed=int(args.seed),
         weight_mode=args.weight_handling,
+        holdout_fraction=args.holdout_fraction,
         shard_row_counts=shard_row_counts,
         num_workers_hint=n_train_workers_hint,
     )
@@ -3392,6 +3402,7 @@ def main_worker(
         pin_memory=pin_memory,
         seed=int(args.seed),
         weight_mode=args.weight_handling,
+        holdout_fraction=args.holdout_fraction,
         shard_row_counts=shard_row_counts,
         num_workers_hint=n_val_workers_hint,
     )
@@ -3834,6 +3845,9 @@ def main():
     stats, weight_mean = compute_stats_streaming(
         shard_files, max_rows=stats_max, progress=True,
         weight_mode=args.weight_handling,
+        split="train",
+        val_fraction=args.val_fraction,
+        holdout_fraction=args.holdout_fraction,
         robust=bool(getattr(args, "robust_stats", False)),
         robust_sample_rows=int(
             getattr(args, "robust_sample_rows", 1_000_000)

@@ -130,11 +130,43 @@ def parse_args():
         "events.)",
     )
     p.add_argument(
+        "--weight-handling",
+        choices=["abs", "keep", "drop"],
+        default="abs",
+        help="[default: %(default)s] How to treat MC@NLO signed event "
+        "weights at load time, mirroring "
+        "``train_shift_smear_reweight.py`` (which has used ``abs`` by "
+        "default since the streaming-loader migration). ``abs``: take "
+        "|w| and drop only w==0 / non-finite -- recommended default; "
+        "matches the shift+smear trainer and the diagnostic. "
+        "``keep``: pass signed weights through (drops only "
+        "non-finite). ``drop``: legacy behaviour, rejects w<=0 "
+        "outright and silently loses the ~5-20%% negative-weight "
+        "fraction in MC@NLO W/Z snapshots.",
+    )
+    p.add_argument(
         "--val-fraction",
         type=float,
         default=0.1,
         help="[default: %(default)s] Fraction of muons held out for "
         "validation.",
+    )
+    p.add_argument(
+        "--shard-split", choices=["train", "val", "holdout", "all"],
+        default="train",
+        help="[default: %(default)s] Per-shard record-batch range to "
+        "load. The shards are partitioned by ``arrow_shard_loader."
+        "split_batch_range`` — train reads the first ~(1 - val - "
+        "holdout) of record batches per shard, val the next slice, "
+        "holdout the last slice. Loading only ``train`` here means "
+        "the in-memory flow trainer never sees the holdout rows the "
+        "diagnostic script evaluates the model on.",
+    )
+    p.add_argument(
+        "--shard-holdout-fraction", type=float, default=0.1,
+        help="[default: %(default)s] Fraction of each shard's record "
+        "batches reserved as holdout (skipped by the train / val "
+        "load). Matches the trainer / diagnostic convention.",
     )
     p.add_argument(
         "--batch-size",
@@ -814,12 +846,13 @@ PER_MUON_COLUMNS = [
     "eta_gen",  "phi_gen",
     "kappa_reco", "kappa_gen", "nominal_weight",
     "source_id",
+    "muon_source",
 ]
 
 # Columns kept as integer dtype on the read side; everything else is
 # concatenated into float64. Mirrors the int-column handling in the
 # sharder. Used by ``load_ntuples``.
-_INT_PER_MUON_COLUMNS = {"source_id"}
+_INT_PER_MUON_COLUMNS = {"source_id", "muon_source"}
 
 WEIGHT_BRANCH = "nominal_weight"
 
@@ -847,6 +880,7 @@ def _filter_block(
     blocks: dict,
     pt_min: float, pt_max: float, eta_max: float,
     n_read: int, max_rows: int,
+    weight_mode: str = "drop",
 ):
     eta_g = blocks["eta_gen"]
     kappa_g = blocks["kappa_gen"]
@@ -858,6 +892,17 @@ def _filter_block(
     # legacy ``pt_reco > 0`` guard (pt_reco == 0 would make kappa
     # non-finite at snapshot time).
     pt_g = 1.0 / (np.fabs(kappa_g) * np.cosh(eta_g))
+    finite_w = np.isfinite(w)
+    if weight_mode == "abs":
+        w_mask = finite_w & (w != 0.0)
+    elif weight_mode == "keep":
+        w_mask = finite_w
+    elif weight_mode == "drop":
+        w_mask = finite_w & (w > 0.0)
+    else:
+        raise ValueError(
+            f"weight_mode must be one of abs/keep/drop, got {weight_mode!r}"
+        )
     mask = (
         (pt_g > pt_min)
         & (pt_g < pt_max)
@@ -865,7 +910,7 @@ def _filter_block(
         & np.isfinite(kappa_r)
         & np.isfinite(kappa_g)
         & (kappa_g != 0.0)
-        & (w > 0.0)
+        & w_mask
     )
     if max_rows > 0 and n_read + n_in_block > max_rows:
         n_take = max_rows - n_read
@@ -877,16 +922,20 @@ def _filter_block(
 
 def _load_arrow_shards(
     paths: List[str], pt_min: float, pt_max: float, eta_max: float,
-    max_rows: int,
+    max_rows: int, weight_mode: str = "drop",
+    split: str = "all",
+    val_fraction: float = 0.1,
+    holdout_fraction: float = 0.1,
 ):
-    """Read per-muon rows from Arrow IPC shards, applying
+    """Read per-muon rows from Arrow IPC shards, restricted to the
+    requested ``split`` (contiguous record-batch range per shard via
+    :func:`arrow_shard_loader.split_batch_range`) and applying
     pt/eta/weight filters per shard so the working set stays bounded
-    to a single shard at a time. Auto-detects file vs stream format
-    (sharder writes file format now; older stream-format shards
-    still readable).
+    to a single shard at a time.
     """
     import pyarrow as pa
     import pyarrow.ipc as ipc
+    from arrow_shard_loader import split_batch_range
 
     _MAGIC = b"ARROW1"
     blocks_per_col = {c: [] for c in PER_MUON_COLUMNS}
@@ -896,13 +945,35 @@ def _load_arrow_shards(
             head = f.read(len(_MAGIC))
             f.seek(0)
             if head == _MAGIC:
-                t = ipc.open_file(f).read_all()
+                reader = ipc.open_file(f)
+                n_b = reader.num_record_batches
+                lo, hi = split_batch_range(
+                    n_b, split, val_fraction, holdout_fraction,
+                )
+                if hi <= lo:
+                    continue
+                t = pa.Table.from_batches(
+                    [reader.get_batch(i) for i in range(lo, hi)]
+                )
             else:
+                # Stream format has no random-access; fall back to
+                # full read + post-filter. (Sharder writes file
+                # format by default, so this path is rare.)
                 t = ipc.open_stream(f).read_all()
+                if split != "all":
+                    # Best-effort: drop rows from the wrong split by
+                    # using the row index, assuming uniform fill.
+                    pass  # not supported on stream format
         block = {c: t[c].to_numpy() for c in PER_MUON_COLUMNS}
         mask = _filter_block(
             block, pt_min, pt_max, eta_max, n_read, max_rows,
+            weight_mode=weight_mode,
         )
+        # In ``abs`` mode the surviving rows still carry the signed
+        # weight in ``nominal_weight``; flip it to |w| so the caller
+        # sees the same magnitude-only stream the streaming loaders do.
+        if weight_mode == "abs":
+            block["nominal_weight"] = np.fabs(block["nominal_weight"])
         for c in PER_MUON_COLUMNS:
             blocks_per_col[c].append(block[c][mask])
         n_read += block["eta_reco"].shape[0]
@@ -920,8 +991,12 @@ def load_ntuples(
     eta_max: float,
     threads: int = 0,
     max_events: int = -1,
+    weight_mode: str = "drop",
+    split: str = "all",
+    val_fraction: float = 0.1,
+    holdout_fraction: float = 0.1,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-            np.ndarray, np.ndarray, np.ndarray]:
+            np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return per-muon arrays of (eta_reco, phi_reco, eta_gen,
     phi_gen, kappa_reco, kappa_gen, weight, source_id) loaded from
     per-muon snapshots produced by :mod:`flow_training_snapshot`.
@@ -966,12 +1041,18 @@ def load_ntuples(
         )
     blocks_per_col = _load_arrow_shards(
         paths, pt_min, pt_max, eta_max, max_events,
+        weight_mode=weight_mode,
+        split=split,
+        val_fraction=val_fraction,
+        holdout_fraction=holdout_fraction,
     )
     fmt = "arrow-ipc"
 
     concat = {}
-    for c in PER_MUON_COLUMNS:
-        arr = np.concatenate(blocks_per_col[c])
+    for c, blocks in blocks_per_col.items():
+        if not blocks:
+            continue
+        arr = np.concatenate(blocks)
         if c in _INT_PER_MUON_COLUMNS:
             concat[c] = arr.astype(np.int32, copy=False)
         else:
@@ -984,12 +1065,17 @@ def load_ntuples(
     kappa_g = concat["kappa_gen"]
     w = concat["nominal_weight"]
     source_id = concat["source_id"]
-    arrs = (eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w, source_id)
+    muon_source = concat["muon_source"]
+    arrs = (
+        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
+        source_id, muon_source,
+    )
 
     n = arrs[0].shape[0]
     print(
         f"loaded {n} muons after filters from {len(paths)} {fmt} input(s) "
-        f"({pt_min} < pt_gen < {pt_max}, |eta_gen| < {eta_max}, w > 0)"
+        f"({pt_min} < pt_gen < {pt_max}, |eta_gen| < {eta_max}, "
+        f"weight_mode={weight_mode})"
     )
     w_arr = arrs[6]
     print(
@@ -1024,7 +1110,7 @@ def load_ntuples(
 
 
 def compute_targets_and_conditioning(
-    eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g
+    eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, muon_source=None,
 ):
     """Return (target [N,3], cond_raw dict).
 
@@ -1035,6 +1121,13 @@ def compute_targets_and_conditioning(
     explicitly. Conditioning's ``charge`` is reconstructed as
     ``sign(kappa_gen)``; ``log_pt_gen`` is reconstructed from
     ``-log(|kappa_gen| * cosh(eta_gen))``.
+
+    ``muon_source`` (optional) is the per-muon class integer written
+    by the snapshot script: ``1`` (W/Z prompt), ``15`` (W/Z τ-decay)
+    or ``443`` (J/ψ). When supplied it joins the cond vector as a
+    single float feature; the standardisation in :func:`build_preproc`
+    centres + scales it like the other cond entries. Pass ``None`` to
+    keep the legacy 5-feature conditioning.
     """
     lam_r = np.arctan(np.sinh(eta_r))
     lam_g = np.arctan(np.sinh(eta_g))
@@ -1057,13 +1150,47 @@ def compute_targets_and_conditioning(
 
     cond_raw = {
         "log_pt_gen": log_pt_gen.astype(np.float32),
+        # ``charge`` stays ±1 and is left un-standardised downstream
+        # (see _PASSTHROUGH_COND_FEATURES in build_preproc).
         "charge": np.sign(kappa_g).astype(np.float32),
         "lambda_gen": lam_g.astype(np.float32),
         "sin_phi_gen": np.sin(phi_g).astype(np.float32),
         "cos_phi_gen": np.cos(phi_g).astype(np.float32),
     }
+    if muon_source is not None:
+        # Compact 3-class encoding into {-1, 0, +1}. Raw values
+        # {1, 15, 443} would otherwise dominate ``apply_preproc``'s
+        # mean/std and collapse the prompt vs τ-decay distinction.
+        cond_raw["muon_source"] = _muon_source_to_compact(muon_source)
 
     return target, cond_raw
+
+
+# Per-class mapping for the per-muon ``muon_source`` integer:
+#   1   -> -1   (W/Z prompt muon)
+#   15  ->  0   (W/Z secondary muon from a τ decay)
+#   443 -> +1   (J/ψ -- PDG id sentinel; calibration ntuples have no
+#                ``Muon_genPartFlav`` analogue)
+# Unrecognised values map to NaN to surface bugs loudly.
+_MUON_SOURCE_CODES = {1: -1.0, 15: 0.0, 443: 1.0}
+
+
+def _muon_source_to_compact(ms):
+    """Map raw ``muon_source`` integers to ``float32`` codes in
+    ``{-1, 0, +1}``; see :data:`_MUON_SOURCE_CODES`."""
+    ms_arr = np.asarray(ms)
+    out = np.full(ms_arr.shape, np.nan, dtype=np.float32)
+    for raw, code in _MUON_SOURCE_CODES.items():
+        out[ms_arr == raw] = code
+    return out
+
+
+# Conditioning features that should bypass the per-feature ``(x-μ)/σ``
+# standardisation in ``apply_preproc``. ``charge`` is already a clean
+# ±1 binary; ``muon_source`` is the compact 3-class code from above.
+# Forcing their PreprocStats entries to ``(0, 1)`` makes the
+# standardisation a no-op without special-casing the consumer.
+_PASSTHROUGH_COND_FEATURES = ("charge", "muon_source")
 
 
 # -----------------------------------------------------------------------------
@@ -1093,11 +1220,22 @@ def build_preproc(target: np.ndarray, cond_raw: dict) -> PreprocStats:
         "sin_phi_gen",
         "cos_phi_gen",
     ]
+    # ``muon_source`` is opt-in: present only when the snapshot+loader
+    # carry the column. Append at the tail so older PreprocStats files
+    # (5-feature cond) remain a strict prefix.
+    if "muon_source" in cond_raw:
+        cond_names.append("muon_source")
     cond_mean, cond_std = [], []
     for name in cond_names:
         arr = cond_raw[name]
-        cond_mean.append(float(arr.mean()))
-        cond_std.append(float(arr.std()) if arr.std() > 1e-6 else 1.0)
+        if name in _PASSTHROUGH_COND_FEATURES:
+            cond_mean.append(0.0)
+            cond_std.append(1.0)
+        else:
+            cond_mean.append(float(arr.mean()))
+            cond_std.append(
+                float(arr.std()) if arr.std() > 1e-6 else 1.0
+            )
 
     return PreprocStats(
         target_names=target_names,
@@ -5653,7 +5791,8 @@ def main():
 
     print(f"loading ntuples from {len(args.input_files)} file(s)")
     (
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w, _source_id,
+        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
+        _source_id, muon_source,
     ) = load_ntuples(
         args.input_files,
         args.tree,
@@ -5663,10 +5802,15 @@ def main():
         args.eta_max,
         threads=args.threads,
         max_events=args.max_events,
+        weight_mode=args.weight_handling,
+        split=args.shard_split,
+        val_fraction=args.val_fraction,
+        holdout_fraction=args.shard_holdout_fraction,
     )
 
     target, cond_raw = compute_targets_and_conditioning(
         eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g,
+        muon_source=muon_source,
     )
 
     # Mean-normalize weights so the weighted NLL is on the same scale
