@@ -111,31 +111,40 @@ inline void compute_c_raw(float kappa_gen, float eta_gen, float phi_gen,
 class ReweightModel {
 public:
   ReweightModel(const std::string &onnx_path, unsigned int nslots = 1)
-      : onnx_(onnx_path, nslots) {}
+      : onnx_(std::make_shared<narf::onnx_helper_alloc>(onnx_path, nslots)) {}
 
   // Static-shape entry: y is [1, F], c is [1, NCond], u and σ are
   // [1, NVar, F], output is [1, NVar].  Buffers are caller-owned so
   // they can live on the stack across the per-muon loop.
   template <std::size_t NVar>
   void
-  run(const Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>> &y,
-      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>> &c,
-      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &u_raw,
-      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &sigma_raw,
+  run(Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>> &y,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>> &c,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &u_raw,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &sigma_raw,
       Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> &log_r) {
-    auto inputs = std::make_tuple(std::cref(y), std::cref(c),
-                                  std::cref(u_raw), std::cref(sigma_raw));
-    auto outputs = std::make_tuple(std::ref(log_r));
-    onnx_(inputs, outputs);
+    // ``narf::onnx_helper_alloc::operator()`` takes input/output tuples of
+    // references-to-tensor (the lambdas inside use ``auto&...``) and
+    // forwards ``.data()`` to ``Ort::Value::CreateTensor<T>(... T* ...)``,
+    // which is non-const even for input tensors. So the input tensors
+    // here are deliberately non-const (the caller's scratch buffers are
+    // freshly allocated per muon and immediately discarded).
+    //
+    // ``std::tie`` makes a tuple of plain references; ``std::cref`` would
+    // wrap in ``reference_wrapper<>``, which has no ``narf::tensor_traits``
+    // specialisation and would break ``::get_sizes()``.
+    auto inputs = std::tie(y, c, u_raw, sigma_raw);
+    auto outputs = std::tie(log_r);
+    (*onnx_)(inputs, outputs);
   }
 
 private:
   // onnx_helper_alloc creates Ort::Value views over the caller's tensor
-  // data on every call, so static-shape Eigen tensors at the run site
-  // are enough.  Slot selection inside onnx_helper_alloc is by TBB
-  // thread index (see onnxutils.hpp), so the same model object is safe
-  // under ``RunGraphs``.
-  narf::onnx_helper_alloc onnx_;
+  // data on every call. Slot selection inside is by TBB thread index
+  // (see onnxutils.hpp), so the same instance is safe under RunGraphs.
+  // Held via shared_ptr so the type is copyable -- RDataFrame Define
+  // needs to copy the helper into its internal storage.
+  std::shared_ptr<narf::onnx_helper_alloc> onnx_;
 };
 
 }  // namespace shift_smear_reweight
@@ -169,7 +178,8 @@ public:
                                    const std::string &onnx_path,
                                    unsigned int nslots = 1)
       : correctionHist_(std::make_shared<const T>(std::move(corrections))),
-        model_(onnx_path, nslots) {}
+        model_(std::make_shared<shift_smear_reweight::ReweightModel>(
+            onnx_path, nslots)) {}
 
   // Variadic templated bin lookup (lifted from JpsiCorrectionsUncHelperSplines
   // so the lookup interface stays identical).
@@ -275,7 +285,7 @@ public:
         }
       }
 
-      model_.template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
+      model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
 
       out_tensor_t alt_weights;
       for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {
@@ -294,7 +304,7 @@ public:
 
 private:
   std::shared_ptr<const T> correctionHist_;
-  shift_smear_reweight::ReweightModel model_;
+  std::shared_ptr<shift_smear_reweight::ReweightModel> model_;
 };
 
 // ---------------------------------------------------------------------------
@@ -331,7 +341,8 @@ public:
                                     unsigned int nslots = 1)
       : base_t(helper),
         hvar_(std::make_shared<const HISTVAR>(std::move(hvar))),
-        model_(onnx_path, nslots) {}
+        model_(std::make_shared<shift_smear_reweight::ReweightModel>(
+            onnx_path, nslots)) {}
 
   out_tensor_t operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
                           const RVec<float> &recPhis, const RVec<int> &recCharges,
@@ -420,7 +431,7 @@ public:
         sigma_buf(0, ivar, 0) = static_cast<float>(sigma_r_kappa);
       }
 
-      model_.template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
+      model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
 
       out_tensor_t alt_weights;
       for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
@@ -435,7 +446,7 @@ public:
 
 private:
   std::shared_ptr<const HISTVAR> hvar_;
-  mutable shift_smear_reweight::ReweightModel model_;
+  std::shared_ptr<shift_smear_reweight::ReweightModel> model_;
 };
 
 }  // namespace wrem

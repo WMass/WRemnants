@@ -422,7 +422,11 @@ calib_filepaths = common.calib_filepaths
 closure_filepaths = common.closure_filepaths
 diff_weights_helper = (
     ROOT.wrem.SplinesDifferentialWeightsHelper(calib_filepaths["tflite_file"])
-    if (args.muonScaleVariation == "smearingWeightsSplines" or args.validationHists)
+    if (
+        args.muonScaleVariation
+        in ("smearingWeightsSplines", "onnxReweight")
+        or args.validationHists
+    )
     else None
 )
 (
@@ -1330,11 +1334,40 @@ def build_graph(df, dataset):
                     input_kinematics.append(f"{reco_sel_GF}_response_weight")
 
                 # muon scale variation from stats. uncertainty on the jpsi massfit
-                df = df.Define(
-                    "nominal_muonScaleSyst_responseWeights_tensor",
-                    data_jpsi_crctn_unc_helper,
-                    [*input_kinematics, "nominal_weight"],
-                )
+                if muon_calibration._is_onnx_reweight_helper(
+                    data_jpsi_crctn_unc_helper
+                ):
+                    # ONNX helper consumes the full (reco/gen) kinematics
+                    # including φ and the muon_source column, plus the
+                    # legacy ``response_weight`` it ignores. Keep this list
+                    # local so the analytic-style auxiliary helpers below
+                    # still see the 7-column ``input_kinematics``.
+                    df = muon_calibration._define_muon_source_for_onnx_helper(
+                        df, reco_sel_GF
+                    )
+                    onnx_input_kinematics = [
+                        f"{reco_sel_GF}_recoPt",
+                        f"{reco_sel_GF}_recoEta",
+                        f"{reco_sel_GF}_recoPhi",
+                        f"{reco_sel_GF}_recoCharge",
+                        f"{reco_sel_GF}_genPt",
+                        f"{reco_sel_GF}_genEta",
+                        f"{reco_sel_GF}_genPhi",
+                        f"{reco_sel_GF}_genCharge",
+                        f"{reco_sel_GF}_muon_source",
+                        f"{reco_sel_GF}_response_weight",
+                    ]
+                    df = df.Define(
+                        "nominal_muonScaleSyst_responseWeights_tensor",
+                        data_jpsi_crctn_unc_helper,
+                        [*onnx_input_kinematics, "nominal_weight"],
+                    )
+                else:
+                    df = df.Define(
+                        "nominal_muonScaleSyst_responseWeights_tensor",
+                        data_jpsi_crctn_unc_helper,
+                        [*input_kinematics, "nominal_weight"],
+                    )
                 muonScaleSyst_responseWeights = df.HistoBoost(
                     "nominal_muonScaleSyst_responseWeights",
                     axes,

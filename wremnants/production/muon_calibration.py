@@ -963,9 +963,19 @@ def make_Z_non_closure_parametrized_helper(
     else:
         hist_non_closure.view()[..., 2] = M.values()
 
+    # The "...Splines..." vs analytic variant differs only in whether the
+    # helper consumes the per-muon ``response_weight`` column (provided by
+    # the SplinesDifferentialWeightsHelper). ``onnxReweight`` callers also
+    # ship that column (the network ignores the value, but the column is
+    # present in the dataframe), so route them through the Splines variant
+    # too to keep input column lists consistent across histmakers.
+    use_splines_response_column = scale_var_method in (
+        "smearingWeightsSplines",
+        "onnxReweight",
+    )
     hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure, tensor_rank=1)
     if correlated:
-        if scale_var_method == "smearingWeightsSplines":
+        if use_splines_response_column:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplinesCorl[
                 type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
             ](ROOT.std.move(hist_non_closure_cpp))
@@ -976,7 +986,7 @@ def make_Z_non_closure_parametrized_helper(
         z_non_closure_helper.tensor_axes = tuple([binning.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == "smearingWeightsSplines":
+        if use_splines_response_column:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplines[
                 type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
             ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
@@ -1004,6 +1014,11 @@ def make_Z_non_closure_binned_helper(
     # TODO: convert variable axis to regular if the bin width is uniform
     hist_non_closure = f["closure"].to_hist()
     hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure)
+    # Same routing rationale as make_Z_non_closure_parametrized_helper.
+    use_splines_response_column = scale_var_method in (
+        "smearingWeightsSplines",
+        "onnxReweight",
+    )
     if correlated:
         z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperCorl[
             type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
@@ -1011,7 +1026,7 @@ def make_Z_non_closure_binned_helper(
         z_non_closure_helper.tensor_axes = tuple([binning.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == "smearingWeightsSplines":
+        if use_splines_response_column:
             z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperSplines[
                 type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
             ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
