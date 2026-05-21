@@ -147,6 +147,76 @@ private:
   std::shared_ptr<narf::onnx_helper_alloc> onnx_;
 };
 
+// Per-muon scale-shift evaluator: encapsulates the kinematics ->
+// (y_raw, c_raw) packing, the u_buf fill from a caller-supplied
+// ``delta_r_kappa[NVar]`` array, the ONNX call, and the
+// ``exp(log_r)`` + ``clip_tensor`` step.  All ONNX-backed scale-
+// uncertainty helpers (J/psi-stats, Z non-closure parametrized, Z
+// non-closure binned, including the correlated variants) compose
+// one of these and supply their own per-muon ``delta_r_kappa``;
+// the per-muon kinematics handling is shared in one place.
+//
+// ``NVar`` is the per-muon shift multiplicity (2 for Z-non-closure
+// down/up; 2 * n_unc for J/psi stats; etc.).
+template <std::size_t NVar>
+class ShiftReweightEvaluator {
+public:
+  using delta_r_t = std::array<float, NVar>;
+  using alt_weights_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NVar>>;
+
+  ShiftReweightEvaluator(const std::string &onnx_path,
+                         unsigned int nslots = 1)
+      : model_(std::make_shared<ReweightModel>(onnx_path, nslots)) {}
+
+  // Per-muon evaluation. ``muon_source_raw`` is the raw
+  // ``Muon_genPartFlav`` value; the ORT graph remaps it internally.
+  // ``delta_r_kappa[k]`` is the signed per-variation shift in raw
+  // r_kappa units (caller computes this from its own correction hist).
+  alt_weights_t
+  evaluate(float recPt, float recEta, float recPhi, int recCharge,
+           float genPt, float genEta, float genPhi, int genCharge,
+           int muonSource_raw,
+           const delta_r_t &delta_r_kappa) const {
+    const float kappa_reco =
+        static_cast<float>(recCharge) / (recPt * std::cosh(recEta));
+    const float kappa_gen =
+        static_cast<float>(genCharge) / (genPt * std::cosh(genEta));
+    const int muon_source =
+        muon_source_from_gen_part_flav(muonSource_raw);
+
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>> y_t;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>> c_t;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> u_buf;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> sigma_buf;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> log_r;
+
+    std::array<float, F> y;
+    std::array<float, NCond> c;
+    compute_y_raw(kappa_reco, recEta, recPhi,
+                  kappa_gen, genEta, genPhi, y);
+    compute_c_raw(kappa_gen, genEta, genPhi, muon_source, c);
+    for (std::size_t k = 0; k < F; ++k) y_t(0, k) = y[k];
+    for (std::size_t k = 0; k < NCond; ++k) c_t(0, k) = c[k];
+
+    u_buf.setZero();
+    for (std::size_t k = 0; k < NVar; ++k) {
+      u_buf(0, k, 0) = delta_r_kappa[k];
+    }
+    sigma_buf.setZero();
+
+    model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
+
+    alt_weights_t alt_weights;
+    for (std::size_t k = 0; k < NVar; ++k) {
+      alt_weights(k) = std::exp(static_cast<double>(log_r(0, k)));
+    }
+    return wrem::clip_tensor(alt_weights, 10.);
+  }
+
+private:
+  std::shared_ptr<ReweightModel> model_;
+};
+
 }  // namespace shift_smear_reweight
 
 // ---------------------------------------------------------------------------
@@ -173,13 +243,13 @@ public:
   // (u down, u up) per η × {A, e, M} variation.
   static constexpr std::size_t NVar = 2 * static_cast<std::size_t>(nUnc);
   using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<nUnc, 2>>;
+  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<NVar>;
 
   JpsiCorrectionsUncReweightHelper(T &&corrections,
                                    const std::string &onnx_path,
                                    unsigned int nslots = 1)
       : correctionHist_(std::make_shared<const T>(std::move(corrections))),
-        model_(std::make_shared<shift_smear_reweight::ReweightModel>(
-            onnx_path, nslots)) {}
+        evaluator_(onnx_path, nslots) {}
 
   // Variadic templated bin lookup (lifted from JpsiCorrectionsUncHelperSplines
   // so the lookup interface stays identical).
@@ -194,68 +264,28 @@ public:
     return get_tensor_impl(std::index_sequence_for<Xs...>{}, xs...);
   }
 
+  // Note: no ``response_weights`` column -- the trained network supplies
+  // the full multiplicative reweight, so the spline-based dweightdqop
+  // linearisation isn't consulted (and the SplinesDifferentialWeightsHelper
+  // doesn't need to be evaluated at all when this helper is in use).
   out_tensor_t
   operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
              const RVec<float> &recPhis, const RVec<int> &recCharges,
              const RVec<float> &genPts, const RVec<float> &genEtas,
              const RVec<float> &genPhis, const RVec<int> &genCharges,
              const RVec<int> &muonSources,
-             const RVec<std::pair<double, double>> &response_weights,
              double nominal_weight = 1.0) {
-    (void)response_weights;  // legacy linearisation column; not consulted
-                             // -- the network gives the full weight directly.
-
     auto const nmuons = recPts.size();
     out_tensor_t alt_weights_all;
     alt_weights_all.setConstant(nominal_weight);
 
-    // Per-muon scratch tensors (live on the stack).  Sigma stays zero
-    // throughout for the scale-only variation.
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, shift_smear_reweight::F>> y_t;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, shift_smear_reweight::NCond>>
-        c_t;
-    Eigen::TensorFixedSize<float,
-                           Eigen::Sizes<1, NVar, shift_smear_reweight::F>>
-        u_buf;
-    Eigen::TensorFixedSize<float,
-                           Eigen::Sizes<1, NVar, shift_smear_reweight::F>>
-        sigma_buf;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> log_r;
-    sigma_buf.setZero();
-
     for (std::size_t i = 0; i < nmuons; ++i) {
       const float recPt = recPts[i];
       const float recEta = recEtas[i];
-      const float recPhi = recPhis[i];
       const int recCharge = recCharges[i];
       const float genPt = genPts[i];
       const float genEta = genEtas[i];
-      const float genPhi = genPhis[i];
       const int genCharge = genCharges[i];
-      const int muonSource = shift_smear_reweight::muon_source_from_gen_part_flav(
-          muonSources[i]);
-
-      const float kappa_reco =
-          static_cast<float>(recCharge) / (recPt * std::cosh(recEta));
-      const float kappa_gen =
-          static_cast<float>(genCharge) / (genPt * std::cosh(genEta));
-
-      // Full (κ_reco, η_reco, φ_reco, κ_gen, η_gen, φ_gen) form for y
-      // and (κ_gen, η_gen, φ_gen, muon_source) for c -- no φ ≈ 0 or
-      // charge-match approximation. The κ ratio absorbs charge flips
-      // natively: when sign(q_reco) ≠ sign(q_gen), κ_reco/κ_gen ≈
-      // -p_gen/p_reco and r_kappa ≈ -2, which is exactly the mode the
-      // network was trained on.
-      std::array<float, shift_smear_reweight::F> y;
-      std::array<float, shift_smear_reweight::NCond> c;
-      shift_smear_reweight::compute_y_raw(kappa_reco, recEta, recPhi,
-                                          kappa_gen, genEta, genPhi, y);
-      shift_smear_reweight::compute_c_raw(kappa_gen, genEta, genPhi,
-                                          muonSource, c);
-
-      for (std::size_t k = 0; k < shift_smear_reweight::F; ++k) y_t(0, k) = y[k];
-      for (std::size_t k = 0; k < shift_smear_reweight::NCond; ++k)
-        c_t(0, k) = c[k];
 
       // δr_kappa per variation (in raw r_κ units; the ONNX preproc
       // divides by target_std internally):
@@ -267,44 +297,40 @@ public:
       const auto &params = get_tensor(recEta);
       const double pgen = genPt * std::cosh(genEta);
       const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
-      u_buf.setZero();
 
+      typename evaluator_t::delta_r_t delta_r_kappa;
       for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {
         const double AUnc = params(0, ivar);
         const double eUnc = params(1, ivar);
         const double MUnc = params(2, ivar);
         const double recoQopUnc =
             calculateQopUnc(recPt, recEta, recCharge, AUnc, eUnc, MUnc);
-        const float delta_r_kappa =
+        const float dr =
             static_cast<float>(recoQopUnc * pgen * sign_qgen);
-        for (std::ptrdiff_t idownup = 0; idownup < 2; ++idownup) {
-          const float dir = (idownup == 0) ? -1.0f : 1.0f;
-          const std::size_t k =
-              static_cast<std::size_t>(ivar) * 2 + idownup;
-          u_buf(0, k, 0) = dir * delta_r_kappa;
-        }
+        delta_r_kappa[ivar * 2 + 0] = -dr;
+        delta_r_kappa[ivar * 2 + 1] = +dr;
       }
 
-      model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
+      const auto alt_weights_flat = evaluator_.evaluate(
+          recPt, recEta, recPhis[i], recCharge,
+          genPt, genEta, genPhis[i], genCharge,
+          muonSources[i], delta_r_kappa);
 
       out_tensor_t alt_weights;
       for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {
         for (std::ptrdiff_t idownup = 0; idownup < 2; ++idownup) {
-          const std::size_t k =
-              static_cast<std::size_t>(ivar) * 2 + idownup;
           alt_weights(ivar, idownup) =
-              std::exp(static_cast<double>(log_r(0, k)));
+              alt_weights_flat(ivar * 2 + idownup);
         }
       }
-      const out_tensor_t alt_weights_clamped = wrem::clip_tensor(alt_weights, 10.);
-      alt_weights_all *= alt_weights_clamped;
+      alt_weights_all *= alt_weights;
     }
     return alt_weights_all;
   }
 
 private:
   std::shared_ptr<const T> correctionHist_;
-  std::shared_ptr<shift_smear_reweight::ReweightModel> model_;
+  evaluator_t evaluator_;
 };
 
 // ---------------------------------------------------------------------------
@@ -344,15 +370,13 @@ public:
         model_(std::make_shared<shift_smear_reweight::ReweightModel>(
             onnx_path, nslots)) {}
 
+  // No ``response_weights`` column -- see JpsiCorrectionsUncReweightHelper.
   out_tensor_t operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
                           const RVec<float> &recPhis, const RVec<int> &recCharges,
                           const RVec<float> &genPts, const RVec<float> &genEtas,
                           const RVec<float> &genPhis, const RVec<int> &genCharges,
                           const RVec<int> &muonSources,
-                          const RVec<std::pair<double, double>> &response_weights,
                           const double nominal_weight = 1.0) const {
-    (void)response_weights;  // see Jpsi helper note.
-
     out_tensor_t res;
     res.setConstant(nominal_weight);
 
@@ -447,6 +471,279 @@ public:
 private:
   std::shared_ptr<const HISTVAR> hvar_;
   std::shared_ptr<shift_smear_reweight::ReweightModel> model_;
+};
+
+// ---------------------------------------------------------------------------
+// Z non-closure ONNX drop-ins
+// ---------------------------------------------------------------------------
+//
+// Drop-in replacements for ZNonClosure{Parametrized,Binned}Helper{,Splines}{,Corl}.
+// The non-closure shift source (per-η parameterised A/e/M; per-(η,pT)
+// binned non-closure factor) is unchanged; only the per-muon evaluation
+// is routed through ``shift_smear_reweight::ShiftReweightEvaluator``
+// instead of the analytic splines-linearisation
+// (``alt_weight = dweightdqop · δqop + 1``).  ``NVar = 2`` (down/up).
+//
+// The Splines and analytic variants take different column lists (the
+// Splines ones consume the ``response_weight`` column, the analytic
+// ones take genQops / recoQops / covs); the ONNX variants here align
+// with the J/psi-style ONNX column list (no ``response_weight``;
+// kinematics + ``muon_source``), so the histmaker call sites can share
+// the same column-list builder for every J/psi-style ONNX helper.
+
+namespace shift_smear_reweight {
+
+// Internal helper: compute the per-muon (down, up) δr_kappa array for
+// the Z-non-closure parametrized source.  ``params`` is the per-η
+// tensor row [A, e, M], ``calVarFlags`` selects which subset of the
+// three contributes (A=1, e=2, M=4 -- bit flags).
+//
+// Mirrors the body of ``ZNonClosureParametrizedHelperSplines::operator()``
+// up to (and including) the ``recoQopUnc`` calculation; the (down, up)
+// signed shift then converts to raw r_kappa units the same way the
+// J/psi-stats helper does (``δr_kappa = δqop_reco · p_gen · sign_qgen``).
+template <typename ParamsT>
+inline std::array<float, 2> z_non_closure_param_delta_r_kappa(
+    const ParamsT &params,
+    float recPt, float recEta, int recCharge,
+    float genPt, float genEta, int genCharge,
+    int calVarFlags) {
+  double recoK = 1.0 / recPt;
+  double recoKUnc = 0.0;
+  enum calVarFlagsScheme { AFlag = 1, eFlag = 2, MFlag = 4 };
+  if (calVarFlags & AFlag) {
+    const double AUnc = params(0);
+    recoKUnc += AUnc * recoK;
+  }
+  if (calVarFlags & eFlag) {
+    const double eUnc = params(1);
+    recoKUnc += -1.0 * eUnc * recoK * recoK;
+  }
+  if (calVarFlags & MFlag) {
+    const double MUnc = params(2);
+    recoKUnc += static_cast<double>(recCharge) * MUnc;
+  }
+  const double recoQopUnc =
+      static_cast<double>(recCharge) *
+      std::sin(calculateTheta(recEta)) * recoKUnc;
+  const double pgen = genPt * std::cosh(genEta);
+  const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
+  const float dr = static_cast<float>(recoQopUnc * pgen * sign_qgen);
+  return {-dr, +dr};
+}
+
+// Same for the binned source: ``non_closure`` is the per-(η, pT) bin
+// value of the non-closure factor (1.0 = no shift).
+inline std::array<float, 2> z_non_closure_binned_delta_r_kappa(
+    double non_closure,
+    float recPt, float recEta, int recCharge,
+    float genPt, float genEta, int genCharge) {
+  const double recoKUnc = (non_closure - 1.0) * (1.0 / recPt);
+  const double recoQopUnc = calculateQopUnc(recEta, recCharge, recoKUnc);
+  const double pgen = genPt * std::cosh(genEta);
+  const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
+  const float dr = static_cast<float>(recoQopUnc * pgen * sign_qgen);
+  return {-dr, +dr};
+}
+
+}  // namespace shift_smear_reweight
+
+// Parametrized, correlated: one [down, up] tensor for the whole event.
+template <typename T, std::size_t NEtaBins>
+class ZNonClosureParametrizedReweightHelperCorl {
+public:
+  using hist_t = T;
+  using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<2>>;
+  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+
+  ZNonClosureParametrizedReweightHelperCorl(T &&corrections,
+                                            const std::string &onnx_path,
+                                            unsigned int nslots = 1)
+      : correctionHist_(std::make_shared<const T>(std::move(corrections))),
+        evaluator_(onnx_path, nslots) {}
+
+  out_tensor_t
+  operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+             const RVec<float> &recPhis, const RVec<int> &recCharges,
+             const RVec<float> &genPts, const RVec<float> &genEtas,
+             const RVec<float> &genPhis, const RVec<int> &genCharges,
+             const RVec<int> &muonSources,
+             double nominal_weight = 1.0,
+             int calVarFlags = 7) {
+    out_tensor_t res;
+    res.setConstant(nominal_weight);
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const unsigned int iEta = std::clamp(
+          correctionHist_->template axis<0>().index(recEtas[i]),
+          0, int(NEtaBins) - 1);
+      const auto &params = correctionHist_->at(iEta).data();
+      const auto delta_r_kappa =
+          shift_smear_reweight::z_non_closure_param_delta_r_kappa(
+              params, recPts[i], recEtas[i], recCharges[i],
+              genPts[i], genEtas[i], genCharges[i], calVarFlags);
+      const auto alt_weights = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_r_kappa);
+      res(0) *= alt_weights(0);
+      res(1) *= alt_weights(1);
+    }
+    return res;
+  }
+
+private:
+  std::shared_ptr<const T> correctionHist_;
+  evaluator_t evaluator_;
+};
+
+// Parametrized, decorrelated: one [down, up] tensor per η bin.
+template <typename T, std::size_t NEtaBins>
+class ZNonClosureParametrizedReweightHelper {
+public:
+  using hist_t = T;
+  using out_tensor_t =
+      Eigen::TensorFixedSize<double, Eigen::Sizes<NEtaBins, 2>>;
+  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+
+  ZNonClosureParametrizedReweightHelper(T &&corrections,
+                                        const std::string &onnx_path,
+                                        unsigned int nslots = 1)
+      : correctionHist_(std::make_shared<const T>(std::move(corrections))),
+        evaluator_(onnx_path, nslots) {}
+
+  out_tensor_t
+  operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+             const RVec<float> &recPhis, const RVec<int> &recCharges,
+             const RVec<float> &genPts, const RVec<float> &genEtas,
+             const RVec<float> &genPhis, const RVec<int> &genCharges,
+             const RVec<int> &muonSources,
+             double nominal_weight = 1.0,
+             int calVarFlags = 7) {
+    out_tensor_t res;
+    res.setConstant(nominal_weight);
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const unsigned int iEta = std::clamp(
+          correctionHist_->template axis<0>().index(recEtas[i]),
+          0, int(NEtaBins) - 1);
+      const auto &params = correctionHist_->at(iEta).data();
+      const auto delta_r_kappa =
+          shift_smear_reweight::z_non_closure_param_delta_r_kappa(
+              params, recPts[i], recEtas[i], recCharges[i],
+              genPts[i], genEtas[i], genCharges[i], calVarFlags);
+      const auto alt_weights = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_r_kappa);
+      res(iEta, 0) *= alt_weights(0);
+      res(iEta, 1) *= alt_weights(1);
+    }
+    return res;
+  }
+
+private:
+  std::shared_ptr<const T> correctionHist_;
+  evaluator_t evaluator_;
+};
+
+// Binned, correlated.
+template <typename T, std::size_t NEtaBins, std::size_t NPtBins>
+class ZNonClosureBinnedReweightHelperCorl {
+public:
+  using hist_t = T;
+  using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<2>>;
+  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+
+  ZNonClosureBinnedReweightHelperCorl(T &&corrections,
+                                      const std::string &onnx_path,
+                                      unsigned int nslots = 1)
+      : correctionHist_(std::make_shared<const T>(std::move(corrections))),
+        evaluator_(onnx_path, nslots) {}
+
+  out_tensor_t
+  operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+             const RVec<float> &recPhis, const RVec<int> &recCharges,
+             const RVec<float> &genPts, const RVec<float> &genEtas,
+             const RVec<float> &genPhis, const RVec<int> &genCharges,
+             const RVec<int> &muonSources,
+             double nominal_weight = 1.0) {
+    out_tensor_t res;
+    res.setConstant(nominal_weight);
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const unsigned int iEta = std::clamp(
+          correctionHist_->template axis<0>().index(recEtas[i]),
+          0, int(NEtaBins) - 1);
+      const unsigned int iPt = std::clamp(
+          correctionHist_->template axis<1>().index(recPts[i]),
+          0, int(NPtBins) - 1);
+      const double non_closure = correctionHist_->at(iEta, iPt).value();
+      const auto delta_r_kappa =
+          shift_smear_reweight::z_non_closure_binned_delta_r_kappa(
+              non_closure, recPts[i], recEtas[i], recCharges[i],
+              genPts[i], genEtas[i], genCharges[i]);
+      const auto alt_weights = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_r_kappa);
+      res(0) *= alt_weights(0);
+      res(1) *= alt_weights(1);
+    }
+    return res;
+  }
+
+private:
+  std::shared_ptr<const T> correctionHist_;
+  evaluator_t evaluator_;
+};
+
+// Binned, decorrelated.
+template <typename T, std::size_t NEtaBins, std::size_t NPtBins>
+class ZNonClosureBinnedReweightHelper {
+public:
+  using hist_t = T;
+  using out_tensor_t =
+      Eigen::TensorFixedSize<double, Eigen::Sizes<NEtaBins, NPtBins, 2>>;
+  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+
+  ZNonClosureBinnedReweightHelper(T &&corrections,
+                                  const std::string &onnx_path,
+                                  unsigned int nslots = 1)
+      : correctionHist_(std::make_shared<const T>(std::move(corrections))),
+        evaluator_(onnx_path, nslots) {}
+
+  out_tensor_t
+  operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+             const RVec<float> &recPhis, const RVec<int> &recCharges,
+             const RVec<float> &genPts, const RVec<float> &genEtas,
+             const RVec<float> &genPhis, const RVec<int> &genCharges,
+             const RVec<int> &muonSources,
+             double nominal_weight = 1.0) {
+    out_tensor_t res;
+    res.setConstant(nominal_weight);
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const unsigned int iEta = std::clamp(
+          correctionHist_->template axis<0>().index(recEtas[i]),
+          0, int(NEtaBins) - 1);
+      const unsigned int iPt = std::clamp(
+          correctionHist_->template axis<1>().index(recPts[i]),
+          0, int(NPtBins) - 1);
+      const double non_closure = correctionHist_->at(iEta, iPt).value();
+      const auto delta_r_kappa =
+          shift_smear_reweight::z_non_closure_binned_delta_r_kappa(
+              non_closure, recPts[i], recEtas[i], recCharges[i],
+              genPts[i], genEtas[i], genCharges[i]);
+      const auto alt_weights = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_r_kappa);
+      res(iEta, iPt, 0) *= alt_weights(0);
+      res(iEta, iPt, 1) *= alt_weights(1);
+    }
+    return res;
+  }
+
+private:
+  std::shared_ptr<const T> correctionHist_;
+  evaluator_t evaluator_;
 };
 
 }  // namespace wrem
