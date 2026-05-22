@@ -126,6 +126,7 @@ closure_filepaths = common.closure_filepaths
     scale_e=args.scale_e,
     scale_M=args.scale_M,
     make_uncertainty_helper=True,
+    smearing=not args.noSmearing,
 )
 
 mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper = (

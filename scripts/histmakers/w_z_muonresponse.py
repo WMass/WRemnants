@@ -106,17 +106,22 @@ if args.testHelpers:
     # ONNX-based equivalents of the simple weight helpers above. Same
     # scalar reweight semantics, computed via the trained shift+smear
     # reweight network instead of the analytic splines linearisation.
+    # Picks the smearing-on / smearing-off variant of the bundled ONNX
+    # to match the resolution-smearing choice in the histmaker.
     _onnx_nslots = (
         ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1
     )
+    _onnx_path = muon_calibration.default_shift_smear_reweight_onnx(
+        smearing=not args.noSmearing,
+    )
     smearing_helper_simple_reweight = ROOT.wrem.SmearingHelperSimpleReweight(
         sigmarel,
-        muon_calibration.default_shift_smear_reweight_onnx,
+        _onnx_path,
         max(int(_onnx_nslots), 1),
     )
     scale_helper_simple_reweight = ROOT.wrem.ScaleHelperSimpleReweight(
         scalerel,
-        muon_calibration.default_shift_smear_reweight_onnx,
+        _onnx_path,
         max(int(_onnx_nslots), 1),
     )
 

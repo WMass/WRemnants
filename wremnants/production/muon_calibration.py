@@ -27,9 +27,24 @@ data_dir = common.data_dir
 # (mlp-factored architecture, muon_source-conditioned, single-file
 # inline-weights export). Produced by
 # scripts/corrections/muon_calibration/shift_smear_reweight_export.py.
-default_shift_smear_reweight_onnx = (
-    f"{data_dir}/calibration/shift_smear_reweight_mlp_factored_combined.onnx"
-)
+#
+# Two variants are bundled in wremnants-data: one trained on snapshots
+# built with the data/MC resolution-matching smearing helper applied to
+# the reco muon pt (the histmaker default), and one trained on the
+# un-smeared corrected pt. The network's reweight is conditioned on
+# whichever sample it learned on, so the right variant has to be
+# selected to match the kinematics the histmaker feeds in.
+def default_shift_smear_reweight_onnx(smearing=True):
+    """Return the path to the bundled shift+smear-reweight ONNX model
+    matching the chosen resolution-smearing setting. ``smearing=True``
+    (the histmaker default) returns the model trained on smeared reco
+    pt; pass ``smearing=False`` for the un-smeared variant.
+    """
+    suffix = "smearing" if smearing else "nosmearing"
+    return (
+        f"{data_dir}/calibration/"
+        f"shift_smear_reweight_mlp_factored_combined_{suffix}.onnx"
+    )
 
 
 def make_muon_calibration_helpers(
@@ -87,6 +102,7 @@ def make_jpsi_crctn_helpers(
     central=False,
     central_eta_min=-1.4,
     central_eta_max=1.4,
+    smearing=True,
 ):
     if muon_corr_mc in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
         mc_corrfile = calib_filepaths["mc_corrfile"][muon_corr_mc]
@@ -113,6 +129,7 @@ def make_jpsi_crctn_helpers(
                 central=central,
                 central_eta_min=central_eta_min,
                 central_eta_max=central_eta_max,
+                smearing=smearing,
             )
             if mc_corrfile
             else None
@@ -128,6 +145,7 @@ def make_jpsi_crctn_helpers(
                 central=central,
                 central_eta_min=central_eta_min,
                 central_eta_max=central_eta_max,
+                smearing=smearing,
             )
             if data_corrfile
             else None
@@ -139,12 +157,14 @@ def make_jpsi_crctn_helpers(
 
 
 def make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths):
+    smearing = not getattr(args, "noSmearing", False)
     parametrized_helper = (
         make_Z_non_closure_parametrized_helper(
             closure_filepaths["parametrized"],
             calib_filepaths["tflite_file"],
             correlated=args.correlatedNonClosureNP,
             scale_var_method=args.muonScaleVariation,
+            smearing=smearing,
             dummy_A=args.dummyNonClosureA,
             dummy_M=args.dummyNonClosureM,
             dummy_A_mag=args.dummyNonClosureAMag,
@@ -162,6 +182,7 @@ def make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths):
             calib_filepaths["tflite_file"],
             correlated=args.correlatedNonClosureNP,
             scale_var_method=args.muonScaleVariation,
+            smearing=smearing,
         )
         if (args.nonClosureScheme in ["binned", "binned-plus-M"])
         else None
@@ -307,9 +328,12 @@ def make_muon_smearing_helpers(
     filenamemc=f"{data_dir}/calibration/resolutionMC_LBL_JZ_deltaphim_Apr3.root",
     override_d=None,
     dummy_vars=False,
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     # this helper smears muon pT to match the resolution in data
 
     def load_res(filename):
@@ -682,9 +706,12 @@ def make_jpsi_crctn_unc_helper(
     central=False,
     central_eta_min=-1.4,
     central_eta_max=1.4,
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("A")
@@ -889,9 +916,12 @@ def _make_jpsi_style_unc_helper(
 def make_closure_uncertainty_helper(
     filepath_correction,
     scale_var_method="onnxReweight",
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("AZ")
@@ -980,9 +1010,12 @@ def make_uniform_closure_uncertainty_helper(
     iparm=0,
     val=1e-5,
     scale_var_method="onnxReweight",
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     nvars = 1
     n_scale_params = 3
 
@@ -1018,13 +1051,16 @@ def make_Z_non_closure_parametrized_helper(
     n_scale_params=3,
     correlated=False,
     scale_var_method="onnxReweight",
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
     dummy_A=True,
     dummy_M=False,
     dummy_A_mag=7.5e-5,
     dummy_M_mag=0,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     f = uproot.open(filepath_correction)
     M = f["MZ"].to_hist()
     A = f["AZ"].to_hist()
@@ -1100,9 +1136,12 @@ def make_Z_non_closure_binned_helper(
     n_pt_bins=5,
     correlated=False,
     scale_var_method="onnxReweight",
-    onnx_path=default_shift_smear_reweight_onnx,
+    smearing=True,
+    onnx_path=None,
     onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     f = uproot.open(filepath_correction)
 
     # TODO: convert variable axis to regular if the bin width is uniform

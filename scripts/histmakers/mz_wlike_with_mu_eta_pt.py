@@ -400,6 +400,7 @@ diff_weights_helper = (
     scale_e=args.scale_e,
     scale_M=args.scale_M,
     make_uncertainty_helper=True,
+    smearing=not args.noSmearing,
 )
 z_non_closure_parametrized_helper, z_non_closure_binned_helper = (
     muon_calibration.make_Z_non_closure_helpers(
@@ -412,13 +413,19 @@ mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper =
 )
 
 closure_unc_helper = muon_calibration.make_closure_uncertainty_helper(
-    common.closure_filepaths["parametrized"]
+    common.closure_filepaths["parametrized"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 closure_unc_helper_A = muon_calibration.make_uniform_closure_uncertainty_helper(
-    0, common.correlated_variation_base_size["A"]
+    0, common.correlated_variation_base_size["A"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 closure_unc_helper_M = muon_calibration.make_uniform_closure_uncertainty_helper(
-    2, common.correlated_variation_base_size["M"]
+    2, common.correlated_variation_base_size["M"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 
 smearing_helper, smearing_uncertainty_helper = (
