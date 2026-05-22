@@ -1640,6 +1640,36 @@ def add_jpsi_crctn_stats_unc_hists(
             )
             results.append(muonScaleSyst_responseWeights_splines)
 
+    if args.muonScaleVariation == "onnxReweight" or args.validationHists:
+        if args.muonScaleVariation == "onnxReweight":
+            jpsi_unc_helper = jpsi_crctn_data_unc_helper
+        else:
+            jpsi_unc_helper = make_jpsi_crctn_unc_helper(
+                calib_filepaths["data_corrfile"][args.muonCorrData],
+                scale_var_method="onnxReweight",
+                smearing=not getattr(args, "noSmearing", False),
+            )
+        df, onnx_cols = jpsi_style_cols(
+            df,
+            jpsi_unc_helper,
+            reco_sel_GF,
+            f"{reco_sel_GF}_response_weight",
+        )
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_onnx",
+            jpsi_unc_helper,
+            [*onnx_cols, "nominal_weight"],
+        )
+        if args.validationHists:
+            muonScaleSyst_responseWeights_onnx = df.HistoBoost(
+                "muonScaleSyst_responseWeights_onnx",
+                axes,
+                [*nominal_cols, "muonScaleSyst_responseWeights_tensor_onnx"],
+                tensor_axes=jpsi_unc_helper.tensor_axes,
+                storage=hist.storage.Double(),
+            )
+            results.append(muonScaleSyst_responseWeights_onnx)
+
     if args.muonScaleVariation == "massWeights" or args.validationHists:
         if args.muonScaleVariation == "massWeights" and isW:
             jpsi_unc_helper = jpsi_crctn_data_unc_helper
@@ -1687,6 +1717,11 @@ def add_jpsi_crctn_stats_unc_hists(
             df = df.Define(
                 "nominal_muonScaleSyst_responseWeights_tensor",
                 "muonScaleSyst_responseWeights_tensor_massWeights",
+            )
+        elif args.muonScaleVariation == "onnxReweight":
+            df = df.Define(
+                "nominal_muonScaleSyst_responseWeights_tensor",
+                "muonScaleSyst_responseWeights_tensor_onnx",
             )
         nominal_muonScaleSyst_responseWeights = df.HistoBoost(
             "nominal_muonScaleSyst_responseWeights",
