@@ -36,6 +36,7 @@ Run::
         --output     /path/to/polyhead.pt2 \
         --onnx-output /path/to/polyhead.onnx
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,10 +67,10 @@ from train_shift_smear_reweight import (  # noqa: E402
     _sigma_pack_indices,
 )
 
-
 # ---------------------------------------------------------------------------
 # Inference wrapper
 # ---------------------------------------------------------------------------
+
 
 class ReweightPolyheadInference(nn.Module):
     """``forward(y_raw, c_raw) → joint_coefs`` with preproc baked in.
@@ -97,7 +98,9 @@ class ReweightPolyheadInference(nn.Module):
         self.register_buffer("cond_std", cond_std)
 
     def forward(
-        self, y_raw: torch.Tensor, c_raw: torch.Tensor,
+        self,
+        y_raw: torch.Tensor,
+        c_raw: torch.Tensor,
     ) -> torch.Tensor:
         c_raw = _remap_muon_source_inplace(c_raw, self.muon_source_idx)
         y_std = (y_raw - self.target_mean) / self.target_std
@@ -151,17 +154,17 @@ class CombinedInference(nn.Module):
         c_raw = _remap_muon_source_inplace(c_raw, self.muon_source_idx)
         y_std = (y_raw - self.target_mean) / self.target_std
         c_std = (c_raw - self.cond_mean) / self.cond_std
-        coefs = self.polyhead(y_std, c_std)              # [B, n_basis]
+        coefs = self.polyhead(y_std, c_std)  # [B, n_basis]
         # Broadcast coefs across N_var without materializing a copy.
         coefs_b = coefs.unsqueeze(1).expand(-1, u.shape[1], -1)
         return evaluate_joint(
-            coefs_b, u, sigma,
+            coefs_b,
+            u,
+            sigma,
             self.polyhead.joint_indices,
             basis=str(getattr(self.polyhead, "basis", "monomial")),
             scale_u=float(getattr(self.polyhead, "basis_scale_u", 1.0)),
-            scale_sigma=float(
-                getattr(self.polyhead, "basis_scale_sigma", 1.0)
-            ),
+            scale_sigma=float(getattr(self.polyhead, "basis_scale_sigma", 1.0)),
             basis_aux=self.polyhead.basis_aux,
         )
 
@@ -180,8 +183,10 @@ class CombinedInference(nn.Module):
 # code without a ``where``-chain.
 # ---------------------------------------------------------------------------
 
+
 def _remap_muon_source_inplace(
-    c_raw: torch.Tensor, muon_source_idx: int,
+    c_raw: torch.Tensor,
+    muon_source_idx: int,
 ) -> torch.Tensor:
     """Return a new tensor identical to ``c_raw`` except column
     ``muon_source_idx`` is remapped from the raw {1, 15, 443} codes
@@ -190,13 +195,13 @@ def _remap_muon_source_inplace(
     if muon_source_idx < 0:
         return c_raw
     idx = muon_source_idx
-    ms_raw = c_raw[:, idx:idx + 1]
+    ms_raw = c_raw[:, idx : idx + 1]
     is_jpsi = (ms_raw == 443).to(c_raw.dtype)
     is_prompt = (ms_raw == 1).to(c_raw.dtype)
     # +1 for J/ψ, -1 for prompt W/Z, 0 for τ-decay (== 15) or anything
     # else — matches the trainer's ``_MUON_SOURCE_CODES`` table.
     ms_compact = is_jpsi - is_prompt
-    return torch.cat([c_raw[:, :idx], ms_compact, c_raw[:, idx + 1:]], dim=1)
+    return torch.cat([c_raw[:, :idx], ms_compact, c_raw[:, idx + 1 :]], dim=1)
 
 
 def _muon_source_idx(stats) -> int:
@@ -304,10 +309,12 @@ class CombinedInferenceMLP(nn.Module):
             # Stash zero-length tensors so torch.export sees consistent
             # state regardless of branch; never actually indexed.
             self.register_buffer(
-                "sigma_pack_iu", torch.zeros(0, dtype=torch.long),
+                "sigma_pack_iu",
+                torch.zeros(0, dtype=torch.long),
             )
             self.register_buffer(
-                "sigma_pack_ju", torch.zeros(0, dtype=torch.long),
+                "sigma_pack_ju",
+                torch.zeros(0, dtype=torch.long),
             )
 
     def forward(
@@ -329,8 +336,8 @@ class CombinedInferenceMLP(nn.Module):
         u = u_raw / self.target_std
         sigma = sigma_raw / self.target_std
         # Trunk runs once per event; broadcast across N_var.
-        e = self.head.trunk_forward(y_std, c_std)              # [B, d_emb]
-        e_b = e.unsqueeze(1).expand(-1, u.shape[1], -1)        # [B, N_var, d_emb]
+        e = self.head.trunk_forward(y_std, c_std)  # [B, d_emb]
+        e_b = e.unsqueeze(1).expand(-1, u.shape[1], -1)  # [B, N_var, d_emb]
 
         if self.shift_only:
             sigma_pack = sigma.new_zeros(
@@ -338,10 +345,12 @@ class CombinedInferenceMLP(nn.Module):
             )
         else:
             sigma_pack = _pack_sigma_outer(
-                sigma, self.sigma_pack_iu, self.sigma_pack_ju,
-            )                                                  # [B, N_var, n_pack]
+                sigma,
+                self.sigma_pack_iu,
+                self.sigma_pack_ju,
+            )  # [B, N_var, n_pack]
 
-        d = self.head.head_forward(e_b, u, sigma_pack)         # [B, N_var]
+        d = self.head.head_forward(e_b, u, sigma_pack)  # [B, N_var]
         if not self.is_factored:
             # Unfactored mlp head doesn't vanish at the origin; subtract
             # ``head(e, 0, 0)`` to recover the trainer's effective d.
@@ -354,6 +363,7 @@ class CombinedInferenceMLP(nn.Module):
         gb = getattr(self.head, "gauss_baseline", None)
         if gb is not None:
             from train_shift_smear_reweight import gauss_baseline_log_r
+
             mu_g, L_g = gb(c_std)
             mu_g_b = mu_g.unsqueeze(1).expand(-1, u.shape[1], -1)
             L_g_b = L_g.unsqueeze(1).expand(-1, u.shape[1], -1, -1)
@@ -365,13 +375,15 @@ class CombinedInferenceMLP(nn.Module):
         # diagnostic path; the trainer's BCE loss uses inf-clamp but
         # the deployment safety clamp is always the finite one.
         return d.clamp(
-            min=-self.positivity_clamp, max=self.positivity_clamp,
+            min=-self.positivity_clamp,
+            max=self.positivity_clamp,
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers (shared with flow_polyhead_export)
 # ---------------------------------------------------------------------------
+
 
 def _decompose_linear(ep):
     aten = torch.ops.aten
@@ -407,16 +419,12 @@ def _to_tuple(out):
 def _validate_aoti(wrapper, runner, n_features, n_cond, B, n_events, tol):
     rng = np.random.default_rng(0)
     n_events = max(B, ((n_events + B - 1) // B) * B)
-    y = torch.from_numpy(
-        rng.standard_normal((n_events, n_features)).astype(np.float32)
-    )
-    c = torch.from_numpy(
-        rng.standard_normal((n_events, n_cond)).astype(np.float32)
-    )
+    y = torch.from_numpy(rng.standard_normal((n_events, n_features)).astype(np.float32))
+    c = torch.from_numpy(rng.standard_normal((n_events, n_cond)).astype(np.float32))
     eager_chunks, aoti_chunks = [], []
     with torch.no_grad():
         for s in range(0, n_events, B):
-            yi, ci = y[s:s + B], c[s:s + B]
+            yi, ci = y[s : s + B], c[s : s + B]
             eager_chunks.append(_to_tuple(wrapper(yi, ci))[0])
             aoti_chunks.append(_to_tuple(runner(yi, ci))[0])
     et, at = torch.cat(eager_chunks), torch.cat(aoti_chunks)
@@ -432,7 +440,12 @@ def _validate_aoti(wrapper, runner, n_features, n_cond, B, n_events, tol):
 
 
 def _validate_onnx_combined(
-    combined, onnx_path, n_features, n_cond, n_events, tol,
+    combined,
+    onnx_path,
+    n_features,
+    n_cond,
+    n_events,
+    tol,
     n_var: int = 8,
 ):
     """Compare eager vs ORT for the (y, c, u, σ) → d combined graph."""
@@ -442,19 +455,20 @@ def _validate_onnx_combined(
         print("[validate-onnx-combined] onnxruntime not installed — skipping.")
         return True
     sess = ort.InferenceSession(
-        onnx_path, providers=["CPUExecutionProvider"],
+        onnx_path,
+        providers=["CPUExecutionProvider"],
     )
     rng = np.random.default_rng(2)
     y_v = rng.standard_normal((n_events, n_features)).astype(np.float32)
     c_v = rng.standard_normal((n_events, n_cond)).astype(np.float32)
-    u_v = rng.uniform(-1.0, 1.0,
-                      (n_events, n_var, n_features)).astype(np.float32)
-    s_v = rng.uniform(0.0, 1.0,
-                      (n_events, n_var, n_features)).astype(np.float32)
+    u_v = rng.uniform(-1.0, 1.0, (n_events, n_var, n_features)).astype(np.float32)
+    s_v = rng.uniform(0.0, 1.0, (n_events, n_var, n_features)).astype(np.float32)
     with torch.no_grad():
         ref = combined(
-            torch.from_numpy(y_v), torch.from_numpy(c_v),
-            torch.from_numpy(u_v), torch.from_numpy(s_v),
+            torch.from_numpy(y_v),
+            torch.from_numpy(c_v),
+            torch.from_numpy(u_v),
+            torch.from_numpy(s_v),
         ).numpy()
     in_names = [i.name for i in sess.get_inputs()]
     out_names = [o.name for o in sess.get_outputs()]
@@ -472,7 +486,12 @@ def _validate_onnx_combined(
 
 
 def _validate_onnx(
-    wrapper, onnx_path, n_features, n_cond, n_events, tol,
+    wrapper,
+    onnx_path,
+    n_features,
+    n_cond,
+    n_events,
+    tol,
 ):
     try:
         import onnxruntime as ort
@@ -480,14 +499,16 @@ def _validate_onnx(
         print("[validate-onnx] onnxruntime not installed — skipping.")
         return True
     sess = ort.InferenceSession(
-        onnx_path, providers=["CPUExecutionProvider"],
+        onnx_path,
+        providers=["CPUExecutionProvider"],
     )
     rng = np.random.default_rng(1)
     y_v = rng.standard_normal((n_events, n_features)).astype(np.float32)
     c_v = rng.standard_normal((n_events, n_cond)).astype(np.float32)
     with torch.no_grad():
         ref = wrapper(
-            torch.from_numpy(y_v), torch.from_numpy(c_v),
+            torch.from_numpy(y_v),
+            torch.from_numpy(c_v),
         ).numpy()
     out_names = [o.name for o in sess.get_outputs()]
     in_names = [i.name for i in sess.get_inputs()]
@@ -508,6 +529,7 @@ def _validate_onnx(
 # Sidecar — joint_indices in flat per-axis-degree form
 # ---------------------------------------------------------------------------
 
+
 def _emit_indices_sidecar(polyhead, stats, out_path):
     """Write a JSON file describing the polynomial basis so the C++
     side can evaluate it without re-implementing the index logic.
@@ -519,31 +541,27 @@ def _emit_indices_sidecar(polyhead, stats, out_path):
     """
     n_features = int(polyhead.n_features)
     aa, bb = [], []
-    for (a, b) in polyhead._joint_indices:
+    for a, b in polyhead._joint_indices:
         aa.append(_multiindex_to_axis_degrees(a, n_features))
         bb.append(_multiindex_to_axis_degrees(b, n_features))
     payload = {
-        "n_features":     n_features,
-        "n_basis":        int(polyhead.n_basis),
-        "n_pure_u":       int(polyhead._n_pure_u),
-        "n_pure_sigma":   int(polyhead._n_pure_s),
-        "n_cross":        int(polyhead._n_cross),
-        "max_deg_u":      int(polyhead.max_deg_u),
-        "max_deg_sigma":  int(polyhead.max_deg_sigma),
-        "max_cross_deg":  int(polyhead.max_cross_deg),
-        "basis":          str(getattr(polyhead, "basis", "monomial")),
-        "basis_scale_u":  float(
-            getattr(polyhead, "basis_scale_u", 1.0)
-        ),
-        "basis_scale_sigma": float(
-            getattr(polyhead, "basis_scale_sigma", 1.0)
-        ),
-        "alpha_degs":     [list(map(int, row)) for row in aa],
-        "beta_degs":      [list(map(int, row)) for row in bb],
-        "target_std":     [float(x) for x in stats.target_std],
-        "target_mean":    [float(x) for x in stats.target_mean],
-        "cond_std":       [float(x) for x in stats.cond_std],
-        "cond_mean":      [float(x) for x in stats.cond_mean],
+        "n_features": n_features,
+        "n_basis": int(polyhead.n_basis),
+        "n_pure_u": int(polyhead._n_pure_u),
+        "n_pure_sigma": int(polyhead._n_pure_s),
+        "n_cross": int(polyhead._n_cross),
+        "max_deg_u": int(polyhead.max_deg_u),
+        "max_deg_sigma": int(polyhead.max_deg_sigma),
+        "max_cross_deg": int(polyhead.max_cross_deg),
+        "basis": str(getattr(polyhead, "basis", "monomial")),
+        "basis_scale_u": float(getattr(polyhead, "basis_scale_u", 1.0)),
+        "basis_scale_sigma": float(getattr(polyhead, "basis_scale_sigma", 1.0)),
+        "alpha_degs": [list(map(int, row)) for row in aa],
+        "beta_degs": [list(map(int, row)) for row in bb],
+        "target_std": [float(x) for x in stats.target_std],
+        "target_mean": [float(x) for x in stats.target_mean],
+        "cond_std": [float(x) for x in stats.cond_std],
+        "cond_mean": [float(x) for x in stats.cond_mean],
     }
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2)
@@ -554,30 +572,35 @@ def _emit_indices_sidecar(polyhead, stats, out_path):
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
-        "--checkpoint", required=True,
+        "--checkpoint",
+        required=True,
         help="Path to a shift_smear_reweight checkpoint with "
         "model_config.arch == 'polyhead'.",
     )
     p.add_argument(
-        "--output", default=None,
+        "--output",
+        default=None,
         help="AOTI .pt2 output path. Pass empty string or skip to "
         "disable AOTI export. Default: alongside the checkpoint as "
         "shift_smear_reweight_polyhead.pt2.",
     )
     p.add_argument(
-        "--onnx-output", default=None,
+        "--onnx-output",
+        default=None,
         help="ONNX .onnx output path for the trunk-only graph "
         "(forward(y, c) -> coefs). Default: alongside the "
         "checkpoint as shift_smear_reweight_polyhead.onnx.",
     )
     p.add_argument(
-        "--combined-onnx-output", default=None,
+        "--combined-onnx-output",
+        default=None,
         help="ONNX .onnx output path for the combined graph "
         "(forward(y, c, u, sigma) -> d) with the polynomial "
         "evaluation folded in. Default: alongside the checkpoint as "
@@ -585,7 +608,8 @@ def parse_args():
         "string to disable.",
     )
     p.add_argument(
-        "--combined-output", default=None,
+        "--combined-output",
+        default=None,
         help="AOTI .pt2 output path for the combined graph "
         "(forward(y, c, u, sigma) -> d). Compiled with dynamic batch "
         "and dynamic N_var dimensions so a single package handles "
@@ -594,36 +618,44 @@ def parse_args():
         "Pass empty string to disable.",
     )
     p.add_argument(
-        "--indices-output", default=None,
+        "--indices-output",
+        default=None,
         help="JSON sidecar path. Default: derived from --output by "
         "replacing the trailing extension with '.indices.json'.",
     )
     p.add_argument(
-        "--batch", type=int, default=1,
+        "--batch",
+        type=int,
+        default=1,
         help="Static batch size baked into AOTI when "
         "--no-dynamic-batch is in effect.",
     )
     p.add_argument(
         "--dynamic-batch",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Compile a dynamic-batch AOTI package. Off by default "
         "(static batch=1 is the lowest-latency narf path).",
     )
     p.add_argument(
         "--max-autotune",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
     p.add_argument(
         "--freeze",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
     p.add_argument(
         "--prepack",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
     p.add_argument(
         "--link-libtorch",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="If False, AOTI compiles the wrapper.so without "
         "libtorch.so / libtorch_cpu.so as DT_NEEDED, leaving only "
         "the C-ABI aoti_torch_* shim symbols (~20) plus libgomp/"
@@ -641,7 +673,8 @@ def parse_args():
     )
     p.add_argument(
         "--package-cpp-only",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Emit the AOTI .pt2 as source code (.cpp + .h + "
         ".weights.o + CMakeLists.txt) instead of a precompiled "
         ".so. Combined with --no-link-libtorch this gives full "
@@ -666,7 +699,8 @@ def parse_args():
     p.add_argument("--validate-n", type=int, default=128)
     p.add_argument("--validate-tol", type=float, default=1e-4)
     p.add_argument(
-        "--bench", action="store_true",
+        "--bench",
+        action="store_true",
         help="After export, time AOTI runner forward at the static "
         "batch (single core).",
     )
@@ -678,27 +712,33 @@ def parse_args():
 # Main
 # ---------------------------------------------------------------------------
 
+
 def _default_paths(args):
     base = os.path.dirname(os.path.abspath(args.checkpoint))
     if args.output is None:
         args.output = os.path.join(
-            base, "shift_smear_reweight_polyhead.pt2",
+            base,
+            "shift_smear_reweight_polyhead.pt2",
         )
     if args.onnx_output is None:
         args.onnx_output = os.path.join(
-            base, "shift_smear_reweight_polyhead.onnx",
+            base,
+            "shift_smear_reweight_polyhead.onnx",
         )
     if args.combined_onnx_output is None:
         args.combined_onnx_output = os.path.join(
-            base, "shift_smear_reweight_polyhead_combined.onnx",
+            base,
+            "shift_smear_reweight_polyhead_combined.onnx",
         )
     if args.combined_output is None:
         args.combined_output = os.path.join(
-            base, "shift_smear_reweight_polyhead_combined.pt2",
+            base,
+            "shift_smear_reweight_polyhead_combined.pt2",
         )
     if args.indices_output is None:
         args.indices_output = os.path.join(
-            base, "shift_smear_reweight_polyhead.indices.json",
+            base,
+            "shift_smear_reweight_polyhead.indices.json",
         )
 
 
@@ -714,8 +754,10 @@ def _build_wrapper(checkpoint_path):
     and ``main`` only emits the combined (y, c, u, σ) variant.
     """
     from train_muon_response_flow import PreprocStats
+
     model, arch, stats, _ = load_model_from_checkpoint(
-        checkpoint_path, device="cpu",
+        checkpoint_path,
+        device="cpu",
     )
     if arch not in ("polyhead", "mlp", "mlp-factored"):
         raise SystemExit(
@@ -728,22 +770,25 @@ def _build_wrapper(checkpoint_path):
         pp = os.path.join(ck_dir, "preproc.json")
         if not os.path.exists(pp):
             raise SystemExit(
-                f"checkpoint has no PreprocStats and no preproc.json "
-                f"at {pp}"
+                f"checkpoint has no PreprocStats and no preproc.json " f"at {pp}"
             )
         with open(pp) as f:
             stats = PreprocStats(**json.load(f))
     target_mean = torch.tensor(
-        list(stats.target_mean), dtype=torch.float32,
+        list(stats.target_mean),
+        dtype=torch.float32,
     )
     target_std = torch.tensor(
-        list(stats.target_std), dtype=torch.float32,
+        list(stats.target_std),
+        dtype=torch.float32,
     )
     cond_mean = torch.tensor(
-        list(stats.cond_mean), dtype=torch.float32,
+        list(stats.cond_mean),
+        dtype=torch.float32,
     )
     cond_std = torch.tensor(
-        list(stats.cond_std), dtype=torch.float32,
+        list(stats.cond_std),
+        dtype=torch.float32,
     )
     if arch == "polyhead":
         wrapper = ReweightPolyheadInference(
@@ -801,10 +846,8 @@ def main():
     )
     print(f"arch={arch}  n_features={n_features}  n_cond={n_cond}")
 
-    is_polyhead = (arch == "polyhead")
-    is_factored = (arch == "mlp-factored") or bool(
-        getattr(model, "is_factored", False)
-    )
+    is_polyhead = arch == "polyhead"
+    is_factored = (arch == "mlp-factored") or bool(getattr(model, "is_factored", False))
     shift_only = bool(getattr(model, "shift_only", False))
 
     if is_polyhead:
@@ -848,21 +891,21 @@ def main():
                 "y_raw": {0: batch_dim},
                 "c_raw": {0: batch_dim},
             }
-            print(
-                f"\ntorch.export.export (dynamic batch, B_example="
-                f"{B_trace}) ..."
-            )
+            print(f"\ntorch.export.export (dynamic batch, B_example=" f"{B_trace}) ...")
         else:
             dynamic_shapes = None
             print(f"\ntorch.export.export (static B={B}) ...")
         ep = torch.export.export(
-            wrapper, (y, c), dynamic_shapes=dynamic_shapes,
+            wrapper,
+            (y, c),
+            dynamic_shapes=dynamic_shapes,
         )
         ep = _decompose_linear(ep)
         print(f"aoti_compile_and_package -> {args.output}")
         with torch.no_grad():
             torch._inductor.aoti_compile_and_package(
-                ep, package_path=args.output,
+                ep,
+                package_path=args.output,
             )
         size_mb = os.path.getsize(args.output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
@@ -884,9 +927,12 @@ def main():
             # Do so explicitly so users can still validate the
             # exported package round-trips correctly.
             import ctypes
+
             import torch as _torch
+
             _libcpu = os.path.join(
-                os.path.dirname(_torch.__file__), "lib",
+                os.path.dirname(_torch.__file__),
+                "lib",
                 "libtorch_cpu.so",
             )
             ctypes.CDLL(_libcpu, mode=ctypes.RTLD_GLOBAL)
@@ -896,8 +942,13 @@ def main():
             print(f"loaded; max |aoti - eager| joint_coefs = {diff:.2e}")
             if args.validate_n > 0:
                 _validate_aoti(
-                    wrapper, runner, n_features, n_cond, B,
-                    args.validate_n, args.validate_tol,
+                    wrapper,
+                    runner,
+                    n_features,
+                    n_cond,
+                    B,
+                    args.validate_n,
+                    args.validate_tol,
                 )
         else:
             runner = torch._inductor.aoti_load_package(args.output)
@@ -907,8 +958,13 @@ def main():
 
             if args.validate_n > 0:
                 _validate_aoti(
-                    wrapper, runner, n_features, n_cond, B,
-                    args.validate_n, args.validate_tol,
+                    wrapper,
+                    runner,
+                    n_features,
+                    n_cond,
+                    B,
+                    args.validate_n,
+                    args.validate_tol,
                 )
 
         if args.bench:
@@ -947,8 +1003,8 @@ def main():
         dynamic_axes = None
         # Export ONNX with dynamic batch by default — trivial for ORT.
         dynamic_axes = {
-            "y_raw":      {0: "batch"},
-            "c_raw":      {0: "batch"},
+            "y_raw": {0: "batch"},
+            "c_raw": {0: "batch"},
             "joint_coefs": {0: "batch"},
         }
         print(
@@ -956,7 +1012,9 @@ def main():
             f"opset={args.opset}) -> {args.onnx_output}"
         )
         torch.onnx.export(
-            wrapper, (y, c), args.onnx_output,
+            wrapper,
+            (y, c),
+            args.onnx_output,
             input_names=["y_raw", "c_raw"],
             output_names=["joint_coefs"],
             dynamic_axes=dynamic_axes,
@@ -965,16 +1023,18 @@ def main():
             export_params=True,
         )
         if args.inline_weights and _onnx_inline_external_data(args.onnx_output):
-            print(
-                "  external-data sidecars absorbed -> single-file .onnx"
-            )
+            print("  external-data sidecars absorbed -> single-file .onnx")
         size_mb = os.path.getsize(args.onnx_output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
 
         if args.validate_n > 0:
             _validate_onnx(
-                wrapper, args.onnx_output, n_features, n_cond,
-                args.validate_n, args.validate_tol,
+                wrapper,
+                args.onnx_output,
+                n_features,
+                n_cond,
+                args.validate_n,
+                args.validate_tol,
             )
 
     # ---------- Combined AOTI / ONNX share the same wrapper ----------
@@ -991,21 +1051,27 @@ def main():
                 cond_std=wrapper.cond_std,
             )
             combined = CombinedInference(
-                polyhead=model, muon_source_idx=ms_idx, **buffers,
+                polyhead=model,
+                muon_source_idx=ms_idx,
+                **buffers,
             ).eval()
         else:
             buffers = dict(
                 target_mean=torch.tensor(
-                    list(stats.target_mean), dtype=torch.float32,
+                    list(stats.target_mean),
+                    dtype=torch.float32,
                 ),
                 target_std=torch.tensor(
-                    list(stats.target_std), dtype=torch.float32,
+                    list(stats.target_std),
+                    dtype=torch.float32,
                 ),
                 cond_mean=torch.tensor(
-                    list(stats.cond_mean), dtype=torch.float32,
+                    list(stats.cond_mean),
+                    dtype=torch.float32,
                 ),
                 cond_std=torch.tensor(
-                    list(stats.cond_std), dtype=torch.float32,
+                    list(stats.cond_std),
+                    dtype=torch.float32,
                 ),
             )
             combined = CombinedInferenceMLP(
@@ -1030,21 +1096,16 @@ def main():
         s_e = torch.randn(B_ex, N_ex, n_features)
         with torch.no_grad():
             d_e = combined(y_e, c_e, u_e, s_e)
-        print(
-            f"\ncombined eager: out={tuple(d_e.shape)} "
-            f"(B={B_ex}, N_var={N_ex})"
-        )
+        print(f"\ncombined eager: out={tuple(d_e.shape)} " f"(B={B_ex}, N_var={N_ex})")
 
     # ---------- Combined AOTI .pt2 ----------
     if args.combined_output:
         os.makedirs(
-            os.path.dirname(
-                os.path.abspath(args.combined_output)
-            ) or ".",
+            os.path.dirname(os.path.abspath(args.combined_output)) or ".",
             exist_ok=True,
         )
         batch_dim = torch.export.Dim("batch", min=1, max=2**20)
-        nvar_dim  = torch.export.Dim("nvar",  min=1, max=2**20)
+        nvar_dim = torch.export.Dim("nvar", min=1, max=2**20)
         # Positional tuple (matches both ``CombinedInference`` and
         # ``CombinedInferenceMLP``, whose 3rd/4th args are ``u``/``sigma``
         # vs ``u_raw``/``sigma_raw`` respectively — torch.export's dict
@@ -1061,14 +1122,16 @@ def main():
             f"(dynamic batch+nvar, B={B_ex}, N_var={N_ex}) ..."
         )
         ep = torch.export.export(
-            combined, (y_e, c_e, u_e, s_e),
+            combined,
+            (y_e, c_e, u_e, s_e),
             dynamic_shapes=dynamic_shapes_combined,
         )
         ep = _decompose_linear(ep)
         print(f"aoti_compile_and_package -> {args.combined_output}")
         with torch.no_grad():
             torch._inductor.aoti_compile_and_package(
-                ep, package_path=args.combined_output,
+                ep,
+                package_path=args.combined_output,
             )
         size_mb = os.path.getsize(args.combined_output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
@@ -1086,18 +1149,19 @@ def main():
                 # resolve at dlopen time when libtorch isn't in
                 # DT_NEEDED.
                 import ctypes
+
                 import torch as _torch
+
                 _libcpu = os.path.join(
-                    os.path.dirname(_torch.__file__), "lib",
+                    os.path.dirname(_torch.__file__),
+                    "lib",
                     "libtorch_cpu.so",
                 )
                 ctypes.CDLL(_libcpu, mode=ctypes.RTLD_GLOBAL)
             runner = torch._inductor.aoti_load_package(args.combined_output)
             out = _to_tuple(runner(y_e, c_e, u_e, s_e))[0]
             diff = (out - d_e).abs().max().item()
-            print(
-                f"loaded; max |aoti - eager| d = {diff:.2e}"
-            )
+            print(f"loaded; max |aoti - eager| d = {diff:.2e}")
 
         if args.validate_n > 0 and runner is not None:
             # Match the existing combined-ONNX validation: random
@@ -1105,25 +1169,25 @@ def main():
             rng = np.random.default_rng(3)
             n_use = args.validate_n
             n_var = 8
-            y_v = torch.from_numpy(rng.standard_normal(
-                (n_use, n_features)).astype(np.float32))
-            c_v = torch.from_numpy(rng.standard_normal(
-                (n_use, n_cond)).astype(np.float32))
-            u_v = torch.from_numpy(rng.uniform(
-                -1.0, 1.0, (n_use, n_var, n_features)
-            ).astype(np.float32))
-            s_v = torch.from_numpy(rng.uniform(
-                0.0, 1.0, (n_use, n_var, n_features)
-            ).astype(np.float32))
+            y_v = torch.from_numpy(
+                rng.standard_normal((n_use, n_features)).astype(np.float32)
+            )
+            c_v = torch.from_numpy(
+                rng.standard_normal((n_use, n_cond)).astype(np.float32)
+            )
+            u_v = torch.from_numpy(
+                rng.uniform(-1.0, 1.0, (n_use, n_var, n_features)).astype(np.float32)
+            )
+            s_v = torch.from_numpy(
+                rng.uniform(0.0, 1.0, (n_use, n_var, n_features)).astype(np.float32)
+            )
             with torch.no_grad():
                 ref = combined(y_v, c_v, u_v, s_v)
                 aoti_out = _to_tuple(runner(y_v, c_v, u_v, s_v))[0]
             max_abs = (ref - aoti_out).abs().max().item()
             denom = max(ref.abs().max().item(), 1e-30)
             rel = max_abs / denom
-            status = (
-                "OK" if rel < args.validate_tol else "MISMATCH"
-            )
+            status = "OK" if rel < args.validate_tol else "MISMATCH"
             print(
                 f"[validate-aoti-combined] d over N={n_use} "
                 f"N_var={n_var}: max |eager-aoti|={max_abs:.3e} "
@@ -1133,17 +1197,15 @@ def main():
     # ---------- Combined ONNX (trunk + poly) ----------
     if args.combined_onnx_output:
         os.makedirs(
-            os.path.dirname(
-                os.path.abspath(args.combined_onnx_output)
-            ) or ".",
+            os.path.dirname(os.path.abspath(args.combined_onnx_output)) or ".",
             exist_ok=True,
         )
         dynamic_axes_combined = {
-            "y_raw":  {0: "batch"},
-            "c_raw":  {0: "batch"},
-            "u":      {0: "batch", 1: "nvar"},
-            "sigma":  {0: "batch", 1: "nvar"},
-            "d":      {0: "batch", 1: "nvar"},
+            "y_raw": {0: "batch"},
+            "c_raw": {0: "batch"},
+            "u": {0: "batch", 1: "nvar"},
+            "sigma": {0: "batch", 1: "nvar"},
+            "d": {0: "batch", 1: "nvar"},
         }
         print(
             f"torch.onnx.export combined (dynamic batch+nvar, "
@@ -1151,7 +1213,9 @@ def main():
             f"{args.combined_onnx_output}"
         )
         torch.onnx.export(
-            combined, (y_e, c_e, u_e, s_e), args.combined_onnx_output,
+            combined,
+            (y_e, c_e, u_e, s_e),
+            args.combined_onnx_output,
             input_names=["y_raw", "c_raw", "u", "sigma"],
             output_names=["d"],
             dynamic_axes=dynamic_axes_combined,
@@ -1162,16 +1226,18 @@ def main():
         if args.inline_weights and _onnx_inline_external_data(
             args.combined_onnx_output,
         ):
-            print(
-                "  external-data sidecars absorbed -> single-file .onnx"
-            )
+            print("  external-data sidecars absorbed -> single-file .onnx")
         size_mb = os.path.getsize(args.combined_onnx_output) / 1e6
         print(f" OK ({size_mb:.2f} MB)")
 
         if args.validate_n > 0:
             _validate_onnx_combined(
-                combined, args.combined_onnx_output, n_features,
-                n_cond, args.validate_n, args.validate_tol,
+                combined,
+                args.combined_onnx_output,
+                n_features,
+                n_cond,
+                args.validate_n,
+                args.validate_tol,
             )
 
 

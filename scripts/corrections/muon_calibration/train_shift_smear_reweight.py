@@ -55,6 +55,7 @@ see the same numbers (and hence make the same early-stopping
 decisions); only rank 0 prints, writes checkpoints, and saves the
 final artifact.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,12 +80,10 @@ if _HERE not in sys.path:
 from train_muon_response_flow import _build_basis_aux  # noqa: E402
 from train_muon_response_flow import _select_basis  # noqa: E402
 from train_muon_response_flow import (  # noqa: E402
-    PreprocStats,
     _joint_indices,
     _state_dict_to_cpu,
     evaluate_joint,
 )
-
 
 _LOG_W_CLAMP = 30.0
 _LOG_LOG2 = math.log(math.log(2.0))
@@ -114,6 +113,7 @@ _LOG_LOG2 = math.log(math.log(2.0))
 # which is the natural choice given the user's "fully described by
 # the polynomial" assumption.
 
+
 def _smolyak_cheb_lobatto_1d(level: int):
     """Chebyshev-Lobatto nodes at Smolyak axis-level α (0-indexed):
     α=0 → {0}; α≥1 → 2^α + 1 nodes including ±1, equally spaced in
@@ -121,15 +121,14 @@ def _smolyak_cheb_lobatto_1d(level: int):
     if level <= 0:
         return [0.0]
     n = (1 << level) + 1
-    return [
-        -math.cos(math.pi * k / (n - 1)) for k in range(n)
-    ]
+    return [-math.cos(math.pi * k / (n - 1)) for k in range(n)]
 
 
 def _smolyak_grid(d: int, L: int):
     """Smolyak sparse grid in [-1, 1]^d at level ``L``. Returns a
     deduplicated, sorted ``np.ndarray`` of shape ``[K, d]``."""
     import itertools as _it
+
     points = set()
     # Iterate (α_1, ..., α_d) with α_j ≥ 0 and Σ α_j ≤ L.
     for alpha in _it.product(range(L + 1), repeat=d):
@@ -163,13 +162,17 @@ def _auto_smolyak_level(d: int, n_target: int, max_level: int = 8) -> int:
 
 
 _ACTIVATIONS = {
-    "gelu": nn.GELU, "relu": nn.ReLU, "silu": nn.SiLU, "tanh": nn.Tanh,
+    "gelu": nn.GELU,
+    "relu": nn.ReLU,
+    "silu": nn.SiLU,
+    "tanh": nn.Tanh,
 }
 
 
 # ============================================================================
 # Σ-pack helpers (upper-triangular flatten of σσᵀ)
 # ============================================================================
+
 
 def _sigma_pack_indices(n_features: int):
     """Indices into a flat n(n+1)/2 vector that mirror the upper
@@ -188,6 +191,7 @@ def _pack_sigma_outer(sigma_vec, iu, ju):
 # ============================================================================
 # Gauss–Hermite quadrature helpers (probabilist's; weights sum to 1)
 # ============================================================================
+
 
 def _gh_nodes_weights(K: int, dtype=torch.float32):
     """Probabilist's Gauss-Hermite nodes/weights for the standard
@@ -231,6 +235,7 @@ def _lagrange_basis_at(eps, gh_nodes):
 # ============================================================================
 # Architecture: B mode (dual scalar forward)
 # ============================================================================
+
 
 class ReweightMLP_B(nn.Module):
     """Trunk + head MLP for the dual-forward construction.
@@ -319,7 +324,9 @@ class ReweightMLP_B(nn.Module):
         # σ-side dropped in shift-only mode (would be dead weights).
         if not self.shift_only:
             self.head_layer1_sigma = nn.Linear(
-                self.n_sigma_pack, head_hidden, bias=False,
+                self.n_sigma_pack,
+                head_hidden,
+                bias=False,
             )
         else:
             self.head_layer1_sigma = None
@@ -347,7 +354,10 @@ class ReweightMLP_B(nn.Module):
         return self.trunk(torch.cat([y, c], dim=-1))
 
     def head_forward(
-        self, e: torch.Tensor, u: torch.Tensor, sigma_pack: torch.Tensor,
+        self,
+        e: torch.Tensor,
+        u: torch.Tensor,
+        sigma_pack: torch.Tensor,
     ) -> torch.Tensor:
         """``f(e, u, σ_pack) ∈ R``. Mathematically identical to the
         legacy packed-head form ``head_rest(act(W·[e, u, σ_pack] + b))``
@@ -391,11 +401,14 @@ class ReweightMLP_B(nn.Module):
         # keys starting with "head." that aren't already targeting the
         # new layout.
         new_keys = (
-            "head_layer1_e", "head_layer1_u", "head_layer1_sigma",
+            "head_layer1_e",
+            "head_layer1_u",
+            "head_layer1_sigma",
             "head_rest",
         )
         legacy_keys = [
-            k for k in state_dict.keys()
+            k
+            for k in state_dict.keys()
             if k.startswith(legacy_prefix)
             and not any(k.startswith(p) for p in new_keys)
         ]
@@ -403,10 +416,9 @@ class ReweightMLP_B(nn.Module):
             return state_dict
 
         # Find which Sequential indices appear (sorted).
-        layer_idxs = sorted({
-            int(k.split(".")[1]) for k in legacy_keys
-            if k.endswith(".weight")
-        })
+        layer_idxs = sorted(
+            {int(k.split(".")[1]) for k in legacy_keys if k.endswith(".weight")}
+        )
         if not layer_idxs:
             return state_dict
 
@@ -423,13 +435,11 @@ class ReweightMLP_B(nn.Module):
             n_u = self.n_features
             new_state["head_layer1_e.weight"] = w_old[:, :n_e].contiguous()
             new_state["head_layer1_e.bias"] = b_old.contiguous()
-            new_state["head_layer1_u.weight"] = (
-                w_old[:, n_e:n_e + n_u].contiguous()
-            )
+            new_state["head_layer1_u.weight"] = w_old[:, n_e : n_e + n_u].contiguous()
             if not self.shift_only:
-                new_state["head_layer1_sigma.weight"] = (
-                    w_old[:, n_e + n_u:].contiguous()
-                )
+                new_state["head_layer1_sigma.weight"] = w_old[
+                    :, n_e + n_u :
+                ].contiguous()
 
         # 2) ``head.{i}.{weight,bias}`` for i > first_idx →
         #    ``head_rest.{i-1-first_idx}.{weight,bias}``. The packed
@@ -450,13 +460,15 @@ class ReweightMLP_B(nn.Module):
         after running :meth:`_remap_legacy_state_dict`."""
         return super().load_state_dict(
             self._remap_legacy_state_dict(state_dict),
-            strict=strict, assign=assign,
+            strict=strict,
+            assign=assign,
         )
 
 
 # ============================================================================
 # Architecture: structurally factored MLP head
 # ============================================================================
+
 
 class ReweightMLPFactored(nn.Module):
     """Trunk + structurally factored head returning the log-ratio directly.
@@ -524,32 +536,26 @@ class ReweightMLPFactored(nn.Module):
         self.head_layers = int(head_layers)
         self.shift_only = bool(shift_only)
         self.n_sigma_pack = (
-            self.n_features * (self.n_features + 1) // 2
-            if not self.shift_only else 0
+            self.n_features * (self.n_features + 1) // 2 if not self.shift_only else 0
         )
         self.gauss_baseline = gauss_baseline
-        self.detach_pure_shift_in_joint = bool(
-            detach_pure_shift_in_joint
-        ) and not self.shift_only
-        self.detach_pure_smear_in_joint = bool(
-            detach_pure_smear_in_joint
-        ) and not self.shift_only
+        self.detach_pure_shift_in_joint = (
+            bool(detach_pure_shift_in_joint) and not self.shift_only
+        )
+        self.detach_pure_smear_in_joint = (
+            bool(detach_pure_smear_in_joint) and not self.shift_only
+        )
         # A independent of σ_pack iff shift-detach is on.
         self.A_uses_sigma = (
-            (not self.shift_only) and not self.detach_pure_shift_in_joint
-        )
+            not self.shift_only
+        ) and not self.detach_pure_shift_in_joint
         # B independent of u iff smear-detach is on.
-        self.B_uses_u = (
-            (not self.shift_only) and not self.detach_pure_smear_in_joint
-        )
+        self.B_uses_u = (not self.shift_only) and not self.detach_pure_smear_in_joint
         # Separate cross head only when both flags are on (fully
         # factorised three-term form). The cross is the only place that
         # JOINT-mode gradients survive when both pure blocks are
         # detached.
-        self.has_C = (
-            self.detach_pure_shift_in_joint
-            and self.detach_pure_smear_in_joint
-        )
+        self.has_C = self.detach_pure_shift_in_joint and self.detach_pure_smear_in_joint
         # Shift-only mode: the σ side collapses out entirely; B and C
         # are unused. log r = ⟨u, A(e, u)⟩ trivially.
         if self.shift_only:
@@ -568,11 +574,16 @@ class ReweightMLPFactored(nn.Module):
         self.trunk = nn.Sequential(*layers)
 
         # A head: e + u (+ σ_pack) → F.
-        in_dim_A = self.d_emb + self.n_features + (
-            self.n_sigma_pack if self.A_uses_sigma else 0
+        in_dim_A = (
+            self.d_emb
+            + self.n_features
+            + (self.n_sigma_pack if self.A_uses_sigma else 0)
         )
         self.A_head = self._make_mlp(
-            in_dim_A, head_hidden, head_layers, activation,
+            in_dim_A,
+            head_hidden,
+            head_layers,
+            activation,
             self.n_features,
         )
         # B head: e + (u +) σ_pack → n_pack. Built only if not shift-only.
@@ -583,7 +594,10 @@ class ReweightMLPFactored(nn.Module):
                 + self.n_sigma_pack
             )
             self.B_head = self._make_mlp(
-                in_dim_B, head_hidden, head_layers, activation,
+                in_dim_B,
+                head_hidden,
+                head_layers,
+                activation,
                 self.n_sigma_pack,
             )
         else:
@@ -593,7 +607,10 @@ class ReweightMLPFactored(nn.Module):
         if self.has_C:
             in_dim_C = self.d_emb + self.n_features + self.n_sigma_pack
             self.C_head = self._make_mlp(
-                in_dim_C, head_hidden, head_layers, activation,
+                in_dim_C,
+                head_hidden,
+                head_layers,
+                activation,
                 self.n_features * self.n_sigma_pack,
             )
         else:
@@ -622,7 +639,10 @@ class ReweightMLPFactored(nn.Module):
         return self.trunk(torch.cat([y, c], dim=-1))
 
     def head_forward_components(
-        self, e, u, sigma_pack,
+        self,
+        e,
+        u,
+        sigma_pack,
     ):
         """Return ``(pure_u_d, pure_s_d, cross_d)`` for the factored
         head, each of shape ``[B]``. ``cross_d`` is ``None`` when there
@@ -635,8 +655,8 @@ class ReweightMLPFactored(nn.Module):
         A_inputs = [e, u]
         if self.A_uses_sigma:
             A_inputs.append(sigma_pack)
-        A = self.A_head(torch.cat(A_inputs, dim=-1))     # [..., F]
-        pure_u_d = (u * A).sum(dim=-1)                    # [...]
+        A = self.A_head(torch.cat(A_inputs, dim=-1))  # [..., F]
+        pure_u_d = (u * A).sum(dim=-1)  # [...]
 
         # B head: e + (u +) σ_pack
         if self.B_head is not None:
@@ -654,12 +674,17 @@ class ReweightMLPFactored(nn.Module):
         if self.C_head is not None:
             C_flat = self.C_head(
                 torch.cat([e, u, sigma_pack], dim=-1),
-            )                                              # [..., F·n_pack]
+            )  # [..., F·n_pack]
             C = C_flat.view(
-                *u.shape[:-1], self.n_features, self.n_sigma_pack,
+                *u.shape[:-1],
+                self.n_features,
+                self.n_sigma_pack,
             )
             cross_d = torch.einsum(
-                "...i,...ij,...j->...", u, C, sigma_pack,
+                "...i,...ij,...j->...",
+                u,
+                C,
+                sigma_pack,
             )
         return pure_u_d, pure_s_d, cross_d
 
@@ -679,6 +704,7 @@ class ReweightMLPFactored(nn.Module):
 # ============================================================================
 # Architecture: polyhead mode (wraps the existing PolyHead)
 # ============================================================================
+
 
 class ReweightPolyhead(nn.Module):
     """Self-contained polyhead trunk: ``(y, c) → joint_coefs ∈ ℝ^{n_basis}``.
@@ -743,23 +769,16 @@ class ReweightPolyhead(nn.Module):
         # this lets the three-head split below produce contiguous
         # coefficient blocks that align with the basis ordering.
         raw_indices = _joint_indices(
-            n_features, max_deg_u, max_deg_sigma, max_cross_deg,
+            n_features,
+            max_deg_u,
+            max_deg_sigma,
+            max_cross_deg,
         )
-        idx_pure_u = [
-            (a, b) for (a, b) in raw_indices
-            if len(b) == 0 and len(a) > 0
-        ]
-        idx_pure_s = [
-            (a, b) for (a, b) in raw_indices
-            if len(a) == 0 and len(b) > 0
-        ]
-        idx_cross = [
-            (a, b) for (a, b) in raw_indices
-            if len(a) > 0 and len(b) > 0
-        ]
-        assert (
-            len(idx_pure_u) + len(idx_pure_s) + len(idx_cross)
-            == len(raw_indices)
+        idx_pure_u = [(a, b) for (a, b) in raw_indices if len(b) == 0 and len(a) > 0]
+        idx_pure_s = [(a, b) for (a, b) in raw_indices if len(a) == 0 and len(b) > 0]
+        idx_cross = [(a, b) for (a, b) in raw_indices if len(a) > 0 and len(b) > 0]
+        assert len(idx_pure_u) + len(idx_pure_s) + len(idx_cross) == len(
+            raw_indices
         ), "non-exhaustive split of joint indices"
         self._joint_indices = idx_pure_u + idx_pure_s + idx_cross
         self.n_basis = len(self._joint_indices)
@@ -782,7 +801,9 @@ class ReweightPolyhead(nn.Module):
         self.register_buffer("is_pure_u", is_pure_u, persistent=False)
         self.register_buffer("is_pure_sigma", is_pure_sigma, persistent=False)
         self.register_buffer(
-            "is_pure", is_pure_u | is_pure_sigma, persistent=False,
+            "is_pure",
+            is_pure_u | is_pure_sigma,
+            persistent=False,
         )
 
         # Basis-evaluation auxiliary tensors as buffers — auto-moved
@@ -794,18 +815,24 @@ class ReweightPolyhead(nn.Module):
         # overwritten by subsequent run".
         _aux = _build_basis_aux(self._joint_indices, n_features)
         self.register_buffer(
-            "_basis_alpha_degs", _aux["alpha_degs"], persistent=False,
+            "_basis_alpha_degs",
+            _aux["alpha_degs"],
+            persistent=False,
         )
         self.register_buffer(
-            "_basis_beta_degs", _aux["beta_degs"], persistent=False,
+            "_basis_beta_degs",
+            _aux["beta_degs"],
+            persistent=False,
         )
         self.register_buffer(
             "_basis_cheb_u_const",
-            _aux["cheb_u_const"], persistent=False,
+            _aux["cheb_u_const"],
+            persistent=False,
         )
         self.register_buffer(
             "_basis_cheb_v_const",
-            _aux["cheb_v_const"], persistent=False,
+            _aux["cheb_v_const"],
+            persistent=False,
         )
         self._basis_max_deg_u = _aux["max_deg_u"]
         self._basis_max_deg_sigma = _aux["max_deg_sigma"]
@@ -833,17 +860,12 @@ class ReweightPolyhead(nn.Module):
         # only created if the corresponding block is non-empty (e.g.
         # in shift-only mode, pure_s and cross are empty).
         self.head_pure_u = (
-            nn.Linear(prev, self._n_pure_u)
-            if self._n_pure_u > 0 else None
+            nn.Linear(prev, self._n_pure_u) if self._n_pure_u > 0 else None
         )
         self.head_pure_sigma = (
-            nn.Linear(prev, self._n_pure_s)
-            if self._n_pure_s > 0 else None
+            nn.Linear(prev, self._n_pure_s) if self._n_pure_s > 0 else None
         )
-        self.head_cross = (
-            nn.Linear(prev, self._n_cross)
-            if self._n_cross > 0 else None
-        )
+        self.head_cross = nn.Linear(prev, self._n_cross) if self._n_cross > 0 else None
         # Init heads near zero so coefs ≈ 0 → log r ≈ 0 at start.
         with torch.no_grad():
             for head in (self.head_pure_u, self.head_pure_sigma, self.head_cross):
@@ -913,7 +935,10 @@ class ReweightPolyhead(nn.Module):
             parts.append(self.head_cross(e))
         if not parts:
             return torch.zeros(
-                e.shape[0], 0, device=e.device, dtype=e.dtype,
+                e.shape[0],
+                0,
+                device=e.device,
+                dtype=e.dtype,
             )
         return torch.cat(parts, dim=-1)
 
@@ -921,6 +946,7 @@ class ReweightPolyhead(nn.Module):
 # ============================================================================
 # Analytic Gaussian baseline
 # ============================================================================
+
 
 class GaussBaseline(nn.Module):
     """Per-event analytic Gaussian baseline for the density-ratio.
@@ -1019,7 +1045,7 @@ class GaussBaseline(nn.Module):
         raw_chol = out[..., nf:]
         # Scatter ``raw_chol`` into a [..., nf, nf] lower-triangular
         # via a fixed projection, then softplus the diagonal.
-        L_flat = raw_chol @ self._chol_proj           # [..., nf*nf]
+        L_flat = raw_chol @ self._chol_proj  # [..., nf*nf]
         L_pre = L_flat.view(*raw_chol.shape[:-1], nf, nf)
         diag_pre = torch.diagonal(L_pre, dim1=-2, dim2=-1)
         diag_post = F.softplus(diag_pre)
@@ -1074,14 +1100,18 @@ def gauss_baseline_log_r(
     log_det_term = -0.5 * (log_det_Sigma_pert - log_det_Sigma)
 
     # Quadratic forms via triangular solves (single-RHS).
-    r = y32 - mu32                                     # [..., F]
+    r = y32 - mu32  # [..., F]
     r_pert = r - u32
     z_nom = torch.linalg.solve_triangular(
-        L32, r.unsqueeze(-1), upper=False,
+        L32,
+        r.unsqueeze(-1),
+        upper=False,
     ).squeeze(-1)
     quad_nom = (z_nom * z_nom).sum(-1)
     z_pert = torch.linalg.solve_triangular(
-        L_pert, r_pert.unsqueeze(-1), upper=False,
+        L_pert,
+        r_pert.unsqueeze(-1),
+        upper=False,
     ).squeeze(-1)
     quad_pert = (z_pert * z_pert).sum(-1)
 
@@ -1093,8 +1123,10 @@ def gauss_baseline_log_r(
 # Positivity wrap (shared)
 # ============================================================================
 
-def _apply_positivity(d: torch.Tensor, positivity: str,
-                      clamp: float = _LOG_W_CLAMP) -> torch.Tensor:
+
+def _apply_positivity(
+    d: torch.Tensor, positivity: str, clamp: float = _LOG_W_CLAMP
+) -> torch.Tensor:
     """Apply the positivity wrap to a pre-positivity scalar ``d`` to
     produce ``log r``. Same shape as input, applied elementwise.
 
@@ -1129,8 +1161,9 @@ def _apply_positivity(d: torch.Tensor, positivity: str,
     raise ValueError(f"unknown positivity {positivity!r}")
 
 
-def _apply_positivity_r(d: torch.Tensor, positivity: str,
-                        clamp: float = _LOG_W_CLAMP) -> torch.Tensor:
+def _apply_positivity_r(
+    d: torch.Tensor, positivity: str, clamp: float = _LOG_W_CLAMP
+) -> torch.Tensor:
     """Return ``r̂(d)`` *directly*, without going through
     ``log r̂`` and exponentiating.
 
@@ -1163,6 +1196,7 @@ def _apply_positivity_r(d: torch.Tensor, positivity: str,
 # ============================================================================
 # compute_log_r_pair: branches on architecture
 # ============================================================================
+
 
 def compute_d_quadrature(
     model: nn.Module,
@@ -1223,10 +1257,11 @@ def compute_d_quadrature(
     if arch == "mlp":
         # Trunk [(n_eps+1)·B]: y_nom plus all perturbed positions.
         y_all = torch.cat(
-            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)], dim=0,
+            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)],
+            dim=0,
         )
         c_all = c.repeat(n_eps + 1, 1)
-        e = model.trunk_forward(y_all, c_all)         # [(n_eps+1)·B, d_emb]
+        e = model.trunk_forward(y_all, c_all)  # [(n_eps+1)·B, d_emb]
 
         u_all = u.repeat(n_eps + 1, 1)
         sigma_pack_all = sigma_pack.repeat(n_eps + 1, 1)
@@ -1240,7 +1275,7 @@ def compute_d_quadrature(
             sp_dual = torch.cat([sigma_pack_all, sp_zero], dim=0)
             f = model.head_forward(e_dual, u_dual, sp_dual)
             n_total = (n_eps + 1) * B
-            d = f[:n_total] - f[n_total:]             # [(n_eps+1)·B]
+            d = f[:n_total] - f[n_total:]  # [(n_eps+1)·B]
         else:
             # 4 head queries per (event, ε-slot):
             #   f_full=f(e,u,σ_pack), f_zero=f(e,0,0),
@@ -1255,28 +1290,38 @@ def compute_d_quadrature(
             e_q = torch.cat([e, e, e, e], dim=0)
             u_q = torch.cat([u_all, u_zero, u_all, u_zero], dim=0)
             sp_q = torch.cat(
-                [sigma_pack_all, sp_zero, sp_zero, sigma_pack_all], dim=0,
+                [sigma_pack_all, sp_zero, sp_zero, sigma_pack_all],
+                dim=0,
             )
             f = model.head_forward(e_q, u_q, sp_q)
             n_total = (n_eps + 1) * B
             f_full = f[0 * n_total : 1 * n_total]
             f_zero = f[1 * n_total : 2 * n_total]
-            f_us   = f[2 * n_total : 3 * n_total]
-            f_sm   = f[3 * n_total : 4 * n_total]
+            f_us = f[2 * n_total : 3 * n_total]
+            f_sm = f[3 * n_total : 4 * n_total]
             d_full = f_full - f_zero
             d_pure_u = f_us - f_zero
             d_pure_s = f_sm - f_zero
             # is_joint per event, broadcast across all (n_eps+1) blocks.
-            is_joint_b = (mode_id == 2)
-            is_joint_all = is_joint_b.unsqueeze(0).expand(
-                n_eps + 1, B,
-            ).reshape(-1)
+            is_joint_b = mode_id == 2
+            is_joint_all = (
+                is_joint_b.unsqueeze(0)
+                .expand(
+                    n_eps + 1,
+                    B,
+                )
+                .reshape(-1)
+            )
             # Replace d_pure_u/d_pure_s with detach() on JOINT events.
             d_pure_u_used = torch.where(
-                is_joint_all, d_pure_u.detach(), d_pure_u,
+                is_joint_all,
+                d_pure_u.detach(),
+                d_pure_u,
             )
             d_pure_s_used = torch.where(
-                is_joint_all, d_pure_s.detach(), d_pure_s,
+                is_joint_all,
+                d_pure_s.detach(),
+                d_pure_s,
             )
             d_mixed = d_full - d_pure_u - d_pure_s
             d = d_pure_u_used + d_pure_s_used + d_mixed
@@ -1288,28 +1333,23 @@ def compute_d_quadrature(
         # detach for --detach-pure-{shift,smear}-in-joint is applied
         # on JOINT-mode events.
         y_all = torch.cat(
-            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)], dim=0,
+            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)],
+            dim=0,
         )
         c_all = c.repeat(n_eps + 1, 1)
         u_all = u.repeat(n_eps + 1, 1)
         sigma_pack_all = sigma_pack.repeat(n_eps + 1, 1)
-        e = model.trunk_forward(y_all, c_all)        # [(n_eps+1)·B, d_emb]
+        e = model.trunk_forward(y_all, c_all)  # [(n_eps+1)·B, d_emb]
         pu, ps, cr = model.head_forward_components(
-            e, u_all, sigma_pack_all,
+            e,
+            u_all,
+            sigma_pack_all,
         )
-        if (
-            mode_id is not None
-            and (
-                model.detach_pure_shift_in_joint
-                or model.detach_pure_smear_in_joint
-            )
+        if mode_id is not None and (
+            model.detach_pure_shift_in_joint or model.detach_pure_smear_in_joint
         ):
-            is_joint_b = (mode_id == 2)
-            is_joint_all = (
-                is_joint_b.unsqueeze(0)
-                .expand(n_eps + 1, B)
-                .reshape(-1)
-            )
+            is_joint_b = mode_id == 2
+            is_joint_all = is_joint_b.unsqueeze(0).expand(n_eps + 1, B).reshape(-1)
             if model.detach_pure_shift_in_joint:
                 pu = torch.where(is_joint_all, pu.detach(), pu)
             if model.detach_pure_smear_in_joint:
@@ -1354,12 +1394,13 @@ def compute_d_quadrature(
 
         # Trunk: one matmul on the full (n_eps+1)·B batch.
         y_all = torch.cat(
-            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)], dim=0,
+            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)],
+            dim=0,
         )
         c_all = c.repeat(n_eps + 1, 1)
         u_all = u.repeat(n_eps + 1, 1)
         sigma_vec_all = sigma_vec.repeat(n_eps + 1, 1)
-        e_flat = model.trunk_forward(y_all, c_all)     # [(n_eps+1)·B, d_emb]
+        e_flat = model.trunk_forward(y_all, c_all)  # [(n_eps+1)·B, d_emb]
         d_emb = e_flat.shape[-1]
         e_r = e_flat.view(n_blocks, B, d_emb)
 
@@ -1368,11 +1409,14 @@ def compute_d_quadrature(
         # the cache-miss path out of the compiled trace (avoids
         # CUDA-graph "tensor overwritten" errors).
         phi_flat = _select_basis(
-            model.basis, u_all, sigma_vec_all, model.joint_indices,
+            model.basis,
+            u_all,
+            sigma_vec_all,
+            model.joint_indices,
             scale_u=model.basis_scale_u,
             scale_sigma=model.basis_scale_sigma,
             aux=model.basis_aux,
-        )                                              # [(n_eps+1)·B, n_basis]
+        )  # [(n_eps+1)·B, n_basis]
         phi_r = phi_flat.view(n_blocks, B, -1)
 
         n_pu = model._n_pure_u
@@ -1385,11 +1429,12 @@ def compute_d_quadrature(
             ``head``: nn.Linear(d_emb, n_out). Returns [N]."""
             if head is None:
                 return torch.zeros(
-                    e_blk.shape[0], device=e_blk.device,
+                    e_blk.shape[0],
+                    device=e_blk.device,
                     dtype=e_blk.dtype,
                 )
-            temp = phi_blk @ head.weight             # [N, d_emb]
-            bias_term = phi_blk @ head.bias          # [N]
+            temp = phi_blk @ head.weight  # [N, d_emb]
+            bias_term = phi_blk @ head.bias  # [N]
             return (e_blk * temp).sum(-1) + bias_term
 
         d_chunks = []
@@ -1404,10 +1449,13 @@ def compute_d_quadrature(
         # SMEAR events: only pure_σ contributes (u = 0).
         if n_smear_b > 0:
             e_m = e_r[
-                :, n_shift_b : n_shift_b + n_smear_b, :,
+                :,
+                n_shift_b : n_shift_b + n_smear_b,
+                :,
             ].reshape(-1, d_emb)
             phi_m_ps = phi_r[
-                :, n_shift_b : n_shift_b + n_smear_b,
+                :,
+                n_shift_b : n_shift_b + n_smear_b,
                 n_pu : n_pu + n_ps,
             ].reshape(-1, n_ps)
             d_m = _order2(e_m, phi_m_ps, model.head_pure_sigma)
@@ -1421,14 +1469,19 @@ def compute_d_quadrature(
             e_j = e_r[:, j0:, :].reshape(-1, d_emb)
             phi_j = phi_r[:, j0:, :].reshape(-1, n_pu + n_ps + n_cr)
             d_j_pu = _order2(
-                e_j, phi_j[:, :n_pu], model.head_pure_u,
+                e_j,
+                phi_j[:, :n_pu],
+                model.head_pure_u,
             )
             d_j_ps = _order2(
-                e_j, phi_j[:, n_pu : n_pu + n_ps],
+                e_j,
+                phi_j[:, n_pu : n_pu + n_ps],
                 model.head_pure_sigma,
             )
             d_j_cr = _order2(
-                e_j, phi_j[:, n_pu + n_ps :], model.head_cross,
+                e_j,
+                phi_j[:, n_pu + n_ps :],
+                model.head_cross,
             )
             if detach_pure_in_joint:
                 d_j_pu = d_j_pu.detach()
@@ -1456,15 +1509,20 @@ def compute_d_quadrature(
     if gauss is not None:
         n_blocks = n_eps + 1
         y_all_g = torch.cat(
-            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)], dim=0,
+            [y_nom, y_pert_stack.reshape(n_eps * B, n_features)],
+            dim=0,
         )
-        mu_g, L_g = gauss(c)                            # [B, F], [B, F, F]
+        mu_g, L_g = gauss(c)  # [B, F], [B, F, F]
         mu_all_g = mu_g.repeat(n_blocks, 1)
         L_all_g = L_g.repeat(n_blocks, 1, 1)
         u_all_g = u.repeat(n_blocks, 1)
         sigma_all_g = sigma_vec.repeat(n_blocks, 1)
         d = d + gauss_baseline_log_r(
-            y_all_g, mu_all_g, L_all_g, u_all_g, sigma_all_g,
+            y_all_g,
+            mu_all_g,
+            L_all_g,
+            u_all_g,
+            sigma_all_g,
         )
 
     d_nom = d[:B]
@@ -1519,8 +1577,14 @@ class ReweightWrapper(nn.Module):
         mode_id: torch.Tensor,
     ):
         return compute_d_quadrature(
-            self.model, self.arch,
-            y_nom, y_pert_stack, c, u, sigma_vec, sigma_pack,
+            self.model,
+            self.arch,
+            y_nom,
+            y_pert_stack,
+            c,
+            u,
+            sigma_vec,
+            sigma_pack,
             mode_id=mode_id,
             detach_pure_in_joint=self.detach_pure_in_joint,
         )
@@ -1604,14 +1668,14 @@ def _smear_pert_estimator(
         return x_pert_all[0]
 
     K = smear_K
-    x_K = x_pert_all[:K]                             # [K, B]
+    x_K = x_pert_all[:K]  # [K, B]
     S_K = torch.einsum("k,kb->b", gh_weights, x_K)
     if not smear_residual:
         return S_K
 
     # Hybrid: control-variate correction.
-    eps_extra = eps_stack[K]                         # [B]
-    L = _lagrange_basis_at(eps_extra, gh_nodes)      # [B, K]
+    eps_extra = eps_stack[K]  # [B]
+    L = _lagrange_basis_at(eps_extra, gh_nodes)  # [B, K]
     g_at_eps = torch.einsum("kb,bk->b", x_K, L)
     x_extra = x_pert_all[K]
     return S_K + (x_extra - g_at_eps)
@@ -1620,6 +1684,7 @@ def _smear_pert_estimator(
 # ============================================================================
 # Sampling: u, σ_vec, ε_smear
 # ============================================================================
+
 
 def sample_perturbations(
     batch_size: int,
@@ -1695,12 +1760,14 @@ def sample_perturbations(
     # the mode that dominates the gradient signal.
     base = batch_size // 3
     extra = batch_size - 3 * base
-    mode_id = torch.cat([
-        torch.full((base + extra,), 0, device=device, dtype=torch.long),
-        torch.full((base,), 1, device=device, dtype=torch.long),
-        torch.full((base,), 2, device=device, dtype=torch.long),
-    ])
-    shift_active = (mode_id != 1).to(delta_u.dtype)   # SHIFT or JOINT
+    mode_id = torch.cat(
+        [
+            torch.full((base + extra,), 0, device=device, dtype=torch.long),
+            torch.full((base,), 1, device=device, dtype=torch.long),
+            torch.full((base,), 2, device=device, dtype=torch.long),
+        ]
+    )
+    shift_active = (mode_id != 1).to(delta_u.dtype)  # SHIFT or JOINT
     smear_active = (mode_id != 0).to(sigma_mag.dtype)  # SMEAR or JOINT
 
     u = (delta_u * shift_active).unsqueeze(-1) * v_u
@@ -1715,6 +1782,7 @@ def sample_perturbations(
 # Loss functions
 # ============================================================================
 
+
 def dv_loss(log_r_nom, pert_T_estimator, weights):
     """Donsker-Varadhan / MINE objective (minimization form):
 
@@ -1726,9 +1794,7 @@ def dv_loss(log_r_nom, pert_T_estimator, weights):
     wsum = weights.sum().clamp_min(1e-30)
     e_pert_T = (weights * pert_T_estimator).sum() / wsum
     log_w = torch.log(weights.clamp_min(1e-30))
-    log_e_nom_expT = (
-        torch.logsumexp(log_w + log_r_nom, dim=0) - torch.log(wsum)
-    )
+    log_e_nom_expT = torch.logsumexp(log_w + log_r_nom, dim=0) - torch.log(wsum)
     return -e_pert_T + log_e_nom_expT
 
 
@@ -1772,9 +1838,7 @@ def bce_loss(log_r_nom, pert_softplus_neg_estimator, weights):
     or GH+residual all plug in uniformly (same machinery as LSIF/DV)."""
     wsum = weights.sum().clamp_min(1e-30)
     e_nom_term = (weights * F.softplus(log_r_nom)).sum() / wsum
-    e_pert_term = (
-        weights * pert_softplus_neg_estimator
-    ).sum() / wsum
+    e_pert_term = (weights * pert_softplus_neg_estimator).sum() / wsum
     return e_nom_term + e_pert_term
 
 
@@ -1811,6 +1875,7 @@ def expkl_loss(log_r_nom, pert_T_estimator, weights):
 # Training step
 # ============================================================================
 
+
 def _per_mode_split(per_event_loss, weights, mode_id, n_modes=3):
     """Aggregate per-event loss into per-mode (SHIFT/SMEAR/JOINT)
     weighted means.
@@ -1834,11 +1899,19 @@ def _per_mode_split(per_event_loss, weights, mode_id, n_modes=3):
 
 
 def _shift_K_per_event_loss(
-    inner_model, arch, y, c, w,
-    u_smolyak, K_extra,
-    delta_max, oversample,
-    loss_fn, positivity,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    inner_model,
+    arch,
+    y,
+    c,
+    w,
+    u_smolyak,
+    K_extra,
+    delta_max,
+    oversample,
+    loss_fn,
+    positivity,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Memory-optimized K-per-event shift loss (shift-only mode).
 
@@ -1878,33 +1951,39 @@ def _shift_K_per_event_loss(
     if K_smolyak > 0:
         u_parts.append(
             u_smolyak.to(device=device, dtype=dtype)
-            .unsqueeze(0).expand(B, K_smolyak, n_features)
+            .unsqueeze(0)
+            .expand(B, K_smolyak, n_features)
         )
     if K_extra > 0:
-        delta = (
-            torch.rand(B, K_extra, device=device, dtype=dtype) * 2.0 - 1.0
-        ) * half
+        delta = (torch.rand(B, K_extra, device=device, dtype=dtype) * 2.0 - 1.0) * half
         v = torch.randn(B, K_extra, n_features, device=device, dtype=dtype)
         v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-30)
         u_parts.append(delta.unsqueeze(-1) * v)
-    u_all = torch.cat(u_parts, dim=1)        # [B, K_total, n_features]
+    u_all = torch.cat(u_parts, dim=1)  # [B, K_total, n_features]
 
-    sigma_zero = torch.zeros_like(u_all)     # [B, K_total, n_features]
+    sigma_zero = torch.zeros_like(u_all)  # [B, K_total, n_features]
     n_cond = c.shape[-1]
 
     if arch == "polyhead":
         # 1 trunk forward at y_nom — coefs shared across all K_total.
-        coefs_nom = inner_model(y, c)        # [B, n_basis]
+        coefs_nom = inner_model(y, c)  # [B, n_basis]
 
         # K trunk forwards at y_pert_k = y + u_k.
-        y_pert = y.unsqueeze(1) + u_all      # [B, K_total, n_features]
+        y_pert = y.unsqueeze(1) + u_all  # [B, K_total, n_features]
         y_pert_flat = y_pert.reshape(B * K_total, n_features)
-        c_flat = c.unsqueeze(1).expand(
-            B, K_total, n_cond,
-        ).reshape(B * K_total, n_cond)
+        c_flat = (
+            c.unsqueeze(1)
+            .expand(
+                B,
+                K_total,
+                n_cond,
+            )
+            .reshape(B * K_total, n_cond)
+        )
         coefs_pert_flat = inner_model(
-            y_pert_flat, c_flat,
-        )                                    # [B·K_total, n_basis]
+            y_pert_flat,
+            c_flat,
+        )  # [B·K_total, n_basis]
         coefs_pert = coefs_pert_flat.view(B, K_total, -1)
 
         # Polynomial evaluations (no trunk gradient flow):
@@ -1913,19 +1992,25 @@ def _shift_K_per_event_loss(
         coefs_nom_view = coefs_nom.unsqueeze(1).expand(B, K_total, -1)
         _basis_aux = inner_model.basis_aux
         d_nom_3d = evaluate_joint(
-            coefs_nom_view, u_all, sigma_zero, inner_model.joint_indices,
+            coefs_nom_view,
+            u_all,
+            sigma_zero,
+            inner_model.joint_indices,
             basis=inner_model.basis,
             scale_u=inner_model.basis_scale_u,
             scale_sigma=inner_model.basis_scale_sigma,
             basis_aux=_basis_aux,
-        )                                    # [B, K_total]
+        )  # [B, K_total]
         d_pert_3d = evaluate_joint(
-            coefs_pert, u_all, sigma_zero, inner_model.joint_indices,
+            coefs_pert,
+            u_all,
+            sigma_zero,
+            inner_model.joint_indices,
             basis=inner_model.basis,
             scale_u=inner_model.basis_scale_u,
             scale_sigma=inner_model.basis_scale_sigma,
             basis_aux=_basis_aux,
-        )                                    # [B, K_total]
+        )  # [B, K_total]
     elif arch in ("mlp", "mlp-factored"):
         # Both flavours use head_forward(e, u, σ_pack). The factored
         # head's head_forward already returns ``d`` (structurally zero
@@ -1934,29 +2019,44 @@ def _shift_K_per_event_loss(
         # factored variant in shift-only mode. Either way the
         # per-event scalar comes out identical to the construction
         # the loss expects.
-        e_nom = inner_model.trunk_forward(y, c)      # [B, d_emb]
+        e_nom = inner_model.trunk_forward(y, c)  # [B, d_emb]
         d_emb = e_nom.shape[-1]
 
         y_pert_flat = (y.unsqueeze(1) + u_all).reshape(B * K_total, n_features)
-        c_flat = c.unsqueeze(1).expand(
-            B, K_total, n_cond,
-        ).reshape(B * K_total, n_cond)
+        c_flat = (
+            c.unsqueeze(1)
+            .expand(
+                B,
+                K_total,
+                n_cond,
+            )
+            .reshape(B * K_total, n_cond)
+        )
         e_pert_flat = inner_model.trunk_forward(
-            y_pert_flat, c_flat,
-        )                                    # [B·K_total, d_emb]
+            y_pert_flat,
+            c_flat,
+        )  # [B·K_total, d_emb]
 
         # Head: f(e, u, σ_pack=0) and f(e, 0, 0). Shift-only ⇒ σ_pack
         # placeholder is [..., 0]. Aggregate the four head forwards
         # per (event, k) needed by the structural construction.
         u_flat = u_all.reshape(B * K_total, n_features)
         sp_zero = torch.empty(
-            B * K_total, 0, device=device, dtype=dtype,
+            B * K_total,
+            0,
+            device=device,
+            dtype=dtype,
         )
         u_zero = torch.zeros_like(u_flat)
         # d_nom: f(e_nom, u_k, 0) - f(e_nom, 0, 0).
         # e_nom needs to be expanded to [B·K_total, d_emb] (view).
-        e_nom_exp = e_nom.unsqueeze(1).expand(B, K_total, d_emb).reshape(
-            B * K_total, d_emb,
+        e_nom_exp = (
+            e_nom.unsqueeze(1)
+            .expand(B, K_total, d_emb)
+            .reshape(
+                B * K_total,
+                d_emb,
+            )
         )
         f_nom_full = inner_model.head_forward(e_nom_exp, u_flat, sp_zero)
         f_nom_zero = inner_model.head_forward(e_nom_exp, u_zero, sp_zero)
@@ -1974,18 +2074,29 @@ def _shift_K_per_event_loss(
     # baseline is evaluated. Broadcast across K_total via expand.
     gauss = getattr(inner_model, "gauss_baseline", None)
     if gauss is not None:
-        mu_g, L_g = gauss(c)                                # [B, F], [B, F, F]
+        mu_g, L_g = gauss(c)  # [B, F], [B, F, F]
         mu_bk = mu_g.unsqueeze(1).expand(B, K_total, n_features)
         L_bk = L_g.unsqueeze(1).expand(
-            B, K_total, n_features, n_features,
+            B,
+            K_total,
+            n_features,
+            n_features,
         )
         y_bk = y.unsqueeze(1).expand(B, K_total, n_features)
-        y_pert_bk = y.unsqueeze(1) + u_all                  # [B, K_total, F]
+        y_pert_bk = y.unsqueeze(1) + u_all  # [B, K_total, F]
         d_nom_3d = d_nom_3d + gauss_baseline_log_r(
-            y_bk, mu_bk, L_bk, u_all, sigma_zero,
+            y_bk,
+            mu_bk,
+            L_bk,
+            u_all,
+            sigma_zero,
         )
         d_pert_3d = d_pert_3d + gauss_baseline_log_r(
-            y_pert_bk, mu_bk, L_bk, u_all, sigma_zero,
+            y_pert_bk,
+            mu_bk,
+            L_bk,
+            u_all,
+            sigma_zero,
         )
 
     # Flatten K into the batch axis for the loss aggregation:
@@ -2002,7 +2113,12 @@ def _shift_K_per_event_loss(
         r_nom = _apply_positivity_r(d_nom_flat, positivity)
         r_pert_all = _apply_positivity_r(d_pert_all, positivity)
         pert_estimator = _smear_pert_estimator(
-            r_pert_all, eps_stack, None, None, 1, False,
+            r_pert_all,
+            eps_stack,
+            None,
+            None,
+            1,
+            False,
         )
         loss = lsif_loss(r_nom, pert_estimator, w_flat)
         per_event = (r_nom * r_nom - 2.0 * pert_estimator).detach()
@@ -2011,56 +2127,72 @@ def _shift_K_per_event_loss(
         # unused for BCE, see _apply_positivity docstring); DV /
         # expKL keep the default clamp for nom-side ``exp(log r̂)``
         # / ``logsumexp(log r̂)`` numerical safety.
-        pos_clamp = (
-            float("inf") if loss_fn == "bce" else _LOG_W_CLAMP
-        )
+        pos_clamp = float("inf") if loss_fn == "bce" else _LOG_W_CLAMP
         log_r_nom = _apply_positivity(
-            d_nom_flat, positivity, clamp=pos_clamp,
+            d_nom_flat,
+            positivity,
+            clamp=pos_clamp,
         )
         log_r_pert_all = _apply_positivity(
-            d_pert_all, positivity, clamp=pos_clamp,
+            d_pert_all,
+            positivity,
+            clamp=pos_clamp,
         )
         if loss_fn == "bce":
             x_pert_all = F.softplus(-log_r_pert_all)
         else:
             x_pert_all = log_r_pert_all
         pert_estimator = _smear_pert_estimator(
-            x_pert_all, eps_stack, None, None, 1, False,
+            x_pert_all,
+            eps_stack,
+            None,
+            None,
+            1,
+            False,
         )
         if loss_fn == "dv":
             loss = dv_loss(log_r_nom, pert_estimator, w_flat)
             per_event = (-pert_estimator).detach()
         elif loss_fn == "bce":
             loss = bce_loss(log_r_nom, pert_estimator, w_flat)
-            per_event = (
-                F.softplus(log_r_nom) + pert_estimator
-            ).detach()
+            per_event = (F.softplus(log_r_nom) + pert_estimator).detach()
         else:  # expkl
             loss = expkl_loss(log_r_nom, pert_estimator, w_flat)
-            per_event = (
-                torch.exp(log_r_nom) - pert_estimator
-            ).detach()
+            per_event = (torch.exp(log_r_nom) - pert_estimator).detach()
 
     # All replicas sit in SHIFT mode (=0); SMEAR/JOINT slots are
     # unpopulated and will return weight=0 → +inf in the caller's
     # split bookkeeping.
     mode_flat = torch.zeros(
-        B * K_total, dtype=torch.long, device=device,
+        B * K_total,
+        dtype=torch.long,
+        device=device,
     )
     split_sum, split_w = _per_mode_split(per_event, w_flat, mode_flat)
     return loss, split_sum, split_w
 
 
 def loss_step(
-    model, arch, y, c, w,
-    delta_max, sigma_max, oversample,
-    loss_fn, positivity,
-    sigma_pack_iu=None, sigma_pack_ju=None,
-    smear_K: int = 1, smear_residual: bool = False,
-    gh_nodes=None, gh_weights=None,
+    model,
+    arch,
+    y,
+    c,
+    w,
+    delta_max,
+    sigma_max,
+    oversample,
+    loss_fn,
+    positivity,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
+    smear_K: int = 1,
+    smear_residual: bool = False,
+    gh_nodes=None,
+    gh_weights=None,
     detach_pure_in_joint: bool = True,
     include_smear: bool = True,
-    shift_smolyak_pts=None, shift_stochastic_extra: int = 0,
+    shift_smolyak_pts=None,
+    shift_stochastic_extra: int = 0,
     inner_model=None,
 ):
     """One forward-loss step.
@@ -2103,9 +2235,8 @@ def loss_step(
     B = y.shape[0]
     device = y.device
 
-    use_shift_K = (
-        not include_smear
-        and (shift_smolyak_pts is not None or shift_stochastic_extra > 0)
+    use_shift_K = not include_smear and (
+        shift_smolyak_pts is not None or shift_stochastic_extra > 0
     )
 
     if use_shift_K:
@@ -2121,20 +2252,38 @@ def loss_step(
                 "to loss_step (used to share the y_nom trunk forward)."
             )
         return _shift_K_per_event_loss(
-            inner_model, arch, y, c, w,
-            shift_smolyak_pts, int(shift_stochastic_extra),
-            delta_max, oversample, loss_fn, positivity,
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+            inner_model,
+            arch,
+            y,
+            c,
+            w,
+            shift_smolyak_pts,
+            int(shift_stochastic_extra),
+            delta_max,
+            oversample,
+            loss_fn,
+            positivity,
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
         )
 
     u, sigma_vec, mode_id = sample_perturbations(
-        B, n_features, delta_max, sigma_max, device,
-        oversample=oversample, include_smear=include_smear,
+        B,
+        n_features,
+        delta_max,
+        sigma_max,
+        device,
+        oversample=oversample,
+        include_smear=include_smear,
     )
 
     if include_smear:
         eps_stack = _build_eps_stack(
-            B, smear_K, smear_residual, gh_nodes, device,
+            B,
+            smear_K,
+            smear_residual,
+            gh_nodes,
+            device,
         )
     else:
         # σ_vec ≡ 0 in shift-only mode, so ε·σ_vec = 0 regardless of
@@ -2150,7 +2299,9 @@ def loss_step(
 
     if arch in ("mlp", "mlp-factored") and sigma_pack_iu is not None:
         sigma_pack = _pack_sigma_outer(
-            sigma_vec, sigma_pack_iu, sigma_pack_ju,
+            sigma_vec,
+            sigma_pack_iu,
+            sigma_pack_ju,
         )
     else:
         # Either polyhead (head ignores Σ_pack) or shift-only mlp /
@@ -2161,7 +2312,13 @@ def loss_step(
 
     # Wrapper returns the pre-positivity scalar d (no log/exp wrap).
     d_nom, d_pert_all = model(
-        y, y_pert_stack, c, u, sigma_vec, sigma_pack, mode_id,
+        y,
+        y_pert_stack,
+        c,
+        u,
+        sigma_vec,
+        sigma_pack,
+        mode_id,
     )
 
     # Apply the wrap in the form the loss family wants. The K=1 / GH /
@@ -2175,17 +2332,19 @@ def loss_step(
         r_nom = _apply_positivity_r(d_nom, positivity)
         r_pert_all = _apply_positivity_r(d_pert_all, positivity)
         pert_estimator = _smear_pert_estimator(
-            r_pert_all, eps_stack, gh_nodes, gh_weights,
-            smear_K, smear_residual,
+            r_pert_all,
+            eps_stack,
+            gh_nodes,
+            gh_weights,
+            smear_K,
+            smear_residual,
         )
         loss = lsif_loss(r_nom, pert_estimator, w)
         # Per-event integrand for per-mode split monitoring.
         # ``r_nom² − 2·pert_estimator`` matches the expectation form
         # of ``lsif_loss``; per-mode weighted means of this quantity
         # serve as the "is this mode improving" signal.
-        per_event = (
-            r_nom * r_nom - 2.0 * pert_estimator
-        ).detach()
+        per_event = (r_nom * r_nom - 2.0 * pert_estimator).detach()
         split_sum, split_w = _per_mode_split(per_event, w, mode_id)
         return loss, split_sum, split_w
 
@@ -2200,7 +2359,9 @@ def loss_step(
     pos_clamp = float("inf") if loss_fn == "bce" else _LOG_W_CLAMP
     log_r_nom = _apply_positivity(d_nom, positivity, clamp=pos_clamp)
     log_r_pert_all = _apply_positivity(
-        d_pert_all, positivity, clamp=pos_clamp,
+        d_pert_all,
+        positivity,
+        clamp=pos_clamp,
     )
     if loss_fn in ("dv", "expkl"):
         x_pert_all = log_r_pert_all
@@ -2210,8 +2371,12 @@ def loss_step(
         raise ValueError(f"unknown loss_fn {loss_fn!r}")
 
     pert_estimator = _smear_pert_estimator(
-        x_pert_all, eps_stack, gh_nodes, gh_weights,
-        smear_K, smear_residual,
+        x_pert_all,
+        eps_stack,
+        gh_nodes,
+        gh_weights,
+        smear_K,
+        smear_residual,
     )
 
     if loss_fn == "dv":
@@ -2227,14 +2392,10 @@ def loss_step(
         loss = bce_loss(log_r_nom, pert_estimator, w)
         # BCE's per-event integrand is the sum of nom-side and pert-
         # side softplus terms.
-        per_event = (
-            F.softplus(log_r_nom) + pert_estimator
-        ).detach()
+        per_event = (F.softplus(log_r_nom) + pert_estimator).detach()
     else:  # expkl
         loss = expkl_loss(log_r_nom, pert_estimator, w)
-        per_event = (
-            torch.exp(log_r_nom) - pert_estimator
-        ).detach()
+        per_event = (torch.exp(log_r_nom) - pert_estimator).detach()
     split_sum, split_w = _per_mode_split(per_event, w, mode_id)
     return loss, split_sum, split_w
 
@@ -2243,10 +2404,12 @@ def loss_step(
 # Training loop
 # ============================================================================
 
+
 def _all_reduce_sum_(t: torch.Tensor, is_dist: bool) -> torch.Tensor:
     """In-place all-reduce(sum) when distributed, otherwise a no-op."""
     if is_dist:
         import torch.distributed as dist
+
         dist.all_reduce(t, op=dist.ReduceOp.SUM)
     return t
 
@@ -2265,16 +2428,30 @@ def _amp_setup(precision: str, device):
     else:
         raise ValueError(f"unknown precision {precision!r}")
     scaler = torch.amp.GradScaler(
-        amp_device_type, enabled=(precision == "fp16"),
+        amp_device_type,
+        enabled=(precision == "fp16"),
     )
     return amp_device_type, amp_dtype, amp_enabled, scaler
 
 
 def train_one_epoch(
-    model, optimizer, train_loader, device, epoch, args, arch,
-    is_rank0, amp_ctx, scaler, sigma_pack_iu, sigma_pack_ju,
-    gh_nodes, gh_weights, is_dist=False,
-    shift_smolyak_pts=None, shift_stochastic_extra: int = 0,
+    model,
+    optimizer,
+    train_loader,
+    device,
+    epoch,
+    args,
+    arch,
+    is_rank0,
+    amp_ctx,
+    scaler,
+    sigma_pack_iu,
+    sigma_pack_ju,
+    gh_nodes,
+    gh_weights,
+    is_dist=False,
+    shift_smolyak_pts=None,
+    shift_stochastic_extra: int = 0,
     inner_model=None,
     step_profiler=None,
 ):
@@ -2297,14 +2474,15 @@ def train_one_epoch(
     split_sum_total = torch.zeros(3, device=device)
     split_w_total = torch.zeros(3, device=device)
     profile_steps = (
-        0 if step_profiler is None else int(step_profiler.enabled) and int(
-            getattr(args, "profile_data_pipeline", 0) or 0
-        )
+        0
+        if step_profiler is None
+        else int(step_profiler.enabled)
+        and int(getattr(args, "profile_data_pipeline", 0) or 0)
     )
     for i, (x, c, w) in enumerate(bar):
-        do_profile = (step_profiler is not None
-                      and step_profiler.enabled
-                      and i < profile_steps)
+        do_profile = (
+            step_profiler is not None and step_profiler.enabled and i < profile_steps
+        )
         if do_profile:
             step_profiler.start()
         x = x.to(device, non_blocking=True)
@@ -2316,7 +2494,11 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         with amp_ctx():
             loss, split_sum, split_w = loss_step(
-                model, arch, x, c, w,
+                model,
+                arch,
+                x,
+                c,
+                w,
                 delta_max=args.delta_max,
                 sigma_max=args.sigma_max,
                 oversample=args.oversample,
@@ -2326,7 +2508,8 @@ def train_one_epoch(
                 sigma_pack_ju=sigma_pack_ju,
                 smear_K=args.smear_K,
                 smear_residual=args.smear_residual,
-                gh_nodes=gh_nodes, gh_weights=gh_weights,
+                gh_nodes=gh_nodes,
+                gh_weights=gh_weights,
                 detach_pure_in_joint=args.detach_pure_in_joint,
                 include_smear=args.include_smear,
                 shift_smolyak_pts=shift_smolyak_pts,
@@ -2378,11 +2561,22 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def run_val(model, val_loader, device, args, arch, amp_ctx,
-            sigma_pack_iu, sigma_pack_ju, gh_nodes, gh_weights,
-            is_dist=False,
-            shift_smolyak_pts=None, shift_stochastic_extra: int = 0,
-            inner_model=None):
+def run_val(
+    model,
+    val_loader,
+    device,
+    args,
+    arch,
+    amp_ctx,
+    sigma_pack_iu,
+    sigma_pack_ju,
+    gh_nodes,
+    gh_weights,
+    is_dist=False,
+    shift_smolyak_pts=None,
+    shift_stochastic_extra: int = 0,
+    inner_model=None,
+):
     model.eval()
     total_loss = torch.zeros((), device=device)
     wsum = torch.zeros((), device=device)
@@ -2395,7 +2589,11 @@ def run_val(model, val_loader, device, args, arch, amp_ctx,
         wb = w.sum()
         with amp_ctx():
             loss, split_sum, split_w = loss_step(
-                model, arch, x, c, w,
+                model,
+                arch,
+                x,
+                c,
+                w,
                 delta_max=args.delta_max,
                 sigma_max=args.sigma_max,
                 oversample=args.oversample,
@@ -2405,7 +2603,8 @@ def run_val(model, val_loader, device, args, arch, amp_ctx,
                 sigma_pack_ju=sigma_pack_ju,
                 smear_K=args.smear_K,
                 smear_residual=args.smear_residual,
-                gh_nodes=gh_nodes, gh_weights=gh_weights,
+                gh_nodes=gh_nodes,
+                gh_weights=gh_weights,
                 detach_pure_in_joint=args.detach_pure_in_joint,
                 include_smear=args.include_smear,
                 shift_smolyak_pts=shift_smolyak_pts,
@@ -2433,25 +2632,44 @@ def run_val(model, val_loader, device, args, arch, amp_ctx,
 
 
 def train(
-    model, inner_model, arch, train_loader, val_loader, device, args,
-    log_lines, stats=None, sigma_pack_iu=None, sigma_pack_ju=None,
-    gh_nodes=None, gh_weights=None,
-    is_dist: bool = False, is_rank0: bool = True,
-    shift_smolyak_pts=None, shift_stochastic_extra: int = 0,
+    model,
+    inner_model,
+    arch,
+    train_loader,
+    val_loader,
+    device,
+    args,
+    log_lines,
+    stats=None,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
+    gh_nodes=None,
+    gh_weights=None,
+    is_dist: bool = False,
+    is_rank0: bool = True,
+    shift_smolyak_pts=None,
+    shift_stochastic_extra: int = 0,
 ):
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5,
+        optimizer,
+        mode="min",
+        factor=0.5,
         patience=max(1, args.patience // 2),
     )
 
     amp_device_type, amp_dtype, amp_enabled, scaler = _amp_setup(
-        args.precision, device,
+        args.precision,
+        device,
     )
     amp_ctx = lambda: torch.amp.autocast(
-        device_type=amp_device_type, dtype=amp_dtype, enabled=amp_enabled,
+        device_type=amp_device_type,
+        dtype=amp_dtype,
+        enabled=amp_enabled,
     )
 
     # Per-step profiler — pairs with the TimedLoader's per-batch
@@ -2460,9 +2678,9 @@ def train(
     # so we can tell whether GPU compute, optimizer, or CPU
     # bookkeeping is the per-step ceiling.
     from arrow_shard_loader import StepProfiler
+
     step_profiler = StepProfiler(
-        enabled=int(getattr(args, "profile_data_pipeline", 0) or 0) > 0
-        and is_rank0,
+        enabled=int(getattr(args, "profile_data_pipeline", 0) or 0) > 0 and is_rank0,
         label="train_step",
         device=device,
     )
@@ -2479,9 +2697,7 @@ def train(
     best_val_split = [float("inf"), float("inf"), float("inf")]
     best_state = None
     no_improve = 0
-    checkpoint_path = (
-        os.path.join(args.output, "checkpoint.pt") if is_rank0 else None
-    )
+    checkpoint_path = os.path.join(args.output, "checkpoint.pt") if is_rank0 else None
 
     # Optional ``torch.profiler`` diagnostic pass: run the first
     # ``warmup + active`` training steps under the profiler, print
@@ -2490,6 +2706,7 @@ def train(
     # only rank 0 runs the profiler / prints / exports.
     if getattr(args, "profile", False):
         from train_muon_response_flow import _run_profile_pass
+
         n_warmup = int(args.profile_warmup)
         n_active = int(args.profile_active)
         n_total = n_warmup + n_active
@@ -2508,7 +2725,11 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             with amp_ctx():
                 loss, _split_sum, _split_w = loss_step(
-                    model, arch, x, c, w,
+                    model,
+                    arch,
+                    x,
+                    c,
+                    w,
                     delta_max=args.delta_max,
                     sigma_max=args.sigma_max,
                     oversample=args.oversample,
@@ -2518,7 +2739,8 @@ def train(
                     sigma_pack_ju=sigma_pack_ju,
                     smear_K=args.smear_K,
                     smear_residual=args.smear_residual,
-                    gh_nodes=gh_nodes, gh_weights=gh_weights,
+                    gh_nodes=gh_nodes,
+                    gh_weights=gh_weights,
                     detach_pure_in_joint=args.detach_pure_in_joint,
                     include_smear=args.include_smear,
                     shift_smolyak_pts=shift_smolyak_pts,
@@ -2529,7 +2751,8 @@ def train(
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=10.0,
+                model.parameters(),
+                max_norm=10.0,
             )
             scaler.step(optimizer)
             scaler.update()
@@ -2538,6 +2761,7 @@ def train(
             output = args.profile_output
             if is_dist and output:
                 import torch.distributed as _dist
+
                 rank_i = _dist.get_rank()
                 base, ext = os.path.splitext(output)
                 output = f"{base}.rank{rank_i}{ext}"
@@ -2558,10 +2782,20 @@ def train(
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         train_loss, train_split = train_one_epoch(
-            model, optimizer, train_loader, device, epoch, args, arch,
-            is_rank0=is_rank0, amp_ctx=amp_ctx, scaler=scaler,
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
-            gh_nodes=gh_nodes, gh_weights=gh_weights,
+            model,
+            optimizer,
+            train_loader,
+            device,
+            epoch,
+            args,
+            arch,
+            is_rank0=is_rank0,
+            amp_ctx=amp_ctx,
+            scaler=scaler,
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
+            gh_nodes=gh_nodes,
+            gh_weights=gh_weights,
             is_dist=is_dist,
             shift_smolyak_pts=shift_smolyak_pts,
             shift_stochastic_extra=shift_stochastic_extra,
@@ -2569,8 +2803,16 @@ def train(
             step_profiler=step_profiler,
         )
         val_loss, val_split = run_val(
-            model, val_loader, device, args, arch, amp_ctx,
-            sigma_pack_iu, sigma_pack_ju, gh_nodes, gh_weights,
+            model,
+            val_loader,
+            device,
+            args,
+            arch,
+            amp_ctx,
+            sigma_pack_iu,
+            sigma_pack_ju,
+            gh_nodes,
+            gh_weights,
             is_dist=is_dist,
             shift_smolyak_pts=shift_smolyak_pts,
             shift_stochastic_extra=shift_stochastic_extra,
@@ -2578,11 +2820,13 @@ def train(
         )
         scheduler.step(val_loss)
         lr_now = optimizer.param_groups[0]["lr"]
+
         # Format split components: show as "-" when no events of
         # that mode in the batch (e.g. SMEAR / JOINT in shift-only
         # training where val_split[1,2] = +inf).
         def _fmt_comp(x):
             return f"{x:+.4f}" if math.isfinite(x) else "  -   "
+
         tr_sh, tr_sm, tr_jt = train_split
         va_sh, va_sm, va_jt = val_split
         line = (
@@ -2644,9 +2888,14 @@ def train(
             and (epoch % args.checkpoint_every == 0)
         ):
             ckpt = _build_ckpt(
-                model=inner_model, arch=arch, args=args, epoch=epoch,
-                train_loss=train_loss, val_loss=val_loss,
-                best_val=best_val, stats=stats,
+                model=inner_model,
+                arch=arch,
+                args=args,
+                epoch=epoch,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                best_val=best_val,
+                stats=stats,
             )
             torch.save(ckpt, checkpoint_path)
 
@@ -2666,10 +2915,7 @@ def train(
                         print(line)
                         log_lines.append(line)
             else:
-                line = (
-                    f"early stopping at epoch {epoch} "
-                    f"(best val {best_val:+.4f})"
-                )
+                line = f"early stopping at epoch {epoch} " f"(best val {best_val:+.4f})"
                 if is_rank0:
                     print(line)
                     log_lines.append(line)
@@ -2680,8 +2926,7 @@ def train(
     return best_val
 
 
-def _build_ckpt(model, arch, args, epoch, train_loss, val_loss, best_val,
-                stats):
+def _build_ckpt(model, arch, args, epoch, train_loss, val_loss, best_val, stats):
     """Bundle a checkpoint payload. ``model_config['arch']`` discriminates
     the construction so loaders can rebuild the right architecture."""
     gb = getattr(model, "gauss_baseline", None)
@@ -2690,7 +2935,8 @@ def _build_ckpt(model, arch, args, epoch, train_loss, val_loss, best_val,
             "hidden": int(gb.hidden),
             "n_layers": int(gb.n_layers),
         }
-        if gb is not None else None
+        if gb is not None
+        else None
     )
     if arch == "mlp":
         model_config = {
@@ -2756,30 +3002,23 @@ def _build_ckpt(model, arch, args, epoch, train_loss, val_loss, best_val,
             "loss_fn": args.loss_fn,
             "positivity": args.positivity,
             "delta_max": args.delta_max,
-            "sigma_max": (
-                args.sigma_max if args.include_smear else 0.0
-            ),
+            "sigma_max": (args.sigma_max if args.include_smear else 0.0),
             "oversample": args.oversample,
             "precision": args.precision,
             "compile": bool(args.compile),
             "include_smear": bool(args.include_smear),
-            "smear_K": (
-                int(args.smear_K) if args.include_smear else 1
-            ),
+            "smear_K": (int(args.smear_K) if args.include_smear else 1),
             "smear_residual": (
                 bool(args.smear_residual) if args.include_smear else False
             ),
             "detach_pure_in_joint": (
-                bool(args.detach_pure_in_joint) if args.include_smear
-                else False
+                bool(args.detach_pure_in_joint) if args.include_smear else False
             ),
             "detach_pure_shift_in_joint": (
-                bool(args.detach_pure_shift_in_joint)
-                if args.include_smear else False
+                bool(args.detach_pure_shift_in_joint) if args.include_smear else False
             ),
             "detach_pure_smear_in_joint": (
-                bool(args.detach_pure_smear_in_joint)
-                if args.include_smear else False
+                bool(args.detach_pure_smear_in_joint) if args.include_smear else False
             ),
         },
         "stats": asdict(stats) if stats is not None else None,
@@ -2790,6 +3029,7 @@ def _build_ckpt(model, arch, args, epoch, train_loss, val_loss, best_val,
 # CLI
 # ============================================================================
 
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Direct shift+smear reweight training (MLP-B / "
@@ -2798,7 +3038,9 @@ def parse_args():
     )
     # Data / IO.
     p.add_argument(
-        "--input-files", nargs="+", required=True,
+        "--input-files",
+        nargs="+",
+        required=True,
         default=argparse.SUPPRESS,
         help="(required) One of: (a) a shard directory containing "
         "manifest.json (auto-expanded to its Arrow IPC shards); "
@@ -2808,15 +3050,19 @@ def parse_args():
         "format.",
     )
     p.add_argument(
-        "--tree", default="tree",
+        "--tree",
+        default="tree",
         help="TTree name inside the input files.",
     )
     p.add_argument(
-        "--output", default="./shift_smear_reweight/",
+        "--output",
+        default="./shift_smear_reweight/",
         help="Output directory (created if missing).",
     )
     p.add_argument(
-        "--stats-max-rows", type=int, default=-1,
+        "--stats-max-rows",
+        type=int,
+        default=-1,
         help="Cap the rows used by the preproc-stats warmup pass. -1 "
         "= scan all rows in all shards (most accurate). 1e7 is "
         "plenty in practice and starts training in seconds rather "
@@ -2843,7 +3089,9 @@ def parse_args():
         action="store_false",
     )
     p.add_argument(
-        "--robust-sample-rows", type=int, default=20_000_000,
+        "--robust-sample-rows",
+        type=int,
+        default=20_000_000,
         help="(``--robust-stats`` only) Sample size for the robust "
         "median + MAD pass. 2e7 rows fits in ~640 MB and gives "
         "stable estimates even for the rare charge-mismeasurement "
@@ -2862,7 +3110,9 @@ def parse_args():
         "(legacy, ~5%% loss on W/Z).",
     )
     p.add_argument(
-        "--holdout-fraction", type=float, default=0.1,
+        "--holdout-fraction",
+        type=float,
+        default=0.1,
         help="Fraction of each shard's record batches held out from "
         "training, never seen by the trainer. The diagnostic script "
         "evaluates the model on this slice. Splits are contiguous "
@@ -2871,7 +3121,9 @@ def parse_args():
         "last holdout_fraction. Default 0.1 → 80 / 10 / 10 split.",
     )
     p.add_argument(
-        "--data-workers", type=int, default=4,
+        "--data-workers",
+        type=int,
+        default=4,
         help="Number of background processes that feed each rank's "
         "data pipeline. 0 = run the loader inline in the trainer "
         "process (single producer thread, prefetch=2). >0 wraps the "
@@ -2913,11 +3165,15 @@ def parse_args():
         "disables.",
     )
     p.add_argument(
-        "--val-fraction", type=float, default=0.1,
+        "--val-fraction",
+        type=float,
+        default=0.1,
         help="Fraction of events held out for validation.",
     )
     p.add_argument(
-        "--seed", type=int, default=42,
+        "--seed",
+        type=int,
+        default=42,
         help="Random seed for the train/val split and PyTorch RNG.",
     )
 
@@ -2940,46 +3196,63 @@ def parse_args():
 
     # Trunk sizing (shared between mlp and polyhead arches).
     p.add_argument(
-        "--trunk-hidden", type=int, default=64,
+        "--trunk-hidden",
+        type=int,
+        default=64,
         help="Trunk MLP hidden width. mlp: trunk(y, c) -> e ∈ ℝ^d_emb. "
         "polyhead: trunk(y, c) -> coefs ∈ ℝ^n_basis.",
     )
     p.add_argument(
-        "--trunk-layers", type=int, default=2,
+        "--trunk-layers",
+        type=int,
+        default=2,
         help="Number of trunk MLP hidden layers (shared).",
     )
 
     # MLP-B-only sizing.
     p.add_argument(
-        "--d-emb", type=int, default=32,
+        "--d-emb",
+        type=int,
+        default=32,
         help="(--arch mlp) Trunk embedding dimension.",
     )
     p.add_argument(
-        "--head-hidden", type=int, default=32,
+        "--head-hidden",
+        type=int,
+        default=32,
         help="(--arch mlp) Head hidden width.",
     )
     p.add_argument(
-        "--head-layers", type=int, default=2,
+        "--head-layers",
+        type=int,
+        default=2,
         help="(--arch mlp) Number of head hidden layers.",
     )
 
     # Polyhead-only sizing.
     p.add_argument(
-        "--max-deg-u", type=int, default=3,
+        "--max-deg-u",
+        type=int,
+        default=3,
         help="(--arch polyhead) Max polynomial degree in u.",
     )
     p.add_argument(
-        "--max-deg-sigma", type=int, default=4,
+        "--max-deg-sigma",
+        type=int,
+        default=4,
         help="(--arch polyhead) Max polynomial degree in σ_vec. Must "
         "be even (smear-symmetry constraint).",
     )
     p.add_argument(
-        "--max-cross-deg", type=int, default=3,
-        help="(--arch polyhead) Max combined degree |α|+|β| of cross "
-        "(u, σ) terms.",
+        "--max-cross-deg",
+        type=int,
+        default=3,
+        help="(--arch polyhead) Max combined degree |α|+|β| of cross " "(u, σ) terms.",
     )
     p.add_argument(
-        "--basis", choices=["monomial", "chebyshev"], default="monomial",
+        "--basis",
+        choices=["monomial", "chebyshev"],
+        default="monomial",
         help="(--arch polyhead) Basis for the polynomial in (u, σ_vec). "
         "'monomial' uses raw u^α · σ^β (default; backwards-compatible). "
         "'chebyshev' uses tensor-product Chebyshev polynomials with "
@@ -2990,7 +3263,9 @@ def parse_args():
         "scale.",
     )
     p.add_argument(
-        "--basis-scale-u", type=float, default=-1.0,
+        "--basis-scale-u",
+        type=float,
+        default=-1.0,
         help="(--arch polyhead, --basis chebyshev) Scale for u in the "
         "Chebyshev basis: T_n(u / basis_scale_u). Set to the nominal "
         "max |u| in standardized-target σ_y units so the recurrence "
@@ -2998,7 +3273,9 @@ def parse_args():
         "use oversample · delta_max (the actual u-magnitude bound).",
     )
     p.add_argument(
-        "--basis-scale-sigma", type=float, default=-1.0,
+        "--basis-scale-sigma",
+        type=float,
+        default=-1.0,
         help="(--arch polyhead, --basis chebyshev) Scale for σ_vec in "
         "the Chebyshev basis: T_n(σ_vec / basis_scale_sigma). Default "
         "-1 = auto: use oversample · sigma_max (the actual σ_vec bound).",
@@ -3007,7 +3284,8 @@ def parse_args():
     # Analytic Gaussian baseline (shared between mlp and polyhead).
     p.add_argument(
         "--gauss-baseline",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Add an analytic Gaussian density-ratio baseline that "
         "models p_nom(y|c) ~ N(μ(c), Σ(c)) and its shift+convolution "
         "under (u, σ_vec). The closed-form log-ratio is added "
@@ -3019,25 +3297,30 @@ def parse_args():
         "recovers legacy behaviour at epoch 0.",
     )
     p.add_argument(
-        "--gauss-baseline-hidden", type=int, default=64,
+        "--gauss-baseline-hidden",
+        type=int,
+        default=64,
         help="(--gauss-baseline) Hidden width of the c → (μ, Σ) MLP.",
     )
     p.add_argument(
-        "--gauss-baseline-layers", type=int, default=2,
-        help="(--gauss-baseline) Number of hidden layers of the "
-        "c → (μ, Σ) MLP.",
+        "--gauss-baseline-layers",
+        type=int,
+        default=2,
+        help="(--gauss-baseline) Number of hidden layers of the " "c → (μ, Σ) MLP.",
     )
 
     # Activation (shared).
     p.add_argument(
-        "--activation", choices=["gelu", "relu", "silu", "tanh"],
+        "--activation",
+        choices=["gelu", "relu", "silu", "tanh"],
         default="gelu",
         help="Activation used in trunk and head MLPs.",
     )
 
     # Loss / positivity / perturbation ranges.
     p.add_argument(
-        "--loss-fn", choices=["dv", "lsif", "bce", "expkl"],
+        "--loss-fn",
+        choices=["dv", "lsif", "bce", "expkl"],
         default="lsif",
         help="Density-ratio loss family. "
         "'lsif' (default): least-squares importance fitting, optimum "
@@ -3057,7 +3340,8 @@ def parse_args():
         "like LSIF; pair with low LR or BCE warm-start.",
     )
     p.add_argument(
-        "--positivity", choices=["exp", "softplus", "asinh"],
+        "--positivity",
+        choices=["exp", "softplus", "asinh"],
         default="softplus",
         help="Positivity wrap on the pre-positivity scalar d. "
         "'softplus' (default) is fp16-safer but asymmetric (compresses "
@@ -3071,7 +3355,8 @@ def parse_args():
     )
     p.add_argument(
         "--include-smear",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Include smear (and joint shift+smear) perturbations in "
         "training. Default OFF: shift-only architecture (no Sigma_pack "
         "in mlp head; no sigma-dependent basis terms in polyhead) and "
@@ -3083,15 +3368,21 @@ def parse_args():
         "enable.",
     )
     p.add_argument(
-        "--delta-max", type=float, default=1.0,
+        "--delta-max",
+        type=float,
+        default=1.0,
         help="Max |u| in standardized target units.",
     )
     p.add_argument(
-        "--sigma-max", type=float, default=1.0,
+        "--sigma-max",
+        type=float,
+        default=1.0,
         help="Max smear magnitude |σ_vec| in standardized target units.",
     )
     p.add_argument(
-        "--oversample", type=float, default=1.3,
+        "--oversample",
+        type=float,
+        default=1.3,
         help="Oversample factor on training perturbation magnitudes; "
         "1.3× covers the operational range with margin.",
     )
@@ -3099,7 +3390,8 @@ def parse_args():
     # Shift-axis Smolyak sparse-grid evaluation.
     p.add_argument(
         "--shift-smolyak",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Use a deterministic Chebyshev-Lobatto Smolyak sparse "
         "grid for the shift (u) evaluation points, instead of one "
         "stochastic u per event per step. Each event is evaluated at "
@@ -3109,7 +3401,9 @@ def parse_args():
         "otherwise. Off by default; turn on with --shift-smolyak.",
     )
     p.add_argument(
-        "--shift-smolyak-level", type=int, default=0,
+        "--shift-smolyak-level",
+        type=int,
+        default=0,
         help="Smolyak level (0-indexed; level L grid has 1, 7, 25, "
         "69, 177, 441 points in d=3 for L=0..5). 0 = auto: with "
         "--arch polyhead, picks the lowest L whose grid has more "
@@ -3118,7 +3412,9 @@ def parse_args():
         "not meaningful; pass an explicit positive level instead.",
     )
     p.add_argument(
-        "--shift-stochastic-extra", type=int, default=0,
+        "--shift-stochastic-extra",
+        type=int,
+        default=0,
         help="Number of additional stochastic u samples per event on "
         "top of the Smolyak grid (or by themselves if --shift-smolyak "
         "is off). Drawn with the same direction × magnitude scheme as "
@@ -3130,7 +3426,9 @@ def parse_args():
 
     # Smear ε-integration.
     p.add_argument(
-        "--smear-K", type=int, default=1,
+        "--smear-K",
+        type=int,
+        default=1,
         help="Quadrature nodes for the smear ε integration in the "
         "pert-side LSIF/DV expectation. K=1 (default) is K=1 "
         "stochastic — one random ε per event. K≥2 uses deterministic "
@@ -3141,7 +3439,8 @@ def parse_args():
         "K=5 through deg 9. For smooth log r, K=3-5 is plenty.",
     )
     p.add_argument(
-        "--smear-residual", action="store_true",
+        "--smear-residual",
+        action="store_true",
         help="(only with --smear-K >= 2) Add a stochastic residual "
         "control variate to the GH estimator: sample one extra "
         "epsilon ~ N(0, 1) per event, evaluate r-hat at the "
@@ -3156,7 +3455,8 @@ def parse_args():
     )
     p.add_argument(
         "--detach-pure-in-joint",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="(polyhead / mlp arches) Detach the pure-shift "
         "(sigma -> 0) and pure-smear (u -> 0) contributions to log r "
         "on JOINT-mode events (mode==2; both u and sigma_vec "
@@ -3173,7 +3473,8 @@ def parse_args():
     )
     p.add_argument(
         "--detach-pure-shift-in-joint",
-        action="store_true", default=False,
+        action="store_true",
+        default=False,
         help="(mlp-factored only) Detach the pure-shift block A on "
         "JOINT events. Equivalently: structurally factor A so it "
         "depends only on (e, u), not on σ_pack; the cross-term "
@@ -3182,7 +3483,8 @@ def parse_args():
     )
     p.add_argument(
         "--detach-pure-smear-in-joint",
-        action="store_true", default=False,
+        action="store_true",
+        default=False,
         help="(mlp-factored only) Detach the pure-smear block B on "
         "JOINT events. Equivalently: structurally factor B so it "
         "depends only on (e, σ_pack), not on u; the cross-term "
@@ -3195,19 +3497,27 @@ def parse_args():
 
     # Optimization.
     p.add_argument(
-        "--epochs", type=int, default=200,
+        "--epochs",
+        type=int,
+        default=200,
         help="Maximum training epochs (early-stopping may end sooner).",
     )
     p.add_argument(
-        "--lr", type=float, default=1e-3,
+        "--lr",
+        type=float,
+        default=1e-3,
         help="Initial Adam learning rate.",
     )
     p.add_argument(
-        "--weight-decay", type=float, default=1e-4,
+        "--weight-decay",
+        type=float,
+        default=1e-4,
         help="Adam weight decay (L2 regularization).",
     )
     p.add_argument(
-        "--patience", type=int, default=20,
+        "--patience",
+        type=int,
+        default=20,
         help="Early-stopping patience: stop after this many consecutive "
         "epochs with no validation-loss improvement (see "
         "--patience-rel-threshold for the improvement criterion).",
@@ -3236,18 +3546,22 @@ def parse_args():
         "sits at O(1). Default: %(default)s.",
     )
     p.add_argument(
-        "--batch-size", type=int, default=None,
-        help="Training batch size. None auto-selects: "
-        "32768 on CUDA, 16384 on CPU.",
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Training batch size. None auto-selects: " "32768 on CUDA, 16384 on CPU.",
     )
 
     # Run config.
     p.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu",
+        "--device",
+        default="cuda" if torch.cuda.is_available() else "cpu",
         help="cuda or cpu. Multi-GPU requires cuda (see --num-gpus).",
     )
     p.add_argument(
-        "--num-gpus", type=int, default=-1,
+        "--num-gpus",
+        type=int,
+        default=-1,
         help="Number of GPUs / worker processes. -1 (default) auto-"
         "detects via torch.cuda.device_count(). Set 1 to force "
         "single-process even on a multi-GPU host. Ignored when "
@@ -3255,7 +3569,8 @@ def parse_args():
     )
     p.add_argument(
         "--prefetch-shuffle",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="[default: on] Hide the per-epoch ``torch.randperm(n)`` "
         "stall by computing the next epoch's permutation in a "
         "background thread while the current epoch is still "
@@ -3272,37 +3587,48 @@ def parse_args():
         "``LOADER_TIME=1`` env var.",
     )
     p.add_argument(
-        "--checkpoint-every", type=int, default=1,
+        "--checkpoint-every",
+        type=int,
+        default=1,
         help="Write a checkpoint every N epochs. 0 disables periodic "
         "checkpoints (final model is still saved at end of training).",
     )
     p.add_argument(
-        "--precision", choices=["fp32", "bf16", "fp16"], default="fp32",
+        "--precision",
+        choices=["fp32", "bf16", "fp16"],
+        default="fp32",
         help="Training/validation forward-pass precision.",
     )
     p.add_argument(
-        "--compile", action="store_true",
+        "--compile",
+        action="store_true",
         help="Wrap the model in torch.compile(mode='reduce-overhead').",
     )
 
     # Profiling diagnostics.
     p.add_argument(
         "--profile",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="If set, run a short ``torch.profiler`` pass on the "
         "first few training steps and exit (does not proceed to the "
         "epoch loop). Useful for identifying CUDA-time hotspots.",
     )
     p.add_argument(
-        "--profile-warmup", type=int, default=3,
+        "--profile-warmup",
+        type=int,
+        default=3,
         help="Profile schedule warmup steps (not recorded).",
     )
     p.add_argument(
-        "--profile-active", type=int, default=5,
+        "--profile-active",
+        type=int,
+        default=5,
         help="Profile schedule active steps (recorded).",
     )
     p.add_argument(
-        "--profile-output", default=None,
+        "--profile-output",
+        default=None,
         help="Optional path for Chrome trace export "
         "(viewable in chrome://tracing or Perfetto). Under DDP, the "
         "rank index is appended before the extension.",
@@ -3317,6 +3643,7 @@ def parse_args():
 # -----------------------------------------------------------------------------
 # Worker (runs once per GPU in distributed mode, once total otherwise)
 # -----------------------------------------------------------------------------
+
 
 def main_worker(
     rank,
@@ -3344,6 +3671,7 @@ def main_worker(
     # Device selection + optional process-group init.
     if is_dist:
         import torch.distributed as dist
+
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(master_port)
         if args.device.startswith("cuda"):
@@ -3354,7 +3682,9 @@ def main_worker(
             device = "cpu"
             backend = "gloo"
         dist.init_process_group(
-            backend=backend, rank=rank, world_size=world_size,
+            backend=backend,
+            rank=rank,
+            world_size=world_size,
         )
     else:
         if args.device.startswith("cuda"):
@@ -3379,12 +3709,16 @@ def main_worker(
     n_train_workers_hint = max(1, n_data_workers)
     n_val_workers_hint = max(1, n_data_workers // 2)
     train_ds = ArrowShardLoader(
-        shard_files, stats, weight_mean,
-        world_size=world_size, rank=rank,
+        shard_files,
+        stats,
+        weight_mean,
+        world_size=world_size,
+        rank=rank,
         batch_size=args.batch_size,
         split="train",
         val_fraction=args.val_fraction,
-        shuffle=True, drop_last=True,
+        shuffle=True,
+        drop_last=True,
         pin_memory=pin_memory,
         seed=int(args.seed),
         weight_mode=args.weight_handling,
@@ -3393,12 +3727,16 @@ def main_worker(
         num_workers_hint=n_train_workers_hint,
     )
     val_ds = ArrowShardLoader(
-        shard_files, stats, weight_mean,
-        world_size=world_size, rank=rank,
+        shard_files,
+        stats,
+        weight_mean,
+        world_size=world_size,
+        rank=rank,
         batch_size=args.batch_size,
         split="val",
         val_fraction=args.val_fraction,
-        shuffle=False, drop_last=False,
+        shuffle=False,
+        drop_last=False,
         pin_memory=pin_memory,
         seed=int(args.seed),
         weight_mode=args.weight_handling,
@@ -3416,6 +3754,7 @@ def main_worker(
     if n_data_workers > 0:
         import torch.utils.data as _td
         from arrow_shard_loader import dataloader_worker_init
+
         train_loader = _td.DataLoader(
             train_ds,
             batch_size=None,
@@ -3445,6 +3784,7 @@ def main_worker(
     n_profile = int(getattr(args, "profile_data_pipeline", 0) or 0)
     if n_profile > 0 and is_rank0:
         from arrow_shard_loader import TimedLoader
+
         train_loader = TimedLoader(train_loader, n_print=n_profile, label="train")
         val_loader = TimedLoader(val_loader, n_print=n_profile, label="val")
     if is_rank0:
@@ -3471,7 +3811,8 @@ def main_worker(
             n_layers=int(args.gauss_baseline_layers),
             activation=activation_cls,
         )
-        if bool(args.gauss_baseline) else None
+        if bool(args.gauss_baseline)
+        else None
     )
     if args.arch == "mlp":
         inner_model = ReweightMLP_B(
@@ -3507,12 +3848,8 @@ def main_worker(
             head_layers=args.head_layers,
             activation=activation_cls,
             shift_only=not args.include_smear,
-            detach_pure_shift_in_joint=bool(
-                args.detach_pure_shift_in_joint
-            ),
-            detach_pure_smear_in_joint=bool(
-                args.detach_pure_smear_in_joint
-            ),
+            detach_pure_shift_in_joint=bool(args.detach_pure_shift_in_joint),
+            detach_pure_smear_in_joint=bool(args.detach_pure_smear_in_joint),
             gauss_baseline=gauss_baseline,
         ).to(device)
         n_params = sum(p.numel() for p in inner_model.parameters())
@@ -3537,25 +3874,22 @@ def main_worker(
                 f"params={n_params:,}"
             )
     elif args.arch == "polyhead":
-        eff_max_deg_sigma = (
-            args.max_deg_sigma if args.include_smear else 0
-        )
-        eff_max_cross_deg = (
-            args.max_cross_deg if args.include_smear else args.max_deg_u
-        )
+        eff_max_deg_sigma = args.max_deg_sigma if args.include_smear else 0
+        eff_max_cross_deg = args.max_cross_deg if args.include_smear else args.max_deg_u
         # Auto-default Chebyshev scales to the actual perturbation
         # bounds (oversample · delta_max for u, oversample · sigma_max
         # for σ_vec) so T_n(x / scale) stays in [-1, 1] over training.
         # Sentinel <= 0 from argparse means "not specified".
         eff_basis_scale_u = (
-            float(args.basis_scale_u) if args.basis_scale_u > 0
+            float(args.basis_scale_u)
+            if args.basis_scale_u > 0
             else float(args.oversample * args.delta_max)
         )
         eff_basis_scale_sigma = (
-            float(args.basis_scale_sigma) if args.basis_scale_sigma > 0
+            float(args.basis_scale_sigma)
+            if args.basis_scale_sigma > 0
             else (
-                float(args.oversample * args.sigma_max)
-                if args.include_smear else 1.0
+                float(args.oversample * args.sigma_max) if args.include_smear else 1.0
             )
         )
         # Persist the resolved values back so the rest of main_worker
@@ -3589,7 +3923,8 @@ def main_worker(
                 + (
                     f"(scale_u={args.basis_scale_u:g},"
                     f"scale_sigma={args.basis_scale_sigma:g})"
-                    if args.basis == "chebyshev" else ""
+                    if args.basis == "chebyshev"
+                    else ""
                 )
                 + f"  n_basis={inner_model.n_basis}  "
                 f"params={n_params:,}"
@@ -3609,26 +3944,21 @@ def main_worker(
     # / --detach-pure-in-joint / --detach-pure-{shift,smear}-in-joint
     # are tracked for logging but ignored.
     eff_smear_K = args.smear_K if args.include_smear else 1
-    eff_smear_residual = (
-        bool(args.smear_residual) if args.include_smear else False
-    )
+    eff_smear_residual = bool(args.smear_residual) if args.include_smear else False
     eff_detach_pure_in_joint = (
         bool(args.detach_pure_in_joint) if args.include_smear else False
     )
     eff_detach_pure_shift_in_joint = (
-        bool(args.detach_pure_shift_in_joint)
-        if args.include_smear else False
+        bool(args.detach_pure_shift_in_joint) if args.include_smear else False
     )
     eff_detach_pure_smear_in_joint = (
-        bool(args.detach_pure_smear_in_joint)
-        if args.include_smear else False
+        bool(args.detach_pure_smear_in_joint) if args.include_smear else False
     )
 
     log_lines: List[str] = []
     if args.include_smear:
-        smear_mode_str = (
-            f"K={eff_smear_K}"
-            + (" + residual" if eff_smear_residual else "")
+        smear_mode_str = f"K={eff_smear_K}" + (
+            " + residual" if eff_smear_residual else ""
         )
     else:
         smear_mode_str = "off (shift-only)"
@@ -3636,7 +3966,8 @@ def main_worker(
         gauss_str = (
             f"gauss_baseline=({args.gauss_baseline_hidden}×"
             f"{args.gauss_baseline_layers})"
-            if bool(args.gauss_baseline) else "gauss_baseline=off"
+            if bool(args.gauss_baseline)
+            else "gauss_baseline=off"
         )
         log_lines.append(
             f"arch={args.arch} include_smear={bool(args.include_smear)} "
@@ -3652,8 +3983,7 @@ def main_worker(
             f"world_size={world_size} params={n_params}"
         )
         if not args.include_smear and (
-            args.smear_K > 1 or args.smear_residual
-            or not args.detach_pure_in_joint
+            args.smear_K > 1 or args.smear_residual or not args.detach_pure_in_joint
         ):
             print(
                 "[note] --no-include-smear (shift-only): ignoring "
@@ -3682,14 +4012,10 @@ def main_worker(
         if is_rank0:
             print(
                 f"Gauss-Hermite ε integration: K={eff_smear_K} "
-                f"{'+ residual control variate' if eff_smear_residual else ''}"
-                .strip()
+                f"{'+ residual control variate' if eff_smear_residual else ''}".strip()
             )
     elif args.include_smear and eff_smear_residual and is_rank0:
-        print(
-            "[warning] --smear-residual has no effect when --smear-K=1; "
-            "ignoring."
-        )
+        print("[warning] --smear-residual has no effect when --smear-K=1; " "ignoring.")
 
     # Shift-axis Smolyak grid (deterministic per-event evaluation
     # points). Built once at startup, broadcast to every event during
@@ -3712,7 +4038,8 @@ def main_worker(
         elif args.arch == "polyhead":
             n_pure = _n_pure_shift_basis(n_features, args.max_deg_u)
             shift_smolyak_level = _auto_smolyak_level(
-                n_features, n_pure,
+                n_features,
+                n_pure,
             )
             if is_rank0:
                 print(
@@ -3732,9 +4059,9 @@ def main_worker(
         # perturbation prior (oversample × delta_max).
         half = float(args.oversample) * float(args.delta_max)
         smolyak_np = smolyak_np * half
-        shift_smolyak_pts = torch.from_numpy(
-            smolyak_np
-        ).to(device=device, dtype=torch.float32)
+        shift_smolyak_pts = torch.from_numpy(smolyak_np).to(
+            device=device, dtype=torch.float32
+        )
         if is_rank0:
             print(
                 f"shift-smolyak: K_smolyak={shift_smolyak_pts.shape[0]} "
@@ -3752,7 +4079,9 @@ def main_worker(
     # Wrap inner model in the single-forward DDP-friendly wrapper
     # (compute_log_r_quadrature) before any DDP / compile wraps.
     wrapper = ReweightWrapper(
-        inner_model, args.arch, args.positivity,
+        inner_model,
+        args.arch,
+        args.positivity,
         detach_pure_in_joint=eff_detach_pure_in_joint,
     ).to(device)
 
@@ -3760,7 +4089,8 @@ def main_worker(
     if is_dist:
         if args.device.startswith("cuda"):
             model = nn.parallel.DistributedDataParallel(
-                model, device_ids=[rank],
+                model,
+                device_ids=[rank],
             )
         else:
             model = nn.parallel.DistributedDataParallel(model)
@@ -3777,11 +4107,21 @@ def main_worker(
         model = torch.compile(model, mode="reduce-overhead")
 
     best_val = train(
-        model, inner_model, args.arch, train_loader, val_loader,
-        device, args, log_lines, stats=stats,
-        sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
-        gh_nodes=gh_nodes, gh_weights=gh_weights,
-        is_dist=is_dist, is_rank0=is_rank0,
+        model,
+        inner_model,
+        args.arch,
+        train_loader,
+        val_loader,
+        device,
+        args,
+        log_lines,
+        stats=stats,
+        sigma_pack_iu=sigma_pack_iu,
+        sigma_pack_ju=sigma_pack_ju,
+        gh_nodes=gh_nodes,
+        gh_weights=gh_weights,
+        is_dist=is_dist,
+        is_rank0=is_rank0,
         shift_smolyak_pts=shift_smolyak_pts,
         shift_stochastic_extra=int(args.shift_stochastic_extra),
     )
@@ -3792,8 +4132,13 @@ def main_worker(
 
         # Final artifact (the ckpt payload sans epoch/loss bookkeeping).
         final = _build_ckpt(
-            model=inner_model, arch=args.arch, args=args, epoch=-1,
-            train_loss=float("nan"), val_loss=best_val, best_val=best_val,
+            model=inner_model,
+            arch=args.arch,
+            args=args,
+            epoch=-1,
+            train_loss=float("nan"),
+            val_loss=best_val,
+            best_val=best_val,
             stats=stats,
         )
         final_name = {
@@ -3810,12 +4155,14 @@ def main_worker(
 
     if is_dist:
         import torch.distributed as dist
+
         dist.destroy_process_group()
 
 
 # -----------------------------------------------------------------------------
 # Main (dispatcher: loads data once, then spawns worker(s))
 # -----------------------------------------------------------------------------
+
 
 def main():
     args = parse_args()
@@ -3824,18 +4171,22 @@ def main():
     np.random.seed(args.seed)
 
     from arrow_shard_loader import (
-        resolve_shard_files,
         compute_stats_streaming,
+        resolve_shard_files,
     )
 
     shard_files, shard_row_counts = resolve_shard_files(
-        args.input_files, return_counts=True,
+        args.input_files,
+        return_counts=True,
     )
     print(
         f"resolved {len(shard_files)} Arrow shard(s) from "
         f"{len(args.input_files)} input arg(s)"
-        + ("" if shard_row_counts is None else
-           f"; manifest reports {sum(shard_row_counts):,} total rows")
+        + (
+            ""
+            if shard_row_counts is None
+            else f"; manifest reports {sum(shard_row_counts):,} total rows"
+        )
     )
 
     # One streaming pass for preproc mean/std + weight mean.
@@ -3843,15 +4194,15 @@ def main():
     # to a subsample if you want training to start faster.
     stats_max = int(getattr(args, "stats_max_rows", -1) or -1)
     stats, weight_mean = compute_stats_streaming(
-        shard_files, max_rows=stats_max, progress=True,
+        shard_files,
+        max_rows=stats_max,
+        progress=True,
         weight_mode=args.weight_handling,
         split="train",
         val_fraction=args.val_fraction,
         holdout_fraction=args.holdout_fraction,
         robust=bool(getattr(args, "robust_stats", False)),
-        robust_sample_rows=int(
-            getattr(args, "robust_sample_rows", 1_000_000)
-        ),
+        robust_sample_rows=int(getattr(args, "robust_sample_rows", 1_000_000)),
     )
     with open(os.path.join(args.output, "preproc.json"), "w") as f:
         json.dump(asdict(stats), f, indent=2)
@@ -3878,22 +4229,39 @@ def main():
 
     if world_size == 1:
         main_worker(
-            0, args, 1, 0, stats, weight_mean, shard_files,
-            shard_row_counts, n_features, n_cond,
+            0,
+            args,
+            1,
+            0,
+            stats,
+            weight_mean,
+            shard_files,
+            shard_row_counts,
+            n_features,
+            n_cond,
         )
     else:
         # Pick a free port on localhost for the rendezvous.
         import socket
+
         sock = socket.socket()
         sock.bind(("", 0))
         master_port = sock.getsockname()[1]
         sock.close()
         import torch.multiprocessing as mp
+
         mp.spawn(
             main_worker,
             args=(
-                args, world_size, master_port, stats, weight_mean,
-                shard_files, shard_row_counts, n_features, n_cond,
+                args,
+                world_size,
+                master_port,
+                stats,
+                weight_mean,
+                shard_files,
+                shard_row_counts,
+                n_features,
+                n_cond,
             ),
             nprocs=world_size,
             join=True,

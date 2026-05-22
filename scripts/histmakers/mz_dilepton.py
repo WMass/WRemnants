@@ -422,10 +422,7 @@ calib_filepaths = common.calib_filepaths
 closure_filepaths = common.closure_filepaths
 diff_weights_helper = (
     ROOT.wrem.SplinesDifferentialWeightsHelper(calib_filepaths["tflite_file"])
-    if (
-        args.muonScaleVariation == "smearingWeightsSplines"
-        or args.validationHists
-    )
+    if (args.muonScaleVariation == "smearingWeightsSplines" or args.validationHists)
     else None
 )
 (
@@ -1349,7 +1346,10 @@ def build_graph(df, dataset):
 
                 # muon scale variation from stats. uncertainty on the jpsi massfit
                 df, _scale_cols = muon_calibration.jpsi_style_cols(
-                    df, data_jpsi_crctn_unc_helper, reco_sel_GF, response_weight_col,
+                    df,
+                    data_jpsi_crctn_unc_helper,
+                    reco_sel_GF,
+                    response_weight_col,
                 )
                 df = df.Define(
                     "nominal_muonScaleSyst_responseWeights_tensor",
@@ -1408,7 +1408,9 @@ def build_graph(df, dataset):
                     # add the ad-hoc Z non-closure nuisances from the jpsi massfit to muon scale unc
                     df = df.DefinePerSample("AFlag", "0x01")
                     df, _znc_cols = muon_calibration.jpsi_style_cols(
-                        df, z_non_closure_parametrized_helper, reco_sel_GF,
+                        df,
+                        z_non_closure_parametrized_helper,
+                        reco_sel_GF,
                         response_weight_col,
                     )
                     df = df.Define(
@@ -1432,7 +1434,9 @@ def build_graph(df, dataset):
                 ]:
                     df = df.DefinePerSample("MFlag", "0x04")
                     df, _znc_cols = muon_calibration.jpsi_style_cols(
-                        df, z_non_closure_parametrized_helper, reco_sel_GF,
+                        df,
+                        z_non_closure_parametrized_helper,
+                        reco_sel_GF,
                         response_weight_col,
                     )
                     df = df.Define(
@@ -1452,7 +1456,9 @@ def build_graph(df, dataset):
                 if args.nonClosureScheme == "A-M-combined":
                     df = df.DefinePerSample("AMFlag", "0x01 | 0x04")
                     df, _znc_cols = muon_calibration.jpsi_style_cols(
-                        df, z_non_closure_parametrized_helper, reco_sel_GF,
+                        df,
+                        z_non_closure_parametrized_helper,
+                        reco_sel_GF,
                         response_weight_col,
                     )
                     df = df.Define(
@@ -1475,7 +1481,10 @@ def build_graph(df, dataset):
 
                 # extra uncertainties from non-closure stats
                 df, _clos_cols = muon_calibration.jpsi_style_cols(
-                    df, closure_unc_helper, reco_sel_GF, response_weight_col,
+                    df,
+                    closure_unc_helper,
+                    reco_sel_GF,
+                    response_weight_col,
                 )
                 df = df.Define(
                     "muonScaleClosSyst_responseWeights_tensor_splines",
@@ -1493,7 +1502,10 @@ def build_graph(df, dataset):
 
                 # extra uncertainties for A (fully correlated)
                 df, _closA_cols = muon_calibration.jpsi_style_cols(
-                    df, closure_unc_helper_A, reco_sel_GF, response_weight_col,
+                    df,
+                    closure_unc_helper_A,
+                    reco_sel_GF,
+                    response_weight_col,
                 )
                 df = df.Define(
                     "muonScaleClosASyst_responseWeights_tensor_splines",
@@ -1511,7 +1523,10 @@ def build_graph(df, dataset):
 
                 # extra uncertainties for M (fully correlated)
                 df, _closM_cols = muon_calibration.jpsi_style_cols(
-                    df, closure_unc_helper_M, reco_sel_GF, response_weight_col,
+                    df,
+                    closure_unc_helper_M,
+                    reco_sel_GF,
+                    response_weight_col,
                 )
                 df = df.Define(
                     "muonScaleClosMSyst_responseWeights_tensor_splines",

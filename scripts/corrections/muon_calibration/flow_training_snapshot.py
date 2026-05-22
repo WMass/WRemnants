@@ -98,6 +98,7 @@ def _write_source_meta(snapshot_path: str, entries: List[dict]) -> None:
         json.dump(payload, f, indent=2)
     print(f"  wrote source-id label side-car: {meta_path}")
 
+
 # Heavy imports (ROOT, wremnants, narf, pyxrootd, …) are deferred to
 # inside the ``run_jpsi_snapshot`` / ``run_wz_snapshot`` /
 # ``run_shard_only`` functions. The orchestrator path (bare
@@ -255,8 +256,7 @@ def parse_args():
     p.add_argument(
         "--input-tree",
         default="tree",
-        help="(--source jpsi only) TTree name inside the J/psi input "
-        "files.",
+        help="(--source jpsi only) TTree name inside the J/psi input " "files.",
     )
     p.add_argument(
         "--max-files",
@@ -405,8 +405,7 @@ def parse_args():
         "--eta-max",
         type=float,
         default=2.5,
-        help="(--source jpsi only) |gen eta| cut, applied to both "
-        "muons.",
+        help="(--source jpsi only) |gen eta| cut, applied to both " "muons.",
     )
     p.add_argument(
         "--no-progress",
@@ -493,8 +492,8 @@ def _declare_jpsi_sample_helper():
     are no-ops in cling.
     """
     import ROOT
-    ROOT.gInterpreter.Declare(
-        """
+
+    ROOT.gInterpreter.Declare("""
         #ifndef _FLOW_JPSI_SAMPLE_HELPER_DECLARED
         #define _FLOW_JPSI_SAMPLE_HELPER_DECLARED
         namespace _flow_jpsi {
@@ -507,8 +506,7 @@ def _declare_jpsi_sample_helper():
             }
         }
         #endif
-        """
-    )
+        """)
 
 
 def _define_jpsi_rvecs(df, source_id_base: int, smearing_helper=None):
@@ -579,8 +577,11 @@ def _define_jpsi_rvecs(df, source_id_base: int, smearing_helper=None):
                 # The J/ψ calibration ntuples expose ``lumi`` (not the
                 # NanoAOD ``luminosityBlock``); ``run`` and ``event``
                 # match the standard names.
-                "run", "lumi", "event",
-                "_jpsi_recopt_pre_smear", "eta_reco",
+                "run",
+                "lumi",
+                "event",
+                "_jpsi_recopt_pre_smear",
+                "eta_reco",
             ],
         )
         df = df.Define(
@@ -632,6 +633,7 @@ def resolve_jpsi_input_paths(paths: List[str]) -> List[str]:
     # pyxrootd loaded here through dataset_tools comes second and
     # ROOT's libXrdCl wins the symbol resolution.
     from wremnants.production.datasets import dataset_tools
+
     out: List[str] = []
     for p in paths:
         if p.lower().endswith(".root"):
@@ -639,9 +641,7 @@ def resolve_jpsi_input_paths(paths: List[str]) -> List[str]:
             continue
         found = dataset_tools.buildFileList(p)
         if not found:
-            print(
-                f"warning: no .root files found under {p}", file=sys.stderr
-            )
+            print(f"warning: no .root files found under {p}", file=sys.stderr)
         out.extend(found)
     return out
 
@@ -652,8 +652,9 @@ def run_jpsi_snapshot(args) -> str:
     # libcrypto-3 (pulled in via ``wremnants.production.muon_calibration``
     # -> hist / uproot) can shadow them. Requires xrootd pip package
     # < 6 so that pyxrootd's libXrdCl matches ROOT's (both v5).
-    import XRootD.client  # noqa: F401
     import ROOT
+    import XRootD.client  # noqa: F401
+
     import wremnants
     import wremnants.production.muon_calibration
     import wremnants.production.pileup
@@ -689,12 +690,9 @@ def run_jpsi_snapshot(args) -> str:
     if args.progress:
         ROOT.ROOT.RDF.Experimental.AddProgressBar(df)
 
-    helper = (
-        wremnants.production.muon_calibration.make_muon_calibration_helper_single()
-    )
-    df = (
-        wremnants.production.muon_calibration
-        .define_lbl_corrections_jpsi_calibration_ntuples(df, helper)
+    helper = wremnants.production.muon_calibration.make_muon_calibration_helper_single()
+    df = wremnants.production.muon_calibration.define_lbl_corrections_jpsi_calibration_ntuples(
+        df, helper
     )
 
     pileup_helper = wremnants.production.pileup.make_pileup_helper(era=args.era)
@@ -740,9 +738,7 @@ def run_jpsi_snapshot(args) -> str:
 
     snapshot_options = ROOT.RDF.RSnapshotOptions()
     if args.snapshot_format == "rntuple":
-        snapshot_options.fOutputFormat = (
-            ROOT.RDF.ESnapshotOutputFormat.kRNTuple
-        )
+        snapshot_options.fOutputFormat = ROOT.RDF.ESnapshotOutputFormat.kRNTuple
         snapshot_options.fCompressionAlgorithm = (
             ROOT.RCompressionSetting.EAlgorithm.kLZ4
         )
@@ -769,8 +765,7 @@ def run_jpsi_snapshot(args) -> str:
     ]
     if n_0to8 > 0:
         jpsi_entries.append(
-            {"source_id": source_id_base + 1,
-             "sample_name": "J/psi (pT<8 GeV)"}
+            {"source_id": source_id_base + 1, "sample_name": "J/psi (pT<8 GeV)"}
         )
     _write_source_meta(out, jpsi_entries)
 
@@ -788,14 +783,21 @@ def run_jpsi_snapshot(args) -> str:
 def _define_wz_rvecs(df, dataset, args, calib_helpers, source_id: int):
     import wremnants.production.muon_calibration
     import wremnants.production.muon_selections
+
     """Define the unified per-muon RVec schema on a W/Z RDataFrame.
 
     Applies the same selMuons mask as ``w_z_muonresponse.py``
     (vetoMuonsPre && genMatchedMuons) and projects per-muon RVecs from
     Muon_corrected* and the matched GenPart_* arrays.
     """
-    pileup_helper, vertex_helper, mc_calibration_helper, mc_jpsi_crctn_helper, \
-        smearing_helper, bias_helper = calib_helpers
+    (
+        pileup_helper,
+        vertex_helper,
+        mc_calibration_helper,
+        mc_jpsi_crctn_helper,
+        smearing_helper,
+        bias_helper,
+    ) = calib_helpers
 
     df = df.Define("weight", "std::copysign(1.0, genWeight)")
     df = df.Define("weight_pu", pileup_helper, ["Pileup_nTrueInt"])
@@ -890,8 +892,9 @@ def _define_wz_rvecs(df, dataset, args, calib_helpers, source_id: int):
 
 def run_wz_snapshot(args) -> List[str]:
     # ``XRootD.client`` first — see run_jpsi_snapshot for rationale.
-    import XRootD.client  # noqa: F401
     import ROOT
+    import XRootD.client  # noqa: F401
+
     import wremnants
     import wremnants.production.muon_calibration
     import wremnants.production.pileup
@@ -920,10 +923,11 @@ def run_wz_snapshot(args) -> List[str]:
     # τ samples if that's what you want.
     wz_names = set(samples.wprocs) | set(samples.zprocs)
     if args.exclude_tau_procs:
-        tau_names = set(samples.wprocs_tau_minnlo) | set(
-            samples.zprocs_tau_minnlo
-        ) | set(samples.wprocs_tau_minnlo_2017G) | set(
-            samples.zprocs_tau_minnlo_2017G
+        tau_names = (
+            set(samples.wprocs_tau_minnlo)
+            | set(samples.zprocs_tau_minnlo)
+            | set(samples.wprocs_tau_minnlo_2017G)
+            | set(samples.zprocs_tau_minnlo_2017G)
         )
         wz_names -= tau_names
     datasets = getDatasets(
@@ -934,10 +938,7 @@ def run_wz_snapshot(args) -> List[str]:
         nanoVersion=args.nano_version,
         base_path=args.data_path,
     )
-    datasets = [
-        d for d in datasets
-        if d.name in wz_names and not d.is_data
-    ]
+    datasets = [d for d in datasets if d.name in wz_names and not d.is_data]
     if not datasets:
         print("error: no W/Z MC datasets matched", file=sys.stderr)
         return []
@@ -978,8 +979,12 @@ def run_wz_snapshot(args) -> List[str]:
     pileup_helper = wremnants.production.pileup.make_pileup_helper(era=args.era)
     vertex_helper = wremnants.production.vertex.make_vertex_helper(era=args.era)
     calib_helpers = (
-        pileup_helper, vertex_helper, mc_calibration_helper,
-        mc_jpsi_crctn_helper, smearing_helper, bias_helper,
+        pileup_helper,
+        vertex_helper,
+        mc_calibration_helper,
+        mc_jpsi_crctn_helper,
+        smearing_helper,
+        bias_helper,
     )
 
     # Build all per-dataset graphs first, hold a TChain + RDF +
@@ -992,9 +997,7 @@ def run_wz_snapshot(args) -> List[str]:
 
     snapshot_options = ROOT.RDF.RSnapshotOptions()
     if args.snapshot_format == "rntuple":
-        snapshot_options.fOutputFormat = (
-            ROOT.RDF.ESnapshotOutputFormat.kRNTuple
-        )
+        snapshot_options.fOutputFormat = ROOT.RDF.ESnapshotOutputFormat.kRNTuple
         snapshot_options.fCompressionAlgorithm = (
             ROOT.RCompressionSetting.EAlgorithm.kLZ4
         )
@@ -1021,7 +1024,11 @@ def run_wz_snapshot(args) -> List[str]:
         df = ROOT.ROOT.RDataFrame(chain)
         sid = base_source_id + i
         df = _define_wz_rvecs(
-            df, dataset, args, calib_helpers, source_id=sid,
+            df,
+            dataset,
+            args,
+            calib_helpers,
+            source_id=sid,
         )
         out_path = os.path.join(out_dir, f"{dataset.name}.root")
         snap = df.Snapshot(args.output_tree, out_path, cols_vec, snapshot_options)
@@ -1036,8 +1043,7 @@ def run_wz_snapshot(args) -> List[str]:
             [{"source_id": int(sid), "sample_name": str(dataset.name)}],
         )
         print(
-            f"queued snapshot graph: {dataset.name} "
-            f"(source_id={sid}) -> {out_path}"
+            f"queued snapshot graph: {dataset.name} " f"(source_id={sid}) -> {out_path}"
         )
 
     print(f"\nrunning event loops across {len(dfs)} dataset(s)")
@@ -1048,6 +1054,7 @@ def run_wz_snapshot(args) -> List[str]:
     # ROOT's xrootd plugin during the event loop, which doesn't share
     # symbol state with pyxrootd's libssl.
     import narf  # noqa: F401  (side effect: registers narf:: with cling)
+
     interval = 1 if sys.stdout.isatty() else 5 * 60
     # PyROOT won't auto-convert a Python list of post-Define
     # ``RInterface<...>`` nodes into the C++ ``vector<RNode>``

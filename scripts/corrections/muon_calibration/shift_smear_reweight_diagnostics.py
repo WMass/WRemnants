@@ -27,6 +27,7 @@ The structural priors ``r(y, c, 0, 0) = 1`` (by construction) and
 ``r`` even in σ_vec (by Σ-input symmetry / polynomial parity) are not
 plotted — they hold structurally and don't need empirical verification.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,12 +36,11 @@ import math
 import os
 import sys
 import time
-from typing import List
 
 import matplotlib
+
 matplotlib.use("Agg")  # noqa: E402  — non-interactive backend; must precede pyplot
 import matplotlib.pyplot as plt  # noqa: E402
-
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
@@ -60,14 +60,13 @@ from train_shift_smear_reweight import (  # noqa: E402
     _ACTIVATIONS,
     _LOG_LOG2,
     _LOG_W_CLAMP,
-    _sigma_pack_indices,
     GaussBaseline,
     ReweightMLP_B,
     ReweightMLPFactored,
     ReweightPolyhead,
+    _sigma_pack_indices,
     gauss_baseline_log_r,
 )
-
 
 TARGET_NAMES = ["r_kappa", "dlambda", "dphi"]
 
@@ -123,6 +122,7 @@ def _toc(label, t0):
 # CLI
 # ============================================================================
 
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Diagnostic plots for a shift+smear reweight "
@@ -130,71 +130,97 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
-        "--checkpoint", required=True, default=argparse.SUPPRESS,
+        "--checkpoint",
+        required=True,
+        default=argparse.SUPPRESS,
         help="(required) Path to a shift_smear_reweight_{mlp,polyhead}.pt "
         "or checkpoint.pt produced by train_shift_smear_reweight.py.",
     )
     p.add_argument(
-        "--input-files", nargs="+", required=True,
+        "--input-files",
+        nargs="+",
+        required=True,
         default=argparse.SUPPRESS,
         help="(required) Input ROOT file(s) with the J/psi snapshot tree.",
     )
     p.add_argument(
-        "--tree", default="tree",
+        "--tree",
+        default="tree",
         help="ROOT TTree name to read from --input-files.",
     )
     p.add_argument(
-        "--output", default=None,
-        help="Output dir for plots. None = directory containing "
-        "--checkpoint.",
+        "--output",
+        default=None,
+        help="Output dir for plots. None = directory containing " "--checkpoint.",
     )
     p.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu",
+        "--device",
+        default="cuda" if torch.cuda.is_available() else "cpu",
         help="Torch device for model evaluation.",
     )
     p.add_argument(
-        "--n-events", type=int, default=500_000,
+        "--n-events",
+        type=int,
+        default=500_000,
         help="Number of muon rows to use for plotting. Subsampled "
         "post-quality-cut. -1 = use all surviving rows.",
     )
     p.add_argument(
-        "--max-events", type=int, default=1_000_000,
+        "--max-events",
+        type=int,
+        default=1_000_000,
         help="Cap on raw J/psi events kept via RDataFrame Filter("
         "rdfentry_<N). 1M events comfortably covers --n-events at "
         "~2 muons/event. -1 = load all.",
     )
     p.add_argument(
-        "--max-muons", type=int, default=-1,
+        "--max-muons",
+        type=int,
+        default=-1,
         help="Cap on muon rows after the event filter. -1 = no cap.",
     )
     p.add_argument(
-        "--threads", type=int, default=0,
+        "--threads",
+        type=int,
+        default=0,
         help="RDataFrame ImplicitMT threads. 0 = ROOT auto.",
     )
     p.add_argument(
-        "--pt-min", type=float, default=2.0,
+        "--pt-min",
+        type=float,
+        default=2.0,
         help="Min gen pt (GeV); matches snapshot script default.",
     )
     p.add_argument(
-        "--pt-max", type=float, default=200.0,
+        "--pt-max",
+        type=float,
+        default=200.0,
         help="Max gen pt (GeV).",
     )
     p.add_argument(
-        "--eta-max", type=float, default=2.4,
+        "--eta-max",
+        type=float,
+        default=2.4,
         help="Max |gen eta|.",
     )
     p.add_argument(
-        "--shift-factors", nargs="+", type=float,
+        "--shift-factors",
+        nargs="+",
+        type=float,
         default=[0.1, 0.3, 0.5, 1.0],
         help="Shift magnitudes (in standardized-target σ units).",
     )
     p.add_argument(
-        "--smear-factors", nargs="+", type=float,
+        "--smear-factors",
+        nargs="+",
+        type=float,
         default=[0.1, 0.3, 0.5, 1.0],
         help="Smear magnitudes (in standardized-target σ units).",
     )
     p.add_argument(
-        "--smear-gh-K", type=int, default=0,
+        "--smear-gh-K",
+        type=int,
+        default=0,
         help="Gauss-Hermite order K for an extra smear-closure curve "
         "computed from the *shift* component of the polyhead via "
         "r_smear(σ·ê) ≈ Σ_k w_k · r_shift(ε_k·σ·ê) with probabilists' "
@@ -204,29 +230,40 @@ def parse_args():
         "starting value.",
     )
     p.add_argument(
-        "--n-bins", type=int, default=80,
+        "--n-bins",
+        type=int,
+        default=80,
         help="Histogram bin count for closure plots.",
     )
     p.add_argument(
-        "--range-percentile", type=float, default=0.5,
+        "--range-percentile",
+        type=float,
+        default=0.5,
         help="Percentile (each side) trimmed when setting histogram "
         "x-range from raw target distribution.",
     )
     p.add_argument(
-        "--scan-magnitudes", type=int, default=11,
+        "--scan-magnitudes",
+        type=int,
+        default=11,
         help="Number of magnitudes per axis in the log-r scan plot.",
     )
     p.add_argument(
-        "--batch-size", type=int, default=8192,
+        "--batch-size",
+        type=int,
+        default=8192,
         help="Batch size for model evaluation.",
     )
     p.add_argument(
-        "--seed", type=int, default=0,
+        "--seed",
+        type=int,
+        default=0,
         help="Seed for the per-event ε draw used to form the "
         "smeared-MC histogram (literal closure target).",
     )
     p.add_argument(
-        "--flow-checkpoint", default=None,
+        "--flow-checkpoint",
+        default=None,
         help="Optional path to a flow checkpoint produced by "
         "train_muon_response_flow.py. When provided, an additional "
         "diagnostic plot ``polyhead_pred_vs_flow.{png,pdf}`` is "
@@ -239,7 +276,9 @@ def parse_args():
         "the same MC sample).",
     )
     p.add_argument(
-        "--flow-validate-n", type=int, default=10000,
+        "--flow-validate-n",
+        type=int,
+        default=10000,
         help="Number of events to use for the optional "
         "polyhead_pred_vs_flow plot. Smaller = faster.",
     )
@@ -250,25 +289,34 @@ def parse_args():
     # in (pt_gen, eta_gen, charge_gen); phi_gen is integrated.
     # ------------------------------------------------------------------
     p.add_argument(
-        "--cmp-pt-min", type=float, default=12.0,
+        "--cmp-pt-min",
+        type=float,
+        default=12.0,
         help="Lower gen-pT (GeV) edge of the (deliberately narrow) "
         "phase-space window used for the per-source target-distribution "
         "comparison plot.",
     )
     p.add_argument(
-        "--cmp-pt-max", type=float, default=13.0,
+        "--cmp-pt-max",
+        type=float,
+        default=13.0,
         help="Upper gen-pT (GeV) edge of the cmp window.",
     )
     p.add_argument(
-        "--cmp-eta-min", type=float, default=0.0,
+        "--cmp-eta-min",
+        type=float,
+        default=0.0,
         help="Lower gen-η edge of the cmp window.",
     )
     p.add_argument(
-        "--cmp-eta-max", type=float, default=0.4,
+        "--cmp-eta-max",
+        type=float,
+        default=0.4,
         help="Upper gen-η edge of the cmp window.",
     )
     p.add_argument(
-        "--cmp-charge", choices=["pos", "neg", "both", "each"],
+        "--cmp-charge",
+        choices=["pos", "neg", "both", "each"],
         default="each",
         help="Charge selection in the cmp window. ``each`` (default) "
         "produces a separate plot for q>0 and q<0; ``both`` integrates "
@@ -276,24 +324,32 @@ def parse_args():
         "charge only.",
     )
     p.add_argument(
-        "--cmp-source-labels", nargs="+", default=None,
+        "--cmp-source-labels",
+        nargs="+",
+        default=None,
         help="Optional per-source labels of the form ``id:label`` "
         "(e.g. ``0:J/psi 100:Zmumu``). Sources without a mapping use "
         "their integer id.",
     )
     p.add_argument(
-        "--cmp-ref-source", type=int, default=ZMUMU_SOURCE_ID,
+        "--cmp-ref-source",
+        type=int,
+        default=ZMUMU_SOURCE_ID,
         help="Reference source_id for the ratio panel of the per-source "
         "comparison plot. Defaults to the Z→μμ convention (100); falls "
         "back to the smallest source_id present if absent in the window.",
     )
     p.add_argument(
-        "--cmp-source-min-events", type=int, default=10000,
+        "--cmp-source-min-events",
+        type=int,
+        default=10000,
         help="Drop sources contributing fewer than this many rows within "
         "the per-source comparison window. Set to 0 to disable.",
     )
     p.add_argument(
-        "--cmp-max-events", type=int, default=-1,
+        "--cmp-max-events",
+        type=int,
+        default=-1,
         help="Cap on raw muon rows *read* for the per-source target-"
         "distribution plots only. -1 (default) = all available rows. "
         "These plots stream shards in parallel and apply the (pt, eta) "
@@ -302,7 +358,9 @@ def parse_args():
         "inference-side caps (--n-events / --max-events).",
     )
     p.add_argument(
-        "--cmp-workers", type=int, default=8,
+        "--cmp-workers",
+        type=int,
+        default=8,
         help="Parallel shard readers (thread pool) for the per-source "
         "comparison loader.",
     )
@@ -316,43 +374,60 @@ def parse_args():
     # once their kinematics are matched.
     # ------------------------------------------------------------------
     p.add_argument(
-        "--cmp-agg-pt-min", type=float, default=10.0,
+        "--cmp-agg-pt-min",
+        type=float,
+        default=10.0,
         help="Lower gen-pT (GeV) edge of the window for the aggregated "
         "J/ψ-vs-W/Z target-distribution plot.",
     )
     p.add_argument(
-        "--cmp-agg-pt-max", type=float, default=16.0,
+        "--cmp-agg-pt-max",
+        type=float,
+        default=16.0,
         help="Upper gen-pT (GeV) edge of the aggregated window.",
     )
     p.add_argument(
-        "--cmp-agg-eta-min", type=float, default=-2.4,
+        "--cmp-agg-eta-min",
+        type=float,
+        default=-2.4,
         help="Lower gen-η edge of the aggregated window.",
     )
     p.add_argument(
-        "--cmp-agg-eta-max", type=float, default=2.4,
+        "--cmp-agg-eta-max",
+        type=float,
+        default=2.4,
         help="Upper gen-η edge of the aggregated window.",
     )
     p.add_argument(
-        "--cmp-agg-rew-eta-bins", type=int, default=24,
+        "--cmp-agg-rew-eta-bins",
+        type=int,
+        default=24,
         help="Number of η bins in the 3D (pt, η, charge) reweighting "
         "histogram. The window above is split uniformly.",
     )
     p.add_argument(
-        "--cmp-agg-rew-pt-bins", type=int, default=12,
+        "--cmp-agg-rew-pt-bins",
+        type=int,
+        default=12,
         help="Number of pT bins in the reweighting histogram (default "
         "12 → 0.5 GeV bins across the default [10, 16] GeV window).",
     )
     p.add_argument(
-        "--cmp-agg-range-sigma", type=float, default=5.0,
+        "--cmp-agg-range-sigma",
+        type=float,
+        default=5.0,
         help="Target-distribution histogram half-range, in units of "
         "stats.target_std around stats.target_mean (per axis).",
     )
     p.add_argument(
-        "--cmp-agg-n-bins", type=int, default=80,
+        "--cmp-agg-n-bins",
+        type=int,
+        default=80,
         help="Number of bins in each 1D target-distribution histogram.",
     )
     p.add_argument(
-        "--weight-handling", choices=["abs", "keep", "drop"],
+        "--weight-handling",
+        choices=["abs", "keep", "drop"],
         default="abs",
         help="How to treat MC@NLO signed event weights in every plot "
         "and loader: ``abs`` (default; |w|, drops zero/non-finite) "
@@ -364,7 +439,8 @@ def parse_args():
         "see a different effective sample than the trainer.",
     )
     p.add_argument(
-        "--split", choices=["train", "val", "holdout", "all"],
+        "--split",
+        choices=["train", "val", "holdout", "all"],
         default="holdout",
         help="Which contiguous per-shard record-batch slice to load "
         "(see ``arrow_shard_loader.split_batch_range``). Default "
@@ -373,13 +449,17 @@ def parse_args():
         "match the trainer's splits; ``all`` loads everything.",
     )
     p.add_argument(
-        "--split-val-fraction", type=float, default=0.1,
+        "--split-val-fraction",
+        type=float,
+        default=0.1,
         help="Fraction of each shard's record batches assigned to "
         "the val split. Must match the trainer's --val-fraction so "
         "the train / val / holdout slices line up.",
     )
     p.add_argument(
-        "--split-holdout-fraction", type=float, default=0.1,
+        "--split-holdout-fraction",
+        type=float,
+        default=0.1,
         help="Fraction of each shard's record batches assigned to "
         "the holdout split. Must match the trainer's "
         "--holdout-fraction.",
@@ -390,6 +470,7 @@ def parse_args():
 # ============================================================================
 # Checkpoint loader — dispatches on arch
 # ============================================================================
+
 
 def load_model_from_checkpoint(checkpoint_path: str, device):
     """Load model + stats + train_config. Builds ``ReweightMLP_B`` or
@@ -413,7 +494,8 @@ def load_model_from_checkpoint(checkpoint_path: str, device):
             n_layers=int(gb_cfg.get("n_layers", 2)),
             activation=activation_cls,
         )
-        if gb_cfg is not None else None
+        if gb_cfg is not None
+        else None
     )
 
     if arch == "mlp":
@@ -462,12 +544,18 @@ def load_model_from_checkpoint(checkpoint_path: str, device):
         # Older checkpoints stored these as ``hidden_features`` /
         # ``n_hidden_layers``; new ones use ``trunk_hidden`` /
         # ``trunk_layers`` (shared with the mlp arch).
-        trunk_hidden = int(cfg.get(
-            "trunk_hidden", cfg.get("hidden_features", 64),
-        ))
-        trunk_layers = int(cfg.get(
-            "trunk_layers", cfg.get("n_hidden_layers", 2),
-        ))
+        trunk_hidden = int(
+            cfg.get(
+                "trunk_hidden",
+                cfg.get("hidden_features", 64),
+            )
+        )
+        trunk_layers = int(
+            cfg.get(
+                "trunk_layers",
+                cfg.get("n_hidden_layers", 2),
+            )
+        )
         model = ReweightPolyhead(
             n_features=int(cfg["n_features"]),
             n_cond=int(cfg["n_cond"]),
@@ -497,6 +585,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device):
 # Unified per-axis log r prediction
 # ============================================================================
 
+
 def _apply_positivity(d, positivity):
     if positivity == "exp":
         return d.clamp(min=-_LOG_W_CLAMP, max=_LOG_W_CLAMP)
@@ -513,9 +602,18 @@ def _apply_positivity(d, positivity):
 
 @torch.no_grad()
 def predict_log_r_axis(
-    model, arch, y_dev, c_dev, u_axis_value, sigma_axis_value, tcol,
-    n_features, batch_size, positivity,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    model,
+    arch,
+    y_dev,
+    c_dev,
+    u_axis_value,
+    sigma_axis_value,
+    tcol,
+    n_features,
+    batch_size,
+    positivity,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Per-event log r prediction with an axis-aligned perturbation.
 
@@ -542,7 +640,9 @@ def predict_log_r_axis(
         # the indexing matches the model's expectations.
         n_sigma_pack = sigma_pack_iu.shape[0]
         sigma_pack_buf = torch.zeros(
-            batch_size, n_sigma_pack, device=device,
+            batch_size,
+            n_sigma_pack,
+            device=device,
         )
         for k in range(n_sigma_pack):
             i, j = int(sigma_pack_iu[k]), int(sigma_pack_ju[k])
@@ -562,16 +662,19 @@ def predict_log_r_axis(
             u_zero = torch.zeros_like(u)
             sp_zero = torch.zeros_like(sigma_pack)
             # 2B head batching: f at (e_y, u, σ) and (e_y, 0, 0).
-            ev = model.trunk_forward(y, c)             # [bsz, d_emb]
+            ev = model.trunk_forward(y, c)  # [bsz, d_emb]
             ev2 = torch.cat([ev, ev], dim=0)
             u2 = torch.cat([u, u_zero], dim=0)
             sp2 = torch.cat([sigma_pack, sp_zero], dim=0)
             f = model.head_forward(ev2, u2, sp2)
             d = f[:bsz] - f[bsz:]
         elif arch == "polyhead":
-            coefs = model(y, c)                         # [bsz, n_basis]
+            coefs = model(y, c)  # [bsz, n_basis]
             d = evaluate_joint(
-                coefs, u, sigma_vec, model.joint_indices,
+                coefs,
+                u,
+                sigma_vec,
+                model.joint_indices,
                 basis=getattr(model, "basis", "monomial"),
                 scale_u=float(getattr(model, "basis_scale_u", 1.0)),
                 scale_sigma=float(getattr(model, "basis_scale_sigma", 1.0)),
@@ -594,9 +697,16 @@ def predict_log_r_axis(
 
 
 def predict_log_r_perevent(
-    model, arch, y_dev, c_dev, u_dev, sigma_dev,
-    batch_size, positivity,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    model,
+    arch,
+    y_dev,
+    c_dev,
+    u_dev,
+    sigma_dev,
+    batch_size,
+    positivity,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Per-event log r prediction with **arbitrary** per-event
     ``(u, σ_vec)`` (not axis-aligned). All four input tensors are on
@@ -623,7 +733,10 @@ def predict_log_r_perevent(
 
         if arch in ("mlp", "mlp-factored"):
             sigma_pack = torch.zeros(
-                bsz, n_sigma_pack, device=device, dtype=y.dtype,
+                bsz,
+                n_sigma_pack,
+                device=device,
+                dtype=y.dtype,
             )
             for k in range(n_sigma_pack):
                 i, j = int(sigma_pack_iu[k]), int(sigma_pack_ju[k])
@@ -639,7 +752,10 @@ def predict_log_r_perevent(
         elif arch == "polyhead":
             coefs = model(y, c)
             d = evaluate_joint(
-                coefs, u, sigma_vec, model.joint_indices,
+                coefs,
+                u,
+                sigma_vec,
+                model.joint_indices,
                 basis=getattr(model, "basis", "monomial"),
                 scale_u=float(getattr(model, "basis_scale_u", 1.0)),
                 scale_sigma=float(getattr(model, "basis_scale_sigma", 1.0)),
@@ -672,9 +788,18 @@ def _gh_nodes_weights(K):
 
 
 def predict_smear_via_gh_shift(
-    model, arch, y_dev, c_dev, factor, tcol, K,
-    n_features, batch_size, positivity,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    model,
+    arch,
+    y_dev,
+    c_dev,
+    factor,
+    tcol,
+    K,
+    n_features,
+    batch_size,
+    positivity,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Estimate per-event log r for an axis-aligned smear from the
     *shift* component of the polyhead via Gauss-Hermite integration:
@@ -697,11 +822,18 @@ def predict_smear_via_gh_shift(
     for k in range(int(K)):
         u_val = float(eps_k[k]) * float(factor)
         log_r_k = predict_log_r_axis(
-            model, arch, y_dev, c_dev,
-            u_axis_value=u_val, sigma_axis_value=0.0, tcol=tcol,
-            n_features=n_features, batch_size=batch_size,
+            model,
+            arch,
+            y_dev,
+            c_dev,
+            u_axis_value=u_val,
+            sigma_axis_value=0.0,
+            tcol=tcol,
+            n_features=n_features,
+            batch_size=batch_size,
             positivity=positivity,
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
         )
         stack[k] = log_r_k.astype(np.float64) + float(log_w[k])
 
@@ -714,6 +846,7 @@ def predict_smear_via_gh_shift(
 # ============================================================================
 # Plot helpers
 # ============================================================================
+
 
 def _save(fig, path):
     fig.savefig(path, dpi=120, bbox_inches="tight")
@@ -753,9 +886,7 @@ def _ratio_with_err(h_num, sigma_num, h_den, sigma_den):
     den_safe = np.where(h_den > 0, h_den, np.nan)
     num_safe = np.where(h_num > 0, h_num, np.nan)
     ratio = h_num / den_safe
-    rel = np.sqrt(
-        (sigma_num / num_safe) ** 2 + (sigma_den / den_safe) ** 2
-    )
+    rel = np.sqrt((sigma_num / num_safe) ** 2 + (sigma_den / den_safe) ** 2)
     return ratio, ratio * rel
 
 
@@ -764,31 +895,62 @@ def _stepped_errorbar(ax, centers, h, sigma, color, **kwargs):
     visually to a step histogram. ``kwargs`` are forwarded to errorbar
     (e.g. label, lw)."""
     ax.errorbar(
-        centers, h, yerr=sigma, fmt="none", ecolor=color,
-        elinewidth=0.7, capsize=0, alpha=0.6, **kwargs,
+        centers,
+        h,
+        yerr=sigma,
+        fmt="none",
+        ecolor=color,
+        elinewidth=0.7,
+        capsize=0,
+        alpha=0.6,
+        **kwargs,
     )
 
 
 def _common_predict_call(
-    model, arch, y_dev, c_dev, factor, tcol, mode, n_features,
-    batch_size, positivity, sigma_pack_iu, sigma_pack_ju,
+    model,
+    arch,
+    y_dev,
+    c_dev,
+    factor,
+    tcol,
+    mode,
+    n_features,
+    batch_size,
+    positivity,
+    sigma_pack_iu,
+    sigma_pack_ju,
 ):
     """Thin wrapper that maps mode={shift,smear} → axis values."""
     if mode == "shift":
         return predict_log_r_axis(
-            model, arch, y_dev, c_dev,
-            u_axis_value=float(factor), sigma_axis_value=0.0, tcol=tcol,
-            n_features=n_features, batch_size=batch_size,
+            model,
+            arch,
+            y_dev,
+            c_dev,
+            u_axis_value=float(factor),
+            sigma_axis_value=0.0,
+            tcol=tcol,
+            n_features=n_features,
+            batch_size=batch_size,
             positivity=positivity,
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
         )
     if mode == "smear":
         return predict_log_r_axis(
-            model, arch, y_dev, c_dev,
-            u_axis_value=0.0, sigma_axis_value=float(factor), tcol=tcol,
-            n_features=n_features, batch_size=batch_size,
+            model,
+            arch,
+            y_dev,
+            c_dev,
+            u_axis_value=0.0,
+            sigma_axis_value=float(factor),
+            tcol=tcol,
+            n_features=n_features,
+            batch_size=batch_size,
             positivity=positivity,
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
         )
     raise ValueError(f"unknown mode {mode!r}")
 
@@ -797,9 +959,17 @@ def _common_predict_call(
 # 1) Per-axis 1D shift closure
 # ============================================================================
 
+
 def plot_shift_closure(
-    target, w_event, args, out_dir, log_r_grid_shift, target_std_per_dim,
-    *, group_mask=None, group_label=None,
+    target,
+    w_event,
+    args,
+    out_dir,
+    log_r_grid_shift,
+    target_std_per_dim,
+    *,
+    group_mask=None,
+    group_label=None,
 ):
     """Per-axis shift-closure plots from a precomputed log r grid.
 
@@ -816,10 +986,7 @@ def plot_shift_closure(
         w_event = np.asarray(w_event)[m]
         log_r_grid_shift = {k: v[m] for k, v in log_r_grid_shift.items()}
         if target.shape[0] == 0:
-            print(
-                f"  [shift_closure] group {group_label!r} empty — "
-                "skipping"
-            )
+            print(f"  [shift_closure] group {group_label!r} empty — " "skipping")
             return
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
@@ -828,7 +995,8 @@ def plot_shift_closure(
     n_rows = len(factors)
     n_cols = len(target_components)
     fig, axes = plt.subplots(
-        2 * n_rows, n_cols,
+        2 * n_rows,
+        n_cols,
         figsize=(4.0 * n_cols, 3.5 * n_rows),
         sharex="col",
         gridspec_kw={"height_ratios": [3, 1] * n_rows, "hspace": 0.05},
@@ -852,46 +1020,75 @@ def plot_shift_closure(
             y_shifted = target[:, tcol] + dy
 
             h_raw, e_raw = _weighted_hist_err(
-                target[:, tcol], bins, w_event,
+                target[:, tcol],
+                bins,
+                w_event,
             )
             h_shifted, e_shifted = _weighted_hist_err(
-                y_shifted, bins, w_event,
+                y_shifted,
+                bins,
+                w_event,
             )
             h_pred, e_pred = _weighted_hist_err(
-                target[:, tcol], bins,
+                target[:, tcol],
+                bins,
                 (w_event * r_pred).astype(np.float64),
             )
 
             ax_main = axes[2 * r][cidx]
             ax_main.step(
-                centers, h_raw, where="mid", color="0.4",
-                linestyle=":", lw=1.0, label="raw MC",
+                centers,
+                h_raw,
+                where="mid",
+                color="0.4",
+                linestyle=":",
+                lw=1.0,
+                label="raw MC",
             )
             ax_main.step(
-                centers, h_shifted, where="mid", color="k", lw=1.0,
+                centers,
+                h_shifted,
+                where="mid",
+                color="k",
+                lw=1.0,
                 label=f"shifted MC ({factor:g}·σ_y)",
             )
             _stepped_errorbar(ax_main, centers, h_shifted, e_shifted, "k")
             ax_main.step(
-                centers, h_pred, where="mid", color="C0",
-                linestyle="--", lw=1.0, label="MLP pred W reweight",
+                centers,
+                h_pred,
+                where="mid",
+                color="C0",
+                linestyle="--",
+                lw=1.0,
+                label="MLP pred W reweight",
             )
             _stepped_errorbar(ax_main, centers, h_pred, e_pred, "C0")
             ax_main.set_ylabel("events")
-            tname = TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            tname = (
+                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            )
             ax_main.set_title(
-                f"shift |δ|={factor:g} along {tname}", fontsize=10,
+                f"shift |δ|={factor:g} along {tname}",
+                fontsize=10,
             )
             if r == 0 and cidx == 0:
                 ax_main.legend(loc="best", fontsize=7)
 
             ax_ratio = axes[2 * r + 1][cidx]
             ratio, e_ratio = _ratio_with_err(
-                h_pred, e_pred, h_shifted, e_shifted,
+                h_pred,
+                e_pred,
+                h_shifted,
+                e_shifted,
             )
             ax_ratio.step(
-                centers, ratio, where="mid",
-                color="C0", linestyle="--", lw=1.0,
+                centers,
+                ratio,
+                where="mid",
+                color="C0",
+                linestyle="--",
+                lw=1.0,
             )
             _stepped_errorbar(ax_ratio, centers, ratio, e_ratio, "C0")
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
@@ -917,10 +1114,18 @@ def plot_shift_closure(
 # 2) Per-axis 1D smear closure
 # ============================================================================
 
+
 def plot_smear_closure(
-    target, w_event, args, out_dir, log_r_grid_smear, target_std_per_dim,
+    target,
+    w_event,
+    args,
+    out_dir,
+    log_r_grid_smear,
+    target_std_per_dim,
     log_r_grid_smear_via_gh=None,
-    *, group_mask=None, group_label=None,
+    *,
+    group_mask=None,
+    group_label=None,
 ):
     """Per-axis smear-closure plots.
 
@@ -947,10 +1152,7 @@ def plot_smear_closure(
                 k: v[m] for k, v in log_r_grid_smear_via_gh.items()
             }
         if target.shape[0] == 0:
-            print(
-                f"  [smear_closure] group {group_label!r} empty — "
-                "skipping"
-            )
+            print(f"  [smear_closure] group {group_label!r} empty — " "skipping")
             return
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
@@ -960,7 +1162,8 @@ def plot_smear_closure(
     n_rows = len(factors)
     n_cols = len(target_components)
     fig, axes = plt.subplots(
-        2 * n_rows, n_cols,
+        2 * n_rows,
+        n_cols,
         figsize=(4.0 * n_cols, 3.5 * n_rows),
         sharex="col",
         gridspec_kw={"height_ratios": [3, 1] * n_rows, "hspace": 0.05},
@@ -989,89 +1192,142 @@ def plot_smear_closure(
             y_smeared = target[:, tcol] + dy * eps
 
             h_raw, e_raw = _weighted_hist_err(
-                target[:, tcol], bins, w_event,
+                target[:, tcol],
+                bins,
+                w_event,
             )
             h_smeared, e_smeared = _weighted_hist_err(
-                y_smeared, bins, w_event,
+                y_smeared,
+                bins,
+                w_event,
             )
             h_pred, e_pred = _weighted_hist_err(
-                target[:, tcol], bins,
+                target[:, tcol],
+                bins,
                 (w_event * r_pred).astype(np.float64),
             )
 
             ax_main = axes[2 * r][cidx]
             ax_main.step(
-                centers, h_raw, where="mid", color="0.4",
-                linestyle=":", lw=1.0, label="raw MC",
+                centers,
+                h_raw,
+                where="mid",
+                color="0.4",
+                linestyle=":",
+                lw=1.0,
+                label="raw MC",
             )
             ax_main.step(
-                centers, h_smeared, where="mid", color="k", lw=1.0,
+                centers,
+                h_smeared,
+                where="mid",
+                color="k",
+                lw=1.0,
                 label=f"smeared MC ({factor:g}·σ_y, K=1)",
             )
             _stepped_errorbar(ax_main, centers, h_smeared, e_smeared, "k")
             ax_main.step(
-                centers, h_pred, where="mid", color="C2",
-                linestyle="--", lw=1.0, label="MLP pred W reweight",
+                centers,
+                h_pred,
+                where="mid",
+                color="C2",
+                linestyle="--",
+                lw=1.0,
+                label="MLP pred W reweight",
             )
             _stepped_errorbar(ax_main, centers, h_pred, e_pred, "C2")
 
             # Optional: GH-on-shift smear estimate.
             h_pred_gh = e_pred_gh = None
             if log_r_grid_smear_via_gh is not None:
-                log_r_gh = log_r_grid_smear_via_gh[
-                    (float(factor), int(tcol))
-                ]
+                log_r_gh = log_r_grid_smear_via_gh[(float(factor), int(tcol))]
                 r_pred_gh = np.exp(log_r_gh)
                 h_pred_gh, e_pred_gh = _weighted_hist_err(
-                    target[:, tcol], bins,
+                    target[:, tcol],
+                    bins,
                     (w_event * r_pred_gh).astype(np.float64),
                 )
                 ax_main.step(
-                    centers, h_pred_gh, where="mid", color="C1",
-                    linestyle="-.", lw=1.0,
+                    centers,
+                    h_pred_gh,
+                    where="mid",
+                    color="C1",
+                    linestyle="-.",
+                    lw=1.0,
                     label=f"GH(K={int(args.smear_gh_K)}) on shift",
                 )
                 _stepped_errorbar(
-                    ax_main, centers, h_pred_gh, e_pred_gh, "C1",
+                    ax_main,
+                    centers,
+                    h_pred_gh,
+                    e_pred_gh,
+                    "C1",
                 )
 
             ax_main.set_ylabel("events")
-            tname = TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            tname = (
+                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            )
             ax_main.set_title(
-                f"smear |σ|={factor:g} along {tname}", fontsize=10,
+                f"smear |σ|={factor:g} along {tname}",
+                fontsize=10,
             )
             if r == 0 and cidx == 0:
                 ax_main.legend(loc="best", fontsize=7)
 
             ax_ratio = axes[2 * r + 1][cidx]
             ratio, e_ratio = _ratio_with_err(
-                h_pred, e_pred, h_smeared, e_smeared,
+                h_pred,
+                e_pred,
+                h_smeared,
+                e_smeared,
             )
             ax_ratio.step(
-                centers, ratio, where="mid",
-                color="C2", linestyle="--", lw=1.0,
+                centers,
+                ratio,
+                where="mid",
+                color="C2",
+                linestyle="--",
+                lw=1.0,
             )
             _stepped_errorbar(ax_ratio, centers, ratio, e_ratio, "C2")
             ratios_for_ylim = [ratio]
             if h_pred_gh is not None:
                 ratio_gh, e_ratio_gh = _ratio_with_err(
-                    h_pred_gh, e_pred_gh, h_smeared, e_smeared,
+                    h_pred_gh,
+                    e_pred_gh,
+                    h_smeared,
+                    e_smeared,
                 )
                 ax_ratio.step(
-                    centers, ratio_gh, where="mid",
-                    color="C1", linestyle="-.", lw=1.0,
+                    centers,
+                    ratio_gh,
+                    where="mid",
+                    color="C1",
+                    linestyle="-.",
+                    lw=1.0,
                 )
                 _stepped_errorbar(
-                    ax_ratio, centers, ratio_gh, e_ratio_gh, "C1",
+                    ax_ratio,
+                    centers,
+                    ratio_gh,
+                    e_ratio_gh,
+                    "C1",
                 )
                 ratios_for_ylim.append(ratio_gh)
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
             ax_ratio.set_ylabel("/ smeared MC", fontsize=8)
             ax_ratio.set_xlabel(tname)
-            ratios = np.concatenate([
-                np.atleast_1d(rr)[np.isfinite(np.atleast_1d(rr))]
-                for rr in ratios_for_ylim
-            ]) if ratios_for_ylim else np.empty(0)
+            ratios = (
+                np.concatenate(
+                    [
+                        np.atleast_1d(rr)[np.isfinite(np.atleast_1d(rr))]
+                        for rr in ratios_for_ylim
+                    ]
+                )
+                if ratios_for_ylim
+                else np.empty(0)
+            )
             if ratios.size:
                 lo_r, hi_r = np.quantile(ratios, [0.05, 0.95])
                 pad = max(0.05, 0.5 * (hi_r - lo_r))
@@ -1098,8 +1354,14 @@ def plot_smear_closure(
 #      reweight inflates the error vs a fresh sample.
 # ============================================================================
 
+
 def plot_closure_error_ratio(
-    target, w_event, args, out_dir, log_r_grid, target_std_per_dim,
+    target,
+    w_event,
+    args,
+    out_dir,
+    log_r_grid,
+    target_std_per_dim,
     mode,
 ):
     """Per-bin √Σw² error comparison: polyhead reweight vs literal
@@ -1146,17 +1408,14 @@ def plot_closure_error_ratio(
     assert mode in ("shift", "smear")
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
-    factors = (
-        args.shift_factors if mode == "shift" else args.smear_factors
-    )
-    rng = (
-        np.random.default_rng(args.seed) if mode == "smear" else None
-    )
+    factors = args.shift_factors if mode == "shift" else args.smear_factors
+    rng = np.random.default_rng(args.seed) if mode == "smear" else None
 
     n_rows = len(factors)
     n_cols = len(target_components)
     fig, axes = plt.subplots(
-        2 * n_rows, n_cols,
+        2 * n_rows,
+        n_cols,
         figsize=(4.0 * n_cols, 3.5 * n_rows),
         sharex="col",
         gridspec_kw={"height_ratios": [3, 1] * n_rows, "hspace": 0.05},
@@ -1183,20 +1442,21 @@ def plot_closure_error_ratio(
             else:
                 eps = rng.standard_normal(target.shape[0])
                 y_ref = target[:, tcol] + dy * eps
-                ref_label = (
-                    f"smeared MC ({factor:g}·σ_y, K=1 stochastic)"
-                )
+                ref_label = f"smeared MC ({factor:g}·σ_y, K=1 stochastic)"
 
             # Three histograms / sigma vectors:
             #   raw      — unperturbed MC at original y (bin-fill).
             #   ref      — perturbed MC at shifted/smeared y.
             #   pred     — polyhead-reweighted MC at original y.
             h_raw, e_raw = _weighted_hist_err(
-                target[:, tcol], bins, w_event,
+                target[:, tcol],
+                bins,
+                w_event,
             )
             h_ref, e_ref = _weighted_hist_err(y_ref, bins, w_event)
             _, e_pred = _weighted_hist_err(
-                target[:, tcol], bins,
+                target[:, tcol],
+                bins,
                 (w_event * r_pred).astype(np.float64),
             )
             # Optimal: constant-per-bin reweight = h_ref / h_raw.
@@ -1208,27 +1468,37 @@ def plot_closure_error_ratio(
 
             ax_main = axes[2 * r][cidx]
             ax_main.step(
-                centers, e_ref, where="mid",
-                color="k", lw=1.0, label=ref_label,
+                centers,
+                e_ref,
+                where="mid",
+                color="k",
+                lw=1.0,
+                label=ref_label,
             )
             ax_main.step(
-                centers, e_pred, where="mid",
-                color="C0", linestyle="--", lw=1.0,
+                centers,
+                e_pred,
+                where="mid",
+                color="C0",
+                linestyle="--",
+                lw=1.0,
                 label=r"polyhead reweight: $\sqrt{\sum (w \hat r)^2}$",
             )
             ax_main.step(
-                centers, e_optimal, where="mid",
-                color="C2", linestyle=":", lw=1.0,
+                centers,
+                e_optimal,
+                where="mid",
+                color="C2",
+                linestyle=":",
+                lw=1.0,
                 label=(
-                    r"optimal reweight: $(h_{\rm ref}/h_{\rm raw})"
-                    r" \sqrt{\sum w^2}$"
+                    r"optimal reweight: $(h_{\rm ref}/h_{\rm raw})" r" \sqrt{\sum w^2}$"
                 ),
             )
             ax_main.set_yscale("log")
             ax_main.set_ylabel(r"$\sigma$ per bin")
             tname = (
-                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES)
-                else f"target[{tcol}]"
+                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
             )
             ax_main.set_title(
                 f"{mode}: |{'δ' if mode == 'shift' else 'σ'}|="
@@ -1246,26 +1516,35 @@ def plot_closure_error_ratio(
             ratio_ref = e_ref / denom
             ax_ratio = axes[2 * r + 1][cidx]
             ax_ratio.step(
-                centers, ratio_pred, where="mid",
-                color="C0", lw=1.0,
+                centers,
+                ratio_pred,
+                where="mid",
+                color="C0",
+                lw=1.0,
                 label=r"$\hat r$ / optimal",
             )
             ax_ratio.step(
-                centers, ratio_ref, where="mid",
-                color="k", lw=1.0,
+                centers,
+                ratio_ref,
+                where="mid",
+                color="k",
+                lw=1.0,
                 label="ref / optimal",
             )
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
             ax_ratio.set_ylabel(
-                r"$\sigma / \sigma_{\rm optimal}$", fontsize=8,
+                r"$\sigma / \sigma_{\rm optimal}$",
+                fontsize=8,
             )
             ax_ratio.set_xlabel(tname)
             if r == 0 and cidx == 0:
                 ax_ratio.legend(loc="best", fontsize=7)
-            ratios_all = np.concatenate([
-                ratio_pred[np.isfinite(ratio_pred)],
-                ratio_ref[np.isfinite(ratio_ref)],
-            ])
+            ratios_all = np.concatenate(
+                [
+                    ratio_pred[np.isfinite(ratio_pred)],
+                    ratio_ref[np.isfinite(ratio_ref)],
+                ]
+            )
             if ratios_all.size:
                 lo_r, hi_r = np.quantile(ratios_all, [0.05, 0.95])
                 pad = max(0.05, 0.5 * (hi_r - lo_r))
@@ -1288,23 +1567,31 @@ def plot_closure_error_ratio(
 # 3) log r distribution (per axis × magnitude × mode)
 # ============================================================================
 
+
 def plot_log_r_distribution(
-    n_features, w_event, args, out_dir,
-    log_r_grid_shift, log_r_grid_smear,
+    n_features,
+    w_event,
+    args,
+    out_dir,
+    log_r_grid_shift,
+    log_r_grid_smear,
 ):
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
 
     fig, axes = plt.subplots(
-        2, len(target_components),
+        2,
+        len(target_components),
         figsize=(4.5 * len(target_components), 7.0),
         squeeze=False,
         layout="constrained",
     )
 
-    for row, (mode, grid, factors) in enumerate([
-        ("shift", log_r_grid_shift, args.shift_factors),
-        ("smear", log_r_grid_smear, args.smear_factors),
-    ]):
+    for row, (mode, grid, factors) in enumerate(
+        [
+            ("shift", log_r_grid_shift, args.shift_factors),
+            ("smear", log_r_grid_smear, args.smear_factors),
+        ]
+    ):
         for cidx, tcol in enumerate(target_components):
             ax = axes[row][cidx]
             all_log_r = []
@@ -1327,14 +1614,20 @@ def plot_log_r_distribution(
                 color = f"C{i}"
                 h, sigma = _weighted_hist_err(log_r, bins, w_event)
                 ax.step(
-                    centers, h, where="mid", color=color, lw=1.2,
+                    centers,
+                    h,
+                    where="mid",
+                    color=color,
+                    lw=1.2,
                     label=lbl,
                 )
                 _stepped_errorbar(ax, centers, h, sigma, color)
             ax.axvline(0.0, color="k", lw=0.5, alpha=0.5)
             ax.set_xlabel("log r")
             ax.set_ylabel("events (weighted)")
-            tname = TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            tname = (
+                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            )
             ax.set_title(f"{mode}: log r along {tname}", fontsize=10)
             ax.legend(fontsize=7)
             ax.set_yscale("log")
@@ -1347,9 +1640,19 @@ def plot_log_r_distribution(
 # 4) log r vs |perturbation| scan (shift and smear)
 # ============================================================================
 
+
 def plot_log_r_scan(
-    model, arch, y_dev, c_dev, n_features, w_event, args, positivity,
-    out_dir, sigma_pack_iu, sigma_pack_ju,
+    model,
+    arch,
+    y_dev,
+    c_dev,
+    n_features,
+    w_event,
+    args,
+    positivity,
+    out_dir,
+    sigma_pack_iu,
+    sigma_pack_ju,
 ):
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
     u_max = float(max(args.shift_factors))
@@ -1363,15 +1666,19 @@ def plot_log_r_scan(
     wsum = float(w64.sum())
 
     fig, axes = plt.subplots(
-        2, len(target_components),
+        2,
+        len(target_components),
         figsize=(4.5 * len(target_components), 7.0),
-        squeeze=False, layout="constrained",
+        squeeze=False,
+        layout="constrained",
     )
 
-    for row, (mode, grid, label_x) in enumerate([
-        ("shift", u_grid, "u (in σ_y units)"),
-        ("smear", sigma_grid, "|σ_vec| (in σ_y units)"),
-    ]):
+    for row, (mode, grid, label_x) in enumerate(
+        [
+            ("shift", u_grid, "u (in σ_y units)"),
+            ("smear", sigma_grid, "|σ_vec| (in σ_y units)"),
+        ]
+    ):
         for cidx, tcol in enumerate(target_components):
             ax = axes[row][cidx]
             means = []
@@ -1379,18 +1686,26 @@ def plot_log_r_scan(
             sigma_means = []
             for v in grid:
                 log_r = _common_predict_call(
-                    model, arch, y_dev, c_dev, float(v), int(tcol),
-                    mode, n_features, args.batch_size, positivity,
-                    sigma_pack_iu, sigma_pack_ju,
+                    model,
+                    arch,
+                    y_dev,
+                    c_dev,
+                    float(v),
+                    int(tcol),
+                    mode,
+                    n_features,
+                    args.batch_size,
+                    positivity,
+                    sigma_pack_iu,
+                    sigma_pack_ju,
                 ).astype(np.float64)
                 mean = (w64 * log_r).sum() / max(wsum, 1e-30)
                 var = (w64 * (log_r - mean) ** 2).sum() / max(wsum, 1e-30)
                 # Statistical uncertainty on the weighted mean:
                 #   σ²<x> = Σ wᵢ² (xᵢ − <x>)² / (Σ wᵢ)²
                 # = (effective-N) variance with Σw² in the numerator.
-                sigma_mean_sq = (
-                    (w64 * w64 * (log_r - mean) ** 2).sum()
-                    / max(wsum * wsum, 1e-60)
+                sigma_mean_sq = (w64 * w64 * (log_r - mean) ** 2).sum() / max(
+                    wsum * wsum, 1e-60
                 )
                 means.append(mean)
                 stds.append(math.sqrt(max(var, 0.0)))
@@ -1400,28 +1715,37 @@ def plot_log_r_scan(
             sigma_means = np.asarray(sigma_means)
             color = "C0" if mode == "shift" else "C2"
             ax.errorbar(
-                grid, means, yerr=sigma_means,
-                fmt="o-", color=color, lw=1.2, capsize=2,
+                grid,
+                means,
+                yerr=sigma_means,
+                fmt="o-",
+                color=color,
+                lw=1.2,
+                capsize=2,
                 label="⟨log r⟩  ± stat (√Σw²/Σw)",
             )
             ax.fill_between(
-                grid, means - stds, means + stds,
-                alpha=0.25, color=color, label="±1σ across events",
+                grid,
+                means - stds,
+                means + stds,
+                alpha=0.25,
+                color=color,
+                label="±1σ across events",
             )
             ax.axhline(0.0, color="k", lw=0.5, alpha=0.5)
             ax.axvline(0.0, color="k", lw=0.5, alpha=0.5)
             ax.set_xlabel(label_x)
             ax.set_ylabel("log r")
-            tname = TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            tname = (
+                TARGET_NAMES[tcol] if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+            )
             ax.set_title(
-                f"{mode}: ⟨log r⟩ along {tname}", fontsize=10,
+                f"{mode}: ⟨log r⟩ along {tname}",
+                fontsize=10,
             )
             ax.legend(fontsize=7)
 
-    fig.suptitle(
-        "MLP predicted log r — magnitude scan (top: shift / "
-        "bottom: smear)"
-    )
+    fig.suptitle("MLP predicted log r — magnitude scan (top: shift / " "bottom: smear)")
     _save(fig, os.path.join(out_dir, "log_r_scan.png"))
 
 
@@ -1429,11 +1753,21 @@ def plot_log_r_scan(
 # Optional: BCE-polyhead vs flow-truth scatter
 # ============================================================================
 
+
 def plot_polyhead_pred_vs_flow(
-    model, arch, flow, flow_stats, polyhead_stats,
-    target_std, cond, n_features, w_event,
-    args, out_dir,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    model,
+    arch,
+    flow,
+    flow_stats,
+    polyhead_stats,
+    target_std,
+    cond,
+    n_features,
+    w_event,
+    args,
+    out_dir,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Scatter / 2D-density of this script's polyhead-predicted W vs.
     a flow's analytic W on a common ``(y, c, u, σ)`` grid. Mirrors
@@ -1489,9 +1823,7 @@ def plot_polyhead_pred_vs_flow(
     half_sig = oversample * sigma_max_train
 
     g = torch.Generator().manual_seed(0)
-    delta_shift = (
-        torch.rand(n_use, generator=g) * 2.0 - 1.0
-    ) * half
+    delta_shift = (torch.rand(n_use, generator=g) * 2.0 - 1.0) * half
     v_shift = torch.randn(n_use, n_features, generator=g)
     v_shift = v_shift / v_shift.norm(dim=-1, keepdim=True).clamp_min(1e-30)
     sigma_smear = torch.rand(n_use, generator=g) * half_sig
@@ -1518,9 +1850,9 @@ def plot_polyhead_pred_vs_flow(
                 u = u_eval[s:e]
                 z, ladj = flow(c).transform.call_and_ladj(y)
                 z_p, ladj_p = flow(c).transform.call_and_ladj(y - u)
-                lw = -0.5 * (
-                    (z_p * z_p).sum(dim=-1) - (z * z).sum(dim=-1)
-                ) + (ladj_p - ladj)
+                lw = -0.5 * ((z_p * z_p).sum(dim=-1) - (z * z).sum(dim=-1)) + (
+                    ladj_p - ladj
+                )
                 out[s:e] = lw.cpu().numpy().astype(np.float32)
         return out
 
@@ -1542,9 +1874,16 @@ def plot_polyhead_pred_vs_flow(
 
         true_lw = flow_log_w_at(u_eval)
         pred_lw = predict_log_r_perevent(
-            model, arch, y_std_t, c_std_t, u_in, sigma_in,
-            args.batch_size, getattr(args, "_positivity", "exp"),
-            sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+            model,
+            arch,
+            y_std_t,
+            c_std_t,
+            u_in,
+            sigma_in,
+            args.batch_size,
+            getattr(args, "_positivity", "exp"),
+            sigma_pack_iu=sigma_pack_iu,
+            sigma_pack_ju=sigma_pack_ju,
         )
 
         # Weighted RMS / bias of pred − true.
@@ -1568,8 +1907,11 @@ def plot_polyhead_pred_vs_flow(
         bins = np.linspace(lo, hi, 80)
         h, xe, ye = np.histogram2d(x, y, bins=[bins, bins], weights=w_f)
         from matplotlib.colors import LogNorm
+
         ax.pcolormesh(
-            xe, ye, h.T,
+            xe,
+            ye,
+            h.T,
             norm=LogNorm(vmin=max(1.0, h.max() * 1e-4), vmax=h.max()),
             cmap="viridis",
         )
@@ -1589,10 +1931,19 @@ def plot_polyhead_pred_vs_flow(
 
 
 def plot_polyhead_axis_logw_error_vs_flow(
-    model, arch, flow, flow_stats, polyhead_stats,
-    target_std, cond, n_features, w_event,
-    args, out_dir,
-    sigma_pack_iu=None, sigma_pack_ju=None,
+    model,
+    arch,
+    flow,
+    flow_stats,
+    polyhead_stats,
+    target_std,
+    cond,
+    n_features,
+    w_event,
+    args,
+    out_dir,
+    sigma_pack_iu=None,
+    sigma_pack_ju=None,
 ):
     """Per-axis polyhead-vs-flow log-W error histograms at the
     closure shift magnitudes. Mirror of
@@ -1642,9 +1993,9 @@ def plot_polyhead_axis_logw_error_vs_flow(
                 c = c_std_t[s:e]
                 z, ladj = flow(c).transform.call_and_ladj(y)
                 z_p, ladj_p = flow(c).transform.call_and_ladj(y - u)
-                lw = -0.5 * (
-                    (z_p * z_p).sum(dim=-1) - (z * z).sum(dim=-1)
-                ) + (ladj_p - ladj)
+                lw = -0.5 * ((z_p * z_p).sum(dim=-1) - (z * z).sum(dim=-1)) + (
+                    ladj_p - ladj
+                )
                 out[s:e] = lw.cpu().numpy().astype(np.float32)
         return out
 
@@ -1653,12 +2004,18 @@ def plot_polyhead_axis_logw_error_vs_flow(
         for c, axis in enumerate(target_components):
             true_lw = flow_log_w_axis(float(factor), int(axis))
             pred_lw = predict_log_r_axis(
-                model, arch, y_std_t, c_std_t,
-                u_axis_value=float(factor), sigma_axis_value=0.0,
-                tcol=int(axis), n_features=n_features,
+                model,
+                arch,
+                y_std_t,
+                c_std_t,
+                u_axis_value=float(factor),
+                sigma_axis_value=0.0,
+                tcol=int(axis),
+                n_features=n_features,
                 batch_size=args.batch_size,
                 positivity=getattr(args, "_positivity", "exp"),
-                sigma_pack_iu=sigma_pack_iu, sigma_pack_ju=sigma_pack_ju,
+                sigma_pack_iu=sigma_pack_iu,
+                sigma_pack_ju=sigma_pack_ju,
             )
             log_err = pred_lw - true_lw
             finite = np.isfinite(log_err)
@@ -1668,15 +2025,18 @@ def plot_polyhead_axis_logw_error_vs_flow(
             if wsum <= 0.0:
                 rms = bias = float("nan")
             else:
-                rms = float(np.sqrt(np.average(le ** 2, weights=wle)))
+                rms = float(np.sqrt(np.average(le**2, weights=wle)))
                 bias = float(np.average(le, weights=wle))
             panel_data[r][c] = (le, wle, rms, bias)
 
     for yscale, suffix in (("linear", ""), ("log", "_log")):
         fig, axes = plt.subplots(
-            n_rows, n_cols,
+            n_rows,
+            n_cols,
             figsize=(4.0 * n_cols, 3.0 * n_rows),
-            sharex="row", sharey="row", squeeze=False,
+            sharex="row",
+            sharey="row",
+            squeeze=False,
         )
         for r, factor in enumerate(deltas):
             spreads = []
@@ -1690,24 +2050,24 @@ def plot_polyhead_axis_logw_error_vs_flow(
                 ax = axes[r][c]
                 le, wle, rms, bias = panel_data[r][c]
                 ax.hist(
-                    le, bins=bins, weights=wle, histtype="step",
-                    color="C0", lw=1.5,
+                    le,
+                    bins=bins,
+                    weights=wle,
+                    histtype="step",
+                    color="C0",
+                    lw=1.5,
                 )
                 ax.axvline(0.0, color="k", lw=0.8, alpha=0.5)
                 ax.set_title(
-                    f"|δ|={factor:g} along {name}: "
-                    f"rms={rms:.4f} bias={bias:+.4f}"
+                    f"|δ|={factor:g} along {name}: " f"rms={rms:.4f} bias={bias:+.4f}"
                 )
                 ax.set_yscale(yscale)
                 if r == n_rows - 1:
-                    ax.set_xlabel(
-                        r"$\log(\hat W) - \log W_{\rm flow}$"
-                    )
+                    ax.set_xlabel(r"$\log(\hat W) - \log W_{\rm flow}$")
                 if c == 0:
                     ax.set_ylabel("weighted events")
         fig.suptitle(
-            "BCE polyhead reconstruction error vs flow, "
-            "axis-aligned shifts"
+            "BCE polyhead reconstruction error vs flow, " "axis-aligned shifts"
         )
         fig.tight_layout()
         _save(
@@ -1722,6 +2082,7 @@ def plot_polyhead_axis_logw_error_vs_flow(
 # ============================================================================
 # Per-source target-distribution comparison
 # ============================================================================
+
 
 def _parse_source_labels(spec):
     """Parse ``["0:Jpsi", "100:Zmumu"]`` into ``{0: "Jpsi", 100: "Zmumu"}``."""
@@ -1765,7 +2126,8 @@ def _read_manifest_source_labels(paths):
                 mfp = p
             else:
                 cand = os.path.join(
-                    os.path.dirname(os.path.abspath(p)), "manifest.json",
+                    os.path.dirname(os.path.abspath(p)),
+                    "manifest.json",
                 )
                 if os.path.exists(cand):
                     mfp = cand
@@ -1787,9 +2149,18 @@ def _read_manifest_source_labels(paths):
 
 
 def _load_per_source_window(
-    paths, *, pt_min, pt_max, eta_min, eta_max,
-    max_events=-1, n_workers=8, weight_mode="abs",
-    split="all", val_fraction=0.1, holdout_fraction=0.1,
+    paths,
+    *,
+    pt_min,
+    pt_max,
+    eta_min,
+    eta_max,
+    max_events=-1,
+    n_workers=8,
+    weight_mode="abs",
+    split="all",
+    val_fraction=0.1,
+    holdout_fraction=0.1,
 ):
     """Parallel streaming loader specialised for the per-source target-
     distribution plots.
@@ -1810,6 +2181,7 @@ def _load_per_source_window(
     those that passed the (pt, eta, finite, w>0) mask.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import pyarrow as pa
     import pyarrow.ipc as ipc
 
@@ -1818,9 +2190,7 @@ def _load_per_source_window(
 
     paths = _expand_input_paths(paths)
     if not paths:
-        raise ValueError(
-            "_load_per_source_window: no input paths after expansion"
-        )
+        raise ValueError("_load_per_source_window: no input paths after expansion")
     if not all(p.endswith(".arrow") for p in paths):
         raise ValueError(
             "_load_per_source_window: only Arrow IPC shards (.arrow) "
@@ -1837,14 +2207,14 @@ def _load_per_source_window(
             if head == _MAGIC:
                 reader = ipc.open_file(f)
                 lo, hi = split_batch_range(
-                    reader.num_record_batches, split,
-                    val_fraction, holdout_fraction,
+                    reader.num_record_batches,
+                    split,
+                    val_fraction,
+                    holdout_fraction,
                 )
                 if hi <= lo:
                     return None, 0
-                t = pa.Table.from_batches(
-                    [reader.get_batch(i) for i in range(lo, hi)]
-                )
+                t = pa.Table.from_batches([reader.get_batch(i) for i in range(lo, hi)])
             else:
                 t = ipc.open_stream(f).read_all()
         eta_r = t["eta_reco"].to_numpy().astype(np.float64)
@@ -1863,17 +2233,24 @@ def _load_per_source_window(
         pt_g = 1.0 / (safe_k * np.cosh(eta_g))
         mask = (
             np.isfinite(pt_g)
-            & (pt_g >= pt_min) & (pt_g <= pt_max)
-            & (eta_g >= eta_min) & (eta_g <= eta_max)
-            & np.isfinite(kappa_r) & np.isfinite(kappa_g)
+            & (pt_g >= pt_min)
+            & (pt_g <= pt_max)
+            & (eta_g >= eta_min)
+            & (eta_g <= eta_max)
+            & np.isfinite(kappa_r)
+            & np.isfinite(kappa_g)
             & w_mask
         )
         if not mask.any():
             return None, n_block
-        eta_r = eta_r[mask]; phi_r = phi_r[mask]
-        eta_g = eta_g[mask]; phi_g = phi_g[mask]
-        kappa_r = kappa_r[mask]; kappa_g = kappa_g[mask]
-        w = w_handled[mask]; sid = sid[mask]
+        eta_r = eta_r[mask]
+        phi_r = phi_r[mask]
+        eta_g = eta_g[mask]
+        phi_g = phi_g[mask]
+        kappa_r = kappa_r[mask]
+        kappa_g = kappa_g[mask]
+        w = w_handled[mask]
+        sid = sid[mask]
 
         # Inline target columns from compute_targets_and_conditioning,
         # restricted to the masked rows so we never form full-shard
@@ -1882,7 +2259,8 @@ def _load_per_source_window(
         lam_g = np.arctan(np.sinh(eta_g))
         r_kappa = kappa_r / kappa_g - 1.0
         dphi = np.arctan2(
-            np.sin(phi_r - phi_g), np.cos(phi_r - phi_g),
+            np.sin(phi_r - phi_g),
+            np.cos(phi_r - phi_g),
         )
         dlambda = lam_r - lam_g
         target = np.stack([r_kappa, dlambda, dphi], axis=1)
@@ -1901,10 +2279,7 @@ def _load_per_source_window(
             try:
                 res, n_block = fut.result()
             except Exception as exc:  # noqa: BLE001
-                print(
-                    f"[per-source loader] shard {futures[fut]} failed: "
-                    f"{exc!r}"
-                )
+                print(f"[per-source loader] shard {futures[fut]} failed: " f"{exc!r}")
                 continue
             rows_read += n_block
             if res is not None:
@@ -1927,7 +2302,13 @@ def _load_per_source_window(
 
 
 def plot_per_source_target_distributions(
-    target, w_event, source_id, kappa_g, eta_g, args, out_dir,
+    target,
+    w_event,
+    source_id,
+    kappa_g,
+    eta_g,
+    args,
+    out_dir,
 ):
     """Compare the marginal target distributions across datasets
     (distinct ``source_id`` values) inside a phase-space window in
@@ -1958,8 +2339,10 @@ def plot_per_source_target_distributions(
     eta_max = float(args.cmp_eta_max)
     base_mask = (
         np.isfinite(pt_g)
-        & (pt_g >= pt_min) & (pt_g <= pt_max)
-        & (eta_g >= eta_min) & (eta_g <= eta_max)
+        & (pt_g >= pt_min)
+        & (pt_g <= pt_max)
+        & (eta_g >= eta_min)
+        & (eta_g <= eta_max)
     )
 
     # Charge modes: ``each`` runs pos and neg in separate plots.
@@ -1976,6 +2359,7 @@ def plot_per_source_target_distributions(
     label_map = dict(DEFAULT_SOURCE_LABELS)
     label_map.update(_read_manifest_source_labels(args.input_files))
     label_map.update(_parse_source_labels(args.cmp_source_labels))
+
     def _source_label(sid):
         return label_map.get(int(sid), f"source {int(sid)}")
 
@@ -2016,21 +2400,19 @@ def plot_per_source_target_distributions(
 
         min_n = int(getattr(args, "cmp_source_min_events", 0))
         if min_n > 0:
-            src_counts = {
-                int(s): int((src_w == s).sum()) for s in unique_sources
-            }
+            src_counts = {int(s): int((src_w == s).sum()) for s in unique_sources}
             kept = [s for s in unique_sources if src_counts[int(s)] >= min_n]
             dropped = [
                 (int(s), src_counts[int(s)])
-                for s in unique_sources if src_counts[int(s)] < min_n
+                for s in unique_sources
+                if src_counts[int(s)] < min_n
             ]
             if dropped:
                 print(
                     "[per-source target distributions] dropped sources "
                     f"with <{min_n} events in {charge_mode} window: "
                     + ", ".join(
-                        f"{_source_label(sid)} (id={sid}, N={n})"
-                        for sid, n in dropped
+                        f"{_source_label(sid)} (id={sid}, N={n})" for sid, n in dropped
                     )
                 )
             unique_sources = kept
@@ -2089,9 +2471,11 @@ def plot_per_source_target_distributions(
             centers = 0.5 * (bins[:-1] + bins[1:])
             bw = bins[1] - bins[0]
 
-            ref_mask = (s_col == ref_source)
+            ref_mask = s_col == ref_source
             h_ref, e_ref = _weighted_hist_err(
-                y[ref_mask], bins, w_col[ref_mask],
+                y[ref_mask],
+                bins,
+                w_col[ref_mask],
             )
             norm_ref = h_ref.sum()
             if norm_ref <= 0:
@@ -2106,7 +2490,7 @@ def plot_per_source_target_distributions(
 
             per_source = []
             for i, sid in enumerate(unique_sources):
-                sm = (s_col == sid)
+                sm = s_col == sid
                 if sm.sum() == 0:
                     continue
                 h, e = _weighted_hist_err(y[sm], bins, w_col[sm])
@@ -2115,13 +2499,15 @@ def plot_per_source_target_distributions(
                     continue
                 h_n = h / (tot * bw)
                 e_n = e / (tot * bw)
-                per_source.append({
-                    "sid": int(sid),
-                    "n": int(sm.sum()),
-                    "color": f"C{i}",
-                    "h": h_n,
-                    "e": e_n,
-                })
+                per_source.append(
+                    {
+                        "sid": int(sid),
+                        "n": int(sm.sum()),
+                        "color": f"C{i}",
+                        "h": h_n,
+                        "e": e_n,
+                    }
+                )
 
             per_col[tcol] = {
                 "centers": centers,
@@ -2134,15 +2520,15 @@ def plot_per_source_target_distributions(
             continue
 
         ch_tag = {"pos": "q>0", "neg": "q<0", "both": "both q"}[charge_mode]
-        ch_suffix = {"pos": "_qpos", "neg": "_qneg", "both": "_qboth"}[
-            charge_mode
-        ]
+        ch_suffix = {"pos": "_qpos", "neg": "_qneg", "both": "_qboth"}[charge_mode]
 
         for yscale, ysuffix in (("linear", ""), ("log", "_log")):
             fig, axes = plt.subplots(
-                2, n_cols,
+                2,
+                n_cols,
                 figsize=(4.5 * n_cols, 6.5),
-                sharex="col", squeeze=False,
+                sharex="col",
+                squeeze=False,
                 gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
                 layout="constrained",
             )
@@ -2163,24 +2549,43 @@ def plot_per_source_target_distributions(
                     color = entry["color"]
                     lbl = f"{_source_label(sid)}  (N={entry['n']})"
                     ax_main.step(
-                        centers, entry["h"], where="mid",
-                        color=color, lw=1.2, label=lbl,
+                        centers,
+                        entry["h"],
+                        where="mid",
+                        color=color,
+                        lw=1.2,
+                        label=lbl,
                     )
                     _stepped_errorbar(
-                        ax_main, centers, entry["h"], entry["e"], color,
+                        ax_main,
+                        centers,
+                        entry["h"],
+                        entry["e"],
+                        color,
                     )
 
                     if sid == ref_source:
                         ax_ratio.axhline(1.0, color=color, lw=0.8)
                         continue
                     ratio, e_ratio = _ratio_with_err(
-                        entry["h"], entry["e"], h_ref_n, e_ref_n,
+                        entry["h"],
+                        entry["e"],
+                        h_ref_n,
+                        e_ref_n,
                     )
                     ax_ratio.step(
-                        centers, ratio, where="mid", color=color, lw=1.0,
+                        centers,
+                        ratio,
+                        where="mid",
+                        color=color,
+                        lw=1.0,
                     )
                     _stepped_errorbar(
-                        ax_ratio, centers, ratio, e_ratio, color,
+                        ax_ratio,
+                        centers,
+                        ratio,
+                        e_ratio,
+                        color,
                     )
 
                 ax_main.set_yscale(yscale)
@@ -2194,11 +2599,13 @@ def plot_per_source_target_distributions(
 
                 ax_ratio.axhline(1.0, color="k", lw=0.4, alpha=0.4)
                 ax_ratio.set_ylabel(
-                    f"ratio /\n{_source_label(ref_source)}", fontsize=8,
+                    f"ratio /\n{_source_label(ref_source)}",
+                    fontsize=8,
                 )
                 ax_ratio.set_xlabel(
                     TARGET_NAMES[tcol]
-                    if tcol < len(TARGET_NAMES) else f"target[{tcol}]"
+                    if tcol < len(TARGET_NAMES)
+                    else f"target[{tcol}]"
                 )
                 ax_ratio.set_ylim(0.5, 1.5)
 
@@ -2236,18 +2643,34 @@ def plot_per_source_target_distributions(
 # group's reweighted curve and ratio; ``raw_color`` for the raw curve
 # in the kinematic-validation plot.
 _AGG_GROUPS = (
-    {"raw":  443, "name": "jpsi",   "label": r"J/$\psi$",
-     "main_color": "C0", "raw_color": "C0", "ref": True},
-    {"raw":  1,   "name": "prompt", "label": "W/Z prompt",
-     "main_color": "C1", "raw_color": "C3", "ref": False},
-    {"raw":  15,  "name": "tau",    "label": r"W/Z $\tau$-decay",
-     "main_color": "C2", "raw_color": "C4", "ref": False},
+    {
+        "raw": 443,
+        "name": "jpsi",
+        "label": r"J/$\psi$",
+        "main_color": "C0",
+        "raw_color": "C0",
+        "ref": True,
+    },
+    {
+        "raw": 1,
+        "name": "prompt",
+        "label": "W/Z prompt",
+        "main_color": "C1",
+        "raw_color": "C3",
+        "ref": False,
+    },
+    {
+        "raw": 15,
+        "name": "tau",
+        "label": r"W/Z $\tau$-decay",
+        "main_color": "C2",
+        "raw_color": "C4",
+        "ref": False,
+    },
 )
 _AGG_REF_NAME = "jpsi"
 _AGG_NAMES = tuple(g["name"] for g in _AGG_GROUPS)
-_AGG_NONREF_NAMES = tuple(
-    g["name"] for g in _AGG_GROUPS if not g["ref"]
-)
+_AGG_NONREF_NAMES = tuple(g["name"] for g in _AGG_GROUPS if not g["ref"])
 
 
 def _agg_group_masks(muon_source):
@@ -2259,10 +2682,20 @@ def _agg_group_masks(muon_source):
 
 
 def _stream_pteta_charge_3d(
-    paths, *, pt_min, pt_max, eta_min, eta_max,
-    pt_edges, eta_edges, charge_edges,
-    n_workers=8, weight_mode="abs",
-    split="all", val_fraction=0.1, holdout_fraction=0.1,
+    paths,
+    *,
+    pt_min,
+    pt_max,
+    eta_min,
+    eta_max,
+    pt_edges,
+    eta_edges,
+    charge_edges,
+    n_workers=8,
+    weight_mode="abs",
+    split="all",
+    val_fraction=0.1,
+    holdout_fraction=0.1,
 ):
     """Pass 1: stream shards and fill weighted 3D ``(pt, η, charge)``
     histograms per ``muon_source`` group (J/ψ, prompt, τ).
@@ -2274,10 +2707,11 @@ def _stream_pteta_charge_3d(
       * ``n_kept``     -- ``{group_name: int}`` count of windowed rows
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import pyarrow as pa
     import pyarrow.ipc as ipc
-    from train_muon_response_flow import _expand_input_paths
     from arrow_shard_loader import split_batch_range
+    from train_muon_response_flow import _expand_input_paths
 
     paths = _expand_input_paths(paths)
     _MAGIC = b"ARROW1"
@@ -2294,15 +2728,15 @@ def _stream_pteta_charge_3d(
             if head == _MAGIC:
                 reader = ipc.open_file(f)
                 lo, hi = split_batch_range(
-                    reader.num_record_batches, split,
-                    val_fraction, holdout_fraction,
+                    reader.num_record_batches,
+                    split,
+                    val_fraction,
+                    holdout_fraction,
                 )
                 if hi <= lo:
                     empty_H = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
                     return empty_H, dict(empty_H), 0, {n: 0 for n in _AGG_NAMES}
-                t = pa.Table.from_batches(
-                    [reader.get_batch(i) for i in range(lo, hi)]
-                )
+                t = pa.Table.from_batches([reader.get_batch(i) for i in range(lo, hi)])
             else:
                 t = ipc.open_stream(f).read_all()
         eta_g = t["eta_gen"].to_numpy().astype(np.float64)
@@ -2317,9 +2751,12 @@ def _stream_pteta_charge_3d(
         pt_g = 1.0 / (safe_k * np.cosh(eta_g))
         mask = (
             np.isfinite(pt_g)
-            & (pt_g >= pt_min) & (pt_g <= pt_max)
-            & (eta_g >= eta_min) & (eta_g <= eta_max)
-            & np.isfinite(kappa_g) & w_mask
+            & (pt_g >= pt_min)
+            & (pt_g <= pt_max)
+            & (eta_g >= eta_min)
+            & (eta_g <= eta_max)
+            & np.isfinite(kappa_g)
+            & w_mask
         )
         partial_H = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
         partial_H2 = {n: np.zeros(shape, dtype=np.float64) for n in _AGG_NAMES}
@@ -2327,8 +2764,11 @@ def _stream_pteta_charge_3d(
         if not mask.any():
             return partial_H, partial_H2, n_block, partial_kept
 
-        eta_g = eta_g[mask]; kappa_g = kappa_g[mask]
-        pt_g = pt_g[mask]; w = w_handled[mask]; ms = ms[mask]
+        eta_g = eta_g[mask]
+        kappa_g = kappa_g[mask]
+        pt_g = pt_g[mask]
+        w = w_handled[mask]
+        ms = ms[mask]
         charge_g = np.where(kappa_g >= 0, 1.0, -1.0)
         group_masks = _agg_group_masks(ms)
 
@@ -2337,12 +2777,15 @@ def _stream_pteta_charge_3d(
             if not gm.any():
                 continue
             coords = np.stack(
-                [pt_g[gm], eta_g[gm], charge_g[gm]], axis=1,
+                [pt_g[gm], eta_g[gm], charge_g[gm]],
+                axis=1,
             )
             ww = w[gm]
             partial_H[name] = np.histogramdd(coords, bins=bins, weights=ww)[0]
             partial_H2[name] = np.histogramdd(
-                coords, bins=bins, weights=ww * ww,
+                coords,
+                bins=bins,
+                weights=ww * ww,
             )[0]
             partial_kept[name] = int(gm.sum())
         return partial_H, partial_H2, n_block, partial_kept
@@ -2357,9 +2800,7 @@ def _stream_pteta_charge_3d(
             try:
                 pH, pH2, n_b, pk = fut.result()
             except Exception as exc:  # noqa: BLE001
-                print(
-                    f"[agg pass-1] shard {futures[fut]} failed: {exc!r}"
-                )
+                print(f"[agg pass-1] shard {futures[fut]} failed: {exc!r}")
                 continue
             rows_read += n_b
             for name in _AGG_NAMES:
@@ -2370,11 +2811,23 @@ def _stream_pteta_charge_3d(
 
 
 def _stream_aggregated_targets(
-    paths, *, pt_min, pt_max, eta_min, eta_max,
-    pt_edges, eta_edges, charge_edges,
-    weight_grids, target_axes_edges,
-    n_workers=8, weight_mode="abs", charge_filter=None,
-    split="all", val_fraction=0.1, holdout_fraction=0.1,
+    paths,
+    *,
+    pt_min,
+    pt_max,
+    eta_min,
+    eta_max,
+    pt_edges,
+    eta_edges,
+    charge_edges,
+    weight_grids,
+    target_axes_edges,
+    n_workers=8,
+    weight_mode="abs",
+    charge_filter=None,
+    split="all",
+    val_fraction=0.1,
+    holdout_fraction=0.1,
 ):
     """Pass 2: stream shards and accumulate 1D target-distribution
     histograms per (axis × group × {raw, reweighted}). The reference
@@ -2391,10 +2844,11 @@ def _stream_aggregated_targets(
     for the raw curves (only the ref group skips the ``_raw_`` pair
     since its "raw" and "reweighted" are identical)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     import pyarrow as pa
     import pyarrow.ipc as ipc
-    from train_muon_response_flow import _expand_input_paths
     from arrow_shard_loader import split_batch_range
+    from train_muon_response_flow import _expand_input_paths
 
     paths = _expand_input_paths(paths)
     _MAGIC = b"ARROW1"
@@ -2426,14 +2880,14 @@ def _stream_aggregated_targets(
             if head == _MAGIC:
                 reader = ipc.open_file(f)
                 lo, hi = split_batch_range(
-                    reader.num_record_batches, split,
-                    val_fraction, holdout_fraction,
+                    reader.num_record_batches,
+                    split,
+                    val_fraction,
+                    holdout_fraction,
                 )
                 if hi <= lo:
                     return _empty_partial()
-                t = pa.Table.from_batches(
-                    [reader.get_batch(i) for i in range(lo, hi)]
-                )
+                t = pa.Table.from_batches([reader.get_batch(i) for i in range(lo, hi)])
             else:
                 t = ipc.open_stream(f).read_all()
         eta_r = t["eta_reco"].to_numpy().astype(np.float64)
@@ -2451,31 +2905,40 @@ def _stream_aggregated_targets(
         pt_g = 1.0 / (safe_k * np.cosh(eta_g))
         mask = (
             np.isfinite(pt_g)
-            & (pt_g >= pt_min) & (pt_g <= pt_max)
-            & (eta_g >= eta_min) & (eta_g <= eta_max)
-            & np.isfinite(kappa_r) & np.isfinite(kappa_g)
+            & (pt_g >= pt_min)
+            & (pt_g <= pt_max)
+            & (eta_g >= eta_min)
+            & (eta_g <= eta_max)
+            & np.isfinite(kappa_r)
+            & np.isfinite(kappa_g)
             & w_mask
         )
         if charge_filter is not None:
             if charge_filter > 0:
-                mask &= (kappa_g >= 0)
+                mask &= kappa_g >= 0
             else:
-                mask &= (kappa_g < 0)
+                mask &= kappa_g < 0
         partial = _empty_partial()
         if not mask.any():
             return partial
 
-        eta_r = eta_r[mask]; phi_r = phi_r[mask]
-        eta_g = eta_g[mask]; phi_g = phi_g[mask]
-        kappa_r = kappa_r[mask]; kappa_g = kappa_g[mask]
-        pt_g = pt_g[mask]; w = w_handled[mask]; ms = ms[mask]
+        eta_r = eta_r[mask]
+        phi_r = phi_r[mask]
+        eta_g = eta_g[mask]
+        phi_g = phi_g[mask]
+        kappa_r = kappa_r[mask]
+        kappa_g = kappa_g[mask]
+        pt_g = pt_g[mask]
+        w = w_handled[mask]
+        ms = ms[mask]
 
         # Targets inline.
         lam_r = np.arctan(np.sinh(eta_r))
         lam_g = np.arctan(np.sinh(eta_g))
         r_kappa = kappa_r / kappa_g - 1.0
         dphi = np.arctan2(
-            np.sin(phi_r - phi_g), np.cos(phi_r - phi_g),
+            np.sin(phi_r - phi_g),
+            np.cos(phi_r - phi_g),
         )
         dlambda = lam_r - lam_g
         target_cols = (r_kappa, dlambda, dphi)
@@ -2500,19 +2963,21 @@ def _stream_aggregated_targets(
                 w_raw_g = w[gm]
                 h, _ = np.histogram(y_g, bins=edges, weights=w_raw_g)
                 h2, _ = np.histogram(
-                    y_g, bins=edges, weights=w_raw_g * w_raw_g,
+                    y_g,
+                    bins=edges,
+                    weights=w_raw_g * w_raw_g,
                 )
                 partial[k][f"{name}_raw_h"] = h
                 partial[k][f"{name}_raw_h2"] = h2
                 if name == _AGG_REF_NAME:
                     continue
-                rew_g = weight_grids[name][
-                    pt_idx[gm], eta_idx[gm], ch_idx[gm]
-                ]
+                rew_g = weight_grids[name][pt_idx[gm], eta_idx[gm], ch_idx[gm]]
                 w_rew = w_raw_g * rew_g
                 h_rw, _ = np.histogram(y_g, bins=edges, weights=w_rew)
                 h_rw2, _ = np.histogram(
-                    y_g, bins=edges, weights=w_rew * w_rew,
+                    y_g,
+                    bins=edges,
+                    weights=w_rew * w_rew,
                 )
                 partial[k][f"{name}_h"] = h_rw
                 partial[k][f"{name}_h2"] = h_rw2
@@ -2525,9 +2990,7 @@ def _stream_aggregated_targets(
             try:
                 partial = fut.result()
             except Exception as exc:  # noqa: BLE001
-                print(
-                    f"[agg pass-2] shard {futures[fut]} failed: {exc!r}"
-                )
+                print(f"[agg pass-2] shard {futures[fut]} failed: {exc!r}")
                 continue
             for k in range(F):
                 for key in totals[k]:
@@ -2536,8 +2999,16 @@ def _stream_aggregated_targets(
 
 
 def _plot_agg_kinematic_validation_2d(
-    H, weight_grids, pt_edges, eta_edges, charge_edges, out_dir,
-    *, charge_filter=None, ch_suffix="", ch_tag="charge integrated",
+    H,
+    weight_grids,
+    pt_edges,
+    eta_edges,
+    charge_edges,
+    out_dir,
+    *,
+    charge_filter=None,
+    ch_suffix="",
+    ch_tag="charge integrated",
 ):
     """2D ``(pt_gen, η_gen)`` heatmaps for each ``muon_source`` group
     summed over the (possibly filtered) charge axis. Panels: J/ψ
@@ -2578,21 +3049,31 @@ def _plot_agg_kinematic_validation_2d(
     norm = LogNorm(vmin=max(vmin, 1e-6 * vmax), vmax=vmax)
 
     fig, axes = plt.subplots(
-        1, len(panels), figsize=(3.8 * len(panels), 4.2),
-        sharey=True, layout="constrained",
+        1,
+        len(panels),
+        figsize=(3.8 * len(panels), 4.2),
+        sharey=True,
+        layout="constrained",
     )
     pt_edges_arr = np.asarray(pt_edges, dtype=np.float64)
     eta_edges_arr = np.asarray(eta_edges, dtype=np.float64)
     for ax, (title, Hp) in zip(axes, panels):
         mesh = ax.pcolormesh(
-            eta_edges_arr, pt_edges_arr, Hp, norm=norm,
-            cmap="viridis", shading="flat",
+            eta_edges_arr,
+            pt_edges_arr,
+            Hp,
+            norm=norm,
+            cmap="viridis",
+            shading="flat",
         )
         ax.set_title(title, fontsize=9)
         ax.set_xlabel("eta_gen")
     axes[0].set_ylabel("pt_gen [GeV]")
     fig.colorbar(
-        mesh, ax=axes, shrink=0.85, label=f"Σ w ({ch_tag})",
+        mesh,
+        ax=axes,
+        shrink=0.85,
+        label=f"Σ w ({ch_tag})",
     )
     fig.suptitle(
         "Aggregated J/$\\psi$ vs prompt vs τ 2D kinematic validation  "
@@ -2608,9 +3089,18 @@ def _plot_agg_kinematic_validation_2d(
 
 
 def _plot_agg_kinematic_validation(
-    H, H_w2, weight_grids,
-    pt_edges, eta_edges, charge_edges, args, out_dir,
-    *, charge_filter=None, ch_suffix="", ch_tag="charge integrated",
+    H,
+    H_w2,
+    weight_grids,
+    pt_edges,
+    eta_edges,
+    charge_edges,
+    args,
+    out_dir,
+    *,
+    charge_filter=None,
+    ch_suffix="",
+    ch_tag="charge integrated",
 ):
     """Plot the (pt_gen, η_gen, charge_gen) marginals for J/ψ vs the
     prompt and τ-decay raw + reweighted distributions, with the bottom
@@ -2664,8 +3154,11 @@ def _plot_agg_kinematic_validation(
         panel_axes = panel_axes_all[:2]
     n_cols = len(panel_axes)
     fig, axes = plt.subplots(
-        2, n_cols, figsize=(4.8 * n_cols, 6.5),
-        sharex="col", squeeze=False,
+        2,
+        n_cols,
+        figsize=(4.8 * n_cols, 6.5),
+        sharex="col",
+        squeeze=False,
         gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
         layout="constrained",
     )
@@ -2693,11 +3186,19 @@ def _plot_agg_kinematic_validation(
             _marg(H_w2_sel[ref_g["name"]], axis_keep),
         )
         ax_main.step(
-            centers, h_ref_n, where="mid",
-            color=ref_g["main_color"], lw=1.4, label=ref_g["label"],
+            centers,
+            h_ref_n,
+            where="mid",
+            color=ref_g["main_color"],
+            lw=1.4,
+            label=ref_g["label"],
         )
         _stepped_errorbar(
-            ax_main, centers, h_ref_n, s_ref_n, ref_g["main_color"],
+            ax_main,
+            centers,
+            h_ref_n,
+            s_ref_n,
+            ref_g["main_color"],
         )
 
         # Non-reference groups: raw + reweighted.
@@ -2712,42 +3213,78 @@ def _plot_agg_kinematic_validation(
                 _marg(H_rew_w2[name], axis_keep),
             )
             ax_main.step(
-                centers, h_raw_n, where="mid",
-                color=g["raw_color"], lw=1.0, linestyle=":",
+                centers,
+                h_raw_n,
+                where="mid",
+                color=g["raw_color"],
+                lw=1.0,
+                linestyle=":",
                 label=f"{g['label']} (raw)",
             )
             _stepped_errorbar(
-                ax_main, centers, h_raw_n, s_raw_n, g["raw_color"],
+                ax_main,
+                centers,
+                h_raw_n,
+                s_raw_n,
+                g["raw_color"],
             )
             ax_main.step(
-                centers, h_rew_n, where="mid",
-                color=g["main_color"], lw=1.2,
+                centers,
+                h_rew_n,
+                where="mid",
+                color=g["main_color"],
+                lw=1.2,
                 label=f"{g['label']} (rew)",
             )
             _stepped_errorbar(
-                ax_main, centers, h_rew_n, s_rew_n, g["main_color"],
+                ax_main,
+                centers,
+                h_rew_n,
+                s_rew_n,
+                g["main_color"],
             )
 
             # Bottom-panel ratios to J/ψ.
             r_raw, e_raw = _ratio_with_err(
-                h_raw_n, s_raw_n, h_ref_n, s_ref_n,
+                h_raw_n,
+                s_raw_n,
+                h_ref_n,
+                s_ref_n,
             )
             r_rew, e_rew = _ratio_with_err(
-                h_rew_n, s_rew_n, h_ref_n, s_ref_n,
+                h_rew_n,
+                s_rew_n,
+                h_ref_n,
+                s_ref_n,
             )
             ax_ratio.step(
-                centers, r_raw, where="mid",
-                color=g["raw_color"], lw=0.9, linestyle=":",
+                centers,
+                r_raw,
+                where="mid",
+                color=g["raw_color"],
+                lw=0.9,
+                linestyle=":",
             )
             _stepped_errorbar(
-                ax_ratio, centers, r_raw, e_raw, g["raw_color"],
+                ax_ratio,
+                centers,
+                r_raw,
+                e_raw,
+                g["raw_color"],
             )
             ax_ratio.step(
-                centers, r_rew, where="mid",
-                color=g["main_color"], lw=1.0,
+                centers,
+                r_rew,
+                where="mid",
+                color=g["main_color"],
+                lw=1.0,
             )
             _stepped_errorbar(
-                ax_ratio, centers, r_rew, e_rew, g["main_color"],
+                ax_ratio,
+                centers,
+                r_rew,
+                e_rew,
+                g["main_color"],
             )
 
         ax_main.set_ylabel("p.d.f.")
@@ -2800,8 +3337,13 @@ def plot_aggregated_target_distributions(stats, paths, args, out_dir):
     t0 = _tic()
     H, H_w2, rows_read, n_kept = _stream_pteta_charge_3d(
         paths,
-        pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
-        pt_edges=pt_edges, eta_edges=eta_edges, charge_edges=charge_edges,
+        pt_min=pt_min,
+        pt_max=pt_max,
+        eta_min=eta_min,
+        eta_max=eta_max,
+        pt_edges=pt_edges,
+        eta_edges=eta_edges,
+        charge_edges=charge_edges,
         n_workers=int(args.cmp_workers),
         weight_mode=str(args.weight_handling),
         split=str(args.split),
@@ -2810,9 +3352,7 @@ def plot_aggregated_target_distributions(stats, paths, args, out_dir):
     )
     t0 = _toc("agg pass-1 (pt-η-charge 3D)", t0)
     sums = {n: float(H[n].sum()) for n in _AGG_NAMES}
-    counts_str = "  ".join(
-        f"{n}: {n_kept[n]:,} (Σw={sums[n]:.3g})" for n in _AGG_NAMES
-    )
+    counts_str = "  ".join(f"{n}: {n_kept[n]:,} (Σw={sums[n]:.3g})" for n in _AGG_NAMES)
     print(f"[agg]   read {rows_read:,} rows; per-group kept: {counts_str}")
     if sums[_AGG_REF_NAME] <= 0:
         print(
@@ -2862,8 +3402,7 @@ def plot_aggregated_target_distributions(stats, paths, args, out_dir):
     nsig = float(args.cmp_agg_range_sigma)
     n_bins = int(args.cmp_agg_n_bins)
     target_axes_edges = [
-        np.linspace(means[k] - nsig * stds[k], means[k] + nsig * stds[k],
-                    n_bins + 1)
+        np.linspace(means[k] - nsig * stds[k], means[k] + nsig * stds[k], n_bins + 1)
         for k in range(min(3, len(means)))
     ]
 
@@ -2874,23 +3413,43 @@ def plot_aggregated_target_distributions(stats, paths, args, out_dir):
         print(f"[agg] charge mode = {ch_mode} ({ch_tag})")
 
         _plot_agg_kinematic_validation(
-            H, H_w2, weight_grids,
-            pt_edges, eta_edges, charge_edges, args, out_dir,
-            charge_filter=cf, ch_suffix=ch_suffix, ch_tag=ch_tag,
+            H,
+            H_w2,
+            weight_grids,
+            pt_edges,
+            eta_edges,
+            charge_edges,
+            args,
+            out_dir,
+            charge_filter=cf,
+            ch_suffix=ch_suffix,
+            ch_tag=ch_tag,
         )
         _plot_agg_kinematic_validation_2d(
-            H, weight_grids, pt_edges, eta_edges, charge_edges, out_dir,
-            charge_filter=cf, ch_suffix=ch_suffix, ch_tag=ch_tag,
+            H,
+            weight_grids,
+            pt_edges,
+            eta_edges,
+            charge_edges,
+            out_dir,
+            charge_filter=cf,
+            ch_suffix=ch_suffix,
+            ch_tag=ch_tag,
         )
 
         # Pass 2 (charge-filtered).
         t0 = _tic()
         totals = _stream_aggregated_targets(
             paths,
-            pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
-            pt_edges=pt_edges, eta_edges=eta_edges,
+            pt_min=pt_min,
+            pt_max=pt_max,
+            eta_min=eta_min,
+            eta_max=eta_max,
+            pt_edges=pt_edges,
+            eta_edges=eta_edges,
             charge_edges=charge_edges,
-            weight_grids=weight_grids, target_axes_edges=target_axes_edges,
+            weight_grids=weight_grids,
+            target_axes_edges=target_axes_edges,
             n_workers=int(args.cmp_workers),
             weight_mode=str(args.weight_handling),
             charge_filter=cf,
@@ -2901,17 +3460,35 @@ def plot_aggregated_target_distributions(stats, paths, args, out_dir):
         _toc(f"agg pass-2 (target hists, {ch_mode})", t0)
 
         _plot_aggregated_target_distributions_one(
-            totals, target_axes_edges, args, out_dir,
-            pt_min=pt_min, pt_max=pt_max, eta_min=eta_min, eta_max=eta_max,
-            n_pt=n_pt, n_eta=n_eta,
-            ch_suffix=ch_suffix, ch_tag=ch_tag,
+            totals,
+            target_axes_edges,
+            args,
+            out_dir,
+            pt_min=pt_min,
+            pt_max=pt_max,
+            eta_min=eta_min,
+            eta_max=eta_max,
+            n_pt=n_pt,
+            n_eta=n_eta,
+            ch_suffix=ch_suffix,
+            ch_tag=ch_tag,
         )
 
 
 def _plot_aggregated_target_distributions_one(
-    totals, target_axes_edges, args, out_dir,
-    *, pt_min, pt_max, eta_min, eta_max, n_pt, n_eta,
-    ch_suffix, ch_tag,
+    totals,
+    target_axes_edges,
+    args,
+    out_dir,
+    *,
+    pt_min,
+    pt_max,
+    eta_min,
+    eta_max,
+    n_pt,
+    n_eta,
+    ch_suffix,
+    ch_tag,
 ):
     """Render the per-axis target-distribution plot for a single
     charge selection. Extracted from ``plot_aggregated_target_distributions``
@@ -2919,8 +3496,11 @@ def _plot_aggregated_target_distributions_one(
     n_cols = len(target_axes_edges)
     for yscale, ysuffix in (("linear", ""), ("log", "_log")):
         fig, axes = plt.subplots(
-            2, n_cols, figsize=(5.0 * n_cols, 6.8),
-            sharex="col", squeeze=False,
+            2,
+            n_cols,
+            figsize=(5.0 * n_cols, 6.8),
+            sharex="col",
+            squeeze=False,
             gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
             layout="constrained",
         )
@@ -2946,12 +3526,18 @@ def _plot_aggregated_target_distributions_one(
             if h_ref.sum() <= 0:
                 continue
             ax_main.step(
-                centers, h_ref_n, where="mid",
-                color=ref_g["main_color"], lw=1.3,
+                centers,
+                h_ref_n,
+                where="mid",
+                color=ref_g["main_color"],
+                lw=1.3,
                 label=ref_g["label"],
             )
             _stepped_errorbar(
-                ax_main, centers, h_ref_n, s_ref_n,
+                ax_main,
+                centers,
+                h_ref_n,
+                s_ref_n,
                 ref_g["main_color"],
             )
 
@@ -2970,55 +3556,87 @@ def _plot_aggregated_target_distributions_one(
 
                 if tot_raw > 0:
                     ax_main.step(
-                        centers, h_raw_n, where="mid",
-                        color=g["raw_color"], lw=0.9, linestyle=":",
+                        centers,
+                        h_raw_n,
+                        where="mid",
+                        color=g["raw_color"],
+                        lw=0.9,
+                        linestyle=":",
                         label=f"{g['label']} (raw)",
                     )
                     _stepped_errorbar(
-                        ax_main, centers, h_raw_n, s_raw_n,
+                        ax_main,
+                        centers,
+                        h_raw_n,
+                        s_raw_n,
                         g["raw_color"],
                     )
                 if tot_rew > 0:
                     ax_main.step(
-                        centers, h_rew_n, where="mid",
-                        color=g["main_color"], lw=1.2,
+                        centers,
+                        h_rew_n,
+                        where="mid",
+                        color=g["main_color"],
+                        lw=1.2,
                         label=f"{g['label']} (rew → J/$\\psi$ kin.)",
                     )
                     _stepped_errorbar(
-                        ax_main, centers, h_rew_n, s_rew_n,
+                        ax_main,
+                        centers,
+                        h_rew_n,
+                        s_rew_n,
                         g["main_color"],
                     )
 
                 # Ratios to J/ψ.
                 if tot_raw > 0:
                     r_raw, e_raw = _ratio_with_err(
-                        h_raw_n, s_raw_n, h_ref_n, s_ref_n,
+                        h_raw_n,
+                        s_raw_n,
+                        h_ref_n,
+                        s_ref_n,
                     )
                     ax_ratio.step(
-                        centers, r_raw, where="mid",
-                        color=g["raw_color"], lw=0.9, linestyle=":",
+                        centers,
+                        r_raw,
+                        where="mid",
+                        color=g["raw_color"],
+                        lw=0.9,
+                        linestyle=":",
                     )
                     _stepped_errorbar(
-                        ax_ratio, centers, r_raw, e_raw, g["raw_color"],
+                        ax_ratio,
+                        centers,
+                        r_raw,
+                        e_raw,
+                        g["raw_color"],
                     )
                 if tot_rew > 0:
                     r_rew, e_rew = _ratio_with_err(
-                        h_rew_n, s_rew_n, h_ref_n, s_ref_n,
+                        h_rew_n,
+                        s_rew_n,
+                        h_ref_n,
+                        s_ref_n,
                     )
                     ax_ratio.step(
-                        centers, r_rew, where="mid",
-                        color=g["main_color"], lw=1.0,
+                        centers,
+                        r_rew,
+                        where="mid",
+                        color=g["main_color"],
+                        lw=1.0,
                     )
                     _stepped_errorbar(
-                        ax_ratio, centers, r_rew, e_rew,
+                        ax_ratio,
+                        centers,
+                        r_rew,
+                        e_rew,
                         g["main_color"],
                     )
 
             ax_main.set_yscale(yscale)
             ax_main.set_ylabel("p.d.f. (weighted, unit area)")
             ax_main.set_title(
-                TARGET_NAMES[k] if k < len(TARGET_NAMES)
-                else f"target[{k}]",
+                TARGET_NAMES[k] if k < len(TARGET_NAMES) else f"target[{k}]",
                 fontsize=10,
             )
             ax_main.legend(fontsize=7)
@@ -3027,8 +3645,7 @@ def _plot_aggregated_target_distributions_one(
             ax_ratio.axhline(1.0, color="k", lw=0.4, alpha=0.4)
             ax_ratio.set_ylabel(r"$/$ J/$\psi$", fontsize=8)
             ax_ratio.set_xlabel(
-                TARGET_NAMES[k] if k < len(TARGET_NAMES)
-                else f"target[{k}]"
+                TARGET_NAMES[k] if k < len(TARGET_NAMES) else f"target[{k}]"
             )
             ax_ratio.set_ylim(0.5, 1.5)
 
@@ -3052,6 +3669,7 @@ def _plot_aggregated_target_distributions_one(
 # main
 # ============================================================================
 
+
 def main():
     args = parse_args()
     if args.output is None:
@@ -3067,7 +3685,8 @@ def main():
 
     print(f"loading checkpoint {args.checkpoint}")
     model, arch, stats, train_cfg = load_model_from_checkpoint(
-        args.checkpoint, device,
+        args.checkpoint,
+        device,
     )
     if stats is None:
         # Older / per-epoch checkpoints didn't bundle PreprocStats.
@@ -3093,12 +3712,24 @@ def main():
     print(f"loading ntuples from {len(args.input_files)} file(s)")
     t0 = _tic()
     (
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
-        source_id, muon_source,
+        eta_r,
+        phi_r,
+        eta_g,
+        phi_g,
+        kappa_r,
+        kappa_g,
+        w,
+        source_id,
+        muon_source,
     ) = load_ntuples(
-        args.input_files, args.tree, args.max_muons,
-        args.pt_min, args.pt_max, args.eta_max,
-        threads=args.threads, max_events=args.max_events,
+        args.input_files,
+        args.tree,
+        args.max_muons,
+        args.pt_min,
+        args.pt_max,
+        args.eta_max,
+        threads=args.threads,
+        max_events=args.max_events,
         weight_mode=args.weight_handling,
         split=args.split,
         val_fraction=args.split_val_fraction,
@@ -3130,7 +3761,12 @@ def main():
     # mismatch in apply_preproc/n_cond otherwise.
     use_muon_source_cond = "muon_source" in (stats.cond_names or [])
     target, cond_raw = compute_targets_and_conditioning(
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g,
+        eta_r,
+        phi_r,
+        eta_g,
+        phi_g,
+        kappa_r,
+        kappa_g,
         muon_source=muon_source if use_muon_source_cond else None,
     )
     t0 = _toc("compute_targets_and_conditioning", t0)
@@ -3167,21 +3803,35 @@ def main():
     log_r_grid_smear = {}
     for factor in args.shift_factors:
         for tcol in target_components:
-            log_r_grid_shift[(float(factor), int(tcol))] = (
-                _common_predict_call(
-                    model, arch, y_dev, c_dev, float(factor), int(tcol),
-                    "shift", n_features, args.batch_size, positivity,
-                    sigma_pack_iu, sigma_pack_ju,
-                )
+            log_r_grid_shift[(float(factor), int(tcol))] = _common_predict_call(
+                model,
+                arch,
+                y_dev,
+                c_dev,
+                float(factor),
+                int(tcol),
+                "shift",
+                n_features,
+                args.batch_size,
+                positivity,
+                sigma_pack_iu,
+                sigma_pack_ju,
             )
     for factor in args.smear_factors:
         for tcol in target_components:
-            log_r_grid_smear[(float(factor), int(tcol))] = (
-                _common_predict_call(
-                    model, arch, y_dev, c_dev, float(factor), int(tcol),
-                    "smear", n_features, args.batch_size, positivity,
-                    sigma_pack_iu, sigma_pack_ju,
-                )
+            log_r_grid_smear[(float(factor), int(tcol))] = _common_predict_call(
+                model,
+                arch,
+                y_dev,
+                c_dev,
+                float(factor),
+                int(tcol),
+                "smear",
+                n_features,
+                args.batch_size,
+                positivity,
+                sigma_pack_iu,
+                sigma_pack_ju,
             )
     t0 = _toc("grid prediction (shift + smear)", t0)
 
@@ -3200,9 +3850,16 @@ def main():
             for tcol in target_components:
                 log_r_grid_smear_via_gh[(float(factor), int(tcol))] = (
                     predict_smear_via_gh_shift(
-                        model, arch, y_dev, c_dev,
-                        float(factor), int(tcol), K,
-                        n_features, args.batch_size, positivity,
+                        model,
+                        arch,
+                        y_dev,
+                        c_dev,
+                        float(factor),
+                        int(tcol),
+                        K,
+                        n_features,
+                        args.batch_size,
+                        positivity,
                         sigma_pack_iu=sigma_pack_iu,
                         sigma_pack_ju=sigma_pack_ju,
                     )
@@ -3210,20 +3867,33 @@ def main():
         t0 = _toc(f"GH(K={K}) smear-via-shift grid prediction", t0)
 
     plot_shift_closure(
-        target, w, args, args.output,
-        log_r_grid_shift, target_std_per_dim,
+        target,
+        w,
+        args,
+        args.output,
+        log_r_grid_shift,
+        target_std_per_dim,
     )
     t0 = _toc("plot_shift_closure", t0)
 
     plot_closure_error_ratio(
-        target, w, args, args.output,
-        log_r_grid_shift, target_std_per_dim, mode="shift",
+        target,
+        w,
+        args,
+        args.output,
+        log_r_grid_shift,
+        target_std_per_dim,
+        mode="shift",
     )
     t0 = _toc("plot_shift_closure_error_ratio", t0)
 
     plot_smear_closure(
-        target, w, args, args.output,
-        log_r_grid_smear, target_std_per_dim,
+        target,
+        w,
+        args,
+        args.output,
+        log_r_grid_smear,
+        target_std_per_dim,
         log_r_grid_smear_via_gh=log_r_grid_smear_via_gh,
     )
     t0 = _toc("plot_smear_closure", t0)
@@ -3239,34 +3909,62 @@ def main():
             print(f"  [closure] group {g['name']!r} empty — skipping")
             continue
         plot_shift_closure(
-            target, w, args, args.output,
-            log_r_grid_shift, target_std_per_dim,
-            group_mask=mask, group_label=g["name"],
+            target,
+            w,
+            args,
+            args.output,
+            log_r_grid_shift,
+            target_std_per_dim,
+            group_mask=mask,
+            group_label=g["name"],
         )
         t0 = _toc(f"plot_shift_closure[{g['name']}]", t0)
         plot_smear_closure(
-            target, w, args, args.output,
-            log_r_grid_smear, target_std_per_dim,
+            target,
+            w,
+            args,
+            args.output,
+            log_r_grid_smear,
+            target_std_per_dim,
             log_r_grid_smear_via_gh=log_r_grid_smear_via_gh,
-            group_mask=mask, group_label=g["name"],
+            group_mask=mask,
+            group_label=g["name"],
         )
         t0 = _toc(f"plot_smear_closure[{g['name']}]", t0)
 
     plot_closure_error_ratio(
-        target, w, args, args.output,
-        log_r_grid_smear, target_std_per_dim, mode="smear",
+        target,
+        w,
+        args,
+        args.output,
+        log_r_grid_smear,
+        target_std_per_dim,
+        mode="smear",
     )
     t0 = _toc("plot_smear_closure_error_ratio", t0)
 
     plot_log_r_distribution(
-        n_features, w, args, args.output,
-        log_r_grid_shift, log_r_grid_smear,
+        n_features,
+        w,
+        args,
+        args.output,
+        log_r_grid_shift,
+        log_r_grid_smear,
     )
     t0 = _toc("plot_log_r_distribution", t0)
 
     plot_log_r_scan(
-        model, arch, y_dev, c_dev, n_features, w, args,
-        positivity, args.output, sigma_pack_iu, sigma_pack_ju,
+        model,
+        arch,
+        y_dev,
+        c_dev,
+        n_features,
+        w,
+        args,
+        positivity,
+        args.output,
+        sigma_pack_iu,
+        sigma_pack_ju,
     )
     t0 = _toc("plot_log_r_scan", t0)
 
@@ -3282,8 +3980,10 @@ def main():
     )
     cmp_data, cmp_read, cmp_kept = _load_per_source_window(
         args.input_files,
-        pt_min=float(args.cmp_pt_min), pt_max=float(args.cmp_pt_max),
-        eta_min=float(args.cmp_eta_min), eta_max=float(args.cmp_eta_max),
+        pt_min=float(args.cmp_pt_min),
+        pt_max=float(args.cmp_pt_max),
+        eta_min=float(args.cmp_eta_min),
+        eta_max=float(args.cmp_eta_max),
         max_events=int(args.cmp_max_events),
         n_workers=int(args.cmp_workers),
         weight_mode=str(args.weight_handling),
@@ -3307,8 +4007,13 @@ def main():
             f"window cut (={100 * cmp_kept / max(cmp_read, 1):.2f}%)"
         )
         plot_per_source_target_distributions(
-            target_cmp, w_cmp, sid_cmp, kg_cmp, eg_cmp,
-            args, args.output,
+            target_cmp,
+            w_cmp,
+            sid_cmp,
+            kg_cmp,
+            eg_cmp,
+            args,
+            args.output,
         )
         t0 = _toc("plot_per_source_target_distributions", t0)
 
@@ -3317,7 +4022,10 @@ def main():
     # in-memory arrays from the per-source loader because the agg
     # window is intentionally wider.
     plot_aggregated_target_distributions(
-        stats, args.input_files, args, args.output,
+        stats,
+        args.input_files,
+        args,
+        args.output,
     )
     t0 = _toc("plot_aggregated_target_distributions", t0)
 
@@ -3329,8 +4037,10 @@ def main():
         from flow_training_diagnostics import (
             load_flow_from_checkpoint,
         )
+
         flow, flow_stats, _flow_ckpt = load_flow_from_checkpoint(
-            args.flow_checkpoint, device,
+            args.flow_checkpoint,
+            device,
         )
         flow.eval()
         # Stash these on args so plot_polyhead_pred_vs_flow can reach
@@ -3339,18 +4049,34 @@ def main():
         args._polyhead_train_cfg = train_cfg
         args._positivity = positivity
         plot_polyhead_pred_vs_flow(
-            model, arch, flow, flow_stats, stats,
-            target_std, cond, n_features, w,
-            args, args.output,
+            model,
+            arch,
+            flow,
+            flow_stats,
+            stats,
+            target_std,
+            cond,
+            n_features,
+            w,
+            args,
+            args.output,
             sigma_pack_iu=sigma_pack_iu,
             sigma_pack_ju=sigma_pack_ju,
         )
         t0 = _toc("plot_polyhead_pred_vs_flow", t0)
 
         plot_polyhead_axis_logw_error_vs_flow(
-            model, arch, flow, flow_stats, stats,
-            target_std, cond, n_features, w,
-            args, args.output,
+            model,
+            arch,
+            flow,
+            flow_stats,
+            stats,
+            target_std,
+            cond,
+            n_features,
+            w,
+            args,
+            args.output,
             sigma_pack_iu=sigma_pack_iu,
             sigma_pack_ju=sigma_pack_ju,
         )

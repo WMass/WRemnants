@@ -24,14 +24,13 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Sequence, Tuple
+from typing import List, Sequence
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import torch
 import torch.utils.data as torch_data
-
 
 # ---------------------------------------------------------------------------
 # Per-muon schema (fp32 columns the snapshot script writes, plus int32
@@ -40,8 +39,13 @@ import torch.utils.data as torch_data
 # ---------------------------------------------------------------------------
 
 _RAW_FEATURE_COLUMNS = (
-    "eta_reco", "phi_reco", "eta_gen", "phi_gen",
-    "kappa_reco", "kappa_gen", "nominal_weight",
+    "eta_reco",
+    "phi_reco",
+    "eta_gen",
+    "phi_gen",
+    "kappa_reco",
+    "kappa_gen",
+    "nominal_weight",
     # ``muon_source`` is an int32 column on the shards (1, 15 or 443)
     # but enters the loader as a float feature in the cond vector.
     "muon_source",
@@ -50,7 +54,11 @@ _RAW_FEATURE_COLUMNS = (
 
 _TARGET_NAMES = ("r_kappa", "dlambda", "dphi")
 _COND_NAMES = (
-    "log_pt_gen", "charge", "lambda_gen", "sin_phi_gen", "cos_phi_gen",
+    "log_pt_gen",
+    "charge",
+    "lambda_gen",
+    "sin_phi_gen",
+    "cos_phi_gen",
     "muon_source",
 )
 
@@ -120,13 +128,9 @@ def split_batch_range(
     if split == "all":
         return 0, int(n_record_batches)
     if split not in _SPLIT_NAMES:
-        raise ValueError(
-            f"split must be one of {_SPLIT_NAMES}, got {split!r}"
-        )
+        raise ValueError(f"split must be one of {_SPLIT_NAMES}, got {split!r}")
     if not (0.0 <= val_fraction < 1.0):
-        raise ValueError(
-            f"val_fraction must be in [0, 1), got {val_fraction!r}"
-        )
+        raise ValueError(f"val_fraction must be in [0, 1), got {val_fraction!r}")
     if not (0.0 <= holdout_fraction < 1.0):
         raise ValueError(
             f"holdout_fraction must be in [0, 1), got {holdout_fraction!r}"
@@ -173,14 +177,13 @@ class TimedLoader:
 
     def __iter__(self):
         import time
+
         n_print = self.n_print
         label = self.label
         it = iter(self.loader)
         idx = 0
         if n_print > 0:
-            print(
-                f"[{label}] data-pipeline profile (first {n_print} batches):"
-            )
+            print(f"[{label}] data-pipeline profile (first {n_print} batches):")
         while True:
             t_req = time.perf_counter()
             try:
@@ -226,6 +229,7 @@ class StepProfiler:
 
     def __init__(self, enabled: bool, label: str, device: str = "cpu"):
         import time as _time
+
         self.enabled = bool(enabled)
         self.label = str(label)
         self.use_cuda = (
@@ -286,11 +290,13 @@ def dataloader_worker_init(worker_id: int):
     the worker count, not threads per worker).
     """
     import os
+
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["NUMEXPR_NUM_THREADS"] = "1"
     import torch as _torch
+
     _torch.set_num_threads(1)
     try:
         _torch.set_num_interop_threads(1)
@@ -327,7 +333,8 @@ def _apply_weight_mode(w, mode):
 
 
 def resolve_shard_files(
-    input_files: Sequence[str], return_counts: bool = False,
+    input_files: Sequence[str],
+    return_counts: bool = False,
 ):
     """Expand the trainer's ``--input-files`` contract to a flat list
     of ``.arrow`` shard paths. Accepts:
@@ -433,10 +440,7 @@ def count_rows(shard_files: Sequence[str]) -> List[int]:
             if isinstance(r, ipc.RecordBatchFileReader):
                 # Sum num_rows per batch — read_all() would
                 # materialize the whole table.
-                n = sum(
-                    r.get_batch(i).num_rows
-                    for i in range(r.num_record_batches)
-                )
+                n = sum(r.get_batch(i).num_rows for i in range(r.num_record_batches))
             else:
                 n = r.read_all().num_rows
             counts.append(n)
@@ -480,9 +484,7 @@ def _per_batch_target_cond(cols: dict):
     lam_g = np.arctan(np.sinh(eta_g))
 
     r_kappa = kappa_r / kappa_g - 1.0
-    dphi = np.arctan2(
-        np.sin(phi_r - phi_g), np.cos(phi_r - phi_g)
-    )
+    dphi = np.arctan2(np.sin(phi_r - phi_g), np.cos(phi_r - phi_g))
     dlambda = lam_r - lam_g
 
     target = np.stack([r_kappa, dlambda, dphi], axis=1).astype(np.float32)
@@ -555,14 +557,14 @@ def _stats_chunk(arg):
                     if i >= batch_stop:
                         return
                     yield b
+
             batches = _walk()
 
         for batch in batches:
             cols = _read_raw_columns(batch)
             target, cond, w = _per_batch_target_cond(cols)
-            target_finite = (
-                np.isfinite(target).all(axis=1)
-                & np.isfinite(cond).all(axis=1)
+            target_finite = np.isfinite(target).all(axis=1) & np.isfinite(cond).all(
+                axis=1
             )
             w_out, w_keep = _apply_weight_mode(w, weight_mode)
             keep = target_finite & w_keep
@@ -581,13 +583,16 @@ def _stats_chunk(arg):
             abs_w_sum += float(np.fabs(w_out, dtype=np.float64).sum())
             n_kept += target.shape[0]
     finally:
-        if hasattr(reader, "close"): reader.close()
+        if hasattr(reader, "close"):
+            reader.close()
         src.close()
     return n_kept, t_sum, t_sq, c_sum, c_sq, w_sum, abs_w_sum, n_filt
 
 
 def _enumerate_chunks(
-    shard_files, batches_per_chunk: int, weight_mode: str,
+    shard_files,
+    batches_per_chunk: int,
+    weight_mode: str,
     split: str = "train",
     val_fraction: float = DEFAULT_VAL_FRACTION,
     holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
@@ -608,12 +613,16 @@ def _enumerate_chunks(
                 # Stream — count by walking (cheap-ish; metadata only).
                 n_b = sum(1 for _ in reader)
         finally:
-            if hasattr(reader, "close"): reader.close()
+            if hasattr(reader, "close"):
+                reader.close()
             src.close()
         if n_b == 0:
             continue
         lo, hi = split_batch_range(
-            n_b, split, val_fraction, holdout_fraction,
+            n_b,
+            split,
+            val_fraction,
+            holdout_fraction,
         )
         if hi <= lo:
             continue
@@ -666,7 +675,10 @@ def _compute_stats_robust(
             if isinstance(reader, ipc.RecordBatchFileReader):
                 n_b = reader.num_record_batches
                 lo, hi = split_batch_range(
-                    n_b, split, val_fraction, holdout_fraction,
+                    n_b,
+                    split,
+                    val_fraction,
+                    holdout_fraction,
                 )
                 batches_iter = (reader.get_batch(i) for i in range(lo, hi))
             else:
@@ -676,9 +688,8 @@ def _compute_stats_robust(
                     break
                 cols = _read_raw_columns(batch)
                 target, cond, w = _per_batch_target_cond(cols)
-                target_finite = (
-                    np.isfinite(target).all(axis=1)
-                    & np.isfinite(cond).all(axis=1)
+                target_finite = np.isfinite(target).all(axis=1) & np.isfinite(cond).all(
+                    axis=1
                 )
                 w_out, w_keep = _apply_weight_mode(w, weight_mode)
                 keep = target_finite & w_keep
@@ -704,7 +715,9 @@ def _compute_stats_robust(
             src.close()
 
     if n_total == 0:
-        raise RuntimeError("compute_stats_streaming(robust): zero rows survived filters")
+        raise RuntimeError(
+            "compute_stats_streaming(robust): zero rows survived filters"
+        )
 
     target_arr = np.concatenate(t_chunks, axis=0)
     cond_arr = np.concatenate(c_chunks, axis=0)
@@ -790,18 +803,17 @@ def compute_stats_streaming(
     bit of overshoot is possible.
     """
     # ``PreprocStats`` lives in the sibling trainer script.
-    from train_muon_response_flow import PreprocStats
-    from concurrent.futures import ProcessPoolExecutor
     import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    from train_muon_response_flow import PreprocStats
 
     if weight_mode not in _WEIGHT_MODES:
         raise ValueError(
             f"weight_mode must be one of {_WEIGHT_MODES}, got {weight_mode!r}"
         )
     if split not in _SPLIT_NAMES:
-        raise ValueError(
-            f"split must be one of {_SPLIT_NAMES}, got {split!r}"
-        )
+        raise ValueError(f"split must be one of {_SPLIT_NAMES}, got {split!r}")
     if robust:
         # Dispatch to the sample-based median + 1.4826·MAD path.
         # Tail mass (e.g. r_kappa charge-mismeasurement peak) doesn't
@@ -809,7 +821,10 @@ def compute_stats_streaming(
         # width — what you actually want when the trainer's δ=1
         # perturbation is meant to span ~1 typical-event width.
         return _compute_stats_robust(
-            shard_files, int(robust_sample_rows), weight_mode, progress,
+            shard_files,
+            int(robust_sample_rows),
+            weight_mode,
+            progress,
             split=split,
             val_fraction=val_fraction,
             holdout_fraction=holdout_fraction,
@@ -826,7 +841,9 @@ def compute_stats_streaming(
         )
 
     tasks = _enumerate_chunks(
-        shard_files, batches_per_chunk, weight_mode,
+        shard_files,
+        batches_per_chunk,
+        weight_mode,
         split=split,
         val_fraction=val_fraction,
         holdout_fraction=holdout_fraction,
@@ -854,7 +871,7 @@ def compute_stats_streaming(
     ctx = mp.get_context("fork")
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
         for partial in ex.map(_stats_chunk, tasks):
-            (p_n, p_ts, p_tsq, p_cs, p_csq, p_ws, p_abs_ws, p_filt) = partial
+            p_n, p_ts, p_tsq, p_cs, p_csq, p_ws, p_abs_ws, p_filt = partial
             t_sum += p_ts
             t_sq += p_tsq
             c_sum += p_cs
@@ -898,7 +915,7 @@ def compute_stats_streaming(
 
     if progress:
         drop_label = {
-            "abs":  "w==0 or non-finite",
+            "abs": "w==0 or non-finite",
             "keep": "non-finite",
             "drop": "w<=0 or non-finite",
         }[weight_mode]
@@ -906,8 +923,11 @@ def compute_stats_streaming(
             f"  scanned {n_total:,} rows"
             + (f" (dropped {n_filt:,} {drop_label})" if n_filt else "")
             + f"; |weight| mean = {weight_mean:.4g}"
-            + (f", signed weight mean = {w_sum/n_total:.4g}"
-               if weight_mode == "keep" else "")
+            + (
+                f", signed weight mean = {w_sum/n_total:.4g}"
+                if weight_mode == "keep"
+                else ""
+            )
         )
 
     return (
@@ -973,13 +993,13 @@ class ArrowShardLoader(torch_data.IterableDataset):
     def __init__(
         self,
         shard_files: Sequence[str],
-        stats,                                 # PreprocStats
+        stats,  # PreprocStats
         weight_mean: float,
         *,
         world_size: int,
         rank: int,
         batch_size: int,
-        split: str = "train",                  # "train" | "val" | "holdout" | "all"
+        split: str = "train",  # "train" | "val" | "holdout" | "all"
         val_fraction: float = DEFAULT_VAL_FRACTION,
         holdout_fraction: float = DEFAULT_HOLDOUT_FRACTION,
         shuffle: bool = True,
@@ -992,9 +1012,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
         num_workers_hint: int = 1,
     ):
         if split not in _SPLIT_NAMES:
-            raise ValueError(
-                f"split must be one of {_SPLIT_NAMES}, got {split!r}"
-            )
+            raise ValueError(f"split must be one of {_SPLIT_NAMES}, got {split!r}")
         if weight_mode not in _WEIGHT_MODES:
             raise ValueError(
                 f"weight_mode must be one of {_WEIGHT_MODES}, got {weight_mode!r}"
@@ -1045,9 +1063,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
         if self._my_row_counts is not None:
             per_shard_rows = self._my_row_counts
         else:
-            per_shard_rows = (
-                count_rows(self.my_shards) if self.my_shards else []
-            )
+            per_shard_rows = count_rows(self.my_shards) if self.my_shards else []
         my_rows = sum(per_shard_rows)
         # Row-count estimate matches the per-shard contiguous record-
         # batch range each split actually iterates. Train rounds up
@@ -1072,9 +1088,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
         # multi-worker total can exceed the single-process estimate
         # by up to ``num_workers``. tqdm reaches 100 % a handful of
         # iterations before the epoch finishes — fine.
-        ceil_len = (
-            (my_rows_split + self.batch_size - 1) // self.batch_size
-        )
+        ceil_len = (my_rows_split + self.batch_size - 1) // self.batch_size
         self._approx_len = max(
             ceil_len + self.num_workers_hint,
             1,
@@ -1117,8 +1131,10 @@ class ArrowShardLoader(torch_data.IterableDataset):
                     reader.close()
                 src.close()
             lo, hi = split_batch_range(
-                n_b, self.split,
-                self.val_fraction, self.holdout_fraction,
+                n_b,
+                self.split,
+                self.val_fraction,
+                self.holdout_fraction,
             )
             for b in range(lo, hi):
                 layout.append((s_idx, b))
@@ -1253,9 +1269,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
         # Distinct RNG per (rank, epoch) — independent shuffles across
         # workers but reproducible per (seed, rank, epoch).
         rng = np.random.default_rng(
-            (self.seed * 1_000_003)
-            ^ (self.rank * 7919 + 1)
-            ^ (epoch * 2_654_435_761)
+            (self.seed * 1_000_003) ^ (self.rank * 7919 + 1) ^ (epoch * 2_654_435_761)
         )
 
         if chunks is None:
@@ -1277,8 +1291,10 @@ class ArrowShardLoader(torch_data.IterableDataset):
                         reader.close()
                     src.close()
                 lo, hi = split_batch_range(
-                    n_b, self.split,
-                    self.val_fraction, self.holdout_fraction,
+                    n_b,
+                    self.split,
+                    self.val_fraction,
+                    self.holdout_fraction,
                 )
                 if hi > lo:
                     chunks.append((s_idx, list(range(lo, hi))))
@@ -1338,9 +1354,7 @@ class ArrowShardLoader(torch_data.IterableDataset):
                     # re-decompresses earlier batches just to skip
                     # them), but functional.
                     idx_set = set(batch_indices)
-                    batches_iter = (
-                        b for i, b in enumerate(reader) if i in idx_set
-                    )
+                    batches_iter = (b for i, b in enumerate(reader) if i in idx_set)
                 for batch in batches_iter:
                     cols = _read_raw_columns(batch)
                     target, cond, w = _per_batch_target_cond(cols)
@@ -1353,10 +1367,9 @@ class ArrowShardLoader(torch_data.IterableDataset):
                     # applied at the record-batch level upstream (the
                     # caller hands us exactly the batches assigned to
                     # ``self.split``).
-                    target_finite = (
-                        np.isfinite(target).all(axis=1)
-                        & np.isfinite(cond).all(axis=1)
-                    )
+                    target_finite = np.isfinite(target).all(axis=1) & np.isfinite(
+                        cond
+                    ).all(axis=1)
                     w_out, w_keep = _apply_weight_mode(w, self.weight_mode)
                     keep = target_finite & w_keep
                     if not keep.all():
@@ -1381,7 +1394,8 @@ class ArrowShardLoader(torch_data.IterableDataset):
                     while buf_n >= bs:
                         yield _flush_one()
             finally:
-                if hasattr(reader, "close"): reader.close()
+                if hasattr(reader, "close"):
+                    reader.close()
                 src.close()
 
         if buf_n > 0 and not self.drop_last:

@@ -25,7 +25,6 @@ import sys
 import warnings
 
 import h5py
-import hist
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -35,7 +34,6 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
 )
 from wremnants.utilities.io_tools import base_io  # noqa: E402
-
 
 SMEAR_PLOT = {
     "title": "Smear closure (qop_reco / qop_gen)",
@@ -83,9 +81,7 @@ def load_aggregated_hists(path, process=None):
         if process is not None:
             procs = [p for p in procs if process in p]
         if not procs:
-            raise SystemExit(
-                f"No MC processes found in {path} (filter={process!r})."
-            )
+            raise SystemExit(f"No MC processes found in {path} (filter={process!r}).")
 
         summed = {}
         for proc in procs:
@@ -127,10 +123,12 @@ def _auto_ratio_ylim(ratios_in_view, pad=1.3, floor=0.005, ceiling=0.5):
     return (1.0 - half, 1.0 + half)
 
 
-def plot_one(summed, plot_spec, output_prefix, yscale="log",
-             xlim=(0.95, 1.05), ratio_ylim=None):
+def plot_one(
+    summed, plot_spec, output_prefix, yscale="log", xlim=(0.95, 1.05), ratio_ylim=None
+):
     fig, (ax_top, ax_bot) = plt.subplots(
-        2, 1,
+        2,
+        1,
         figsize=(7.5, 6.0),
         sharex=True,
         gridspec_kw={"height_ratios": [3.0, 1.0], "hspace": 0.05},
@@ -156,9 +154,7 @@ def plot_one(summed, plot_spec, output_prefix, yscale="log",
     nominal_int = nominal.values().sum()
     truth_v_raw = truth.values()
     truth_int = truth_v_raw.sum()
-    truth_scale = (
-        nominal_int / truth_int if truth_int > 0.0 else 1.0
-    )
+    truth_scale = nominal_int / truth_int if truth_int > 0.0 else 1.0
     if not np.isclose(truth_scale, 1.0, atol=1e-3):
         print(
             f"  [{plot_spec['title']}] scaling truth hist"
@@ -169,8 +165,15 @@ def plot_one(summed, plot_spec, output_prefix, yscale="log",
     edges = nominal.axes["qopr"].edges
 
     def step_arr(ax, v, label, color, ls="-"):
-        ax.step(edges, np.concatenate([[v[0]], v]), where="pre",
-                label=label, color=color, linestyle=ls, linewidth=1.4)
+        ax.step(
+            edges,
+            np.concatenate([[v[0]], v]),
+            where="pre",
+            label=label,
+            color=color,
+            linestyle=ls,
+            linewidth=1.4,
+        )
 
     def step(ax, h, label, color, ls="-"):
         v, _ = _values_with_err(h)
@@ -200,8 +203,13 @@ def plot_one(summed, plot_spec, output_prefix, yscale="log",
         step(ax_top, h, label, color)
         v, _ = _values_with_err(h)
         ratio = v / truth_safe
-        ax_bot.step(edges, np.concatenate([[ratio[0]], ratio]),
-                    where="pre", color=color, linewidth=1.2)
+        ax_bot.step(
+            edges,
+            np.concatenate([[ratio[0]], ratio]),
+            where="pre",
+            color=color,
+            linewidth=1.2,
+        )
         ratios_in_view.append(ratio[in_view & well_populated])
 
     ax_top.set_yscale(yscale)
@@ -236,22 +244,31 @@ def plot_one(summed, plot_spec, output_prefix, yscale="log",
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--input", "-i", required=True,
+        "--input",
+        "-i",
+        required=True,
         help="HDF5 from w_z_muonresponse.py --testHelpers",
     )
     p.add_argument(
-        "--output", "-o", default="muonresponse_closure",
+        "--output",
+        "-o",
+        default="muonresponse_closure",
         help="Output filename prefix (default: %(default)s)",
     )
     p.add_argument(
-        "--process", default=None,
+        "--process",
+        default=None,
         help="Only aggregate over processes whose name contains this string.",
     )
     p.add_argument(
-        "--ratio-ylim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
+        "--ratio-ylim",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("LO", "HI"),
         help="Override the ratio panel y-limits (default: auto-zoomed to "
-             "max |ratio-1| over well-populated bins in the visible x-range, "
-             "clamped to ±[0.5%%, 50%%]).",
+        "max |ratio-1| over well-populated bins in the visible x-range, "
+        "clamped to ±[0.5%%, 50%%]).",
     )
     args = p.parse_args()
 
@@ -260,10 +277,20 @@ def main():
 
     for ys in ("log", "lin"):
         ys_mpl = "log" if ys == "log" else "linear"
-        plot_one(summed, SMEAR_PLOT, f"{args.output}_smear_{ys}",
-                 yscale=ys_mpl, ratio_ylim=args.ratio_ylim)
-        plot_one(summed, SCALE_PLOT, f"{args.output}_scale_{ys}",
-                 yscale=ys_mpl, ratio_ylim=args.ratio_ylim)
+        plot_one(
+            summed,
+            SMEAR_PLOT,
+            f"{args.output}_smear_{ys}",
+            yscale=ys_mpl,
+            ratio_ylim=args.ratio_ylim,
+        )
+        plot_one(
+            summed,
+            SCALE_PLOT,
+            f"{args.output}_scale_{ys}",
+            yscale=ys_mpl,
+            ratio_ylim=args.ratio_ylim,
+        )
 
 
 if __name__ == "__main__":

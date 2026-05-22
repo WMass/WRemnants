@@ -50,7 +50,6 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import uproot
 
-
 _MASK64 = np.uint64(0xFFFFFFFFFFFFFFFF)
 _GOLDEN_GAMMA = np.uint64(0x9E3779B97F4A7C15)
 _MIX1 = np.uint64(0xBF58476D1CE4E5B9)
@@ -133,7 +132,9 @@ def _phase1_worker(arg_tuple):
     int_set = set(int_columns)
     int64_set = set(int64_columns)
     row_dtype = _intermediate_row_dtype(
-        branches, int_columns, int64_columns,
+        branches,
+        int_columns,
+        int64_columns,
     )
 
     src = uproot.open(snapshot_path)[tree_name]
@@ -152,7 +153,8 @@ def _phase1_worker(arg_tuple):
             if not bufs[b]:
                 continue
             path = os.path.join(
-                tmp_dir, f"s{source_id:02d}_w{worker_id:04d}_b{b:05d}.bin",
+                tmp_dir,
+                f"s{source_id:02d}_w{worker_id:04d}_b{b:05d}.bin",
             )
             with open(path, "ab") as f:
                 for arr in bufs[b]:
@@ -196,13 +198,16 @@ def _phase1_worker(arg_tuple):
             np.arange(cur, cur + n_events, dtype=np.int64),
             counts,
         )
-        muon_idx_flat = (
-            np.arange(total, dtype=np.int64)
-            - np.repeat(offsets[:-1], counts)
+        muon_idx_flat = np.arange(total, dtype=np.int64) - np.repeat(
+            offsets[:-1], counts
         )
 
         bids = _splitmix64_bucket(
-            source_id, event_idx_flat, muon_idx_flat, seed, n_buckets,
+            source_id,
+            event_idx_flat,
+            muon_idx_flat,
+            seed,
+            n_buckets,
         )
 
         # Pack each RVec column into the per-row structured record at
@@ -254,10 +259,13 @@ def _phase2_worker(arg_tuple):
     int_set = set(int_columns)
     int64_set = set(int64_columns)
     row_dtype = _intermediate_row_dtype(
-        branches, int_columns, int64_columns,
+        branches,
+        int_columns,
+        int64_columns,
     )
 
     my_buckets = list(range(worker_id, n_buckets, n_workers_phase2))
+
     # ``int_columns`` -> ``pa.int32()``, ``int64_columns`` ->
     # ``pa.int64()``, rest -> ``pa.float32()``. The phase-1
     # intermediates are a packed structured array of the same widths,
@@ -269,9 +277,11 @@ def _phase2_worker(arg_tuple):
         if c in int_set:
             return pa.int32()
         return pa.float32()
+
     schema = pa.schema([(c, _arrow_type(c)) for c in branches])
     write_opts = ipc.IpcWriteOptions(
-        compression="lz4_frame", use_threads=False,
+        compression="lz4_frame",
+        use_threads=False,
     )
     rng = np.random.default_rng(
         int(seed) ^ (worker_id * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
@@ -289,8 +299,9 @@ def _phase2_worker(arg_tuple):
     # individual record batches without walking the whole shard
     # sequentially, which enables intra-shard parallelism in the
     # trainer's stats warmup.
-    with pa.OSFile(tmp_out, "wb") as out_f, \
-         ipc.new_file(out_f, schema, options=write_opts) as writer:
+    with pa.OSFile(tmp_out, "wb") as out_f, ipc.new_file(
+        out_f, schema, options=write_opts
+    ) as writer:
         for b in my_buckets:
             chunks: list[np.ndarray] = []
             for s in range(n_sources):
@@ -399,9 +410,7 @@ def run_sharding_pass(
     # it in. No int64 column is written by the current snapshot.
     unknown_int = [c for c in int_columns if c not in branches]
     if unknown_int:
-        raise ValueError(
-            f"int_columns refers to unknown branches: {unknown_int}"
-        )
+        raise ValueError(f"int_columns refers to unknown branches: {unknown_int}")
     n_cols = len(branches)
     sources = list(snapshot_paths)
     n_sources = len(sources)
@@ -445,16 +454,24 @@ def run_sharding_pass(
     try:
         # ---- Phase 1 ----
         print(
-            f"\nphase 1: parallel scan + per-(source, worker, bucket) "
-            f"intermediates"
+            f"\nphase 1: parallel scan + per-(source, worker, bucket) " f"intermediates"
         )
         t0 = time.time()
         phase1_args = [
             (
-                src_id, w, n_workers, sources[src_id], tree_name,
-                branches, n_buckets, tmp_dir,
-                flush_threshold_bytes, step_rows, seed,
-                int_columns, int64_columns,
+                src_id,
+                w,
+                n_workers,
+                sources[src_id],
+                tree_name,
+                branches,
+                n_buckets,
+                tmp_dir,
+                flush_threshold_bytes,
+                step_rows,
+                seed,
+                int_columns,
+                int64_columns,
             )
             for src_id in range(n_sources)
             for w in range(n_workers)
@@ -483,9 +500,18 @@ def run_sharding_pass(
         # phase 1 deposited.
         phase2_args = [
             (
-                s, n_shards, n_buckets, n_workers, n_sources,
-                branches, int_columns, int64_columns,
-                tmp_dir, shard_dir, batch_rows, seed,
+                s,
+                n_shards,
+                n_buckets,
+                n_workers,
+                n_sources,
+                branches,
+                int_columns,
+                int64_columns,
+                tmp_dir,
+                shard_dir,
+                batch_rows,
+                seed,
             )
             for s in range(n_shards)
         ]
@@ -524,9 +550,7 @@ def run_sharding_pass(
                 with open(meta_path) as f:
                     meta = json.load(f)
             except (OSError, json.JSONDecodeError) as exc:
-                print(
-                    f"  warning: failed to parse {meta_path}: {exc!r}"
-                )
+                print(f"  warning: failed to parse {meta_path}: {exc!r}")
                 continue
             for entry in meta.get("entries", []):
                 try:
@@ -544,9 +568,7 @@ def run_sharding_pass(
                 f"  source_id labels (from side-cars): "
                 + ", ".join(
                     f"{k}={v!r}"
-                    for k, v in sorted(
-                        source_labels.items(), key=lambda kv: int(kv[0])
-                    )
+                    for k, v in sorted(source_labels.items(), key=lambda kv: int(kv[0]))
                 )
             )
 

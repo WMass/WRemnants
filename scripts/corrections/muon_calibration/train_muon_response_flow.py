@@ -75,7 +75,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import List, Tuple
 
 import numpy as np
@@ -148,11 +148,11 @@ def parse_args():
         "--val-fraction",
         type=float,
         default=0.1,
-        help="[default: %(default)s] Fraction of muons held out for "
-        "validation.",
+        help="[default: %(default)s] Fraction of muons held out for " "validation.",
     )
     p.add_argument(
-        "--shard-split", choices=["train", "val", "holdout", "all"],
+        "--shard-split",
+        choices=["train", "val", "holdout", "all"],
         default="train",
         help="[default: %(default)s] Per-shard record-batch range to "
         "load. The shards are partitioned by ``arrow_shard_loader."
@@ -163,7 +163,9 @@ def parse_args():
         "diagnostic script evaluates the model on.",
     )
     p.add_argument(
-        "--shard-holdout-fraction", type=float, default=0.1,
+        "--shard-holdout-fraction",
+        type=float,
+        default=0.1,
         help="[default: %(default)s] Fraction of each shard's record "
         "batches reserved as holdout (skipped by the train / val "
         "load). Matches the trainer / diagnostic convention.",
@@ -196,8 +198,7 @@ def parse_args():
         "--patience",
         type=int,
         default=5,
-        help="[default: %(default)s] Early-stopping patience on "
-        "validation NLL.",
+        help="[default: %(default)s] Early-stopping patience on " "validation NLL.",
     )
     p.add_argument(
         "--no-early-stop",
@@ -226,8 +227,7 @@ def parse_args():
         "--n-transforms",
         type=int,
         default=5,
-        help="[default: %(default)s] Number of coupling layers in the "
-        "flow.",
+        help="[default: %(default)s] Number of coupling layers in the " "flow.",
     )
     p.add_argument(
         "--hidden-features",
@@ -446,7 +446,8 @@ def parse_args():
     )
     p.add_argument(
         "--prefetch-shuffle",
-        action=argparse.BooleanOptionalAction, default=True,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="[default: on] Hide the per-epoch ``torch.randperm(n)`` "
         "stall by computing the next epoch's permutation in a "
         "background thread while the current epoch is still training. "
@@ -464,7 +465,8 @@ def parse_args():
     )
     p.add_argument(
         "--profile",
-        action=argparse.BooleanOptionalAction, default=False,
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="[default: off] If set, run a short ``torch.profiler`` "
         "diagnostic pass on the first few training steps of the "
         "current ``train()`` invocation and exit before the normal "
@@ -475,17 +477,22 @@ def parse_args():
         "load the flow from a prior checkpoint).",
     )
     p.add_argument(
-        "--profile-warmup", type=int, default=3,
+        "--profile-warmup",
+        type=int,
+        default=3,
         help="[default: %(default)s] Profile schedule warmup steps "
         "(executed but not recorded).",
     )
     p.add_argument(
-        "--profile-active", type=int, default=5,
+        "--profile-active",
+        type=int,
+        default=5,
         help="[default: %(default)s] Profile schedule active steps "
         "(recorded by the profiler).",
     )
     p.add_argument(
-        "--profile-output", default=None,
+        "--profile-output",
+        default=None,
         help="[default: %(default)s] Optional path for Chrome-trace "
         "export of the profile (viewable in chrome://tracing or "
         "Perfetto). Under DDP, the rank index is appended before "
@@ -574,22 +581,19 @@ def parse_args():
         "--trunk-layers",
         type=int,
         default=2,
-        help="[default: %(default)s] Number of trunk MLP hidden layers "
-        "(shared).",
+        help="[default: %(default)s] Number of trunk MLP hidden layers " "(shared).",
     )
     p.add_argument(
         "--d-emb",
         type=int,
         default=32,
-        help="[default: %(default)s] (--head-arch mlp) Trunk embedding "
-        "dimension.",
+        help="[default: %(default)s] (--head-arch mlp) Trunk embedding " "dimension.",
     )
     p.add_argument(
         "--head-hidden",
         type=int,
         default=32,
-        help="[default: %(default)s] (--head-arch mlp) Head hidden "
-        "width.",
+        help="[default: %(default)s] (--head-arch mlp) Head hidden " "width.",
     )
     p.add_argument(
         "--head-layers",
@@ -842,9 +846,13 @@ def parse_args():
 # -----------------------------------------------------------------------------
 
 PER_MUON_COLUMNS = [
-    "eta_reco", "phi_reco",
-    "eta_gen",  "phi_gen",
-    "kappa_reco", "kappa_gen", "nominal_weight",
+    "eta_reco",
+    "phi_reco",
+    "eta_gen",
+    "phi_gen",
+    "kappa_reco",
+    "kappa_gen",
+    "nominal_weight",
     "source_id",
     "muon_source",
 ]
@@ -867,6 +875,7 @@ def _expand_input_paths(paths: List[str]) -> List[str]:
             manifest_path = os.path.join(p, "manifest.json")
             if os.path.exists(manifest_path):
                 import json
+
                 with open(manifest_path) as f:
                     manifest = json.load(f)
                 for entry in manifest["shard_files"]:
@@ -878,8 +887,11 @@ def _expand_input_paths(paths: List[str]) -> List[str]:
 
 def _filter_block(
     blocks: dict,
-    pt_min: float, pt_max: float, eta_max: float,
-    n_read: int, max_rows: int,
+    pt_min: float,
+    pt_max: float,
+    eta_max: float,
+    n_read: int,
+    max_rows: int,
     weight_mode: str = "drop",
 ):
     eta_g = blocks["eta_gen"]
@@ -921,8 +933,12 @@ def _filter_block(
 
 
 def _load_arrow_shards(
-    paths: List[str], pt_min: float, pt_max: float, eta_max: float,
-    max_rows: int, weight_mode: str = "drop",
+    paths: List[str],
+    pt_min: float,
+    pt_max: float,
+    eta_max: float,
+    max_rows: int,
+    weight_mode: str = "drop",
     split: str = "all",
     val_fraction: float = 0.1,
     holdout_fraction: float = 0.1,
@@ -948,13 +964,14 @@ def _load_arrow_shards(
                 reader = ipc.open_file(f)
                 n_b = reader.num_record_batches
                 lo, hi = split_batch_range(
-                    n_b, split, val_fraction, holdout_fraction,
+                    n_b,
+                    split,
+                    val_fraction,
+                    holdout_fraction,
                 )
                 if hi <= lo:
                     continue
-                t = pa.Table.from_batches(
-                    [reader.get_batch(i) for i in range(lo, hi)]
-                )
+                t = pa.Table.from_batches([reader.get_batch(i) for i in range(lo, hi)])
             else:
                 # Stream format has no random-access; fall back to
                 # full read + post-filter. (Sharder writes file
@@ -966,7 +983,12 @@ def _load_arrow_shards(
                     pass  # not supported on stream format
         block = {c: t[c].to_numpy() for c in PER_MUON_COLUMNS}
         mask = _filter_block(
-            block, pt_min, pt_max, eta_max, n_read, max_rows,
+            block,
+            pt_min,
+            pt_max,
+            eta_max,
+            n_read,
+            max_rows,
             weight_mode=weight_mode,
         )
         # In ``abs`` mode the surviving rows still carry the signed
@@ -995,8 +1017,17 @@ def load_ntuples(
     split: str = "all",
     val_fraction: float = 0.1,
     holdout_fraction: float = 0.1,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-            np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """Return per-muon arrays of (eta_reco, phi_reco, eta_gen,
     phi_gen, kappa_reco, kappa_gen, weight, source_id) loaded from
     per-muon snapshots produced by :mod:`flow_training_snapshot`.
@@ -1040,7 +1071,11 @@ def load_ntuples(
             "shards."
         )
     blocks_per_col = _load_arrow_shards(
-        paths, pt_min, pt_max, eta_max, max_events,
+        paths,
+        pt_min,
+        pt_max,
+        eta_max,
+        max_events,
         weight_mode=weight_mode,
         split=split,
         val_fraction=val_fraction,
@@ -1067,8 +1102,15 @@ def load_ntuples(
     source_id = concat["source_id"]
     muon_source = concat["muon_source"]
     arrs = (
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
-        source_id, muon_source,
+        eta_r,
+        phi_r,
+        eta_g,
+        phi_g,
+        kappa_r,
+        kappa_g,
+        w,
+        source_id,
+        muon_source,
     )
 
     n = arrs[0].shape[0]
@@ -1086,10 +1128,7 @@ def load_ntuples(
     # the mode r_kappa absorbs.
     n_flip = int(np.sum(np.sign(arrs[4]) != np.sign(arrs[5])))
     if n_flip:
-        print(
-            f"  charge mismeasurement: {n_flip} / {n} rows "
-            f"({100*n_flip/n:.3f}%)"
-        )
+        print(f"  charge mismeasurement: {n_flip} / {n} rows " f"({100*n_flip/n:.3f}%)")
     # Diagnostic: per-source-id row counts (visible to downstream code
     # for split / validation by dataset).
     sid_arr = arrs[7]
@@ -1097,7 +1136,9 @@ def load_ntuples(
     if len(unique_sids) > 1 or unique_sids[0] != 0:
         print(
             f"  source_id breakdown: "
-            + ", ".join(f"{int(s)}: {int(c):,}" for s, c in zip(unique_sids, sid_counts))
+            + ", ".join(
+                f"{int(s)}: {int(c):,}" for s, c in zip(unique_sids, sid_counts)
+            )
         )
 
     if max_muons > 0 and n > max_muons:
@@ -1110,7 +1151,13 @@ def load_ntuples(
 
 
 def compute_targets_and_conditioning(
-    eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, muon_source=None,
+    eta_r,
+    phi_r,
+    eta_g,
+    phi_g,
+    kappa_r,
+    kappa_g,
+    muon_source=None,
 ):
     """Return (target [N,3], cond_raw dict).
 
@@ -1135,9 +1182,7 @@ def compute_targets_and_conditioning(
     r_kappa = kappa_r / kappa_g - 1.0
 
     # Wrap dphi to [-pi, pi]
-    dphi = np.arctan2(
-        np.sin(phi_r - phi_g), np.cos(phi_r - phi_g)
-    )
+    dphi = np.arctan2(np.sin(phi_r - phi_g), np.cos(phi_r - phi_g))
     dlambda = lam_r - lam_g
 
     # Target order is (r_kappa, dlambda, dphi) so that the reco
@@ -1197,13 +1242,14 @@ _PASSTHROUGH_COND_FEATURES = ("charge", "muon_source")
 # Preprocessing
 # -----------------------------------------------------------------------------
 
+
 @dataclass
 class PreprocStats:
     target_names: List[str]
     target_mean: List[float]
     target_std: List[float]
 
-    cond_names: List[str]     # order matters: matches flow input order
+    cond_names: List[str]  # order matters: matches flow input order
     cond_mean: List[float]
     cond_std: List[float]
 
@@ -1233,9 +1279,7 @@ def build_preproc(target: np.ndarray, cond_raw: dict) -> PreprocStats:
             cond_std.append(1.0)
         else:
             cond_mean.append(float(arr.mean()))
-            cond_std.append(
-                float(arr.std()) if arr.std() > 1e-6 else 1.0
-            )
+            cond_std.append(float(arr.std()) if arr.std() > 1e-6 else 1.0)
 
     return PreprocStats(
         target_names=target_names,
@@ -1305,13 +1349,14 @@ def _build_glow(
     initialization and modest learning rate, this never happens
     for this problem. If it does, reduce ``--lr``.
     """
-    import zuko
+    from zuko.distributions import DiagNormal
     from zuko.flows import (
-        Flow, GeneralCouplingTransform, UnconditionalTransform,
+        Flow,
+        GeneralCouplingTransform,
         UnconditionalDistribution,
+        UnconditionalTransform,
     )
     from zuko.transforms import LULinearTransform
-    from zuko.distributions import DiagNormal
 
     # Reproducible per-call initialization of the LU perturbation
     # and (optionally) the random masks. Not a model seed — model
@@ -1323,23 +1368,24 @@ def _build_glow(
         # LU linear mixing, initialized near-identity.
         LU_init = torch.eye(n_features, dtype=torch.float32)
         noise = 0.05 * torch.randn(
-            n_features, n_features, generator=rng,
+            n_features,
+            n_features,
+            generator=rng,
         )
         # Perturb only the off-diagonal entries; keep diagonal
         # near 1 so log|det| starts finite.
         LU_init = LU_init + noise.tril(-1) + noise.triu(1)
         transforms_list.append(
             UnconditionalTransform(
-                LULinearTransform, LU_init, buffer=False,
+                LULinearTransform,
+                LU_init,
+                buffer=False,
             )
         )
 
         # Affine coupling (same as RealNVP).
         if randmask:
-            mask = (
-                torch.randperm(n_features, generator=rng) % 2
-                == i % 2
-            )
+            mask = torch.randperm(n_features, generator=rng) % 2 == i % 2
         else:
             mask = torch.arange(n_features) % 2 == i % 2
         transforms_list.append(
@@ -1389,13 +1435,12 @@ def _build_sospf(
     masked-autoregressive transforms (keeps inputs inside the
     ``[-10, 10]`` SOSPolynomialTransform invertibility window).
     """
-    import zuko
     from zuko.flows import MAF, UnconditionalTransform
     from zuko.transforms import (
-        ComposedTransform,
         AdditiveTransform,
-        SOSPolynomialTransform,
+        ComposedTransform,
         SoftclipTransform,
+        SOSPolynomialTransform,
         UnconstrainedMonotonicTransform,
     )
 
@@ -1409,7 +1454,11 @@ def _build_sospf(
 
         def __init__(self, a, slope: float = 1e-3, **kwargs):
             UnconstrainedMonotonicTransform.__init__(
-                self, None, phi=(a,), n=int(quad_n), **kwargs,
+                self,
+                None,
+                phi=(a,),
+                n=int(quad_n),
+                **kwargs,
             )
             self.a = a
             self.i = torch.arange(a.shape[-1], device=a.device)
@@ -1438,7 +1487,8 @@ def _build_sospf(
     transforms = flow.transform.transforms
     for i in reversed(range(1, len(transforms))):
         transforms.insert(
-            i, UnconditionalTransform(SoftclipTransform, bound=11.0),
+            i,
+            UnconditionalTransform(SoftclipTransform, bound=11.0),
         )
     return flow
 
@@ -1521,15 +1571,12 @@ def build_flow(
     try:
         import zuko
     except ImportError as e:
-        raise ImportError(
-            "zuko is required for training (pip install zuko)."
-        ) from e
+        raise ImportError("zuko is required for training (pip install zuko).") from e
 
     act_cls = ACTIVATIONS.get(activation.lower())
     if act_cls is None:
         raise ValueError(
-            f"unknown activation '{activation}'; "
-            f"available: {sorted(ACTIVATIONS)}"
+            f"unknown activation '{activation}'; " f"available: {sorted(ACTIVATIONS)}"
         )
 
     arch = architecture.lower()
@@ -1649,9 +1696,8 @@ def build_flow(
 import itertools as _itertools
 import math as _math
 
-
 _LOG_LOG2 = _math.log(_math.log(2.0))
-_LOG_W_CLAMP = 30.0   # exp-positivity clamp on log W to keep fp32 finite
+_LOG_W_CLAMP = 30.0  # exp-positivity clamp on log W to keep fp32 finite
 
 
 # ============================================================================
@@ -1673,6 +1719,7 @@ _LOG_W_CLAMP = 30.0   # exp-positivity clamp on log W to keep fp32 finite
 #                      (``√(j²+1) > |j|``), grows only logarithmically in
 #                      |j| in log-space. Needs *no* clamp at all.
 # ============================================================================
+
 
 def _apply_positivity_W(j: torch.Tensor, positivity: str) -> torch.Tensor:
     """Return ``W(j)`` directly, without going through ``log W``."""
@@ -1762,9 +1809,14 @@ def _joint_indices(
 # only "stales" if the indices object is GC'd and a new list ends up
 # at the same memory address, which doesn't happen during a normal
 # polyhead lifetime.
-def _run_profile_pass(step_fn, n_warmup: int, n_active: int,
-                      output_path: str = None, label: str = "",
-                      row_limit: int = 30):
+def _run_profile_pass(
+    step_fn,
+    n_warmup: int,
+    n_active: int,
+    output_path: str = None,
+    label: str = "",
+    row_limit: int = 30,
+):
     """Run ``step_fn(i)`` for ``n_warmup + n_active`` iterations under
     ``torch.profiler``; print the top-``row_limit`` hot ops sorted by
     self CUDA time (or self CPU time when CUDA isn't available).
@@ -1778,14 +1830,18 @@ def _run_profile_pass(step_fn, n_warmup: int, n_active: int,
     diagnostic pass that the caller invokes from a ``--profile``
     branch and then exits.
     """
-    from torch.profiler import profile, schedule, ProfilerActivity
+    from torch.profiler import ProfilerActivity, profile, schedule
+
     activities = [ProfilerActivity.CPU]
     cuda_ok = torch.cuda.is_available()
     if cuda_ok:
         activities.append(ProfilerActivity.CUDA)
     n_total = int(n_warmup) + int(n_active)
     sched = schedule(
-        wait=0, warmup=int(n_warmup), active=int(n_active), repeat=1,
+        wait=0,
+        warmup=int(n_warmup),
+        active=int(n_active),
+        repeat=1,
     )
     print(
         f"[profile{label}] running {n_total} steps "
@@ -1836,12 +1892,8 @@ def _build_basis_aux(indices, n_features: int):
         (pure-u or pure-σ).
       * ``max_deg_u`` / ``max_deg_sigma``: int.
     """
-    alpha_list = [
-        _multiindex_to_axis_degrees(a, n_features) for a, _ in indices
-    ]
-    beta_list = [
-        _multiindex_to_axis_degrees(b, n_features) for _, b in indices
-    ]
+    alpha_list = [_multiindex_to_axis_degrees(a, n_features) for a, _ in indices]
+    beta_list = [_multiindex_to_axis_degrees(b, n_features) for _, b in indices]
     if alpha_list:
         alpha_degs = torch.tensor(alpha_list, dtype=torch.long)
     else:
@@ -1978,11 +2030,13 @@ def joint_monomial_basis(
     phi = None
     for j in range(n_features):
         u_j = u_pow[..., j, :].index_select(
-            dim=-1, index=alpha_degs[:, j],
+            dim=-1,
+            index=alpha_degs[:, j],
         )
         if has_sigma:
             s_j = s_pow[..., j, :].index_select(
-                dim=-1, index=beta_degs[:, j],
+                dim=-1,
+                index=beta_degs[:, j],
             )
             factor_j = u_j * s_j
         else:
@@ -2007,9 +2061,9 @@ def _cheb_table(x_norm: torch.Tensor, max_deg: int) -> torch.Tensor:
     an empty trailing dim."""
     if max_deg < 0:
         return x_norm.unsqueeze(-1)[..., :0]
-    cols = [torch.ones_like(x_norm)]   # T_0 = 1
+    cols = [torch.ones_like(x_norm)]  # T_0 = 1
     if max_deg >= 1:
-        cols.append(x_norm)            # T_1 = x
+        cols.append(x_norm)  # T_1 = x
     for n in range(2, max_deg + 1):
         cols.append(2 * x_norm * cols[-1] - cols[-2])
     return torch.stack(cols, dim=-1)
@@ -2017,7 +2071,7 @@ def _cheb_table(x_norm: torch.Tensor, max_deg: int) -> torch.Tensor:
 
 def _T_at_zero(n: int) -> float:
     """Value of the n-th first-kind Chebyshev polynomial at x=0:
-       T_0(0)=1, T_n(0)=0 for odd n, T_n(0)=(-1)^(n/2) for even n>0.
+    T_0(0)=1, T_n(0)=0 for odd n, T_n(0)=(-1)^(n/2) for even n>0.
     """
     if n == 0:
         return 1.0
@@ -2098,14 +2152,16 @@ def joint_chebyshev_basis(
     u_factor = None
     for j in range(n_features):
         u_j = Tu[..., j, :].index_select(
-            dim=-1, index=alpha_degs[:, j],
+            dim=-1,
+            index=alpha_degs[:, j],
         )
         u_factor = u_j if u_factor is None else u_factor * u_j
     if has_sigma:
         v_factor = None
         for j in range(n_features):
             s_j = Ts[..., j, :].index_select(
-                dim=-1, index=beta_degs[:, j],
+                dim=-1,
+                index=beta_degs[:, j],
             )
             v_factor = s_j if v_factor is None else v_factor * s_j
         return (u_factor - u_const) * (v_factor - v_const)
@@ -2132,7 +2188,12 @@ def _select_basis(
         return joint_monomial_basis(u, sigma_vec, indices, aux=aux)
     if basis == "chebyshev":
         return joint_chebyshev_basis(
-            u, sigma_vec, indices, scale_u, scale_sigma, aux=aux,
+            u,
+            sigma_vec,
+            indices,
+            scale_u,
+            scale_sigma,
+            aux=aux,
         )
     raise ValueError(f"unknown basis {basis!r}")
 
@@ -2207,23 +2268,16 @@ class PolyHead(nn.Module):
         # contraction read the right phi slice without scatter/
         # gather. Total set is unchanged.
         raw_indices = _joint_indices(
-            n_features, max_deg_u, max_deg_sigma, max_cross_deg,
+            n_features,
+            max_deg_u,
+            max_deg_sigma,
+            max_cross_deg,
         )
-        idx_pure_u = [
-            (a, b) for (a, b) in raw_indices
-            if len(b) == 0 and len(a) > 0
-        ]
-        idx_pure_s = [
-            (a, b) for (a, b) in raw_indices
-            if len(a) == 0 and len(b) > 0
-        ]
-        idx_cross = [
-            (a, b) for (a, b) in raw_indices
-            if len(a) > 0 and len(b) > 0
-        ]
-        assert (
-            len(idx_pure_u) + len(idx_pure_s) + len(idx_cross)
-            == len(raw_indices)
+        idx_pure_u = [(a, b) for (a, b) in raw_indices if len(b) == 0 and len(a) > 0]
+        idx_pure_s = [(a, b) for (a, b) in raw_indices if len(a) == 0 and len(b) > 0]
+        idx_cross = [(a, b) for (a, b) in raw_indices if len(a) > 0 and len(b) > 0]
+        assert len(idx_pure_u) + len(idx_pure_s) + len(idx_cross) == len(
+            raw_indices
         ), "non-exhaustive split of joint indices"
         self._joint_indices = idx_pure_u + idx_pure_s + idx_cross
         self.n_joint_basis = len(self._joint_indices)
@@ -2254,18 +2308,24 @@ class PolyHead(nn.Module):
         # via ``self.basis_aux`` for use in :func:`evaluate_joint`.
         _aux = _build_basis_aux(self._joint_indices, n_features)
         self.register_buffer(
-            "_basis_alpha_degs", _aux["alpha_degs"], persistent=False,
+            "_basis_alpha_degs",
+            _aux["alpha_degs"],
+            persistent=False,
         )
         self.register_buffer(
-            "_basis_beta_degs", _aux["beta_degs"], persistent=False,
+            "_basis_beta_degs",
+            _aux["beta_degs"],
+            persistent=False,
         )
         self.register_buffer(
             "_basis_cheb_u_const",
-            _aux["cheb_u_const"], persistent=False,
+            _aux["cheb_u_const"],
+            persistent=False,
         )
         self.register_buffer(
             "_basis_cheb_v_const",
-            _aux["cheb_v_const"], persistent=False,
+            _aux["cheb_v_const"],
+            persistent=False,
         )
         self._basis_max_deg_u = _aux["max_deg_u"]
         self._basis_max_deg_sigma = _aux["max_deg_sigma"]
@@ -2274,9 +2334,7 @@ class PolyHead(nn.Module):
         # smear-weight target. K=1 → empty buffers (no GH; loss step
         # falls back to the K=1 stochastic estimator).
         if self.smear_K > 1:
-            nodes_np, w_np = np.polynomial.hermite_e.hermegauss(
-                self.smear_K
-            )
+            nodes_np, w_np = np.polynomial.hermite_e.hermegauss(self.smear_K)
             w_norm = w_np / np.sqrt(2.0 * np.pi)
             gh_nodes = torch.tensor(nodes_np, dtype=torch.float32)
             gh_log_w = torch.tensor(np.log(w_norm), dtype=torch.float32)
@@ -2285,7 +2343,9 @@ class PolyHead(nn.Module):
             gh_log_w = torch.zeros(0, dtype=torch.float32)
         self.register_buffer("gh_nodes", gh_nodes, persistent=False)
         self.register_buffer(
-            "gh_log_weights", gh_log_w, persistent=False,
+            "gh_log_weights",
+            gh_log_w,
+            persistent=False,
         )
 
         # Trunk: ``[y, c] → e ∈ R^trunk_hidden``. The final coefficient
@@ -2310,21 +2370,18 @@ class PolyHead(nn.Module):
         # only created if the corresponding block is non-empty (e.g.
         # in shift-only mode, pure_s and cross are empty).
         self.head_pure_u = (
-            nn.Linear(prev, self._n_pure_u)
-            if self._n_pure_u > 0 else None
+            nn.Linear(prev, self._n_pure_u) if self._n_pure_u > 0 else None
         )
         self.head_pure_sigma = (
-            nn.Linear(prev, self._n_pure_s)
-            if self._n_pure_s > 0 else None
+            nn.Linear(prev, self._n_pure_s) if self._n_pure_s > 0 else None
         )
-        self.head_cross = (
-            nn.Linear(prev, self._n_cross)
-            if self._n_cross > 0 else None
-        )
+        self.head_cross = nn.Linear(prev, self._n_cross) if self._n_cross > 0 else None
         # Init heads near zero so coefs ≈ 0 at start.
         with torch.no_grad():
             for head in (
-                self.head_pure_u, self.head_pure_sigma, self.head_cross,
+                self.head_pure_u,
+                self.head_pure_sigma,
+                self.head_cross,
             ):
                 if head is not None:
                     head.weight.mul_(0.01)
@@ -2380,10 +2437,9 @@ class PolyHead(nn.Module):
         if not net_keys:
             return state_dict
         # Find the index of the final layer (largest ``net.{N}.weight``).
-        net_layer_idxs = sorted({
-            int(k.split(".")[1]) for k in net_keys
-            if k.endswith(".weight")
-        })
+        net_layer_idxs = sorted(
+            {int(k.split(".")[1]) for k in net_keys if k.endswith(".weight")}
+        )
         if not net_layer_idxs:
             return state_dict
         last_idx = net_layer_idxs[-1]
@@ -2441,7 +2497,8 @@ class PolyHead(nn.Module):
         after running :meth:`_remap_legacy_state_dict`."""
         return super().load_state_dict(
             self._remap_legacy_state_dict(state_dict),
-            strict=strict, assign=assign,
+            strict=strict,
+            assign=assign,
         )
 
     def trunk_forward(
@@ -2482,7 +2539,10 @@ class PolyHead(nn.Module):
             parts.append(self.head_cross(e))
         if not parts:
             return torch.zeros(
-                e.shape[0], 0, device=e.device, dtype=e.dtype,
+                e.shape[0],
+                0,
+                device=e.device,
+                dtype=e.dtype,
             )
         return torch.cat(parts, dim=-1)
 
@@ -2508,7 +2568,9 @@ def _sigma_pack_outer(sigma: torch.Tensor) -> torch.Tensor:
     """
     F = sigma.shape[-1]
     iu, ju = torch.triu_indices(
-        F, F, device=sigma.device,
+        F,
+        F,
+        device=sigma.device,
     ).unbind(0)
     return sigma[..., iu] * sigma[..., ju]
 
@@ -2540,8 +2602,13 @@ def evaluate_joint(
     tensors inside the compiled forward, which CUDA graphs captures
     as outputs and then errors on overwrite."""
     phi = _select_basis(
-        basis, u, sigma_vec, joint_indices,
-        scale_u, scale_sigma, aux=basis_aux,
+        basis,
+        u,
+        sigma_vec,
+        joint_indices,
+        scale_u,
+        scale_sigma,
+        aux=basis_aux,
     )
     return torch.einsum("...b,...b->...", joint_coefs, phi)
 
@@ -2567,8 +2634,13 @@ def predicted_W(
     options (``"monomial"`` or ``"chebyshev"``).
     """
     j = evaluate_joint(
-        joint_coefs, u_shift, sigma_vec, joint_indices,
-        basis=basis, scale_u=scale_u, scale_sigma=scale_sigma,
+        joint_coefs,
+        u_shift,
+        sigma_vec,
+        joint_indices,
+        basis=basis,
+        scale_u=scale_u,
+        scale_sigma=scale_sigma,
         basis_aux=basis_aux,
     )
     return _apply_positivity_W(j, positivity)
@@ -2593,8 +2665,13 @@ def predicted_log_W(
     ``basis`` and ``scale_*`` are forwarded to :func:`evaluate_joint`.
     """
     j = evaluate_joint(
-        joint_coefs, u_shift, sigma_vec, joint_indices,
-        basis=basis, scale_u=scale_u, scale_sigma=scale_sigma,
+        joint_coefs,
+        u_shift,
+        sigma_vec,
+        joint_indices,
+        basis=basis,
+        scale_u=scale_u,
+        scale_sigma=scale_sigma,
         basis_aux=basis_aux,
     )
     return _apply_positivity_logW(j, positivity)
@@ -2657,7 +2734,9 @@ def sample_perturbations(
         v_smear[:, 0] = 1.0
         sigma_vec = torch.zeros(batch_size, n_dim, device=device)
         mode_id = torch.zeros(
-            batch_size, device=device, dtype=torch.long,
+            batch_size,
+            device=device,
+            dtype=torch.long,
         )
         return u_shift, sigma_vec, zeros, v_smear, mode_id
 
@@ -2679,13 +2758,15 @@ def sample_perturbations(
     # lowest-noise / highest-leverage gradient signal.
     base = batch_size // 3
     extra = batch_size - 3 * base
-    mode_id = torch.cat([
-        torch.full((base + extra,), 0, device=device, dtype=torch.long),
-        torch.full((base,), 1, device=device, dtype=torch.long),
-        torch.full((base,), 2, device=device, dtype=torch.long),
-    ])
-    shift_active = (mode_id != 1).to(delta_shift.dtype)   # SHIFT or JOINT
-    smear_active = (mode_id != 0).to(delta_smear.dtype)   # SMEAR or JOINT
+    mode_id = torch.cat(
+        [
+            torch.full((base + extra,), 0, device=device, dtype=torch.long),
+            torch.full((base,), 1, device=device, dtype=torch.long),
+            torch.full((base,), 2, device=device, dtype=torch.long),
+        ]
+    )
+    shift_active = (mode_id != 1).to(delta_shift.dtype)  # SHIFT or JOINT
+    smear_active = (mode_id != 0).to(delta_smear.dtype)  # SMEAR or JOINT
 
     u_shift = (delta_shift * shift_active).unsqueeze(-1) * v_shift
     sigma_vec = (sigma_smear * smear_active).unsqueeze(-1) * v_smear
@@ -2711,9 +2792,7 @@ def _lagrange_basis_at(eps, gh_nodes):
         for j in range(K):
             if j == k:
                 continue
-            L[:, k] = L[:, k] * (eps - gh_nodes[j]) / (
-                gh_nodes[k] - gh_nodes[j]
-            )
+            L[:, k] = L[:, k] * (eps - gh_nodes[j]) / (gh_nodes[k] - gh_nodes[j])
     return L
 
 
@@ -2808,9 +2887,7 @@ def _compute_target_lw(
 
         def _eval_direct():
             z_p, ladj_p = _flow_z_ladj(flow, y_pert, c_pert)
-            log_p_p = (
-                -0.5 * (z_p * z_p).sum(dim=-1) - log_const + ladj_p
-            )
+            log_p_p = -0.5 * (z_p * z_p).sum(dim=-1) - log_const + ladj_p
             return log_p_p - log_p.detach()
 
         if detach_target:
@@ -2831,8 +2908,9 @@ def _compute_target_lw(
         if smear_residual:
             eps_extra = torch.randn(B, device=y_std.device, dtype=y_std.dtype)
             eps_all = torch.cat(
-                [eps_nodes.to(eps_extra.dtype), eps_extra], dim=0,
-            )           # [K+1]
+                [eps_nodes.to(eps_extra.dtype), eps_extra],
+                dim=0,
+            )  # [K+1]
             n_eps = K_smear + 1
         else:
             eps_all = eps_nodes
@@ -2841,52 +2919,52 @@ def _compute_target_lw(
         # For GH nodes ε_k is per-quadrature-node (broadcast across B);
         # for the extra slot ε_extra is per-event.
         if smear_residual:
-            eps_view = torch.cat([
-                eps_nodes.view(K_smear, 1).expand(K_smear, B),
-                eps_extra.view(1, B),
-            ], dim=0)                                      # [K+1, B]
-            u_eval_k = (
-                u_shift.unsqueeze(0)
-                + eps_view.unsqueeze(-1) * sigma_vec.unsqueeze(0)
-            )                                              # [K+1, B, n_features]
+            eps_view = torch.cat(
+                [
+                    eps_nodes.view(K_smear, 1).expand(K_smear, B),
+                    eps_extra.view(1, B),
+                ],
+                dim=0,
+            )  # [K+1, B]
+            u_eval_k = u_shift.unsqueeze(0) + eps_view.unsqueeze(
+                -1
+            ) * sigma_vec.unsqueeze(
+                0
+            )  # [K+1, B, n_features]
         else:
-            u_eval_k = (
-                u_shift.unsqueeze(0)
-                + eps_nodes.view(K_smear, 1, 1) * sigma_vec.unsqueeze(0)
-            )                                              # [K, B, n_features]
+            u_eval_k = u_shift.unsqueeze(0) + eps_nodes.view(
+                K_smear, 1, 1
+            ) * sigma_vec.unsqueeze(
+                0
+            )  # [K, B, n_features]
         nB = n_eps * B
-        perturbed_y = (
-            y_std.unsqueeze(0).expand(n_eps, -1, -1) - u_eval_k
-        ).reshape(nB, n_features)
-        perturbed_c = (
-            c_std.unsqueeze(0)
-            .expand(n_eps, -1, -1)
-            .reshape(nB, n_cond)
+        perturbed_y = (y_std.unsqueeze(0).expand(n_eps, -1, -1) - u_eval_k).reshape(
+            nB, n_features
         )
+        perturbed_c = c_std.unsqueeze(0).expand(n_eps, -1, -1).reshape(nB, n_cond)
 
         def _eval():
             z_p, ladj_p = _flow_z_ladj(flow, perturbed_y, perturbed_c)
-            log_p_p = (
-                -0.5 * (z_p * z_p).sum(dim=-1) - log_const + ladj_p
-            ).view(n_eps, B)
+            log_p_p = (-0.5 * (z_p * z_p).sum(dim=-1) - log_const + ladj_p).view(
+                n_eps, B
+            )
             true_lw_all = log_p_p - log_p.detach().unsqueeze(0)
             log_W_K = torch.logsumexp(
-                true_lw_all[:K_smear] + log_gh_w.view(K_smear, 1), dim=0,
-            )                                              # [B]
+                true_lw_all[:K_smear] + log_gh_w.view(K_smear, 1),
+                dim=0,
+            )  # [B]
             if not smear_residual:
                 return log_W_K
 
             # log W_K is the dominant term; we add log1p of a small
             # control-variate correction. All ratios are formed
             # against W_K so the absolute scale of W cancels.
-            log_W_extra = true_lw_all[K_smear]            # [B]
+            log_W_extra = true_lw_all[K_smear]  # [B]
             ratio_extra = torch.exp(log_W_extra - log_W_K)  # [B]
             # exp(true_lw_all[:K] - log_W_K) ∈ [0, 1/w_min] is well-
             # conditioned because log_W_K ≥ max_k(log_w_k + log_W_k).
-            ratio_K = torch.exp(
-                true_lw_all[:K_smear] - log_W_K.unsqueeze(0)
-            )                                              # [K, B]
-            L_at_eps = _lagrange_basis_at(eps_extra, eps_nodes)   # [B, K]
+            ratio_K = torch.exp(true_lw_all[:K_smear] - log_W_K.unsqueeze(0))  # [K, B]
+            L_at_eps = _lagrange_basis_at(eps_extra, eps_nodes)  # [B, K]
             ratio_g = torch.einsum("kb,bk->b", ratio_K, L_at_eps)  # [B]
             delta = ratio_extra - ratio_g
             # delta ∈ (-∞, ∞) per event; the control variate guarantees
@@ -2912,9 +2990,7 @@ def _compute_target_lw(
 
     def _eval_stoch():
         z_e, ladj_e = _flow_z_ladj(flow, y_std - u_eval, c_std)
-        log_p_e = (
-            -0.5 * (z_e * z_e).sum(dim=-1) - log_const + ladj_e
-        )
+        log_p_e = -0.5 * (z_e * z_e).sum(dim=-1) - log_const + ladj_e
         return log_p_e - log_p.detach()
 
     if detach_target:
@@ -2936,8 +3012,8 @@ def _detach_pure_coefs_in_joint(
     the pure terms — those parameters are still trained by the
     deterministic SHIFT (pure-u) and lower-cross-coupling SMEAR
     (pure-σ) events, which carry a lower-noise signal."""
-    is_joint = (mode == 2)
-    pure_basis = head.is_pure_u | head.is_pure_sigma
+    is_joint = mode == 2
+    pure_basis = polyhead.is_pure_u | polyhead.is_pure_sigma
     detach_mask = is_joint.unsqueeze(-1) & pure_basis.unsqueeze(0)
     return torch.where(detach_mask, joint_coefs.detach(), joint_coefs)
 
@@ -3008,15 +3084,18 @@ def _polyhead_d_per_mode(
         extra = B - 3 * base
         n_shift_b, n_smear_b, n_joint_b = base + extra, base, base
 
-    e = polyhead.trunk_forward(y_std, c_std)         # [B, d_emb]
+    e = polyhead.trunk_forward(y_std, c_std)  # [B, d_emb]
     d_emb = e.shape[-1]
 
     phi = _select_basis(
-        polyhead.basis, u_shift, sigma_vec, polyhead.joint_indices,
+        polyhead.basis,
+        u_shift,
+        sigma_vec,
+        polyhead.joint_indices,
         scale_u=polyhead.basis_scale_u,
         scale_sigma=polyhead.basis_scale_sigma,
         aux=polyhead.basis_aux,
-    )                                                 # [B, n_basis]
+    )  # [B, n_basis]
 
     n_pu = polyhead._n_pure_u
     n_ps = polyhead._n_pure_s
@@ -3027,10 +3106,12 @@ def _polyhead_d_per_mode(
         ``head`` ``nn.Linear(d_emb, n_out)``. Returns ``[N]``."""
         if head is None:
             return torch.zeros(
-                e_blk.shape[0], device=e_blk.device, dtype=e_blk.dtype,
+                e_blk.shape[0],
+                device=e_blk.device,
+                dtype=e_blk.dtype,
             )
-        temp = phi_blk @ head.weight                  # [N, d_emb]
-        bias_term = phi_blk @ head.bias               # [N]
+        temp = phi_blk @ head.weight  # [N, d_emb]
+        bias_term = phi_blk @ head.bias  # [N]
         return (e_blk * temp).sum(-1) + bias_term
 
     d_chunks = []
@@ -3045,7 +3126,8 @@ def _polyhead_d_per_mode(
     if n_smear_b > 0:
         e_m = e[n_shift_b : n_shift_b + n_smear_b]
         phi_m_ps = phi[
-            n_shift_b : n_shift_b + n_smear_b, n_pu : n_pu + n_ps,
+            n_shift_b : n_shift_b + n_smear_b,
+            n_pu : n_pu + n_ps,
         ]
         d_chunks.append(_order2(e_m, phi_m_ps, polyhead.head_pure_sigma))
 
@@ -3058,10 +3140,14 @@ def _polyhead_d_per_mode(
         phi_j = phi[j0:]
         d_j_pu = _order2(e_j, phi_j[:, :n_pu], polyhead.head_pure_u)
         d_j_ps = _order2(
-            e_j, phi_j[:, n_pu : n_pu + n_ps], polyhead.head_pure_sigma,
+            e_j,
+            phi_j[:, n_pu : n_pu + n_ps],
+            polyhead.head_pure_sigma,
         )
         d_j_cr = _order2(
-            e_j, phi_j[:, n_pu + n_ps :], polyhead.head_cross,
+            e_j,
+            phi_j[:, n_pu + n_ps :],
+            polyhead.head_cross,
         )
         if detach_pure_in_joint:
             d_j_pu = d_j_pu.detach()
@@ -3104,25 +3190,29 @@ def _mlp_d_per_mode(
     :func:`sample_perturbations` and ``_polyhead_d_per_mode``).
     """
     B = y_std.shape[0]
-    e = mlp.trunk_forward(y_std, c_std)                  # [B, d_emb]
+    e = mlp.trunk_forward(y_std, c_std)  # [B, d_emb]
     if mlp.head_layer1_sigma is not None:
         sigma_pack = (
-            sigma_vec[..., mlp.sigma_pack_iu]
-            * sigma_vec[..., mlp.sigma_pack_ju]
+            sigma_vec[..., mlp.sigma_pack_iu] * sigma_vec[..., mlp.sigma_pack_ju]
         )
     else:
         sigma_pack = torch.zeros(
-            B, 0, device=y_std.device, dtype=y_std.dtype,
+            B,
+            0,
+            device=y_std.device,
+            dtype=y_std.dtype,
         )
 
     if not detach_pure_in_joint:
         # 2·B head queries: f(e, u, σ_pack) and f(e, 0, 0).
         e_dual = torch.cat([e, e], dim=0)
         u_dual = torch.cat(
-            [u_shift, torch.zeros_like(u_shift)], dim=0,
+            [u_shift, torch.zeros_like(u_shift)],
+            dim=0,
         )
         sp_dual = torch.cat(
-            [sigma_pack, torch.zeros_like(sigma_pack)], dim=0,
+            [sigma_pack, torch.zeros_like(sigma_pack)],
+            dim=0,
         )
         f = mlp.head_forward(e_dual, u_dual, sp_dual)
         return f[:B] - f[B:]
@@ -3133,13 +3223,14 @@ def _mlp_d_per_mode(
     zeros_sp = torch.zeros_like(sigma_pack)
     u_q = torch.cat([u_shift, zeros_u, u_shift, zeros_u], dim=0)
     sp_q = torch.cat(
-        [sigma_pack, zeros_sp, zeros_sp, sigma_pack], dim=0,
+        [sigma_pack, zeros_sp, zeros_sp, sigma_pack],
+        dim=0,
     )
     f = mlp.head_forward(e_q, u_q, sp_q)
     f_full = f[0 * B : 1 * B]
     f_zero = f[1 * B : 2 * B]
-    f_us   = f[2 * B : 3 * B]
-    f_sm   = f[3 * B : 4 * B]
+    f_us = f[2 * B : 3 * B]
+    f_sm = f[3 * B : 4 * B]
     d_full = f_full - f_zero
     d_pure_u = f_us - f_zero
     d_pure_s = f_sm - f_zero
@@ -3154,7 +3245,7 @@ def _mlp_d_per_mode(
     n_joint_b = base
     is_joint = torch.zeros(B, dtype=torch.bool, device=y_std.device)
     if n_joint_b > 0:
-        is_joint[n_shift_b + n_smear_b:] = True
+        is_joint[n_shift_b + n_smear_b :] = True
     d_pure_u_used = torch.where(is_joint, d_pure_u.detach(), d_pure_u)
     d_pure_s_used = torch.where(is_joint, d_pure_s.detach(), d_pure_s)
     d_mixed = d_full - d_pure_u - d_pure_s
@@ -3183,12 +3274,14 @@ def _mlp_factored_d_per_mode(
     e = head.trunk_forward(y_std, c_std)
     if head.n_sigma_pack > 0:
         sigma_pack = (
-            sigma_vec[..., head.sigma_pack_iu]
-            * sigma_vec[..., head.sigma_pack_ju]
+            sigma_vec[..., head.sigma_pack_iu] * sigma_vec[..., head.sigma_pack_ju]
         )
     else:
         sigma_pack = torch.zeros(
-            B, 0, device=y_std.device, dtype=y_std.dtype,
+            B,
+            0,
+            device=y_std.device,
+            dtype=y_std.dtype,
         )
     pu, ps, cr = head.head_forward_components(e, u_shift, sigma_pack)
     if head.detach_pure_shift_in_joint or head.detach_pure_smear_in_joint:
@@ -3201,7 +3294,7 @@ def _mlp_factored_d_per_mode(
         n_joint_b = base
         is_joint = torch.zeros(B, dtype=torch.bool, device=y_std.device)
         if n_joint_b > 0:
-            is_joint[n_shift_b + n_smear_b:] = True
+            is_joint[n_shift_b + n_smear_b :] = True
         if head.detach_pure_shift_in_joint:
             pu = torch.where(is_joint, pu.detach(), pu)
         if head.detach_pure_smear_in_joint:
@@ -3233,15 +3326,27 @@ def _head_d_per_mode(
     """
     if isinstance(head, PolyHead):
         return _polyhead_d_per_mode(
-            head, y_std, c_std, u_shift, sigma_vec,
+            head,
+            y_std,
+            c_std,
+            u_shift,
+            sigma_vec,
             detach_pure_in_joint=detach_pure_in_joint,
         )
     if getattr(head, "is_factored", False):
         return _mlp_factored_d_per_mode(
-            head, y_std, c_std, u_shift, sigma_vec,
+            head,
+            y_std,
+            c_std,
+            u_shift,
+            sigma_vec,
         )
     return _mlp_d_per_mode(
-        head, y_std, c_std, u_shift, sigma_vec,
+        head,
+        y_std,
+        c_std,
+        u_shift,
+        sigma_vec,
         detach_pure_in_joint=detach_pure_in_joint,
     )
 
@@ -3268,7 +3373,8 @@ def _per_event_loss(
 
 
 def _expkl_per_event(
-    pred_log: torch.Tensor, target_log: torch.Tensor,
+    pred_log: torch.Tensor,
+    target_log: torch.Tensor,
 ) -> torch.Tensor:
     """Per-event expKL (f-GAN-KL / I-divergence) loss:
 
@@ -3293,13 +3399,15 @@ def _expkl_per_event(
     ``asinh`` positivity wraps the natural range of ``δ`` is well
     inside the clamp."""
     delta = (target_log - pred_log).clamp(
-        min=-_LOG_W_CLAMP, max=_LOG_W_CLAMP,
+        min=-_LOG_W_CLAMP,
+        max=_LOG_W_CLAMP,
     )
     return torch.exp(delta) - delta - 1.0
 
 
 def _wbce_per_event(
-    pred_log: torch.Tensor, target_log: torch.Tensor,
+    pred_log: torch.Tensor,
+    target_log: torch.Tensor,
 ) -> torch.Tensor:
     """Per-event importance-sampled BCE / single-sample CARL loss:
 
@@ -3388,16 +3496,20 @@ def joint_loss_step(
     device = y_std.device
 
     u_shift, sigma_vec, delta_smear, v_smear, mode = sample_perturbations(
-        B, n_features, delta_max, sigma_max, device, oversample=oversample,
+        B,
+        n_features,
+        delta_max,
+        sigma_max,
+        device,
+        oversample=oversample,
         include_smear=head.include_smear,
     )
 
     # Baseline flow forward — gradients DO flow back through this
     # (drives the NLL term).
     z, ladj = _flow_z_ladj(flow, y_std, c_std)
-    log_phi = (
-        -0.5 * (z * z).sum(dim=-1)
-        - 0.5 * float(n_features) * _math.log(2.0 * _math.pi)
+    log_phi = -0.5 * (z * z).sum(dim=-1) - 0.5 * float(n_features) * _math.log(
+        2.0 * _math.pi
     )
     log_p = log_phi + ladj
     nll = -log_p
@@ -3407,9 +3519,17 @@ def joint_loss_step(
     # ``head.smear_K``. K perturbed forwards are run under
     # no_grad when ``detach_target`` (default True).
     true_lw = _compute_target_lw(
-        flow, head, y_std, c_std, log_p,
-        u_shift, sigma_vec, delta_smear, v_smear,
-        n_features, detach_target=detach_target,
+        flow,
+        head,
+        y_std,
+        c_std,
+        log_p,
+        u_shift,
+        sigma_vec,
+        delta_smear,
+        v_smear,
+        n_features,
+        detach_target=detach_target,
     )
 
     # Trustable-target mask. The Gaussian tail of δ_smear can place
@@ -3418,14 +3538,16 @@ def joint_loss_step(
     # These events aren't representative of any real reweight regime
     # (we don't deploy at 5σ shifts), so we simply drop them from
     # the polyhead loss contribution.
-    target_threshold = 10.0   # |log w| up to 10 → |w| up to ~22000
+    target_threshold = 10.0  # |log w| up to 10 → |w| up to ~22000
     trustable = torch.isfinite(true_lw) & (true_lw.abs() < target_threshold)
     trustable_f = trustable.to(true_lw.dtype)
     # Replace non-trustable targets with 0 so subsequent ops (exp,
     # diff) don't propagate inf/NaN; the per-event contribution is
     # zeroed by the mask at the end either way.
     true_lw_safe = torch.where(
-        trustable, true_lw, torch.zeros_like(true_lw),
+        trustable,
+        true_lw,
+        torch.zeros_like(true_lw),
     )
 
     # Per-mode Order-2 contraction: avoids materialising the full
@@ -3435,7 +3557,11 @@ def joint_loss_step(
     # form (W or log W) it needs. Each wrap returns its target form
     # directly — no exp(log W) or log(W) round trips.
     j = _head_d_per_mode(
-        head, y_std, c_std, u_shift, sigma_vec,
+        head,
+        y_std,
+        c_std,
+        u_shift,
+        sigma_vec,
         detach_pure_in_joint=detach_pure_in_joint,
     )
     if loss_fn == "expkl":
@@ -3457,7 +3583,9 @@ def joint_loss_step(
         # which is stable for any finite input, and the clamp would
         # zero gradients in the |log W| > 30 regions.
         pred_log = _apply_positivity_logW(
-            j, head.positivity, clamp=_math.inf,
+            j,
+            head.positivity,
+            clamp=_math.inf,
         )
         per_event_raw = _wbce_per_event(pred_log, true_lw_safe)
         per_event = per_event_raw * trustable_f
@@ -3558,20 +3686,30 @@ def head_only_loss_step(
         nll = -log_p
 
         # Sample perturbations using the same scheme as joint_loss_step.
-        u_shift, sigma_vec, delta_smear, v_smear, mode = (
-            sample_perturbations(
-                B, n_features, delta_max, sigma_max, device,
-                oversample=oversample,
-                include_smear=head.include_smear,
-            )
+        u_shift, sigma_vec, delta_smear, v_smear, mode = sample_perturbations(
+            B,
+            n_features,
+            delta_max,
+            sigma_max,
+            device,
+            oversample=oversample,
+            include_smear=head.include_smear,
         )
 
     # Target log-weight via the same K=1 / K>1 GH branch as
     # joint_loss_step; the helper handles its own no_grad.
     true_lw = _compute_target_lw(
-        flow, head, y_std, c_std, log_p,
-        u_shift, sigma_vec, delta_smear, v_smear,
-        n_features, detach_target=True,
+        flow,
+        head,
+        y_std,
+        c_std,
+        log_p,
+        u_shift,
+        sigma_vec,
+        delta_smear,
+        v_smear,
+        n_features,
+        detach_target=True,
     )
 
     # Trustable-target mask (same as joint_loss_step).
@@ -3579,7 +3717,9 @@ def head_only_loss_step(
     trustable = torch.isfinite(true_lw) & (true_lw.abs() < target_threshold)
     trustable_f = trustable.to(true_lw.dtype)
     true_lw_safe = torch.where(
-        trustable, true_lw, torch.zeros_like(true_lw),
+        trustable,
+        true_lw,
+        torch.zeros_like(true_lw),
     )
 
     # Polyhead forward — only this part has gradients. Per-mode
@@ -3587,7 +3727,11 @@ def head_only_loss_step(
     # only the polyhead under gradient (the flow forward above is
     # under no_grad).
     j = _head_d_per_mode(
-        head, y_std, c_std, u_shift, sigma_vec,
+        head,
+        y_std,
+        c_std,
+        u_shift,
+        sigma_vec,
         detach_pure_in_joint=detach_pure_in_joint,
     )
     if loss_fn == "expkl":
@@ -3598,7 +3742,9 @@ def head_only_loss_step(
         # See joint_loss_step's wbce branch for the clamp=inf
         # rationale (softplus-only consumption ⇒ no overflow risk).
         pred_log = _apply_positivity_logW(
-            j, head.positivity, clamp=_math.inf,
+            j,
+            head.positivity,
+            clamp=_math.inf,
         )
         per_event_raw = _wbce_per_event(pred_log, true_lw_safe)
         per_event = per_event_raw * trustable_f
@@ -3642,6 +3788,7 @@ def head_only_loss_step(
 # Flow-only and flow+polyhead training wrappers
 # -----------------------------------------------------------------------------
 
+
 class FlowWithLogProb(nn.Module):
     """DDP-friendly wrapper that returns log p(x|c) from forward().
 
@@ -3650,6 +3797,7 @@ class FlowWithLogProb(nn.Module):
     forward to return tensors/standard containers). Wrapping the
     log_prob call in a standard nn.Module.forward makes DDP happy.
     """
+
     def __init__(self, flow: nn.Module):
         super().__init__()
         self.flow = flow
@@ -3669,6 +3817,7 @@ class FlowHeadModel(nn.Module):
     arguments are passed in as Python floats, not buffers, so the
     same module can be reused across schedules without re-wrapping.
     """
+
     def __init__(
         self,
         flow: nn.Module,
@@ -3700,18 +3849,31 @@ class FlowHeadModel(nn.Module):
         # at the MC c).
         if self.head_only:
             return head_only_loss_step(
-                self.flow, self.head, c_std, w,
-                delta_max=delta_max, sigma_max=sigma_max,
-                loss_target=loss_target, weight_power=weight_power,
-                loss_fn=loss_fn, huber_delta=huber_delta,
+                self.flow,
+                self.head,
+                c_std,
+                w,
+                delta_max=delta_max,
+                sigma_max=sigma_max,
+                loss_target=loss_target,
+                weight_power=weight_power,
+                loss_fn=loss_fn,
+                huber_delta=huber_delta,
                 detach_pure_in_joint=detach_pure_in_joint,
             )
         return joint_loss_step(
-            self.flow, self.head, x_std, c_std, w,
-            delta_max=delta_max, sigma_max=sigma_max,
+            self.flow,
+            self.head,
+            x_std,
+            c_std,
+            w,
+            delta_max=delta_max,
+            sigma_max=sigma_max,
             aux_jacobian_weight=aux_jacobian_weight,
-            loss_target=loss_target, weight_power=weight_power,
-            loss_fn=loss_fn, huber_delta=huber_delta,
+            loss_target=loss_target,
+            weight_power=weight_power,
+            loss_fn=loss_fn,
+            huber_delta=huber_delta,
             detach_pure_in_joint=detach_pure_in_joint,
             detach_target=detach_target,
         )
@@ -3721,6 +3883,7 @@ def _all_reduce_sum_(t: torch.Tensor, is_dist: bool) -> torch.Tensor:
     """In-place all-reduce(sum) when distributed, otherwise a no-op."""
     if is_dist:
         import torch.distributed as dist
+
         dist.all_reduce(t, op=dist.ReduceOp.SUM)
     return t
 
@@ -3746,7 +3909,10 @@ def _state_dict_to_cpu(module: nn.Module) -> dict:
         if v.is_cuda:
             any_cuda = True
             dst = torch.empty(
-                v.shape, dtype=v.dtype, device="cpu", pin_memory=True,
+                v.shape,
+                dtype=v.dtype,
+                device="cpu",
+                pin_memory=True,
             )
             dst.copy_(v, non_blocking=True)
             cpu[k] = dst
@@ -3760,6 +3926,7 @@ def _state_dict_to_cpu(module: nn.Module) -> dict:
 # -----------------------------------------------------------------------------
 # Training loop
 # -----------------------------------------------------------------------------
+
 
 def train(
     model: nn.Module,
@@ -3818,9 +3985,7 @@ def train(
     the flow's density quality drives selection.
     """
     use_polyhead = head_config is not None
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr, weight_decay=weight_decay
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=max(1, patience // 2)
     )
@@ -3846,9 +4011,7 @@ def train(
     # phase 1 (flow-only) with σ-conditioning enabled and active
     # (apply_smearing=True). Phase 2 (polyhead) has its own (sh, sm,
     # jt) split. Plain NLL training has no split.
-    track_nll_sigma_split = (
-        cond_on_smear and apply_smearing and not use_polyhead
-    )
+    track_nll_sigma_split = cond_on_smear and apply_smearing and not use_polyhead
 
     # How often to refresh the tqdm postfix with the running NLL. Each
     # refresh triggers an .item() on GPU scalars (= a H2D sync), which
@@ -3876,7 +4039,8 @@ def train(
     # range and doesn't need loss scaling). When disabled, all
     # scaler calls below are no-ops.
     scaler = torch.amp.GradScaler(
-        amp_device_type, enabled=(precision == "fp16"),
+        amp_device_type,
+        enabled=(precision == "fp16"),
     )
 
     # Smear-conditioning helper: per-batch, augment ``(x, c) →
@@ -3901,7 +4065,8 @@ def train(
                 "tensor of standardized σ upper bounds)."
             )
         sigma_max_std_dev = sigma_max_std.to(
-            device=device, dtype=torch.float32,
+            device=device,
+            dtype=torch.float32,
         )
         smear_zero_frac = float(cond_smear_zero_fraction)
     else:
@@ -3965,23 +4130,28 @@ def train(
         F = x.shape[1]
         if not cond_on_smear:
             return (
-                x, c,
+                x,
+                c,
                 torch.ones(B, dtype=torch.bool, device=x.device),
             )
         if sample_smear:
             # Ball sampling: ‖σ‖₂ ~ U[0, σ_max_radius], v on S^{F−1}.
-            sigma_max_radius = (
-                sigma_max_std_dev.max().to(dtype=x.dtype)
-            )
+            sigma_max_radius = sigma_max_std_dev.max().to(dtype=x.dtype)
             sigma_mag = (
                 torch.rand(
-                    B, 1, device=x.device, dtype=x.dtype,
+                    B,
+                    1,
+                    device=x.device,
+                    dtype=x.dtype,
                     generator=generator,
                 )
                 * sigma_max_radius
             )
             v = torch.randn(
-                B, F, device=x.device, dtype=x.dtype,
+                B,
+                F,
+                device=x.device,
+                dtype=x.dtype,
                 generator=generator,
             )
             v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-30)
@@ -3989,24 +4159,34 @@ def train(
             if smear_zero_frac > 0.0:
                 zero_mask_2d = (
                     torch.rand(
-                        B, 1, device=x.device, dtype=x.dtype,
+                        B,
+                        1,
+                        device=x.device,
+                        dtype=x.dtype,
                         generator=generator,
                     )
                     < smear_zero_frac
                 )
                 sigma_std = torch.where(
-                    zero_mask_2d, torch.zeros_like(sigma_std), sigma_std,
+                    zero_mask_2d,
+                    torch.zeros_like(sigma_std),
+                    sigma_std,
                 )
                 is_zero = zero_mask_2d.squeeze(-1)
             else:
                 is_zero = torch.zeros(
-                    B, dtype=torch.bool, device=x.device,
+                    B,
+                    dtype=torch.bool,
+                    device=x.device,
                 )
             # Single scalar ε per event (rank-1 correlated smear): all
             # F components share the same ε, so y' − y = ε · σ ~
             # N(0, σσᵀ). Matches the head's _make_y_pert_stack.
             eps = torch.randn(
-                B, 1, device=x.device, dtype=x.dtype,
+                B,
+                1,
+                device=x.device,
+                dtype=x.dtype,
                 generator=generator,
             )
             x_aug = x + sigma_std * eps
@@ -4019,15 +4199,15 @@ def train(
         return x_aug, c_aug, is_zero
 
     head_only_mode = (
-        bool(head_config.get("head_only", False))
-        if head_config is not None else False
+        bool(head_config.get("head_only", False)) if head_config is not None else False
     )
     # Track best by val_wmse in polyhead-only mode (val_nll is
     # essentially constant since the flow is frozen — its only
     # variation comes from the per-batch random y sample).
     track_by_wmse = head_only_mode
     phase_label = (
-        "polyhead only (frozen flow)" if head_only_mode
+        "polyhead only (frozen flow)"
+        if head_only_mode
         else ("flow + polyhead" if use_polyhead else "flow only")
     )
 
@@ -4070,7 +4250,8 @@ def train(
                 # same way during phase 1 (apply_smearing=True), or
                 # forced to zero in phase 2 (apply_smearing=False).
                 x, c, is_zero = _augment_x_c(
-                    x, c,
+                    x,
+                    c,
                     sample_smear=apply_smearing,
                     generator=val_gen,
                 )
@@ -4078,7 +4259,9 @@ def train(
                     with amp_ctx():
                         # Aux loss off in val — pure flow + polyhead loss.
                         _, nll_w, wloss_w, _, wloss_split = model(
-                            x, c, w,
+                            x,
+                            c,
+                            w,
                             head_config["delta_max"],
                             head_config["sigma_max"],
                             0.0,
@@ -4087,15 +4270,14 @@ def train(
                             head_config.get("loss_fn", "huber"),
                             head_config.get("huber_delta", 1.0),
                             head_config.get(
-                                "detach_pure_in_joint", False,
+                                "detach_pure_in_joint",
+                                False,
                             ),
                             head_config.get("detach_target", True),
                         )
                     total_nll = total_nll + nll_w.float() * wb
                     total_wloss = total_wloss + wloss_w.float() * wb
-                    total_wloss_split = (
-                        total_wloss_split + wloss_split.float() * wb
-                    )
+                    total_wloss_split = total_wloss_split + wloss_split.float() * wb
                 else:
                     with amp_ctx():
                         log_p = model(x, c)
@@ -4106,7 +4288,9 @@ def train(
                     # early-stopping signal).
                     finite_mask = torch.isfinite(log_p)
                     log_p = torch.where(
-                        finite_mask, log_p, torch.zeros_like(log_p),
+                        finite_mask,
+                        log_p,
+                        torch.zeros_like(log_p),
                     )
                     w_eff = w * finite_mask.to(dtype=log_p.dtype)
                     wb_eff = w_eff.sum()
@@ -4119,20 +4303,16 @@ def train(
                         mask_zero = is_zero.to(dtype=neg_log_p_w.dtype)
                         mask_nz = 1.0 - mask_zero
                         total_nll_sigma_split[0] = (
-                            total_nll_sigma_split[0]
-                            + (mask_zero * neg_log_p_w).sum()
+                            total_nll_sigma_split[0] + (mask_zero * neg_log_p_w).sum()
                         )
                         total_nll_sigma_split[1] = (
-                            total_nll_sigma_split[1]
-                            + (mask_nz * neg_log_p_w).sum()
+                            total_nll_sigma_split[1] + (mask_nz * neg_log_p_w).sum()
                         )
                         wsum_sigma_split[0] = (
-                            wsum_sigma_split[0]
-                            + (mask_zero * w_eff).sum()
+                            wsum_sigma_split[0] + (mask_zero * w_eff).sum()
                         )
                         wsum_sigma_split[1] = (
-                            wsum_sigma_split[1]
-                            + (mask_nz * w_eff).sum()
+                            wsum_sigma_split[1] + (mask_nz * w_eff).sum()
                         )
                 wsum = wsum + wb
         _all_reduce_sum_(total_nll, is_dist)
@@ -4183,13 +4363,17 @@ def train(
             c = c.to(device, non_blocking=True)
             w = w.to(device, non_blocking=True)
             x, c, _is_zero = _augment_x_c(
-                x, c, sample_smear=apply_smearing,
+                x,
+                c,
+                sample_smear=apply_smearing,
             )
             optimizer.zero_grad(set_to_none=True)
             if use_polyhead:
                 with amp_ctx():
                     loss, _nll_w, _wloss_w, _aux_w, _wloss_split = model(
-                        x, c, w,
+                        x,
+                        c,
+                        w,
                         head_config["delta_max"],
                         head_config["sigma_max"],
                         head_config.get("aux_jacobian_weight", 0.0),
@@ -4198,7 +4382,8 @@ def train(
                         head_config.get("loss_fn", "huber"),
                         head_config.get("huber_delta", 1.0),
                         head_config.get(
-                            "detach_pure_in_joint", False,
+                            "detach_pure_in_joint",
+                            False,
                         ),
                         head_config.get("detach_target", True),
                     )
@@ -4211,7 +4396,8 @@ def train(
             if precision == "fp16":
                 scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=10.0,
+                model.parameters(),
+                max_norm=10.0,
             )
             scaler.step(optimizer)
             scaler.update()
@@ -4220,6 +4406,7 @@ def train(
             output = profile_output
             if is_dist and output:
                 import torch.distributed as _dist
+
                 rank_i = _dist.get_rank()
                 base, ext = os.path.splitext(output)
                 output = f"{base}.rank{rank_i}{ext}"
@@ -4272,14 +4459,18 @@ def train(
             wsum_b = wb.clamp_min(1e-30)
             # Augment (x, c) with smear conditioning when enabled.
             x, c, is_zero = _augment_x_c(
-                x, c, sample_smear=apply_smearing,
+                x,
+                c,
+                sample_smear=apply_smearing,
             )
 
             optimizer.zero_grad(set_to_none=True)
             if use_polyhead:
                 with amp_ctx():
                     loss, nll_w, wloss_w, _aux_w, wloss_split = model(
-                        x, c, w,
+                        x,
+                        c,
+                        w,
                         head_config["delta_max"],
                         head_config["sigma_max"],
                         head_config.get("aux_jacobian_weight", 0.0),
@@ -4317,23 +4508,22 @@ def train(
                 finite_mask = torch.isfinite(log_p)
                 n_nonfinite = int((~finite_mask).sum().item())
                 if n_nonfinite > 0:
-                    n_nonfinite_total = (
-                        n_nonfinite_total + n_nonfinite
-                    )
-                    n_finite_events_total = (
-                        n_finite_events_total
-                        + int(finite_mask.numel() - n_nonfinite)
+                    n_nonfinite_total = n_nonfinite_total + n_nonfinite
+                    n_finite_events_total = n_finite_events_total + int(
+                        finite_mask.numel() - n_nonfinite
                     )
                     log_p = torch.where(
-                        finite_mask, log_p, torch.zeros_like(log_p),
+                        finite_mask,
+                        log_p,
+                        torch.zeros_like(log_p),
                     )
                     finite_mask_f = finite_mask.to(dtype=log_p.dtype)
                     w_eff = w * finite_mask_f
                     wb_eff = w_eff.sum()
                     wsum_b_eff = wb_eff.clamp_min(1e-30)
                 else:
-                    n_finite_events_total = (
-                        n_finite_events_total + int(finite_mask.numel())
+                    n_finite_events_total = n_finite_events_total + int(
+                        finite_mask.numel()
                     )
                     w_eff = w
                     wb_eff = wb
@@ -4347,18 +4537,10 @@ def train(
                 if track_nll_sigma_split:
                     mask_zero = is_zero.to(dtype=neg_log_p_w.dtype)
                     mask_nz = 1.0 - mask_zero
-                    running_nll_sigma_zero = (
-                        (mask_zero * neg_log_p_w).sum().detach()
-                    )
-                    running_nll_sigma_nz = (
-                        (mask_nz * neg_log_p_w).sum().detach()
-                    )
-                    running_wsum_sigma_zero = (
-                        (mask_zero * w_eff).sum().detach()
-                    )
-                    running_wsum_sigma_nz = (
-                        (mask_nz * w_eff).sum().detach()
-                    )
+                    running_nll_sigma_zero = (mask_zero * neg_log_p_w).sum().detach()
+                    running_nll_sigma_nz = (mask_nz * neg_log_p_w).sum().detach()
+                    running_wsum_sigma_zero = (mask_zero * w_eff).sum().detach()
+                    running_wsum_sigma_nz = (mask_nz * w_eff).sum().detach()
                 # Whole-batch guard: skip backward/step if either
                 #   (a) the loss itself is non-finite, or
                 #   (b) every event in the batch was non-finite
@@ -4366,7 +4548,7 @@ def train(
                 #       but devoid of gradient signal).
                 # In either case, the optimiser step would corrupt
                 # the parameters or do nothing useful.
-                all_nonfinite_batch = (n_nonfinite == int(log_p.numel()))
+                all_nonfinite_batch = n_nonfinite == int(log_p.numel())
                 if (not torch.isfinite(loss)) or all_nonfinite_batch:
                     n_skipped_batches += 1
                     optimizer.zero_grad(set_to_none=True)
@@ -4380,9 +4562,7 @@ def train(
             # Running accumulators stay on device.
             total_nll = total_nll + running_nll_term.detach()
             total_wloss = total_wloss + running_wloss_term.detach()
-            total_wloss_split = (
-                total_wloss_split + running_wloss_split_term.detach()
-            )
+            total_wloss_split = total_wloss_split + running_wloss_split_term.detach()
             if track_nll_sigma_split:
                 total_nll_sigma_split[0] = (
                     total_nll_sigma_split[0] + running_nll_sigma_zero
@@ -4390,12 +4570,8 @@ def train(
                 total_nll_sigma_split[1] = (
                     total_nll_sigma_split[1] + running_nll_sigma_nz
                 )
-                wsum_sigma_split[0] = (
-                    wsum_sigma_split[0] + running_wsum_sigma_zero
-                )
-                wsum_sigma_split[1] = (
-                    wsum_sigma_split[1] + running_wsum_sigma_nz
-                )
+                wsum_sigma_split[0] = wsum_sigma_split[0] + running_wsum_sigma_zero
+                wsum_sigma_split[1] = wsum_sigma_split[1] + running_wsum_sigma_nz
             wsum = wsum + wb
             if is_rank0 and (i + 1) % postfix_every == 0:
                 # rank-0-local running metrics (not globally reduced;
@@ -4404,9 +4580,7 @@ def train(
                 running_nll = total_nll.item() / wsum_py_now
                 if use_polyhead:
                     running_wloss = total_wloss.item() / wsum_py_now
-                    sh, sm, jt = (
-                        total_wloss_split / wsum_py_now
-                    ).cpu().tolist()
+                    sh, sm, jt = (total_wloss_split / wsum_py_now).cpu().tolist()
                     bar.set_postfix(
                         nll=f"{running_nll:+.4f}",
                         wmse=f"{running_wloss:.4f}",
@@ -4474,21 +4648,13 @@ def train(
         # Append NaN-event accounting when active (flow-only path).
         # Quiet by default: only annotate epochs where something
         # actually went wrong.
-        if (not use_polyhead) and (
-            n_nonfinite_total > 0 or n_skipped_batches > 0
-        ):
+        if (not use_polyhead) and (n_nonfinite_total > 0 or n_skipped_batches > 0):
             n_total_events = n_finite_events_total + n_nonfinite_total
-            nf_frac = (
-                n_nonfinite_total / max(n_total_events, 1)
-            )
-            line = (
-                f"{line}  nan_evt {n_nonfinite_total} "
-                f"({nf_frac*100:.3g}%)"
-                + (
-                    f"  skipped {n_skipped_batches} batch(es)"
-                    if n_skipped_batches > 0
-                    else ""
-                )
+            nf_frac = n_nonfinite_total / max(n_total_events, 1)
+            line = f"{line}  nan_evt {n_nonfinite_total} " f"({nf_frac*100:.3g}%)" + (
+                f"  skipped {n_skipped_batches} batch(es)"
+                if n_skipped_batches > 0
+                else ""
             )
         if is_rank0:
             print(line, flush=True)
@@ -4531,8 +4697,7 @@ def train(
                     comp_imp = val_comp < best_val_split[i]
                 else:
                     comp_imp = val_comp < best_val_split[i] - (
-                        patience_rel_threshold
-                        * abs(best_val_split[i])
+                        patience_rel_threshold * abs(best_val_split[i])
                     )
                 if comp_imp:
                     best_val_split[i] = val_comp
@@ -4613,10 +4778,7 @@ def train(
                         print(line)
                     log_lines.append(line)
             else:
-                line = (
-                    f"early stopping at epoch {epoch} "
-                    f"(best val {best_val:+.4f})"
-                )
+                line = f"early stopping at epoch {epoch} " f"(best val {best_val:+.4f})"
                 if is_rank0:
                     print(line)
                 log_lines.append(line)
@@ -4632,6 +4794,7 @@ def train(
 # -----------------------------------------------------------------------------
 # TorchScript export
 # -----------------------------------------------------------------------------
+
 
 class FlowWrapper(nn.Module):
     """TorchScript-friendly wrapper exposing log_density and score.
@@ -4678,7 +4841,10 @@ class FlowWrapper(nn.Module):
         return (c_raw - self.cond_mean) / self.cond_std
 
     def _augment_cond_with_sigma(
-        self, c_std: torch.Tensor, sigma_raw, x_ref: torch.Tensor,
+        self,
+        c_std: torch.Tensor,
+        sigma_raw,
+        x_ref: torch.Tensor,
     ) -> torch.Tensor:
         """Return c_std augmented with the F·(F+1)/2-component pack
         of ``σσᵀ`` (in standardized target units), when smear-
@@ -4689,16 +4855,20 @@ class FlowWrapper(nn.Module):
         n_features = self.target_std.shape[0]
         if sigma_raw is None:
             sigma_std = torch.zeros(
-                c_std.shape[0], n_features,
-                device=c_std.device, dtype=c_std.dtype,
+                c_std.shape[0],
+                n_features,
+                device=c_std.device,
+                dtype=c_std.dtype,
             )
         else:
             sigma_std = sigma_raw.to(
-                device=c_std.device, dtype=c_std.dtype,
+                device=c_std.device,
+                dtype=c_std.dtype,
             )
             if sigma_std.dim() == 1:
                 sigma_std = sigma_std.unsqueeze(0).expand(
-                    c_std.shape[0], -1,
+                    c_std.shape[0],
+                    -1,
                 )
             sigma_std = sigma_std / self.target_std
         sigma_pack = _sigma_pack_outer(sigma_std)
@@ -4798,8 +4968,9 @@ def export_flow(
     # the ``log_density`` forward but skips the ``score`` path
     # (autograd.grad isn't traceable). If C++ score inference is
     # needed, use flow_export_onnx.py's dynamo-based export.
-    import zuko.utils
     import zuko.transforms
+    import zuko.utils
+
     _orig_gl_utils = zuko.utils.gauss_legendre
     _orig_gl_transforms = zuko.transforms.gauss_legendre
 
@@ -4808,7 +4979,9 @@ def export_flow(
             n, dtype=a.dtype, device=a.device
         )
         x_nodes = torch.lerp(
-            a[..., None], b[..., None], nodes,
+            a[..., None],
+            b[..., None],
+            nodes,
         ).movedim(-1, 0)
         return (b - a) * torch.tensordot(weights, f(x_nodes), dims=1)
 
@@ -4834,6 +5007,7 @@ def export_flow(
 
         trace_inputs = (x_example, c_example, sigma_example)
     else:
+
         class _TracedLogDensity(nn.Module):
             def __init__(self, inner: nn.Module):
                 super().__init__()
@@ -4853,10 +5027,7 @@ def export_flow(
                 strict=False,
             )
         traced.save(outpath_ts)
-        print(
-            f"saved TorchScript (traced, log_density only) to "
-            f"{outpath_ts}"
-        )
+        print(f"saved TorchScript (traced, log_density only) to " f"{outpath_ts}")
     except Exception as e:
         print(
             f"[note] torch.jit.trace export skipped "
@@ -4871,6 +5042,7 @@ def export_flow(
 # -----------------------------------------------------------------------------
 # In-memory loader
 # -----------------------------------------------------------------------------
+
 
 class InMemoryLoader:
     """Bulk-indexed per-batch iterator over in-RAM CPU tensors.
@@ -4904,9 +5076,18 @@ class InMemoryLoader:
         profiler around the training loop.
     """
 
-    def __init__(self, x, c, w, batch_size, shuffle, drop_last,
-                 pin_memory=True, prefetch_shuffle=False,
-                 time_iter=False):
+    def __init__(
+        self,
+        x,
+        c,
+        w,
+        batch_size,
+        shuffle,
+        drop_last,
+        pin_memory=True,
+        prefetch_shuffle=False,
+        time_iter=False,
+    ):
         self.x, self.c, self.w = x, c, w
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -4915,7 +5096,8 @@ class InMemoryLoader:
         self.n = x.shape[0]
         self.prefetch_shuffle = bool(prefetch_shuffle) and shuffle
         self.time_iter = bool(time_iter) or os.environ.get(
-            "LOADER_TIME", "0",
+            "LOADER_TIME",
+            "0",
         ) not in ("", "0", "false", "False")
 
         # Async prefetch state: background thread + a stashed
@@ -4924,6 +5106,7 @@ class InMemoryLoader:
         self._next_perm_future = None
         if self.prefetch_shuffle:
             import concurrent.futures as _futures
+
             self._executor = _futures.ThreadPoolExecutor(max_workers=1)
             # Kick off the *first* epoch's permutation now, so it
             # overlaps with whatever happens between loader
@@ -4943,12 +5126,10 @@ class InMemoryLoader:
         """Submit a randperm task to run in the background; the result
         is consumed by the next ``__iter__`` call. No-op if prefetch
         is disabled or a previous future already exists."""
-        if (
-            self._executor is not None
-            and self._next_perm_future is None
-        ):
+        if self._executor is not None and self._next_perm_future is None:
             self._next_perm_future = self._executor.submit(
-                torch.randperm, self.n,
+                torch.randperm,
+                self.n,
             )
 
     def __iter__(self):
@@ -4982,12 +5163,10 @@ class InMemoryLoader:
             # tiny gap between iterators.
             self._kick_off_next_perm()
 
-            n_batches = self.n // bs if self.drop_last else (
-                (self.n + bs - 1) // bs
-            )
+            n_batches = self.n // bs if self.drop_last else ((self.n + bs - 1) // bs)
             t_first = None
             for i in range(n_batches):
-                idx = perm[i * bs:min((i + 1) * bs, self.n)]
+                idx = perm[i * bs : min((i + 1) * bs, self.n)]
                 xb = self.x.index_select(0, idx)
                 cb = self.c.index_select(0, idx)
                 wb = self.w.index_select(0, idx)
@@ -5008,9 +5187,7 @@ class InMemoryLoader:
                     )
                 yield xb, cb, wb
         else:
-            n_batches = self.n // bs if self.drop_last else (
-                (self.n + bs - 1) // bs
-            )
+            n_batches = self.n // bs if self.drop_last else ((self.n + bs - 1) // bs)
             t_first = None
             for i in range(n_batches):
                 s = i * bs
@@ -5076,6 +5253,7 @@ def _zuko_base_remap(flow_state, target_module):
 # Worker (runs once per GPU in distributed mode, once total otherwise)
 # -----------------------------------------------------------------------------
 
+
 def main_worker(
     rank,
     args,
@@ -5095,6 +5273,7 @@ def main_worker(
     # Device selection + optional process-group init.
     if is_dist:
         import torch.distributed as dist
+
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(master_port)
         if args.device.startswith("cuda"):
@@ -5104,9 +5283,7 @@ def main_worker(
         else:
             device = "cpu"
             backend = "gloo"
-        dist.init_process_group(
-            backend=backend, rank=rank, world_size=world_size
-        )
+        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
     else:
         if args.device.startswith("cuda"):
             torch.cuda.set_device(0)
@@ -5116,12 +5293,8 @@ def main_worker(
 
     # Per-rank index shard. With world_size==1 this is a no-op.
     if is_dist:
-        train_sel_rank = torch.chunk(
-            train_sel, world_size
-        )[rank].contiguous()
-        val_sel_rank = torch.chunk(
-            val_sel, world_size
-        )[rank].contiguous()
+        train_sel_rank = torch.chunk(train_sel, world_size)[rank].contiguous()
+        val_sel_rank = torch.chunk(val_sel, world_size)[rank].contiguous()
     else:
         train_sel_rank = train_sel
         val_sel_rank = val_sel
@@ -5136,14 +5309,22 @@ def main_worker(
     n_val_rank = val_x_cpu.shape[0]
 
     train_loader = InMemoryLoader(
-        train_x_cpu, train_c_cpu, train_w_cpu,
-        batch_size=args.batch_size, shuffle=True, drop_last=True,
+        train_x_cpu,
+        train_c_cpu,
+        train_w_cpu,
+        batch_size=args.batch_size,
+        shuffle=True,
+        drop_last=True,
         prefetch_shuffle=bool(getattr(args, "prefetch_shuffle", True)),
         time_iter=bool(getattr(args, "time_loader", False)),
     )
     val_loader = InMemoryLoader(
-        val_x_cpu, val_c_cpu, val_w_cpu,
-        batch_size=args.batch_size, shuffle=False, drop_last=False,
+        val_x_cpu,
+        val_c_cpu,
+        val_w_cpu,
+        batch_size=args.batch_size,
+        shuffle=False,
+        drop_last=False,
         time_iter=bool(getattr(args, "time_loader", False)),
     )
     if is_rank0:
@@ -5168,15 +5349,12 @@ def main_worker(
     if cond_on_smear:
         sigma_max_std = torch.full(
             (int(flow_config["n_features"]),),
-            _flow_smear_oversample
-            * float(flow_config["cond_smear_sigma_max"]),
+            _flow_smear_oversample * float(flow_config["cond_smear_sigma_max"]),
             dtype=torch.float32,
         )
     else:
         sigma_max_std = None
-    cond_smear_zero_fraction = float(
-        flow_config.get("cond_smear_zero_fraction", 0.5)
-    )
+    cond_smear_zero_fraction = float(flow_config.get("cond_smear_zero_fraction", 0.5))
     if is_rank0 and cond_on_smear:
         print(
             f"smear conditioning: σ_max_std="
@@ -5220,7 +5398,7 @@ def main_worker(
             flow_state = ckpt["state_dict"]
         elif "wrapper_state_dict" in ckpt:
             flow_state = {
-                k[len("flow."):]: v
+                k[len("flow.") :]: v
                 for k, v in ckpt["wrapper_state_dict"].items()
                 if k.startswith("flow.")
             }
@@ -5244,27 +5422,17 @@ def main_worker(
                 " (also head state)"
                 if loaded_head_state is not None
                 else (
-                    " (head state in checkpoint ignored — "
-                    "--reset-head)"
-                    if "polyhead_state_dict" in ckpt
-                    and args.reset_head
+                    " (head state in checkpoint ignored — " "--reset-head)"
+                    if "polyhead_state_dict" in ckpt and args.reset_head
                     else ""
                 )
             )
-            print(
-                f"loaded flow state from {args.load_flow_checkpoint}"
-                + ph_msg
-            )
+            print(f"loaded flow state from {args.load_flow_checkpoint}" + ph_msg)
     if head_only_mode:
         if args.load_flow_checkpoint is None:
-            raise SystemExit(
-                "--head-only requires --load-flow-checkpoint"
-            )
+            raise SystemExit("--head-only requires --load-flow-checkpoint")
         if not args.head:
-            raise SystemExit(
-                "--head-only implies --head but --no-head "
-                "was passed"
-            )
+            raise SystemExit("--head-only implies --head but --no-head " "was passed")
         zuko_flow.eval()
         for p in zuko_flow.parameters():
             p.requires_grad_(False)
@@ -5286,7 +5454,8 @@ def main_worker(
         # ``sample_perturbations``.
         _oversample = 1.3
         activation_cls = ACTIVATIONS.get(
-            flow_config.get("activation", "gelu").lower(), nn.GELU,
+            flow_config.get("activation", "gelu").lower(),
+            nn.GELU,
         )
         if args.head_arch == "polyhead":
             head = PolyHead(
@@ -5310,8 +5479,11 @@ def main_worker(
             # Lazy import to avoid the train_shift_smear_reweight.py →
             # train_muon_response_flow.py module-level import cycle.
             from train_shift_smear_reweight import (
-                ReweightMLP_B, ReweightMLPFactored, _sigma_pack_indices,
+                ReweightMLP_B,
+                ReweightMLPFactored,
+                _sigma_pack_indices,
             )
+
             if args.head_arch == "mlp":
                 head = ReweightMLP_B(
                     n_features=flow_config["n_features"],
@@ -5335,12 +5507,8 @@ def main_worker(
                     head_layers=int(args.head_layers),
                     activation=activation_cls,
                     shift_only=not bool(args.include_smear),
-                    detach_pure_shift_in_joint=bool(
-                        args.detach_pure_shift_in_joint
-                    ),
-                    detach_pure_smear_in_joint=bool(
-                        args.detach_pure_smear_in_joint
-                    ),
+                    detach_pure_shift_in_joint=bool(args.detach_pure_shift_in_joint),
+                    detach_pure_smear_in_joint=bool(args.detach_pure_smear_in_joint),
                 ).to(device)
             # The MLP head doesn't carry the smear-quadrature config
             # natively (PolyHead does). Attach the same fields the
@@ -5360,15 +5528,11 @@ def main_worker(
                 eff_smear_K = int(args.smear_K)
                 eff_smear_residual = bool(args.smear_residual)
                 if eff_smear_residual and eff_smear_K <= 1:
-                    raise SystemExit(
-                        "--smear-residual requires --smear-K > 1."
-                    )
+                    raise SystemExit("--smear-residual requires --smear-K > 1.")
             head.smear_K = eff_smear_K
             head.smear_residual = eff_smear_residual
             if eff_smear_K > 1:
-                nodes_np, w_np = np.polynomial.hermite_e.hermegauss(
-                    eff_smear_K
-                )
+                nodes_np, w_np = np.polynomial.hermite_e.hermegauss(eff_smear_K)
                 w_norm = w_np / np.sqrt(2.0 * np.pi)
                 gh_nodes = torch.tensor(nodes_np, dtype=torch.float32)
                 gh_log_w = torch.tensor(np.log(w_norm), dtype=torch.float32)
@@ -5376,17 +5540,25 @@ def main_worker(
                 gh_nodes = torch.zeros(0, dtype=torch.float32)
                 gh_log_w = torch.zeros(0, dtype=torch.float32)
             head.register_buffer(
-                "gh_nodes", gh_nodes.to(device), persistent=False,
+                "gh_nodes",
+                gh_nodes.to(device),
+                persistent=False,
             )
             head.register_buffer(
-                "gh_log_weights", gh_log_w.to(device), persistent=False,
+                "gh_log_weights",
+                gh_log_w.to(device),
+                persistent=False,
             )
             iu, ju = _sigma_pack_indices(int(flow_config["n_features"]))
             head.register_buffer(
-                "sigma_pack_iu", iu.to(device), persistent=False,
+                "sigma_pack_iu",
+                iu.to(device),
+                persistent=False,
             )
             head.register_buffer(
-                "sigma_pack_ju", ju.to(device), persistent=False,
+                "sigma_pack_ju",
+                ju.to(device),
+                persistent=False,
             )
         else:
             raise SystemExit(f"unknown --head-arch {args.head_arch!r}")
@@ -5408,20 +5580,14 @@ def main_worker(
         # via attributes on the head module.
         cond_smear_target_choice = str(args.cond_smear_target)
         if cond_smear_target_choice == "auto":
-            cond_smear_target_choice = (
-                "direct" if cond_on_smear else "gh"
-            )
+            cond_smear_target_choice = "direct" if cond_on_smear else "gh"
         if cond_smear_target_choice == "direct" and not cond_on_smear:
             raise SystemExit(
                 "--cond-smear-target=direct requires --cond-on-smear "
                 "(no σ-conditioned flow to query otherwise)."
             )
-        head.cond_smear_target_direct = (
-            cond_smear_target_choice == "direct"
-        )
-        head.n_cond_base = int(
-            flow_config.get("n_cond_base", flow_config["n_cond"])
-        )
+        head.cond_smear_target_direct = cond_smear_target_choice == "direct"
+        head.n_cond_base = int(flow_config.get("n_cond_base", flow_config["n_cond"]))
         if is_rank0:
             print(
                 f"head smear target: {cond_smear_target_choice} "
@@ -5437,9 +5603,7 @@ def main_worker(
             "max_cross_deg": int(args.max_cross_deg),
             "basis": str(args.basis),
             "basis_scale_u": _oversample * float(args.delta_max),
-            "basis_scale_sigma": (
-                _oversample * float(args.sigma_max)
-            ),
+            "basis_scale_sigma": (_oversample * float(args.sigma_max)),
             # MLP-only sizing fields.
             "d_emb": int(args.d_emb),
             "head_hidden": int(args.head_hidden),
@@ -5472,10 +5636,7 @@ def main_worker(
         n_flow = sum(p.numel() for p in zuko_flow.parameters())
         if head is not None:
             n_head = sum(p.numel() for p in head.parameters())
-            print(
-                f"flow parameters: {n_flow:,}  "
-                f"head parameters: {n_head:,}"
-            )
+            print(f"flow parameters: {n_flow:,}  " f"head parameters: {n_head:,}")
         else:
             print(f"flow parameters: {n_flow:,}")
         log_lines.append(f"flow parameters: {n_flow}")
@@ -5491,8 +5652,8 @@ def main_worker(
                 f"max_cross_deg={head.max_cross_deg} "
                 f"n_joint_basis={head.n_joint_basis} "
                 f"basis={head.basis} "
-                if args.head_arch == "polyhead" else
-                f"d_emb={args.d_emb} "
+                if args.head_arch == "polyhead"
+                else f"d_emb={args.d_emb} "
                 f"head_hidden={args.head_hidden} "
                 f"head_layers={args.head_layers} "
             )
@@ -5542,10 +5703,7 @@ def main_worker(
             _quad_n_eff = (
                 _qn if _qn > 0 else int(flow_config.get("sospf_degree", 4)) + 1
             )
-            _qn_tag = (
-                f"{_quad_n_eff}"
-                if _qn > 0 else f"{_quad_n_eff} (auto = L+1)"
-            )
+            _qn_tag = f"{_quad_n_eff}" if _qn > 0 else f"{_quad_n_eff} (auto = L+1)"
             print(
                 f"architecture: SOSPF (sum-of-squares polynomial)  "
                 f"transforms={flow_config['n_transforms']}  "
@@ -5555,9 +5713,7 @@ def main_worker(
             )
         print(f"precision: {precision}")
 
-    checkpoint_path = (
-        os.path.join(args.output, "checkpoint.pt") if is_rank0 else None
-    )
+    checkpoint_path = os.path.join(args.output, "checkpoint.pt") if is_rank0 else None
 
     # ---- Sequential training: phase 1 (flow only) → phase 2 (head). -
     # Phase 1 is skipped when --head-only (flow comes pre-trained from
@@ -5580,9 +5736,7 @@ def main_worker(
                 )
             else:
                 flow_model = nn.parallel.DistributedDataParallel(flow_model)
-        inner_flow_p1 = (
-            flow_model.module.flow if is_dist else flow_model.flow
-        )
+        inner_flow_p1 = flow_model.module.flow if is_dist else flow_model.flow
         # Compile *after* DDP wrap and after capturing inner refs:
         # checkpoint capture goes through ``inner_flow_p1`` directly,
         # bypassing the OptimizedModule, so state_dict access is
@@ -5627,7 +5781,8 @@ def main_worker(
                 _reason = (
                     " (CUDA Graphs disabled — incompatible with "
                     "zuko's Gauss–Legendre node cache)"
-                    if _arch == "sospf" else ""
+                    if _arch == "sospf"
+                    else ""
                 )
                 print(
                     f"torch.compile: enabled (mode={_compile_mode})"
@@ -5636,14 +5791,25 @@ def main_worker(
                 )
             flow_model = torch.compile(flow_model, mode=_compile_mode)
         zuko_flow_trained, best_phase1_val = train(
-            flow_model, inner_flow_p1, train_loader, val_loader,
-            args.epochs, args.lr, args.weight_decay, args.patience,
-            device, log_lines,
-            is_dist=is_dist, is_rank0=is_rank0,
+            flow_model,
+            inner_flow_p1,
+            train_loader,
+            val_loader,
+            args.epochs,
+            args.lr,
+            args.weight_decay,
+            args.patience,
+            device,
+            log_lines,
+            is_dist=is_dist,
+            is_rank0=is_rank0,
             checkpoint_path=checkpoint_path,
-            stats=stats, flow_config=flow_config, precision=precision,
+            stats=stats,
+            flow_config=flow_config,
+            precision=precision,
             checkpoint_every=int(args.checkpoint_every),
-            head_config=None, inner_head=None,
+            head_config=None,
+            inner_head=None,
             patience_rel_threshold=float(args.patience_rel_threshold),
             profile=bool(args.profile),
             profile_warmup=int(args.profile_warmup),
@@ -5669,18 +5835,17 @@ def main_worker(
             p.requires_grad_(False)
         if is_rank0:
             print(
-                f"\n=== phase 2: head training "
-                f"(frozen flow) ===",
+                f"\n=== phase 2: head training " f"(frozen flow) ===",
                 flush=True,
             )
-            log_lines.append(
-                "=== phase 2: head training (frozen flow) ==="
-            )
+            log_lines.append("=== phase 2: head training (frozen flow) ===")
         # Force head_only=True for the phase-2 model and config.
         phase2_head_config = dict(head_config)
         phase2_head_config["head_only"] = True
         poly_model = FlowHeadModel(
-            zuko_flow, head, head_only=True,
+            zuko_flow,
+            head,
+            head_only=True,
         ).to(device)
         if is_dist:
             if args.device.startswith("cuda"):
@@ -5689,12 +5854,8 @@ def main_worker(
                 )
             else:
                 poly_model = nn.parallel.DistributedDataParallel(poly_model)
-        inner_flow_p2 = (
-            poly_model.module.flow if is_dist else poly_model.flow
-        )
-        inner_head_p2 = (
-            poly_model.module.head if is_dist else poly_model.head
-        )
+        inner_flow_p2 = poly_model.module.flow if is_dist else poly_model.flow
+        inner_head_p2 = poly_model.module.head if is_dist else poly_model.head
         # Same architecture-specific compile handling as phase 1: GF
         # is skipped entirely (double-autograd in MonotonicTransform);
         # SOSPF falls back to mode='default' (CUDA Graphs disabled —
@@ -5723,7 +5884,8 @@ def main_worker(
                 _reason_p2 = (
                     " (CUDA Graphs disabled — incompatible with "
                     "zuko's Gauss–Legendre node cache)"
-                    if _arch_p2 == "sospf" else ""
+                    if _arch_p2 == "sospf"
+                    else ""
                 )
                 print(
                     f"torch.compile: enabled (mode={_compile_mode_p2})"
@@ -5732,12 +5894,22 @@ def main_worker(
                 )
             poly_model = torch.compile(poly_model, mode=_compile_mode_p2)
         _, best_phase2_val = train(
-            poly_model, inner_flow_p2, train_loader, val_loader,
-            args.epochs, args.lr, args.weight_decay, args.patience,
-            device, log_lines,
-            is_dist=is_dist, is_rank0=is_rank0,
+            poly_model,
+            inner_flow_p2,
+            train_loader,
+            val_loader,
+            args.epochs,
+            args.lr,
+            args.weight_decay,
+            args.patience,
+            device,
+            log_lines,
+            is_dist=is_dist,
+            is_rank0=is_rank0,
             checkpoint_path=checkpoint_path,
-            stats=stats, flow_config=flow_config, precision=precision,
+            stats=stats,
+            flow_config=flow_config,
+            precision=precision,
             checkpoint_every=int(args.checkpoint_every),
             head_config=phase2_head_config,
             inner_head=inner_head_p2,
@@ -5755,9 +5927,7 @@ def main_worker(
         del poly_model
         if is_rank0:
             print(f"phase 2 best val wmse: {best_phase2_val:.4e}")
-            log_lines.append(
-                f"phase 2 best val_wmse: {best_phase2_val:.4e}"
-            )
+            log_lines.append(f"phase 2 best val_wmse: {best_phase2_val:.4e}")
 
     if is_rank0:
         with open(os.path.join(args.output, "training.log"), "w") as f:
@@ -5775,12 +5945,14 @@ def main_worker(
 
     if is_dist:
         import torch.distributed as dist
+
         dist.destroy_process_group()
 
 
 # -----------------------------------------------------------------------------
 # Main (dispatcher: loads data once, then spawns worker(s))
 # -----------------------------------------------------------------------------
+
 
 def main():
     args = parse_args()
@@ -5791,8 +5963,15 @@ def main():
 
     print(f"loading ntuples from {len(args.input_files)} file(s)")
     (
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g, w,
-        _source_id, muon_source,
+        eta_r,
+        phi_r,
+        eta_g,
+        phi_g,
+        kappa_r,
+        kappa_g,
+        w,
+        _source_id,
+        muon_source,
     ) = load_ntuples(
         args.input_files,
         args.tree,
@@ -5809,7 +5988,12 @@ def main():
     )
 
     target, cond_raw = compute_targets_and_conditioning(
-        eta_r, phi_r, eta_g, phi_g, kappa_r, kappa_g,
+        eta_r,
+        phi_r,
+        eta_g,
+        phi_g,
+        kappa_r,
+        kappa_g,
         muon_source=muon_source,
     )
 
@@ -5875,14 +6059,16 @@ def main():
     # query time hits the same conditioning point as the
     # corresponding |σ| training event.
     n_sigma_pack = (
-        int(n_features) * (int(n_features) + 1) // 2
-        if args.cond_on_smear else 0
+        int(n_features) * (int(n_features) + 1) // 2 if args.cond_on_smear else 0
     )
     n_cond_total = int(n_cond) + n_sigma_pack
     flow_config = {
         "flow_type": {
-            "realnvp": "RealNVP", "glow": "Glow", "maf": "MAF",
-            "gf": "GF", "sospf": "SOSPF",
+            "realnvp": "RealNVP",
+            "glow": "Glow",
+            "maf": "MAF",
+            "gf": "GF",
+            "sospf": "SOSPF",
         }[arch],
         "architecture": arch,
         "n_features": int(n_features),
@@ -5911,8 +6097,17 @@ def main():
 
     if world_size == 1:
         main_worker(
-            0, args, 1, 0, stats, flow_config,
-            target_std_t, cond_t, w_t, train_sel, val_sel,
+            0,
+            args,
+            1,
+            0,
+            stats,
+            flow_config,
+            target_std_t,
+            cond_t,
+            w_t,
+            train_sel,
+            val_sel,
         )
     else:
         # Share memory so child workers attach rather than copy.
@@ -5923,16 +6118,26 @@ def main():
         val_sel.share_memory_()
         # Pick a free port on localhost for the rendezvous.
         import socket
+
         sock = socket.socket()
         sock.bind(("", 0))
         master_port = sock.getsockname()[1]
         sock.close()
         import torch.multiprocessing as mp
+
         mp.spawn(
             main_worker,
             args=(
-                args, world_size, master_port, stats, flow_config,
-                target_std_t, cond_t, w_t, train_sel, val_sel,
+                args,
+                world_size,
+                master_port,
+                stats,
+                flow_config,
+                target_std_t,
+                cond_t,
+                w_t,
+                train_sel,
+                val_sel,
             ),
             nprocs=world_size,
             join=True,
