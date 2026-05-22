@@ -31,13 +31,15 @@
 #include <string>
 #include <utility>
 
-// ``muon_calibration.hpp`` (carrying ``calculateQopUnc``,
-// ``SmearingHelperParametrized``, ``wrem::clip_tensor``, ``narf::get_value``)
-// is intentionally not re-#included here -- it lacks a header guard and
-// any re-include in the same cling TU redefines everything. Both
-// headers are loaded side-by-side via ``narf.clingutils.Declare`` in
-// muon_calibration.py (muon_calibration.hpp first, this header second),
-// so the symbols are already in scope by the time we get here.
+// ``muon_calibration.hpp`` carries the dependencies this header relies
+// on (``wrem::clip_tensor``, ``wrem::calculateQopUnc``,
+// ``wrem::SmearingHelperParametrized``, the ``using ROOT::VecOps::RVec``
+// pulled into namespace wrem, and ``narf::get_value``).  It has an
+// include guard so this re-include is a no-op when both headers are
+// loaded together via ``narf.clingutils.Declare`` (muon_calibration.py)
+// while still letting CI's standalone ``clang -fsyntax-only`` pass on
+// this header alone.
+#include "muon_calibration.hpp"
 #include "onnxutils.hpp"
 
 namespace wrem {

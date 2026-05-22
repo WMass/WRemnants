@@ -1,3 +1,6 @@
+#ifndef WREM_MUON_CALIBRATION_H
+#define WREM_MUON_CALIBRATION_H
+
 #include <Math/GenVector/PtEtaPhiM4D.h>
 #include <ROOT/RVec.hxx>
 #include <TFile.h>
@@ -2103,3 +2106,5 @@ private:
 };
 
 } // namespace wrem
+
+#endif
