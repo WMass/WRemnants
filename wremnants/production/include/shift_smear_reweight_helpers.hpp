@@ -147,36 +147,42 @@ private:
   std::shared_ptr<narf::onnx_helper_alloc> onnx_;
 };
 
-// Per-muon scale-shift evaluator: encapsulates the kinematics ->
-// (y_raw, c_raw) packing, the u_buf fill from a caller-supplied
-// ``delta_r_kappa[NVar]`` array, the ONNX call, and the
-// ``exp(log_r)`` + ``clip_tensor`` step.  All ONNX-backed scale-
-// uncertainty helpers (J/psi-stats, Z non-closure parametrized, Z
-// non-closure binned, including the correlated variants) compose
-// one of these and supply their own per-muon ``delta_r_kappa``;
-// the per-muon kinematics handling is shared in one place.
+// Per-muon ONNX reweight evaluator: encapsulates the kinematics ->
+// (y_raw, c_raw) packing, the u_buf / sigma_buf fill from caller-
+// supplied ``delta_r_kappa[NVar]`` and ``sigma_r_kappa[NVar]``
+// arrays, the ONNX call, and the ``exp(log_r)`` + ``clip_tensor``
+// step.  All ONNX-backed scale / resolution / closure helpers
+// (J/psi-stats, smearing-uncertainty, Z non-closure parametrized /
+// binned including correlated variants, plus the SimpleReweight
+// helpers used by the muon-response test) compose one of these and
+// supply their own per-muon shift and/or smear magnitudes; the
+// per-muon kinematics handling is shared in one place.
 //
-// ``NVar`` is the per-muon shift multiplicity (2 for Z-non-closure
-// down/up; 2 * n_unc for J/psi stats; etc.).
+// ``NVar`` is the per-muon variation multiplicity (2 for
+// Z-non-closure down/up; 2 * n_unc for J/psi stats; etc.).
 template <std::size_t NVar>
-class ShiftReweightEvaluator {
+class ReweightEvaluator {
 public:
   using delta_r_t = std::array<float, NVar>;
   using alt_weights_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NVar>>;
 
-  ShiftReweightEvaluator(const std::string &onnx_path,
+  ReweightEvaluator(const std::string &onnx_path,
                          unsigned int nslots = 1)
       : model_(std::make_shared<ReweightModel>(onnx_path, nslots)) {}
 
   // Per-muon evaluation. ``muon_source_raw`` is the raw
   // ``Muon_genPartFlav`` value; the ORT graph remaps it internally.
-  // ``delta_r_kappa[k]`` is the signed per-variation shift in raw
-  // r_kappa units (caller computes this from its own correction hist).
+  // ``delta_r_kappa[k]`` is the signed per-variation shift along
+  // r_kappa, ``sigma_r_kappa[k]`` is the per-variation smear width
+  // along r_kappa (zero is fine for shift-only or smear-only cases).
+  // Both arrays are in raw r_kappa units; the ONNX preproc divides
+  // by target_std internally.
   alt_weights_t
   evaluate(float recPt, float recEta, float recPhi, int recCharge,
            float genPt, float genEta, float genPhi, int genCharge,
            int muonSource_raw,
-           const delta_r_t &delta_r_kappa) const {
+           const delta_r_t &delta_r_kappa,
+           const delta_r_t &sigma_r_kappa) const {
     const float kappa_reco =
         static_cast<float>(recCharge) / (recPt * std::cosh(recEta));
     const float kappa_gen =
@@ -199,10 +205,11 @@ public:
     for (std::size_t k = 0; k < NCond; ++k) c_t(0, k) = c[k];
 
     u_buf.setZero();
+    sigma_buf.setZero();
     for (std::size_t k = 0; k < NVar; ++k) {
       u_buf(0, k, 0) = delta_r_kappa[k];
+      sigma_buf(0, k, 0) = sigma_r_kappa[k];
     }
-    sigma_buf.setZero();
 
     model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
 
@@ -211,6 +218,19 @@ public:
       alt_weights(k) = std::exp(static_cast<double>(log_r(0, k)));
     }
     return wrem::clip_tensor(alt_weights, 10.);
+  }
+
+  // Shift-only convenience overload: ``sigma_r_kappa`` defaults to
+  // all-zeros (no smear). Most existing callers want this.
+  alt_weights_t
+  evaluate(float recPt, float recEta, float recPhi, int recCharge,
+           float genPt, float genEta, float genPhi, int genCharge,
+           int muonSource_raw,
+           const delta_r_t &delta_r_kappa) const {
+    const delta_r_t sigma_zero{};
+    return evaluate(recPt, recEta, recPhi, recCharge,
+                    genPt, genEta, genPhi, genCharge,
+                    muonSource_raw, delta_r_kappa, sigma_zero);
   }
 
 private:
@@ -243,7 +263,7 @@ public:
   // (u down, u up) per η × {A, e, M} variation.
   static constexpr std::size_t NVar = 2 * static_cast<std::size_t>(nUnc);
   using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<nUnc, 2>>;
-  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<NVar>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<NVar>;
 
   JpsiCorrectionsUncReweightHelper(T &&corrections,
                                    const std::string &onnx_path,
@@ -361,14 +381,14 @@ class SmearingUncertaintyReweightHelper
 public:
   using base_t = SmearingHelperParametrized<HISTNOM>;
   using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<NVar>>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<NVar>;
 
   SmearingUncertaintyReweightHelper(const base_t &helper, HISTVAR &&hvar,
                                     const std::string &onnx_path,
                                     unsigned int nslots = 1)
       : base_t(helper),
         hvar_(std::make_shared<const HISTVAR>(std::move(hvar))),
-        model_(std::make_shared<shift_smear_reweight::ReweightModel>(
-            onnx_path, nslots)) {}
+        evaluator_(onnx_path, nslots) {}
 
   // No ``response_weights`` column -- see JpsiCorrectionsUncReweightHelper.
   out_tensor_t operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
@@ -380,49 +400,16 @@ public:
     out_tensor_t res;
     res.setConstant(nominal_weight);
 
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, shift_smear_reweight::F>> y_t;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, shift_smear_reweight::NCond>>
-        c_t;
-    Eigen::TensorFixedSize<float,
-                           Eigen::Sizes<1, NVar, shift_smear_reweight::F>>
-        u_buf;
-    Eigen::TensorFixedSize<float,
-                           Eigen::Sizes<1, NVar, shift_smear_reweight::F>>
-        sigma_buf;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> log_r;
-    u_buf.setZero();  // resolution variations don't shift.
+    const typename evaluator_t::delta_r_t delta_zero{};
 
     for (std::size_t i = 0; i < recPts.size(); ++i) {
       const float recPt = recPts[i];
       const float recEta = recEtas[i];
-      const float recPhi = recPhis[i];
-      const int recCharge = recCharges[i];
       const float genPt = genPts[i];
       const float genEta = genEtas[i];
-      const float genPhi = genPhis[i];
-      const int genCharge = genCharges[i];
-      const int muonSource = shift_smear_reweight::muon_source_from_gen_part_flav(
-          muonSources[i]);
 
-      const float kappa_reco =
-          static_cast<float>(recCharge) / (recPt * std::cosh(recEta));
-      const float kappa_gen =
-          static_cast<float>(genCharge) / (genPt * std::cosh(genEta));
-      // Full y / c with the real (φ_reco, φ_gen); no charge-match
-      // assumption -- κ_reco/κ_gen folds the reco-charge sign in
-      // natively. ``muonSource`` is the post-mapping integer code (1
-      // or 15) the ORT graph will remap to {-1, 0} internally.
-      std::array<float, shift_smear_reweight::F> y;
-      std::array<float, shift_smear_reweight::NCond> c;
-      shift_smear_reweight::compute_y_raw(kappa_reco, recEta, recPhi,
-                                          kappa_gen, genEta, genPhi, y);
-      shift_smear_reweight::compute_c_raw(kappa_gen, genEta, genPhi,
-                                          muonSource, c);
-      for (std::size_t k = 0; k < shift_smear_reweight::F; ++k) y_t(0, k) = y[k];
-      for (std::size_t k = 0; k < shift_smear_reweight::NCond; ++k)
-        c_t(0, k) = c[k];
-
-      // Nominal σ²_rel(pt, η) from the base helper's histogram.
+      // Nominal and varied σ²_rel(pt, η) from the base helper's
+      // histogram and the per-eigenvariation companion histogram.
       auto const &resolution_parms = narf::get_value(base_t::hist(), recEta).data();
       const std::size_t idatamc = 0;
       const double anom = resolution_parms(0, idatamc);
@@ -438,7 +425,9 @@ public:
       const double pgen = genPt * std::cosh(genEta);
       const double pgen_sq = pgen * pgen;
 
-      sigma_buf.setZero();
+      // var(δr_kappa) per variation from the extra smear above nominal;
+      // raw r_κ units (the ONNX preproc divides by target_std).
+      typename evaluator_t::delta_r_t sigma_r_kappa{};
       for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
         const double avar = resolution_parms_var(0, ivar);
         const double cvar = resolution_parms_var(1, ivar);
@@ -446,31 +435,23 @@ public:
         const double dvar = resolution_parms_var(3, ivar);
         const double sigmasqvar_rel =
             avar + cvar * recPt * recPt + bvar / (1. + dvar / recPt / recPt);
-        // var(δr_kappa) from the extra smear above nominal.  Raw r_κ
-        // units; the ONNX preproc divides by target_std internally.
         const double dsigmarelsq = sigmasqvar_rel - sigmasqnom_rel;
         const double var_r_kappa = dsigmarelsq * qop_reco_sq * pgen_sq;
-        const double sigma_r_kappa =
-            (var_r_kappa > 0.0) ? std::sqrt(var_r_kappa) : 0.0;
-        sigma_buf(0, ivar, 0) = static_cast<float>(sigma_r_kappa);
+        sigma_r_kappa[ivar] = static_cast<float>(
+            (var_r_kappa > 0.0) ? std::sqrt(var_r_kappa) : 0.0);
       }
 
-      model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
-
-      out_tensor_t alt_weights;
-      for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
-        alt_weights(ivar) = std::exp(static_cast<double>(log_r(0, ivar)));
-      }
-      const out_tensor_t alt_weights_clamped =
-          wrem::clip_tensor(alt_weights, 10.);
-      res *= alt_weights_clamped;
+      res *= evaluator_.evaluate(
+          recPt, recEta, recPhis[i], recCharges[i],
+          genPt, genEta, genPhis[i], genCharges[i],
+          muonSources[i], delta_zero, sigma_r_kappa);
     }
     return res;
   }
 
 private:
   std::shared_ptr<const HISTVAR> hvar_;
-  std::shared_ptr<shift_smear_reweight::ReweightModel> model_;
+  evaluator_t evaluator_;
 };
 
 // ---------------------------------------------------------------------------
@@ -480,7 +461,7 @@ private:
 // Drop-in replacements for ZNonClosure{Parametrized,Binned}Helper{,Splines}{,Corl}.
 // The non-closure shift source (per-η parameterised A/e/M; per-(η,pT)
 // binned non-closure factor) is unchanged; only the per-muon evaluation
-// is routed through ``shift_smear_reweight::ShiftReweightEvaluator``
+// is routed through ``shift_smear_reweight::ReweightEvaluator``
 // instead of the analytic splines-linearisation
 // (``alt_weight = dweightdqop · δqop + 1``).  ``NVar = 2`` (down/up).
 //
@@ -554,7 +535,7 @@ class ZNonClosureParametrizedReweightHelperCorl {
 public:
   using hist_t = T;
   using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<2>>;
-  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<2>;
 
   ZNonClosureParametrizedReweightHelperCorl(T &&corrections,
                                             const std::string &onnx_path,
@@ -603,7 +584,7 @@ public:
   using hist_t = T;
   using out_tensor_t =
       Eigen::TensorFixedSize<double, Eigen::Sizes<NEtaBins, 2>>;
-  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<2>;
 
   ZNonClosureParametrizedReweightHelper(T &&corrections,
                                         const std::string &onnx_path,
@@ -651,7 +632,7 @@ class ZNonClosureBinnedReweightHelperCorl {
 public:
   using hist_t = T;
   using out_tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<2>>;
-  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<2>;
 
   ZNonClosureBinnedReweightHelperCorl(T &&corrections,
                                       const std::string &onnx_path,
@@ -702,7 +683,7 @@ public:
   using hist_t = T;
   using out_tensor_t =
       Eigen::TensorFixedSize<double, Eigen::Sizes<NEtaBins, NPtBins, 2>>;
-  using evaluator_t = shift_smear_reweight::ShiftReweightEvaluator<2>;
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<2>;
 
   ZNonClosureBinnedReweightHelper(T &&corrections,
                                   const std::string &onnx_path,
@@ -743,6 +724,109 @@ public:
 
 private:
   std::shared_ptr<const T> correctionHist_;
+  evaluator_t evaluator_;
+};
+
+// ---------------------------------------------------------------------------
+// "Simple" uniform-sigmarel / scalerel ONNX reweight helpers
+// ---------------------------------------------------------------------------
+//
+// Drop-in ONNX equivalents of wrem::SmearingHelperSimpleWeight and
+// wrem::ScaleHelperSimpleWeight (declared in muon_calibration.hpp).  Same
+// scalar output shape (per-event ``double`` reweight = nominal_weight
+// times Π_muons clamp(alt_weight, 10)).  Used by the
+// scripts/histmakers/w_z_muonresponse.py --testHelpers path to compare
+// the trained network's reweight against the analytic splines /
+// MC-smear reference.
+//
+// For sigmarel:
+//   σ(δr_kappa) = sigmarel · |qop_reco| · p_gen
+//                = sigmarel · p_gen / p_reco
+//
+// For scalerel (relative scale shift): δqop_reco = scalerel · qop_reco
+//   δr_kappa  = δqop_reco · p_gen · sign(q_gen)
+//              = scalerel · q_reco / p_reco · p_gen · sign(q_gen)
+//
+// Both conversions follow ``JpsiCorrectionsUncReweightHelper``'s
+// δqop -> δr_kappa formula (``δr_kappa = δqop · p_gen · sign(q_gen)``).
+
+class SmearingHelperSimpleReweight {
+public:
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<1>;
+
+  SmearingHelperSimpleReweight(const double sigmarel,
+                               const std::string &onnx_path,
+                               unsigned int nslots = 1)
+      : sigmarel_(sigmarel), evaluator_(onnx_path, nslots) {}
+
+  double operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+                    const RVec<float> &recPhis, const RVec<int> &recCharges,
+                    const RVec<float> &genPts, const RVec<float> &genEtas,
+                    const RVec<float> &genPhis, const RVec<int> &genCharges,
+                    const RVec<int> &muonSources,
+                    const double nominal_weight = 1.0) const {
+    double res = nominal_weight;
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const double preco =
+          static_cast<double>(recPts[i]) * std::cosh(recEtas[i]);
+      const double pgen =
+          static_cast<double>(genPts[i]) * std::cosh(genEtas[i]);
+      const std::array<float, 1> delta_zero{0.f};
+      const std::array<float, 1> sigma_r_kappa{
+          static_cast<float>(std::abs(sigmarel_ * pgen / preco))
+      };
+      const auto alt = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_zero, sigma_r_kappa);
+      res *= alt(0);
+    }
+    return res;
+  }
+
+private:
+  double sigmarel_;
+  evaluator_t evaluator_;
+};
+
+class ScaleHelperSimpleReweight {
+public:
+  using evaluator_t = shift_smear_reweight::ReweightEvaluator<1>;
+
+  ScaleHelperSimpleReweight(const double scalerel,
+                            const std::string &onnx_path,
+                            unsigned int nslots = 1)
+      : scalerel_(scalerel), evaluator_(onnx_path, nslots) {}
+
+  double operator()(const RVec<float> &recPts, const RVec<float> &recEtas,
+                    const RVec<float> &recPhis, const RVec<int> &recCharges,
+                    const RVec<float> &genPts, const RVec<float> &genEtas,
+                    const RVec<float> &genPhis, const RVec<int> &genCharges,
+                    const RVec<int> &muonSources,
+                    const double nominal_weight = 1.0) const {
+    double res = nominal_weight;
+    for (std::size_t i = 0; i < recPts.size(); ++i) {
+      const double preco =
+          static_cast<double>(recPts[i]) * std::cosh(recEtas[i]);
+      const double pgen =
+          static_cast<double>(genPts[i]) * std::cosh(genEtas[i]);
+      const double sign_qgen = (genCharges[i] >= 0) ? 1.0 : -1.0;
+      const std::array<float, 1> delta_r_kappa{
+          static_cast<float>(scalerel_ *
+                             static_cast<double>(recCharges[i]) *
+                             sign_qgen * pgen / preco)
+      };
+      const auto alt = evaluator_.evaluate(
+          recPts[i], recEtas[i], recPhis[i], recCharges[i],
+          genPts[i], genEtas[i], genPhis[i], genCharges[i],
+          muonSources[i], delta_r_kappa);
+      res *= alt(0);
+    }
+    return res;
+  }
+
+private:
+  double scalerel_;
   evaluator_t evaluator_;
 };
 

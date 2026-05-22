@@ -103,6 +103,23 @@ if args.testHelpers:
     smearing_helper_simple_transform = ROOT.wrem.SmearingHelperSimpleTransform(sigmarel)
     scale_helper_simple_weights = ROOT.wrem.ScaleHelperSimpleWeight(scalerel)
 
+    # ONNX-based equivalents of the simple weight helpers above. Same
+    # scalar reweight semantics, computed via the trained shift+smear
+    # reweight network instead of the analytic splines linearisation.
+    _onnx_nslots = (
+        ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1
+    )
+    smearing_helper_simple_reweight = ROOT.wrem.SmearingHelperSimpleReweight(
+        sigmarel,
+        muon_calibration.default_shift_smear_reweight_onnx,
+        max(int(_onnx_nslots), 1),
+    )
+    scale_helper_simple_reweight = ROOT.wrem.ScaleHelperSimpleReweight(
+        scalerel,
+        muon_calibration.default_shift_smear_reweight_onnx,
+        max(int(_onnx_nslots), 1),
+    )
+
 
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
@@ -464,6 +481,38 @@ def build_graph(df, dataset):
                 ],
             )
 
+            # ONNX-based equivalents: same scalar reweight, but the
+            # alt-weight per muon is exp(log_r) from the trained network
+            # instead of (1 + dweightd[mu|sigmasq] · δ[mu|sigma²]). The
+            # network needs φ and the muon_source code in addition to
+            # the kinematics. The Splines helper's δ-function "splines"
+            # vs. ONNX-Reweight comparison is the test.
+            df = df.Define(
+                "selMuons_muon_source",
+                "ROOT::VecOps::RVec<int>(Muon_genPartFlav[selMuons])",
+            )
+            _onnx_cols = [
+                "selMuons_correctedPt",
+                "selMuons_correctedEta",
+                "selMuons_correctedPhi",
+                "selMuons_correctedCharge",
+                "selMuons_genPt",
+                "selMuons_genEta",
+                "selMuons_genPhi",
+                "selMuons_genCharge",
+                "selMuons_muon_source",
+            ]
+            df = df.Define(
+                "weight_smear_onnx",
+                smearing_helper_simple_reweight,
+                [*_onnx_cols, "nominal_weight"],
+            )
+            df = df.Define(
+                "weight_scale_onnx",
+                scale_helper_simple_reweight,
+                [*_onnx_cols, "nominal_weight"],
+            )
+
             response_cols_smeared = [
                 "selMuons_genPt",
                 "selMuons_genEta",
@@ -503,6 +552,22 @@ def build_graph(df, dataset):
                 [*response_cols, "weight_scale"],
             )
             results.append(hist_qopr_scaled_weight)
+
+            # ONNX-reweight reference histograms: same axes as the
+            # splines weight ones, so the comparison is one-to-one.
+            hist_qopr_smeared_weight_onnx = df.HistoBoost(
+                "hist_qopr_smeared_weight_onnx",
+                response_axes,
+                [*response_cols, "weight_smear_onnx"],
+            )
+            results.append(hist_qopr_smeared_weight_onnx)
+
+            hist_qopr_scaled_weight_onnx = df.HistoBoost(
+                "hist_qopr_scaled_weight_onnx",
+                response_axes,
+                [*response_cols, "weight_scale_onnx"],
+            )
+            results.append(hist_qopr_scaled_weight_onnx)
 
     return results, weightsum
 
