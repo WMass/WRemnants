@@ -174,17 +174,23 @@ public:
 
   // Per-muon evaluation. ``muon_source_raw`` is the raw
   // ``Muon_genPartFlav`` value; the ORT graph remaps it internally.
-  // ``delta_r_kappa[k]`` is the signed per-variation shift along
-  // r_kappa, ``sigma_r_kappa[k]`` is the per-variation smear width
-  // along r_kappa (zero is fine for shift-only or smear-only cases).
-  // Both arrays are in raw r_kappa units; the ONNX preproc divides
-  // by target_std internally.
+  // ``delta_u_raw[k]`` is the signed per-variation shift,
+  // ``sigma_raw[k]`` is the per-variation smear width.  Both arrays
+  // are in *raw physical units of the reco-space delta*:
+  //   index 0:  δqop   [GeV⁻¹]
+  //   index 1:  δλ     [radians]
+  //   index 2:  δφ     [radians]
+  // (Despite the trainer's nominal r_κ target, the deployed network's
+  //  effective gradient is calibrated for u in qop space for the 0th
+  //  component; do NOT multiply by p_gen.) The ONNX preproc divides
+  // both u_raw and sigma_raw by ``target_std`` internally before
+  // feeding the network.
   alt_weights_t
   evaluate(float recPt, float recEta, float recPhi, int recCharge,
            float genPt, float genEta, float genPhi, int genCharge,
            int muonSource_raw,
-           const delta_r_t &delta_r_kappa,
-           const delta_r_t &sigma_r_kappa) const {
+           const delta_r_t &delta_u_raw,
+           const delta_r_t &sigma_raw) const {
     const float kappa_reco =
         static_cast<float>(recCharge) / (recPt * std::cosh(recEta));
     const float kappa_gen =
@@ -209,8 +215,8 @@ public:
     u_buf.setZero();
     sigma_buf.setZero();
     for (std::size_t k = 0; k < NVar; ++k) {
-      u_buf(0, k, 0) = delta_r_kappa[k];
-      sigma_buf(0, k, 0) = sigma_r_kappa[k];
+      u_buf(0, k, 0) = delta_u_raw[k];
+      sigma_buf(0, k, 0) = sigma_raw[k];
     }
 
     model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
@@ -222,17 +228,17 @@ public:
     return wrem::clip_tensor(alt_weights, 10.);
   }
 
-  // Shift-only convenience overload: ``sigma_r_kappa`` defaults to
+  // Shift-only convenience overload: ``sigma_raw`` defaults to
   // all-zeros (no smear). Most existing callers want this.
   alt_weights_t
   evaluate(float recPt, float recEta, float recPhi, int recCharge,
            float genPt, float genEta, float genPhi, int genCharge,
            int muonSource_raw,
-           const delta_r_t &delta_r_kappa) const {
+           const delta_r_t &delta_u_raw) const {
     const delta_r_t sigma_zero{};
     return evaluate(recPt, recEta, recPhi, recCharge,
                     genPt, genEta, genPhi, genCharge,
-                    muonSource_raw, delta_r_kappa, sigma_zero);
+                    muonSource_raw, delta_u_raw, sigma_zero);
   }
 
 private:
@@ -309,34 +315,32 @@ public:
       const float genEta = genEtas[i];
       const int genCharge = genCharges[i];
 
-      // δr_kappa per variation (in raw r_κ units; the ONNX preproc
-      // divides by target_std internally):
-      //   δr_kappa = δκ_reco / κ_gen = δqop_reco · sign(q_gen) · p_gen
+      // δu_raw per variation, in raw qop units (GeV⁻¹). The ONNX
+      // preproc divides by target_std internally. NOTE: do NOT
+      // multiply by p_gen / sign(q_gen); the deployed network's
+      // effective gradient was calibrated for u in qop space (see
+      // ReweightEvaluator::evaluate docs).
       // ``calculateQopUnc`` returns the signed δqop_reco using the reco
-      // charge internally (M term, leading sign); no further q_reco·q_gen
-      // factor enters, so charge-flipped muons get the same conversion
-      // as charge-matched ones.
+      // charge internally (M term, leading sign); charge-flipped muons
+      // get the same conversion as charge-matched ones.
       const auto &params = get_tensor(recEta);
-      const double pgen = genPt * std::cosh(genEta);
-      const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
 
-      typename evaluator_t::delta_r_t delta_r_kappa;
+      typename evaluator_t::delta_r_t delta_u_raw;
       for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {
         const double AUnc = params(0, ivar);
         const double eUnc = params(1, ivar);
         const double MUnc = params(2, ivar);
         const double recoQopUnc =
             calculateQopUnc(recPt, recEta, recCharge, AUnc, eUnc, MUnc);
-        const float dr =
-            static_cast<float>(recoQopUnc * pgen * sign_qgen);
-        delta_r_kappa[ivar * 2 + 0] = -dr;
-        delta_r_kappa[ivar * 2 + 1] = +dr;
+        const float dr = static_cast<float>(recoQopUnc);
+        delta_u_raw[ivar * 2 + 0] = -dr;
+        delta_u_raw[ivar * 2 + 1] = +dr;
       }
 
       const auto alt_weights_flat = evaluator_.evaluate(
           recPt, recEta, recPhis[i], recCharge,
           genPt, genEta, genPhis[i], genCharge,
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
 
       out_tensor_t alt_weights;
       for (std::ptrdiff_t ivar = 0; ivar < nUnc; ++ivar) {
@@ -424,12 +428,12 @@ public:
       auto const &resolution_parms_var = narf::get_value(*hvar_, recEta).data();
       const double p_reco = recPt * std::cosh(recEta);
       const double qop_reco_sq = 1.0 / (p_reco * p_reco);
-      const double pgen = genPt * std::cosh(genEta);
-      const double pgen_sq = pgen * pgen;
 
-      // var(δr_kappa) per variation from the extra smear above nominal;
-      // raw r_κ units (the ONNX preproc divides by target_std).
-      typename evaluator_t::delta_r_t sigma_r_kappa{};
+      // var(δqop_reco) per variation from the extra smear above
+      // nominal: var(δqop) = (σ²_rel_var - σ²_rel_nom) · qop_reco².
+      // Pass σ in raw qop units (GeV⁻¹) to match the network's
+      // expected input space (see ReweightEvaluator::evaluate docs).
+      typename evaluator_t::delta_r_t sigma_raw{};
       for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
         const double avar = resolution_parms_var(0, ivar);
         const double cvar = resolution_parms_var(1, ivar);
@@ -438,15 +442,15 @@ public:
         const double sigmasqvar_rel =
             avar + cvar * recPt * recPt + bvar / (1. + dvar / recPt / recPt);
         const double dsigmarelsq = sigmasqvar_rel - sigmasqnom_rel;
-        const double var_r_kappa = dsigmarelsq * qop_reco_sq * pgen_sq;
-        sigma_r_kappa[ivar] = static_cast<float>(
-            (var_r_kappa > 0.0) ? std::sqrt(var_r_kappa) : 0.0);
+        const double var_qop = dsigmarelsq * qop_reco_sq;
+        sigma_raw[ivar] = static_cast<float>(
+            (var_qop > 0.0) ? std::sqrt(var_qop) : 0.0);
       }
 
       res *= evaluator_.evaluate(
           recPt, recEta, recPhis[i], recCharges[i],
           genPt, genEta, genPhis[i], genCharges[i],
-          muonSources[i], delta_zero, sigma_r_kappa);
+          muonSources[i], delta_zero, sigma_raw);
     }
     return res;
   }
@@ -482,14 +486,14 @@ namespace shift_smear_reweight {
 // three contributes (A=1, e=2, M=4 -- bit flags).
 //
 // Mirrors the body of ``ZNonClosureParametrizedHelperSplines::operator()``
-// up to (and including) the ``recoQopUnc`` calculation; the (down, up)
-// signed shift then converts to raw r_kappa units the same way the
-// J/psi-stats helper does (``δr_kappa = δqop_reco · p_gen · sign_qgen``).
+// up to (and including) the ``recoQopUnc`` calculation. The (down, up)
+// signed shift is returned in raw qop units (GeV⁻¹) -- this is the
+// space the deployed reweight network expects u in (see
+// ReweightEvaluator::evaluate for the convention discussion).
 template <typename ParamsT>
-inline std::array<float, 2> z_non_closure_param_delta_r_kappa(
+inline std::array<float, 2> z_non_closure_param_delta_u_raw(
     const ParamsT &params,
     float recPt, float recEta, int recCharge,
-    float genPt, float genEta, int genCharge,
     int calVarFlags) {
   double recoK = 1.0 / recPt;
   double recoKUnc = 0.0;
@@ -509,23 +513,18 @@ inline std::array<float, 2> z_non_closure_param_delta_r_kappa(
   const double recoQopUnc =
       static_cast<double>(recCharge) *
       std::sin(calculateTheta(recEta)) * recoKUnc;
-  const double pgen = genPt * std::cosh(genEta);
-  const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
-  const float dr = static_cast<float>(recoQopUnc * pgen * sign_qgen);
+  const float dr = static_cast<float>(recoQopUnc);
   return {-dr, +dr};
 }
 
 // Same for the binned source: ``non_closure`` is the per-(η, pT) bin
 // value of the non-closure factor (1.0 = no shift).
-inline std::array<float, 2> z_non_closure_binned_delta_r_kappa(
+inline std::array<float, 2> z_non_closure_binned_delta_u_raw(
     double non_closure,
-    float recPt, float recEta, int recCharge,
-    float genPt, float genEta, int genCharge) {
+    float recPt, float recEta, int recCharge) {
   const double recoKUnc = (non_closure - 1.0) * (1.0 / recPt);
   const double recoQopUnc = calculateQopUnc(recEta, recCharge, recoKUnc);
-  const double pgen = genPt * std::cosh(genEta);
-  const double sign_qgen = (genCharge >= 0) ? 1.0 : -1.0;
-  const float dr = static_cast<float>(recoQopUnc * pgen * sign_qgen);
+  const float dr = static_cast<float>(recoQopUnc);
   return {-dr, +dr};
 }
 
@@ -560,14 +559,13 @@ public:
           correctionHist_->template axis<0>().index(recEtas[i]),
           0, int(NEtaBins) - 1);
       const auto &params = correctionHist_->at(iEta).data();
-      const auto delta_r_kappa =
-          shift_smear_reweight::z_non_closure_param_delta_r_kappa(
-              params, recPts[i], recEtas[i], recCharges[i],
-              genPts[i], genEtas[i], genCharges[i], calVarFlags);
+      const auto delta_u_raw =
+          shift_smear_reweight::z_non_closure_param_delta_u_raw(
+              params, recPts[i], recEtas[i], recCharges[i], calVarFlags);
       const auto alt_weights = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
       res(0) *= alt_weights(0);
       res(1) *= alt_weights(1);
     }
@@ -609,14 +607,13 @@ public:
           correctionHist_->template axis<0>().index(recEtas[i]),
           0, int(NEtaBins) - 1);
       const auto &params = correctionHist_->at(iEta).data();
-      const auto delta_r_kappa =
-          shift_smear_reweight::z_non_closure_param_delta_r_kappa(
-              params, recPts[i], recEtas[i], recCharges[i],
-              genPts[i], genEtas[i], genCharges[i], calVarFlags);
+      const auto delta_u_raw =
+          shift_smear_reweight::z_non_closure_param_delta_u_raw(
+              params, recPts[i], recEtas[i], recCharges[i], calVarFlags);
       const auto alt_weights = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
       res(iEta, 0) *= alt_weights(0);
       res(iEta, 1) *= alt_weights(1);
     }
@@ -659,14 +656,13 @@ public:
           correctionHist_->template axis<1>().index(recPts[i]),
           0, int(NPtBins) - 1);
       const double non_closure = correctionHist_->at(iEta, iPt).value();
-      const auto delta_r_kappa =
-          shift_smear_reweight::z_non_closure_binned_delta_r_kappa(
-              non_closure, recPts[i], recEtas[i], recCharges[i],
-              genPts[i], genEtas[i], genCharges[i]);
+      const auto delta_u_raw =
+          shift_smear_reweight::z_non_closure_binned_delta_u_raw(
+              non_closure, recPts[i], recEtas[i], recCharges[i]);
       const auto alt_weights = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
       res(0) *= alt_weights(0);
       res(1) *= alt_weights(1);
     }
@@ -710,14 +706,13 @@ public:
           correctionHist_->template axis<1>().index(recPts[i]),
           0, int(NPtBins) - 1);
       const double non_closure = correctionHist_->at(iEta, iPt).value();
-      const auto delta_r_kappa =
-          shift_smear_reweight::z_non_closure_binned_delta_r_kappa(
-              non_closure, recPts[i], recEtas[i], recCharges[i],
-              genPts[i], genEtas[i], genCharges[i]);
+      const auto delta_u_raw =
+          shift_smear_reweight::z_non_closure_binned_delta_u_raw(
+              non_closure, recPts[i], recEtas[i], recCharges[i]);
       const auto alt_weights = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
       res(iEta, iPt, 0) *= alt_weights(0);
       res(iEta, iPt, 1) *= alt_weights(1);
     }
@@ -769,18 +764,18 @@ public:
                     const double nominal_weight = 1.0) const {
     double res = nominal_weight;
     for (std::size_t i = 0; i < recPts.size(); ++i) {
+      // σ_qop = sigmarel · |qop_reco| = sigmarel / p_reco. Pass in
+      // raw qop units (GeV⁻¹) -- the ONNX preproc standardizes.
       const double preco =
           static_cast<double>(recPts[i]) * std::cosh(recEtas[i]);
-      const double pgen =
-          static_cast<double>(genPts[i]) * std::cosh(genEtas[i]);
       const std::array<float, 1> delta_zero{0.f};
-      const std::array<float, 1> sigma_r_kappa{
-          static_cast<float>(std::abs(sigmarel_ * pgen / preco))
+      const std::array<float, 1> sigma_raw{
+          static_cast<float>(std::abs(sigmarel_) / preco)
       };
       const auto alt = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_zero, sigma_r_kappa);
+          muonSources[i], delta_zero, sigma_raw);
       res *= alt(0);
     }
     return res;
@@ -808,20 +803,18 @@ public:
                     const double nominal_weight = 1.0) const {
     double res = nominal_weight;
     for (std::size_t i = 0; i < recPts.size(); ++i) {
+      // δqop = scalerel · qop_reco = scalerel · q_reco / p_reco. Pass
+      // in raw qop units (GeV⁻¹); see ReweightEvaluator::evaluate.
       const double preco =
           static_cast<double>(recPts[i]) * std::cosh(recEtas[i]);
-      const double pgen =
-          static_cast<double>(genPts[i]) * std::cosh(genEtas[i]);
-      const double sign_qgen = (genCharges[i] >= 0) ? 1.0 : -1.0;
-      const std::array<float, 1> delta_r_kappa{
+      const std::array<float, 1> delta_u_raw{
           static_cast<float>(scalerel_ *
-                             static_cast<double>(recCharges[i]) *
-                             sign_qgen * pgen / preco)
+                             static_cast<double>(recCharges[i]) / preco)
       };
       const auto alt = evaluator_.evaluate(
           recPts[i], recEtas[i], recPhis[i], recCharges[i],
           genPts[i], genEtas[i], genPhis[i], genCharges[i],
-          muonSources[i], delta_r_kappa);
+          muonSources[i], delta_u_raw);
       res *= alt(0);
     }
     return res;
