@@ -243,16 +243,9 @@ def solve_leastsquare(X, XTY):
     # compute the transpose of X for the mt and parameter axes
     XT = np.transpose(X, axes=(*np.arange(X.ndim - 2), X.ndim - 1, X.ndim - 2))
     XTX = XT @ X
-    # Pseudo-inverse handles rank-deficient bins (where the smoothing
-    # window contains too many zeroed bins to determine all polynomial
-    # coefficients) by returning the minimum-norm solution rather than
-    # raising LinAlgError("Singular matrix"). For full-rank bins it is
-    # numerically equivalent to ``np.linalg.inv``. Also reused as the
-    # parameter covariance below; in the rank-deficient case the
-    # pseudo-inverse zeros the degenerate directions, which is the
-    # right downstream behaviour (no spurious large uncertainty in a
-    # direction the data couldn't constrain).
-    XTXinv = np.linalg.pinv(XTX.reshape(-1, *XTX.shape[-2:]))
+    # compute the inverse of the matrix in each bin (reshape to make last two axes contiguous, reshape back after inversion),
+    # this term is also the covariance matrix for the parameters
+    XTXinv = np.linalg.inv(XTX.reshape(-1, *XTX.shape[-2:]))
     XTXinv = XTXinv.reshape((*XT.shape[:-2], *XTXinv.shape[-2:]))
     params = np.einsum("...ij,...j->...i", XTXinv, XTY)
     return params, XTXinv
@@ -262,11 +255,7 @@ def solve_nonnegative_leastsquare(X, XTY, exclude_idx=None):
     # exclude_idx to exclude the non negative constrained for one parameter by evaluating the nnls twice and flipping the sign
     XT = np.transpose(X, axes=(*np.arange(X.ndim - 2), X.ndim - 1, X.ndim - 2))
     XTX = XT @ X
-    # See ``solve_leastsquare`` for the pinv rationale (rank-deficient
-    # smoothing windows). XTXinv is only returned as the parameter
-    # covariance here; the actual params come from scipy.nnls on the
-    # unmodified XTX matrix.
-    XTXinv = np.linalg.pinv(XTX.reshape(-1, *XTX.shape[-2:]))
+    XTXinv = np.linalg.inv(XTX.reshape(-1, *XTX.shape[-2:]))
     XTXinv = XTXinv.reshape((*XT.shape[:-2], *XTXinv.shape[-2:]))
     orig_shape = XTY.shape
     nBins = np.prod(orig_shape[:-1])
