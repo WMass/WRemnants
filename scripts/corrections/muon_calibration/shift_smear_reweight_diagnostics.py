@@ -207,15 +207,33 @@ def parse_args():
         "--shift-factors",
         nargs="+",
         type=float,
-        default=[0.1, 0.3, 0.5, 1.0],
-        help="Shift magnitudes (in standardized-target σ units).",
+        default=[6e-5, 6e-4, 0.1, 0.3, 0.5, 1.0],
+        help="Shift magnitudes (in standardized-target σ units). The "
+        "6e-5 and 6e-4 rows probe the small-u regime that the "
+        "deployed closureA / J/ψ-stats / Z-non-closure paths actually "
+        "query at runtime; the ≥ 0.1 rows probe the operational "
+        "range of an O(1σ) NP pull.",
     )
     p.add_argument(
         "--smear-factors",
         nargs="+",
         type=float,
-        default=[0.1, 0.3, 0.5, 1.0],
-        help="Smear magnitudes (in standardized-target σ units).",
+        default=[6e-5, 6e-4, 0.1, 0.3, 0.5, 1.0],
+        help="Smear magnitudes (in standardized-target σ units). The "
+        "6e-5 and 6e-4 rows probe the small-σ regime.",
+    )
+    p.add_argument(
+        "--lin-noise-thresh",
+        type=float,
+        default=100.0,
+        help="Average per-bin event-crossings threshold below which "
+        "the literal shifted/smeared MC is considered noise-dominated "
+        "and the linearized reference takes over as the ratio-panel "
+        "denominator (and y-range setter). At crossings/bin ≈ thresh "
+        "the literal ratio has per-bin S/N ~ √thresh, so 100 ⇒ S/N≈10 "
+        "needed before the literal becomes primary. Both curves are "
+        "always drawn; this only controls which one anchors the ratio "
+        "comparison.",
     )
     p.add_argument(
         "--smear-gh-K",
@@ -907,6 +925,81 @@ def _stepped_errorbar(ax, centers, h, sigma, color, **kwargs):
     )
 
 
+def _fd_linearized_shift(h_raw, sigma_raw, bins, dy):
+    """First-order finite-difference shifted-MC reference computed
+    directly from the unshifted histogram:
+
+        h_lin(y_j; δy) = h_raw[j] − δy · (∂h/∂y)[j],
+
+    matching h(y − δy) at linear order. ``∂h/∂y`` is built from
+    centered finite differences on ``h_raw`` (forward at the left
+    edge, backward at the right edge). No reference shifted MC is
+    needed — the curve is fully determined by the raw histogram and
+    so carries the raw histogram's noise structure rather than the
+    additional sampling noise of a shifted-events sample.
+
+    Variance propagation treats the per-bin counts as Poisson-
+    independent (overestimates at edges where centered differences
+    pull in neighbours that share events). Bins must be uniformly
+    spaced.
+
+    Returns ``(h_lin, sigma_lin)`` shaped ``(n_bins,)``.
+    """
+    h = np.asarray(h_raw, dtype=np.float64)
+    s = np.asarray(sigma_raw, dtype=np.float64)
+    bw = float(bins[1] - bins[0])
+    dh = np.empty_like(h)
+    var_dh = np.empty_like(h)
+    dh[1:-1] = (h[2:] - h[:-2]) / (2.0 * bw)
+    var_dh[1:-1] = (s[2:] ** 2 + s[:-2] ** 2) / (4.0 * bw ** 2)
+    dh[0] = (h[1] - h[0]) / bw
+    var_dh[0] = (s[1] ** 2 + s[0] ** 2) / bw ** 2
+    dh[-1] = (h[-1] - h[-2]) / bw
+    var_dh[-1] = (s[-1] ** 2 + s[-2] ** 2) / bw ** 2
+    h_lin = h - float(dy) * dh
+    var_lin = s ** 2 + (float(dy) ** 2) * var_dh
+    return h_lin, np.sqrt(np.maximum(var_lin, 0.0))
+
+
+def _fd_linearized_smear(h_raw, sigma_raw, bins, sigma_y):
+    """Leading-order (σ²) smeared-MC reference computed directly from
+    the unshifted histogram:
+
+        h_lin(y_j; σ) = h_raw[j] + (σ²/2) · (∂²h/∂y²)[j],
+
+    matching the Gaussian-convolution mean at second order in σ.
+    ``∂²h/∂y²`` is built from the standard 3-point centered second
+    difference on ``h_raw``; set to zero in the two edge bins where
+    a centered stencil isn't defined. Bins must be uniformly spaced.
+
+    Returns ``(h_lin, sigma_lin)`` shaped ``(n_bins,)``.
+    """
+    h = np.asarray(h_raw, dtype=np.float64)
+    s = np.asarray(sigma_raw, dtype=np.float64)
+    bw = float(bins[1] - bins[0])
+    ddh = np.zeros_like(h)
+    var_ddh = np.zeros_like(h)
+    ddh[1:-1] = (h[2:] - 2.0 * h[1:-1] + h[:-2]) / bw ** 2
+    var_ddh[1:-1] = (
+        s[2:] ** 2 + 4.0 * s[1:-1] ** 2 + s[:-2] ** 2
+    ) / bw ** 4
+    coef = 0.5 * float(sigma_y) ** 2
+    h_lin = h + coef * ddh
+    var_lin = s ** 2 + (coef ** 2) * var_ddh
+    return h_lin, np.sqrt(np.maximum(var_lin, 0.0))
+
+
+def _perbin_crossings_per_bin(values, perturbed_values, bins):
+    """Average count of events that change bin under the perturbation,
+    divided by the number of bins. Used as the noise-dominated
+    criterion for picking between literal and linearized references.
+    """
+    bin_o = np.digitize(values, bins) - 1
+    bin_p = np.digitize(perturbed_values, bins) - 1
+    n_crossed = int(np.sum(bin_o != bin_p))
+    return n_crossed / max(len(bins) - 1, 1)
+
+
 def _common_predict_call(
     model,
     arch,
@@ -991,6 +1084,7 @@ def plot_shift_closure(
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
     factors = args.shift_factors
+    n_thresh = float(args.lin_noise_thresh)
 
     n_rows = len(factors)
     n_cols = len(target_components)
@@ -1029,11 +1123,17 @@ def plot_shift_closure(
                 bins,
                 w_event,
             )
+            h_lin, e_lin = _fd_linearized_shift(h_raw, e_raw, bins, dy)
             h_pred, e_pred = _weighted_hist_err(
                 target[:, tcol],
                 bins,
                 (w_event * r_pred).astype(np.float64),
             )
+
+            avg_cross = _perbin_crossings_per_bin(
+                target[:, tcol], y_shifted, bins
+            )
+            use_lin_ref = avg_cross < n_thresh
 
             ax_main = axes[2 * r][cidx]
             ax_main.step(
@@ -1056,6 +1156,16 @@ def plot_shift_closure(
             _stepped_errorbar(ax_main, centers, h_shifted, e_shifted, "k")
             ax_main.step(
                 centers,
+                h_lin,
+                where="mid",
+                color="C3",
+                linestyle="--",
+                lw=1.0,
+                label="lin shifted MC (FD ∂h/∂y)",
+            )
+            _stepped_errorbar(ax_main, centers, h_lin, e_lin, "C3")
+            ax_main.step(
+                centers,
                 h_pred,
                 where="mid",
                 color="C0",
@@ -1076,29 +1186,79 @@ def plot_shift_closure(
                 ax_main.legend(loc="best", fontsize=7)
 
             ax_ratio = axes[2 * r + 1][cidx]
-            ratio, e_ratio = _ratio_with_err(
-                h_pred,
-                e_pred,
-                h_shifted,
-                e_shifted,
+            ref_h, ref_e, ref_lbl = (
+                (h_lin, e_lin, "lin shifted MC")
+                if use_lin_ref
+                else (h_shifted, e_shifted, "shifted MC")
+            )
+            # Raw MC / reference shifted MC as a "zero prediction"
+            # reference: shows how far the unreweighted MC alone would
+            # be from the (literal or linearized) shifted truth. Drawn
+            # for context; not used to compute the ratio panel y-range.
+            ratio_raw, e_ratio_raw = _ratio_with_err(
+                h_raw,
+                e_raw,
+                ref_h,
+                ref_e,
             )
             ax_ratio.step(
                 centers,
-                ratio,
+                ratio_raw,
                 where="mid",
-                color="C0",
-                linestyle="--",
+                color="0.4",
+                linestyle=":",
                 lw=1.0,
             )
-            _stepped_errorbar(ax_ratio, centers, ratio, e_ratio, "C0")
+            _stepped_errorbar(
+                ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4"
+            )
+
+            # Always show both ratios; the y-range is set from the
+            # designated reference (literal or linearized) per the
+            # noise-dominated criterion.
+            ratio_shift, e_ratio_shift = _ratio_with_err(
+                h_pred, e_pred, h_shifted, e_shifted,
+            )
+            ratio_lin, e_ratio_lin = _ratio_with_err(
+                h_pred, e_pred, h_lin, e_lin,
+            )
+            # Ratio-panel curves are colored by the *numerator* (pred);
+            # linestyle distinguishes which denominator they use.
+            # Active (primary) reference is drawn on top with full
+            # opacity; the other is faded in the background.
+            if use_lin_ref:
+                ax_ratio.step(
+                    centers, ratio_shift, where="mid",
+                    color="C0", linestyle=":", lw=0.8, alpha=0.4,
+                )
+                ax_ratio.step(
+                    centers, ratio_lin, where="mid",
+                    color="C0", linestyle="--", lw=1.0,
+                )
+                _stepped_errorbar(
+                    ax_ratio, centers, ratio_lin, e_ratio_lin, "C0"
+                )
+            else:
+                ax_ratio.step(
+                    centers, ratio_lin, where="mid",
+                    color="C0", linestyle=":", lw=0.8, alpha=0.4,
+                )
+                ax_ratio.step(
+                    centers, ratio_shift, where="mid",
+                    color="C0", linestyle="--", lw=1.0,
+                )
+                _stepped_errorbar(
+                    ax_ratio, centers, ratio_shift, e_ratio_shift, "C0"
+                )
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
-            ax_ratio.set_ylabel("/ shifted MC", fontsize=8)
+            ax_ratio.set_ylabel(f"/ {ref_lbl}", fontsize=8)
             ax_ratio.set_xlabel(tname)
-            ratios = np.atleast_1d(ratio)
+            ratios_for_ylim = ratio_lin if use_lin_ref else ratio_shift
+            ratios = np.atleast_1d(ratios_for_ylim)
             ratios = ratios[np.isfinite(ratios)]
             if ratios.size:
                 lo_r, hi_r = np.quantile(ratios, [0.05, 0.95])
-                pad = max(0.05, 0.5 * (hi_r - lo_r))
+                pad = 0.5 * (hi_r - lo_r)
                 ax_ratio.set_ylim(
                     max(0.0, min(lo_r - pad, 1.0 - pad)),
                     max(hi_r + pad, 1.0 + pad),
@@ -1157,6 +1317,7 @@ def plot_smear_closure(
     n_features = target.shape[1]
     target_components = list(range(min(n_features, len(TARGET_NAMES), 3)))
     factors = args.smear_factors
+    n_thresh = float(args.lin_noise_thresh)
     rng = np.random.default_rng(args.seed)
 
     n_rows = len(factors)
@@ -1201,11 +1362,17 @@ def plot_smear_closure(
                 bins,
                 w_event,
             )
+            h_lin, e_lin = _fd_linearized_smear(h_raw, e_raw, bins, dy)
             h_pred, e_pred = _weighted_hist_err(
                 target[:, tcol],
                 bins,
                 (w_event * r_pred).astype(np.float64),
             )
+
+            avg_cross = _perbin_crossings_per_bin(
+                target[:, tcol], y_smeared, bins
+            )
+            use_lin_ref = avg_cross < n_thresh
 
             ax_main = axes[2 * r][cidx]
             ax_main.step(
@@ -1226,6 +1393,16 @@ def plot_smear_closure(
                 label=f"smeared MC ({factor:g}·σ_y, K=1)",
             )
             _stepped_errorbar(ax_main, centers, h_smeared, e_smeared, "k")
+            ax_main.step(
+                centers,
+                h_lin,
+                where="mid",
+                color="C3",
+                linestyle="--",
+                lw=1.0,
+                label="lin smeared MC (FD ½σ²·∂²h/∂y²)",
+            )
+            _stepped_errorbar(ax_main, centers, h_lin, e_lin, "C3")
             ax_main.step(
                 centers,
                 h_pred,
@@ -1276,28 +1453,74 @@ def plot_smear_closure(
                 ax_main.legend(loc="best", fontsize=7)
 
             ax_ratio = axes[2 * r + 1][cidx]
-            ratio, e_ratio = _ratio_with_err(
-                h_pred,
-                e_pred,
-                h_smeared,
-                e_smeared,
+            ref_h, ref_e, ref_lbl = (
+                (h_lin, e_lin, "lin smeared MC")
+                if use_lin_ref
+                else (h_smeared, e_smeared, "smeared MC")
+            )
+            # Raw MC / reference smeared MC; not used in y-range.
+            ratio_raw, e_ratio_raw = _ratio_with_err(
+                h_raw,
+                e_raw,
+                ref_h,
+                ref_e,
             )
             ax_ratio.step(
                 centers,
-                ratio,
+                ratio_raw,
                 where="mid",
-                color="C2",
-                linestyle="--",
+                color="0.4",
+                linestyle=":",
                 lw=1.0,
             )
-            _stepped_errorbar(ax_ratio, centers, ratio, e_ratio, "C2")
-            ratios_for_ylim = [ratio]
+            _stepped_errorbar(
+                ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4"
+            )
+
+            # h_pred / h_smeared and h_pred / h_lin always drawn; the
+            # designated reference (controlled by use_lin_ref) anchors
+            # the y-range and is drawn on top.
+            ratio_smear, e_ratio_smear = _ratio_with_err(
+                h_pred, e_pred, h_smeared, e_smeared,
+            )
+            ratio_lin, e_ratio_lin = _ratio_with_err(
+                h_pred, e_pred, h_lin, e_lin,
+            )
+            # Ratio-panel curves are colored by the *numerator* (pred);
+            # linestyle distinguishes which denominator they use.
+            if use_lin_ref:
+                ax_ratio.step(
+                    centers, ratio_smear, where="mid",
+                    color="C2", linestyle=":", lw=0.8, alpha=0.4,
+                )
+                ax_ratio.step(
+                    centers, ratio_lin, where="mid",
+                    color="C2", linestyle="--", lw=1.0,
+                )
+                _stepped_errorbar(
+                    ax_ratio, centers, ratio_lin, e_ratio_lin, "C2"
+                )
+                primary_ratio = ratio_lin
+            else:
+                ax_ratio.step(
+                    centers, ratio_lin, where="mid",
+                    color="C2", linestyle=":", lw=0.8, alpha=0.4,
+                )
+                ax_ratio.step(
+                    centers, ratio_smear, where="mid",
+                    color="C2", linestyle="--", lw=1.0,
+                )
+                _stepped_errorbar(
+                    ax_ratio, centers, ratio_smear, e_ratio_smear, "C2"
+                )
+                primary_ratio = ratio_smear
+            ratios_for_ylim = [primary_ratio]
             if h_pred_gh is not None:
                 ratio_gh, e_ratio_gh = _ratio_with_err(
                     h_pred_gh,
                     e_pred_gh,
-                    h_smeared,
-                    e_smeared,
+                    ref_h,
+                    ref_e,
                 )
                 ax_ratio.step(
                     centers,
@@ -1316,7 +1539,7 @@ def plot_smear_closure(
                 )
                 ratios_for_ylim.append(ratio_gh)
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
-            ax_ratio.set_ylabel("/ smeared MC", fontsize=8)
+            ax_ratio.set_ylabel(f"/ {ref_lbl}", fontsize=8)
             ax_ratio.set_xlabel(tname)
             ratios = (
                 np.concatenate(
@@ -1330,7 +1553,7 @@ def plot_smear_closure(
             )
             if ratios.size:
                 lo_r, hi_r = np.quantile(ratios, [0.05, 0.95])
-                pad = max(0.05, 0.5 * (hi_r - lo_r))
+                pad = 0.5 * (hi_r - lo_r)
                 ax_ratio.set_ylim(
                     max(0.0, min(lo_r - pad, 1.0 - pad)),
                     max(hi_r + pad, 1.0 + pad),
@@ -1812,21 +2035,23 @@ def plot_polyhead_pred_vs_flow(
     w_sub = w_event[idx].astype(np.float32)
 
     # Sample perturbations in standardized target space, matching the
-    # training-time sampler: |δ| uniform on [0, 1.3 · delta_max], v on
-    # the unit sphere. Read magnitudes from the polyhead's training
-    # config when available; fall back to the conventional 1.3.
+    # training-time sampler: |δ|, |σ| ~ product-of-Gaussians with
+    # scale ``delta_max`` / ``sigma_max``, direction on the unit
+    # sphere. Read magnitudes from the polyhead's training config
+    # when available.
     train_cfg = getattr(args, "_polyhead_train_cfg", {}) or {}
     delta_max_train = float(train_cfg.get("delta_max", 1.0))
     sigma_max_train = float(train_cfg.get("sigma_max", 1.0)) or 1.0
-    oversample = 1.3
-    half = oversample * delta_max_train
-    half_sig = oversample * sigma_max_train
 
     g = torch.Generator().manual_seed(0)
-    delta_shift = (torch.rand(n_use, generator=g) * 2.0 - 1.0) * half
+    g1 = torch.randn(n_use, generator=g)
+    g2 = torch.randn(n_use, generator=g).abs()
+    delta_shift = g1 * g2 * delta_max_train
     v_shift = torch.randn(n_use, n_features, generator=g)
     v_shift = v_shift / v_shift.norm(dim=-1, keepdim=True).clamp_min(1e-30)
-    sigma_smear = torch.rand(n_use, generator=g) * half_sig
+    h1 = torch.randn(n_use, generator=g).abs()
+    h2 = torch.randn(n_use, generator=g).abs()
+    sigma_smear = h1 * h2 * sigma_max_train
     v_smear = torch.randn(n_use, n_features, generator=g)
     v_smear = v_smear / v_smear.norm(dim=-1, keepdim=True).clamp_min(1e-30)
     delta_smear = sigma_smear * torch.randn(n_use, generator=g)
