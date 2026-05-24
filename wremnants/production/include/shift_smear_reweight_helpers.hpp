@@ -104,58 +104,53 @@ inline void compute_c_raw(float kappa_gen, float eta_gen, float phi_gen,
 
 // Compile-time-sized ONNX runner for the combined
 // (y_raw, c_raw, u_raw, σ_raw) -> log_r call at batch 1.  ``NVar`` is
-// the number of (u, σ) variations baked into the inference at the call
-// site (it's the second dim of the model's dynamic-axis input).
+// the number of (u, σ) variations baked into the inference at this
+// model instance — it's the second dim of the model's dynamic-axis
+// input, pinned at construction.
 //
 // Each ``operator()`` invocation issues one Ort::Session::Run, so an
 // event with two muons triggers two calls; for J/ψ that's the same
 // cardinality as the existing analytic helper's inner per-muon loop.
+template <std::size_t NVar>
 class ReweightModel {
 public:
   ReweightModel(const std::string &onnx_path, unsigned int nslots = 1)
-      : onnx_(std::make_shared<narf::onnx_helper_alloc>(onnx_path, nslots)) {}
+      : onnx_(std::make_shared<narf::onnx_helper>(
+            onnx_path,
+            /*input_shapes=*/std::vector<std::vector<int64_t>>{
+                {1, static_cast<int64_t>(F)},
+                {1, static_cast<int64_t>(NCond)},
+                {1, static_cast<int64_t>(NVar), static_cast<int64_t>(F)},
+                {1, static_cast<int64_t>(NVar), static_cast<int64_t>(F)},
+            },
+            /*output_shapes=*/std::vector<std::vector<int64_t>>{
+                {1, static_cast<int64_t>(NVar)},
+            },
+            nslots)) {}
 
-  // Static-shape entry: y is [1, F], c is [1, NCond], u and σ are
-  // [1, NVar, F], output is [1, NVar].  Buffers are caller-owned so
-  // they can live on the stack across the per-muon loop.
-  //
-  // All tensors are declared ``Eigen::RowMajor`` so the underlying
-  // ``.data()`` byte order matches ONNX Runtime's row-major
-  // expectation. Eigen's default ColMajor layout silently scrambled
-  // the (NVar, F) axes whenever both > 1 — every NVar ≥ 2 caller
-  // (J/ψ-stats, Z-non-closure, closure-A/M) was sending garbage to
-  // the network before this fix; NVar = 1 (the Simple helpers)
-  // happened to be unaffected because a length-1 axis is layout-
-  // invariant.
-  template <std::size_t NVar>
+  // y is [1, F], c is [1, NCond], u and σ are [1, NVar, F], output is
+  // [1, NVar].  ``narf::onnx_helper`` keeps the persistent ORT-owned
+  // buffers and copies in/out via ``Eigen::TensorMap<…, RowMajor>``
+  // assignment, so the caller's RowMajor declaration here is for
+  // shape-matching alone — ColMajor would also produce correct
+  // results, just with strided copies.
   void
-  run(Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>, Eigen::RowMajor> &y,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>, Eigen::RowMajor> &c,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &u_raw,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &sigma_raw,
+  run(const Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>, Eigen::RowMajor> &y,
+      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>, Eigen::RowMajor> &c,
+      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &u_raw,
+      const Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &sigma_raw,
       Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>, Eigen::RowMajor> &log_r) {
-    // ``narf::onnx_helper_alloc::operator()`` takes input/output tuples of
-    // references-to-tensor (the lambdas inside use ``auto&...``) and
-    // forwards ``.data()`` to ``Ort::Value::CreateTensor<T>(... T* ...)``,
-    // which is non-const even for input tensors. So the input tensors
-    // here are deliberately non-const (the caller's scratch buffers are
-    // freshly allocated per muon and immediately discarded).
-    //
-    // ``std::tie`` makes a tuple of plain references; ``std::cref`` would
-    // wrap in ``reference_wrapper<>``, which has no ``narf::tensor_traits``
-    // specialisation and would break ``::get_sizes()``.
-    auto inputs = std::tie(y, c, u_raw, sigma_raw);
+    auto inputs = std::forward_as_tuple(y, c, u_raw, sigma_raw);
     auto outputs = std::tie(log_r);
     (*onnx_)(inputs, outputs);
   }
 
 private:
-  // onnx_helper_alloc creates Ort::Value views over the caller's tensor
-  // data on every call. Slot selection inside is by TBB thread index
-  // (see onnxutils.hpp), so the same instance is safe under RunGraphs.
-  // Held via shared_ptr so the type is copyable -- RDataFrame Define
-  // needs to copy the helper into its internal storage.
-  std::shared_ptr<narf::onnx_helper_alloc> onnx_;
+  // Slot selection inside ``narf::onnx_helper`` is by TBB thread
+  // index, so the same instance is safe under RunGraphs. Held via
+  // shared_ptr so the type is copyable — RDataFrame Define needs to
+  // copy the helper into its internal storage.
+  std::shared_ptr<narf::onnx_helper> onnx_;
 };
 
 // Per-muon ONNX reweight evaluator: encapsulates the kinematics ->
@@ -179,7 +174,7 @@ public:
 
   ReweightEvaluator(const std::string &onnx_path,
                          unsigned int nslots = 1)
-      : model_(std::make_shared<ReweightModel>(onnx_path, nslots)) {}
+      : model_(std::make_shared<ReweightModel<NVar>>(onnx_path, nslots)) {}
 
   // Per-muon evaluation. ``muon_source_raw`` is the raw
   // ``Muon_genPartFlav`` value; the ORT graph remaps it internally.
@@ -224,7 +219,7 @@ public:
       sigma_buf(0, k, 0) = sigma_r_kappa[k];
     }
 
-    model_->template run<NVar>(y_t, c_t, u_buf, sigma_buf, log_r);
+    model_->run(y_t, c_t, u_buf, sigma_buf, log_r);
 
     alt_weights_t alt_weights;
     for (std::size_t k = 0; k < NVar; ++k) {
@@ -247,7 +242,7 @@ public:
   }
 
 private:
-  std::shared_ptr<ReweightModel> model_;
+  std::shared_ptr<ReweightModel<NVar>> model_;
 };
 
 }  // namespace shift_smear_reweight
