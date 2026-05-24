@@ -951,13 +951,13 @@ def _fd_linearized_shift(h_raw, sigma_raw, bins, dy):
     dh = np.empty_like(h)
     var_dh = np.empty_like(h)
     dh[1:-1] = (h[2:] - h[:-2]) / (2.0 * bw)
-    var_dh[1:-1] = (s[2:] ** 2 + s[:-2] ** 2) / (4.0 * bw ** 2)
+    var_dh[1:-1] = (s[2:] ** 2 + s[:-2] ** 2) / (4.0 * bw**2)
     dh[0] = (h[1] - h[0]) / bw
-    var_dh[0] = (s[1] ** 2 + s[0] ** 2) / bw ** 2
+    var_dh[0] = (s[1] ** 2 + s[0] ** 2) / bw**2
     dh[-1] = (h[-1] - h[-2]) / bw
-    var_dh[-1] = (s[-1] ** 2 + s[-2] ** 2) / bw ** 2
+    var_dh[-1] = (s[-1] ** 2 + s[-2] ** 2) / bw**2
     h_lin = h - float(dy) * dh
-    var_lin = s ** 2 + (float(dy) ** 2) * var_dh
+    var_lin = s**2 + (float(dy) ** 2) * var_dh
     return h_lin, np.sqrt(np.maximum(var_lin, 0.0))
 
 
@@ -979,13 +979,11 @@ def _fd_linearized_smear(h_raw, sigma_raw, bins, sigma_y):
     bw = float(bins[1] - bins[0])
     ddh = np.zeros_like(h)
     var_ddh = np.zeros_like(h)
-    ddh[1:-1] = (h[2:] - 2.0 * h[1:-1] + h[:-2]) / bw ** 2
-    var_ddh[1:-1] = (
-        s[2:] ** 2 + 4.0 * s[1:-1] ** 2 + s[:-2] ** 2
-    ) / bw ** 4
+    ddh[1:-1] = (h[2:] - 2.0 * h[1:-1] + h[:-2]) / bw**2
+    var_ddh[1:-1] = (s[2:] ** 2 + 4.0 * s[1:-1] ** 2 + s[:-2] ** 2) / bw**4
     coef = 0.5 * float(sigma_y) ** 2
     h_lin = h + coef * ddh
-    var_lin = s ** 2 + (coef ** 2) * var_ddh
+    var_lin = s**2 + (coef**2) * var_ddh
     return h_lin, np.sqrt(np.maximum(var_lin, 0.0))
 
 
@@ -1130,9 +1128,7 @@ def plot_shift_closure(
                 (w_event * r_pred).astype(np.float64),
             )
 
-            avg_cross = _perbin_crossings_per_bin(
-                target[:, tcol], y_shifted, bins
-            )
+            avg_cross = _perbin_crossings_per_bin(target[:, tcol], y_shifted, bins)
             use_lin_ref = avg_cross < n_thresh
 
             ax_main = axes[2 * r][cidx]
@@ -1209,18 +1205,22 @@ def plot_shift_closure(
                 linestyle=":",
                 lw=1.0,
             )
-            _stepped_errorbar(
-                ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4"
-            )
+            _stepped_errorbar(ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4")
 
             # Always show both ratios; the y-range is set from the
             # designated reference (literal or linearized) per the
             # noise-dominated criterion.
             ratio_shift, e_ratio_shift = _ratio_with_err(
-                h_pred, e_pred, h_shifted, e_shifted,
+                h_pred,
+                e_pred,
+                h_shifted,
+                e_shifted,
             )
             ratio_lin, e_ratio_lin = _ratio_with_err(
-                h_pred, e_pred, h_lin, e_lin,
+                h_pred,
+                e_pred,
+                h_lin,
+                e_lin,
             )
             # Ratio-panel curves are colored by the *numerator* (pred);
             # linestyle distinguishes which denominator they use.
@@ -1228,28 +1228,42 @@ def plot_shift_closure(
             # opacity; the other is faded in the background.
             if use_lin_ref:
                 ax_ratio.step(
-                    centers, ratio_shift, where="mid",
-                    color="C0", linestyle=":", lw=0.8, alpha=0.4,
+                    centers,
+                    ratio_shift,
+                    where="mid",
+                    color="C0",
+                    linestyle=":",
+                    lw=0.8,
+                    alpha=0.4,
                 )
                 ax_ratio.step(
-                    centers, ratio_lin, where="mid",
-                    color="C0", linestyle="--", lw=1.0,
+                    centers,
+                    ratio_lin,
+                    where="mid",
+                    color="C0",
+                    linestyle="--",
+                    lw=1.0,
                 )
-                _stepped_errorbar(
-                    ax_ratio, centers, ratio_lin, e_ratio_lin, "C0"
-                )
+                _stepped_errorbar(ax_ratio, centers, ratio_lin, e_ratio_lin, "C0")
             else:
                 ax_ratio.step(
-                    centers, ratio_lin, where="mid",
-                    color="C0", linestyle=":", lw=0.8, alpha=0.4,
+                    centers,
+                    ratio_lin,
+                    where="mid",
+                    color="C0",
+                    linestyle=":",
+                    lw=0.8,
+                    alpha=0.4,
                 )
                 ax_ratio.step(
-                    centers, ratio_shift, where="mid",
-                    color="C0", linestyle="--", lw=1.0,
+                    centers,
+                    ratio_shift,
+                    where="mid",
+                    color="C0",
+                    linestyle="--",
+                    lw=1.0,
                 )
-                _stepped_errorbar(
-                    ax_ratio, centers, ratio_shift, e_ratio_shift, "C0"
-                )
+                _stepped_errorbar(ax_ratio, centers, ratio_shift, e_ratio_shift, "C0")
             ax_ratio.axhline(1.0, color="k", lw=0.5, alpha=0.5)
             ax_ratio.set_ylabel(f"/ {ref_lbl}", fontsize=8)
             ax_ratio.set_xlabel(tname)
@@ -1369,9 +1383,7 @@ def plot_smear_closure(
                 (w_event * r_pred).astype(np.float64),
             )
 
-            avg_cross = _perbin_crossings_per_bin(
-                target[:, tcol], y_smeared, bins
-            )
+            avg_cross = _perbin_crossings_per_bin(target[:, tcol], y_smeared, bins)
             use_lin_ref = avg_cross < n_thresh
 
             ax_main = axes[2 * r][cidx]
@@ -1473,46 +1485,64 @@ def plot_smear_closure(
                 linestyle=":",
                 lw=1.0,
             )
-            _stepped_errorbar(
-                ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4"
-            )
+            _stepped_errorbar(ax_ratio, centers, ratio_raw, e_ratio_raw, "0.4")
 
             # h_pred / h_smeared and h_pred / h_lin always drawn; the
             # designated reference (controlled by use_lin_ref) anchors
             # the y-range and is drawn on top.
             ratio_smear, e_ratio_smear = _ratio_with_err(
-                h_pred, e_pred, h_smeared, e_smeared,
+                h_pred,
+                e_pred,
+                h_smeared,
+                e_smeared,
             )
             ratio_lin, e_ratio_lin = _ratio_with_err(
-                h_pred, e_pred, h_lin, e_lin,
+                h_pred,
+                e_pred,
+                h_lin,
+                e_lin,
             )
             # Ratio-panel curves are colored by the *numerator* (pred);
             # linestyle distinguishes which denominator they use.
             if use_lin_ref:
                 ax_ratio.step(
-                    centers, ratio_smear, where="mid",
-                    color="C2", linestyle=":", lw=0.8, alpha=0.4,
+                    centers,
+                    ratio_smear,
+                    where="mid",
+                    color="C2",
+                    linestyle=":",
+                    lw=0.8,
+                    alpha=0.4,
                 )
                 ax_ratio.step(
-                    centers, ratio_lin, where="mid",
-                    color="C2", linestyle="--", lw=1.0,
+                    centers,
+                    ratio_lin,
+                    where="mid",
+                    color="C2",
+                    linestyle="--",
+                    lw=1.0,
                 )
-                _stepped_errorbar(
-                    ax_ratio, centers, ratio_lin, e_ratio_lin, "C2"
-                )
+                _stepped_errorbar(ax_ratio, centers, ratio_lin, e_ratio_lin, "C2")
                 primary_ratio = ratio_lin
             else:
                 ax_ratio.step(
-                    centers, ratio_lin, where="mid",
-                    color="C2", linestyle=":", lw=0.8, alpha=0.4,
+                    centers,
+                    ratio_lin,
+                    where="mid",
+                    color="C2",
+                    linestyle=":",
+                    lw=0.8,
+                    alpha=0.4,
                 )
                 ax_ratio.step(
-                    centers, ratio_smear, where="mid",
-                    color="C2", linestyle="--", lw=1.0,
+                    centers,
+                    ratio_smear,
+                    where="mid",
+                    color="C2",
+                    linestyle="--",
+                    lw=1.0,
                 )
-                _stepped_errorbar(
-                    ax_ratio, centers, ratio_smear, e_ratio_smear, "C2"
-                )
+                _stepped_errorbar(ax_ratio, centers, ratio_smear, e_ratio_smear, "C2")
                 primary_ratio = ratio_smear
             ratios_for_ylim = [primary_ratio]
             if h_pred_gh is not None:
