@@ -440,7 +440,20 @@ public:
 
       // var(δr_kappa) per variation from the extra smear above nominal;
       // raw r_κ units (the ONNX preproc divides by target_std).
+      //
+      // Sign of δσ²: the network parameterises σ as a positive
+      // magnitude and is even in σ, so it can't directly produce a
+      // signed response for variations that *reduce* the resolution
+      // (δσ²<0). The analytic linearisation does (W ∝ 1 + ∂_σ²·δσ²,
+      // signed). To track that here we feed |δσ²| to ONNX and apply
+      // the linear-order odd-symmetry afterwards: log_r(−|δσ²|) ≈
+      // −log_r(+|δσ²|), i.e. ``alt_weight → 1 / alt_weight`` whenever
+      // ``dsigmarelsq < 0``. Exact to first order in δσ²; higher-order
+      // (curvature) terms have the wrong sign in this approximation,
+      // but those are O((δσ²)²) and small for the 1σ eigenvariations
+      // we apply here.
       typename evaluator_t::delta_r_t sigma_r_kappa{};
+      std::array<signed char, NVar> sign_var{};
       for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
         const double avar = resolution_parms_var(0, ivar);
         const double cvar = resolution_parms_var(1, ivar);
@@ -451,13 +464,23 @@ public:
         const double dsigmarelsq = sigmasqvar_rel - sigmasqnom_rel;
         const double var_r_kappa = dsigmarelsq * qop_reco_sq * pgen_sq;
         sigma_r_kappa[ivar] = static_cast<float>(
-            (var_r_kappa > 0.0) ? std::sqrt(var_r_kappa) : 0.0);
+            std::sqrt(std::abs(var_r_kappa)));
+        sign_var[ivar] = (var_r_kappa > 0.0) - (var_r_kappa < 0.0);
       }
 
-      res *= evaluator_.evaluate(
+      auto alt = evaluator_.evaluate(
           recPt, recEta, recPhis[i], recCharges[i],
           genPt, genEta, genPhis[i], genCharges[i],
           muonSources[i], delta_zero, sigma_r_kappa);
+      for (std::size_t ivar = 0; ivar < NVar; ++ivar) {
+        if (sign_var[ivar] < 0) {
+          // log_r → −log_r ⇔ alt_weight → 1/alt_weight.
+          alt(ivar) = 1.0 / alt(ivar);
+        } else if (sign_var[ivar] == 0) {
+          alt(ivar) = 1.0;  // exactly zero variance → no shift.
+        }
+      }
+      res *= alt;
     }
     return res;
   }
