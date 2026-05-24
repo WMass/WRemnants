@@ -6,7 +6,13 @@ Commands in this repository must be run inside the apptainer/singularity contain
 /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling
 ```
 
-Check whether you are already inside the container by verifying the `SINGULARITY_CONTAINER` environment variable is set.
+or the corresponding docker/podman container at
+
+```
+gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling
+```
+
+Check whether you are already inside the container by checking if the `SINGULARITY_CONTAINER` or $container environment variable is set.
 
 If not inside the container, prefix commands with `scripts/ci/run_with_singularity.sh`:
 
@@ -14,7 +20,7 @@ If not inside the container, prefix commands with `scripts/ci/run_with_singulari
 scripts/ci/run_with_singularity.sh bash -c "source setup.sh && <command>"
 ```
 
-If already inside the container, then commands can be run directly.
+If already inside the container, then commands can be run directly (but still sourcing setup.sh).
 
 ## Verification
 
