@@ -470,7 +470,11 @@ closure_unc_helper_M = muon_calibration.make_uniform_closure_uncertainty_helper(
 )
 
 smearing_helper, smearing_uncertainty_helper = (
-    (None, None) if args.noSmearing else muon_calibration.make_muon_smearing_helpers()
+    (None, None)
+    if args.noSmearing
+    else muon_calibration.make_muon_smearing_helpers(
+        scale_var_method=args.muonScaleVariation,
+    )
 )
 
 smearinggradhelper = muon_calibration.make_smearing_grad_helper()

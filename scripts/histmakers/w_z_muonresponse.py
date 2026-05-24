@@ -79,7 +79,11 @@ mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper =
 )
 
 smearing_helper, smearing_uncertainty_helper = (
-    (None, None) if args.noSmearing else muon_calibration.make_muon_smearing_helpers()
+    (None, None)
+    if args.noSmearing
+    else muon_calibration.make_muon_smearing_helpers(
+        scale_var_method=args.muonScaleVariation,
+    )
 )
 bias_helper = (
     muon_calibration.make_muon_bias_helpers(args) if args.biasCalibration else None

@@ -330,10 +330,12 @@ def make_muon_smearing_helpers(
     override_d=None,
     dummy_vars=False,
     smearing=True,
+    scale_var_method="onnxReweight",
     onnx_path=None,
     onnx_nslots=None,
 ):
-    if onnx_path is None:
+    is_onnx = scale_var_method == "onnxReweight"
+    if is_onnx and onnx_path is None:
         onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     # this helper smears muon pT to match the resolution in data
 
@@ -451,7 +453,7 @@ def make_muon_smearing_helpers(
     hvar = narf.hist_to_pyroot_boost(hvar, tensor_rank=2)
 
     helper = ROOT.wrem.SmearingHelperParametrized[type(hnom)](ROOT.std.move(hnom))
-    if onnx_path is not None:
+    if is_onnx:
         # ONNX-backed drop-in: same nominal smearer + ONNX-backed
         # uncertainty helper.  The new uncertainty helper consumes gen
         # kinematics in addition to reco -- see add_resolution_uncertainty
