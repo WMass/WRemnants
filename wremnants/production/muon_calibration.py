@@ -1573,10 +1573,7 @@ def add_jpsi_crctn_stats_unc_hists(
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 scale_var_method="smearingWeightsGaus",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )
         df = df.Define(
             "muonScaleSyst_responseWeights_tensor_gaus",
@@ -1614,10 +1611,7 @@ def add_jpsi_crctn_stats_unc_hists(
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 scale_var_method="smearingWeightsSplines",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )
         df, splines_cols = jpsi_style_cols(
             df,
@@ -1676,11 +1670,8 @@ def add_jpsi_crctn_stats_unc_hists(
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 isW=isW,
                 scale_var_method="massWeights",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )  # need to make a new massweights helper due to different nweights for Z and W
         df = df.Define(
             "muonScaleSyst_responseWeights_tensor_massWeights",
