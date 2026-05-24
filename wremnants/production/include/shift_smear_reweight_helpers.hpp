@@ -118,13 +118,22 @@ public:
   // Static-shape entry: y is [1, F], c is [1, NCond], u and σ are
   // [1, NVar, F], output is [1, NVar].  Buffers are caller-owned so
   // they can live on the stack across the per-muon loop.
+  //
+  // All tensors are declared ``Eigen::RowMajor`` so the underlying
+  // ``.data()`` byte order matches ONNX Runtime's row-major
+  // expectation. Eigen's default ColMajor layout silently scrambled
+  // the (NVar, F) axes whenever both > 1 — every NVar ≥ 2 caller
+  // (J/ψ-stats, Z-non-closure, closure-A/M) was sending garbage to
+  // the network before this fix; NVar = 1 (the Simple helpers)
+  // happened to be unaffected because a length-1 axis is layout-
+  // invariant.
   template <std::size_t NVar>
   void
-  run(Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>> &y,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>> &c,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &u_raw,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> &sigma_raw,
-      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> &log_r) {
+  run(Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>, Eigen::RowMajor> &y,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>, Eigen::RowMajor> &c,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &u_raw,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> &sigma_raw,
+      Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>, Eigen::RowMajor> &log_r) {
     // ``narf::onnx_helper_alloc::operator()`` takes input/output tuples of
     // references-to-tensor (the lambdas inside use ``auto&...``) and
     // forwards ``.data()`` to ``Ort::Value::CreateTensor<T>(... T* ...)``,
@@ -192,11 +201,13 @@ public:
     const int muon_source =
         muon_source_from_gen_part_flav(muonSource_raw);
 
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>> y_t;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>> c_t;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> u_buf;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>> sigma_buf;
-    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>> log_r;
+    // RowMajor so the byte order forwarded to ONNX via ``.data()``
+    // matches ORT's row-major expectation. See ``ReweightModel::run``.
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, F>, Eigen::RowMajor> y_t;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NCond>, Eigen::RowMajor> c_t;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> u_buf;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar, F>, Eigen::RowMajor> sigma_buf;
+    Eigen::TensorFixedSize<float, Eigen::Sizes<1, NVar>, Eigen::RowMajor> log_r;
 
     std::array<float, F> y;
     std::array<float, NCond> c;
