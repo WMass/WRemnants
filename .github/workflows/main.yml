@@ -153,7 +153,7 @@ jobs:
       - name: setup 1:1 data:mc events
         if: github.event_name != 'pull_request' && github.event.schedule != '30 5 * * 1-5'
         run: |
-          echo "NTHREADS=128" >> $GITHUB_ENV
+          echo "NTHREADS=64" >> $GITHUB_ENV
           echo "MAX_FILES=-2" >> $GITHUB_ENV
           echo "LUMI_SCALE=1" >> $GITHUB_ENV
           echo "NOMINAL_FAKE_SMOOTHING=full" >> $GITHUB_ENV
@@ -1304,9 +1304,9 @@ jobs:
 
       - name: dilepton ptll from wlike
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
-          $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ZMassDilepton.hdf5 --saveHists --saveHistsPerProcess --computeHistErrors
-          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --externalPostfitResult uncorr --noPostfitProfileBB --noHessian
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
+          $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ZMassDilepton.hdf5 --saveHists --saveHistsPerProcess --computeHistErrors 
+          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --externalPostfitResult uncorr --noPostfitProfileBB
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ --postfix from_ZMassWLike_eta_pt_charge --pseudoData uncorr
 
       - name: dilepton ptll from wlike postfit
