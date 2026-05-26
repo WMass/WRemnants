@@ -11,14 +11,19 @@ Outputs (under --output, default ``<checkpoint_dir>/diagnostics/``):
      m_ll histograms (data + MC, weighted) with overlaid model curves
      (signal + Bernstein backgrounds + total mixture) per |η_+| slice.
   2. theta_scale_vs_eta.png
-     A, e, M per η-bin with Fisher ±1σ bands.
+     A, e, M per η-bin with ±1σ error bars (from --fisher: fisher_info.pt or
+     bootstrap_cov.pt).
   3. theta_smear_vs_eta.png
-     a, c per η-bin (no Fisher: θ_smear is a nuisance, not in the
-     advertised covariance; can be added later if needed).
-  4. fisher_correlation.png
-     72×72 correlation heatmap with η-bin grid lines + (A,e,M) labels.
+     effective a, c per η-bin with ±1σ error bars (from --fisher).
+  4. covariance_correlation.png
+     full joint covariance (signed-log) + correlation heatmaps over
+     θ_scale + the active θ_smear, with the scale/smear block separator.
+     (Legacy θ_scale-only files fall back to fisher_correlation.png.)
   5. mll_pulls_inclusive.png  + mll_pulls_eta{0..3}.png
      Per-bin (data − model)/√model histograms; expect ~N(0,1).
+
+The ±1σ bands and the matrix plot require a covariance file via --fisher
+(fisher_info.pt from --fisher-info, or bootstrap_cov.pt from --bootstrap).
 """
 
 from __future__ import annotations
@@ -660,6 +665,54 @@ def plot_fisher_correlation(cov: np.ndarray, output_dir: str):
         print(f"  wrote {p}")
 
 
+def plot_cov_corr(cov: np.ndarray, labels, n_scale: int, output_dir: str):
+    """Side-by-side covariance (symmetric-log) + correlation ([-1,1]) heatmaps of
+    the FULL joint parameter covariance (θ_scale + the active θ_smear), with the
+    scale/smear block separator and sparse per-parameter tick labels.
+
+    The covariance mixes units across blocks (A, e, M, smear), spanning many
+    orders of magnitude, so it is shown on a signed-log (SymLog) colour scale;
+    the correlation is the dimensionless, directly-readable companion.
+    """
+    import matplotlib.colors as mcolors
+
+    n = cov.shape[0]
+    d = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr = cov / np.outer(d, d)
+    corr = np.where(np.isfinite(corr), corr, 0.0)
+
+    fig, (axc, axr) = plt.subplots(1, 2, figsize=(15, 6.5))
+    amax = float(np.abs(cov).max()) or 1.0
+    norm = mcolors.SymLogNorm(linthresh=amax * 1e-6, vmin=-amax, vmax=amax, base=10)
+    im0 = axc.imshow(cov, cmap="RdBu_r", norm=norm)
+    axc.set_title("covariance (signed log)")
+    fig.colorbar(im0, ax=axc, fraction=0.046, pad=0.04)
+    im1 = axr.imshow(corr, cmap="RdBu_r", vmin=-1.0, vmax=1.0)
+    axr.set_title("correlation")
+    fig.colorbar(im1, ax=axr, fraction=0.046, pad=0.04)
+
+    # Sparse ticks straight from the parameter labels (~16 across the axis).
+    if labels is not None and len(labels) == n:
+        step = max(1, n // 16)
+        ticks = list(range(0, n, step))
+        tlabels = [labels[i] for i in ticks]
+    else:
+        ticks, tlabels = [], []
+    for ax in (axc, axr):
+        if 0 < n_scale < n:   # separate the θ_scale and θ_smear blocks
+            ax.axhline(n_scale - 0.5, color="k", lw=1.0)
+            ax.axvline(n_scale - 0.5, color="k", lw=1.0)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(tlabels, fontsize=6, rotation=90)
+        ax.set_yticks(ticks)
+        ax.set_yticklabels(tlabels, fontsize=6)
+    fig.suptitle("parameter covariance / correlation (θ_scale + active θ_smear)")
+    fig.tight_layout()
+    for p in _save_fig(fig, output_dir, "covariance_correlation"):
+        print(f"  wrote {p}")
+
+
 def plot_mc_closure(
     evals, m_centers_np, eta_slice_edges, output_dir: str,
 ):
@@ -997,18 +1050,26 @@ def main() -> int:
         if f.get("edm") is not None:
             print(f"  fit EDM (½ gᵀV g) = {f['edm']:.3e}")
         cov_pt = f.get("covariance_24_3_24_3")
+        cov_flat = None
         if cov_pt is not None:
             cov_flat = cov_pt.reshape(72, 72).cpu().numpy()
-            sigma_scale_flat = np.sqrt(np.maximum(np.diag(cov_flat), 0.0))
-            sigma_scale = sigma_scale_flat.reshape(24, 3)
-            print("plotting Fisher correlation matrix...")
-            plot_fisher_correlation(cov_flat, out_dir)
-        else:
-            print("  warning: covariance not in fisher_info.pt (Hessian "
-                  "inversion may have failed); skipping correlation plot.")
+            sigma_scale = np.sqrt(np.maximum(np.diag(cov_flat), 0.0)).reshape(24, 3)
         ss = f.get("sigma_smear_eff_24_2")
         if ss is not None:
             sigma_smear = ss.cpu().numpy()
+        # Covariance + correlation matrix over the FULL joint parameter set
+        # (θ_scale + active θ_smear); fall back to the θ_scale-only correlation
+        # for legacy files that store only the 24×3×24×3 scale block.
+        full_cov = f.get("covariance")
+        if full_cov is not None:
+            print("plotting covariance / correlation matrix...")
+            plot_cov_corr(full_cov.detach().cpu().numpy(), f.get("labels"),
+                          int(f.get("n_scale", 72)), out_dir)
+        elif cov_flat is not None:
+            print("plotting correlation matrix (θ_scale block)...")
+            plot_fisher_correlation(cov_flat, out_dir)
+        else:
+            print("  warning: no covariance in the file; skipping matrix plot.")
     else:
         print("no fisher_info.pt → skipping θ_scale ±σ bands + correlation plot.")
 
