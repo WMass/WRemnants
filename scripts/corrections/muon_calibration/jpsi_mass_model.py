@@ -1301,11 +1301,19 @@ class JpsiMassMixtureModel(nn.Module):
         def resp(me):  # me: [B,G]
             return self._continuity_response(me, mo, pto, etao, qo, tsp, tse)
 
+        # √V·ε smear term, with NO ε-floor: softplus(θ_smear) > 0 makes the
+        # smear variance strictly positive whenever smearing is enabled, so √V
+        # and its m'-gradient are finite. When smearing is disabled V ≡ 0 and the
+        # term is dropped entirely (√0·ε = 0 exactly) — which also avoids
+        # autograd's 0·∞ from differentiating the bare √0 in G' below (V≡0 is a
+        # constant in m', so ∂√V/∂m' would be inf·0 = NaN without this).
+        def _smear(Vt):
+            return Vt.sqrt() * xig if self.smearing_enabled else 0.0
         # fixed-point source solve  m' = m_obs − s_adv(m') − √V(m')·ε
         mp = mo.expand(B, G).clone()
         for _ in range(n_iter):
             s_adv, V = resp(mp)
-            mp = mo - s_adv - (V + 1e-12).sqrt() * xig
+            mp = mo - s_adv - _smear(V)
         # change-of-variables Jacobian G'(m') = ∂x/∂m' by autograd in m'.
         # The m-derivative is over the cheap analytic response (s_adv, V), not
         # the flow, so this double-autograd is cheap. In the fit (grad on) we
@@ -1315,13 +1323,13 @@ class JpsiMassMixtureModel(nn.Module):
         # only need the value, so a fresh leaf under enable_grad suffices.
         if mp.requires_grad:
             s_advj, Vj = resp(mp)
-            Gx = (mp + s_advj + (Vj + 1e-12).sqrt() * xig).sum()
+            Gx = (mp + s_advj + _smear(Vj)).sum()
             Gp = torch.autograd.grad(Gx, mp, create_graph=True)[0]
         else:
             with torch.enable_grad():
                 mp_j = mp.detach().requires_grad_(True)
                 s_advj, Vj = resp(mp_j)
-                Gx = (mp_j + s_advj + (Vj + 1e-12).sqrt() * xig).sum()
+                Gx = (mp_j + s_advj + _smear(Vj)).sum()
                 Gp = torch.autograd.grad(Gx, mp_j)[0].detach()
         # frozen-flow density at the source points (POINT values only)
         mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).reshape(B * G, -1)
