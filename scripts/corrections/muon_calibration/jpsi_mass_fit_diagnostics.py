@@ -985,10 +985,17 @@ def main() -> int:
         stats.m_lo, stats.m_hi, out_dir,
     )
 
-    # Fisher info → ±1σ for θ_scale.
+    # Fisher info → ±1σ for θ_scale (and θ_smear, when present).
     sigma_scale = None
+    sigma_smear = None
     if args.fisher and os.path.exists(args.fisher):
         f = torch.load(args.fisher, weights_only=False)
+        if f.get("n_negative_eig", 0) not in (0, None):
+            print(f"  warning: fisher_info.pt has {f['n_negative_eig']} "
+                  f"non-positive eigenvalue(s) (min={f.get('min_eig', float('nan')):.2e}) "
+                  f"— σ bands for affected params are unreliable.")
+        if f.get("edm") is not None:
+            print(f"  fit EDM (½ gᵀV g) = {f['edm']:.3e}")
         cov_pt = f.get("covariance_24_3_24_3")
         if cov_pt is not None:
             cov_flat = cov_pt.reshape(72, 72).cpu().numpy()
@@ -999,6 +1006,9 @@ def main() -> int:
         else:
             print("  warning: covariance not in fisher_info.pt (Hessian "
                   "inversion may have failed); skipping correlation plot.")
+        ss = f.get("sigma_smear_eff_24_2")
+        if ss is not None:
+            sigma_smear = ss.cpu().numpy()
     else:
         print("no fisher_info.pt → skipping θ_scale ±σ bands + correlation plot.")
 
@@ -1017,7 +1027,7 @@ def main() -> int:
         # softplus-reparameterised — plot the *effective* (physical, ≥0) a, c.
         theta_smear_eff = model.effective_theta_smear().detach().cpu().numpy()
         plot_theta_vs_eta(
-            theta_smear_eff, None, ["a [1/GeV] (eff)", "c (eff)"],
+            theta_smear_eff, sigma_smear, ["a [1/GeV] (eff)", "c (eff)"],
             "theta_smear_vs_eta", stats.eta_edges, out_dir,
         )
     else:

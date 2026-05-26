@@ -455,6 +455,211 @@ def compute_fisher_info(
     return H.view(24, 3, 24, 3).detach().cpu()
 
 
+def _smear_active_cols(model) -> List[int]:
+    """Column indices of ``theta_smear`` actually fit (smear_param_mask != 0).
+    The non-fit column is zeroed post-softplus → identically zero gradient, so
+    it must be excluded from the Fisher Hessian (else a singular row/col)."""
+    return [c for c in range(model.theta_smear.shape[1])
+            if float(model.smear_param_mask[c]) != 0.0]
+
+
+def compute_fisher_info_continuity(
+    model: JpsiMassMixtureModel,
+    loader: JpsiMassArrowLoader,
+    device: str,
+    *,
+    mc_as_data: bool = False,
+    n_gh: int = 5,
+    n_iter: int = 2,
+    progress: bool = True,
+):
+    """Observed (plug-in) Fisher information for the two-stage continuity fit,
+    over ``theta_scale`` + the ACTIVE ``theta_smear`` columns jointly, with the
+    flow and the background MLP held FIXED (option 1: conditional / fixed-φ).
+
+    H = Σ_events w · ∂²(−ln p_mixture)/∂θ² at the fit point, on the data branch
+    (``data_nll_continuity`` — the objective stage 2 actually minimises, NOT the
+    legacy ``model.nll``). ``theta_smear`` is the raw (pre-softplus) parameter.
+
+    Accumulated per batch (build the batch gradient with ``create_graph`` then
+    immediately take its ∂/∂θ rows and free the graph) so memory stays at one
+    batch regardless of dataset size; cost is O(N_batches · n_active) backward
+    passes. With ``mc_as_data`` the data branch is the MC (``~is_data_mask``)
+    rows — the validation-mode pseudo-data.
+
+    Returns ``(H [n_act, n_act] on cpu, layout dict)``.
+    """
+    model.eval()
+    for p in model.flow.parameters():
+        p.requires_grad_(False)
+    for p in model.mlp.parameters():
+        p.requires_grad_(False)
+    model.theta_scale.requires_grad_(model.scale_enabled)
+    model.theta_smear.requires_grad_(model.smearing_enabled)
+
+    # Parameters to differentiate + the active flat layout. theta_scale: all
+    # active; theta_smear: only the fitted column(s).
+    params: list = []
+    blocks: list = []          # (name, numel, active_local_indices)
+    if model.scale_enabled:
+        params.append(model.theta_scale)
+        blocks.append(("scale", model.theta_scale.numel(),
+                       list(range(model.theta_scale.numel()))))
+    smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
+    if smear_cols:
+        params.append(model.theta_smear)
+        n_eta, n_comp = model.theta_smear.shape
+        active = [b * n_comp + c for b in range(n_eta) for c in smear_cols]
+        blocks.append(("smear", model.theta_smear.numel(), active))
+    if not params:
+        raise RuntimeError(
+            "compute_fisher_info_continuity: no free parameters "
+            "(--disable-scale and --disable-smearing / no active smear term).")
+
+    # Active index into the concatenated flat [scale_flat | smear_flat] vector.
+    active_idx, offset = [], 0
+    for _name, numel, act in blocks:
+        active_idx += [offset + a for a in act]
+        offset += numel
+    active_idx = torch.tensor(active_idx, dtype=torch.long, device=device)
+    n_act = int(active_idx.numel())
+
+    H = torch.zeros((n_act, n_act), device=device, dtype=torch.float32)
+    grad = torch.zeros(n_act, device=device, dtype=torch.float32)  # Σ ∂(NLL)/∂θ
+    sw = 0.0
+    seen = 0
+    bar = tqdm(loader, desc="fisher", disable=not progress, unit="batch")
+    for batch in bar:
+        batch = _move_batch(batch, device)
+        data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
+        if not bool(data_mask.any()):
+            continue
+        per = model.data_nll_continuity(
+            batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
+            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            n_gh=n_gh, n_iter=n_iter)
+        w = batch["w"] * data_mask.to(batch["w"].dtype)
+        nll = (w * per).sum()
+        if not torch.isfinite(nll):
+            continue
+        g = torch.autograd.grad(nll, params, create_graph=True)
+        g_full = torch.cat([gi.reshape(-1) for gi in g])
+        grad += g_full[active_idx].detach()
+        for r in range(n_act):
+            i = int(active_idx[r])
+            row = torch.autograd.grad(
+                g_full[i], params, retain_graph=True, allow_unused=True)
+            row_full = torch.cat([
+                (ri if ri is not None else torch.zeros_like(p)).reshape(-1)
+                for ri, p in zip(row, params)])
+            H[r] += row_full[active_idx].detach()
+        sw += float(w.sum().item())
+        seen += int(data_mask.sum().item())
+        bar.set_postfix_str(f"events={seen:,}")
+    bar.close()
+    if seen == 0:
+        raise RuntimeError(
+            "compute_fisher_info_continuity: loader yielded zero events on the "
+            "data branch (mc_as_data=%s). Check the split / --validation." % mc_as_data)
+    H = 0.5 * (H + H.T)
+    layout = {"blocks": blocks, "smear_cols": smear_cols,
+              "n_scale": (model.theta_scale.numel() if model.scale_enabled else 0),
+              "sw": sw, "seen": seen, "grad": grad.detach().cpu()}
+    return H.detach().cpu(), layout
+
+
+def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel) -> dict:
+    """Invert H → covariance and package it (with labels, the θ_scale block in
+    the legacy 24×3×24×3 layout for the diagnostics, and delta-method effective
+    σ for the raw θ_smear)."""
+    n_act = H.shape[0]
+    # Positive-definiteness check: at a true optimum the observed information is
+    # PD. Negative/zero eigenvalues flag a non-converged fit or unidentified
+    # (e.g. event-starved) η-bins; the corresponding variances are not
+    # trustworthy. eigvalsh is exact for the symmetric H.
+    try:
+        eig = torch.linalg.eigvalsh(H)
+        min_eig = float(eig.min())
+        n_neg_eig = int((eig <= 0).sum())
+    except RuntimeError:
+        min_eig = float("nan")
+        n_neg_eig = -1
+    cov = None
+    ok = False
+    try:
+        cov = torch.linalg.inv(H)
+        ok = bool(torch.isfinite(cov).all()) and n_neg_eig == 0
+    except RuntimeError:
+        ok = False
+    if cov is None or not bool(torch.isfinite(cov).all()):
+        try:
+            cov = torch.linalg.pinv(H)
+        except Exception:
+            cov = None
+
+    n_scale = layout["n_scale"]
+    smear_cols = layout["smear_cols"]
+    comp = ["A", "e", "M"]
+    smear_comp = ["a", "c"]
+    labels: List[str] = []
+    if n_scale:
+        for b in range(model.theta_scale.shape[0]):
+            for c in range(model.theta_scale.shape[1]):
+                labels.append(f"{comp[c]}[{b}]")
+    for b in range(model.theta_smear.shape[0]):
+        for c in smear_cols:
+            labels.append(f"{smear_comp[c]}[{b}](raw)")
+
+    out: dict = {
+        "hessian": H,
+        "covariance": cov,
+        "ok": ok,
+        "labels": labels,
+        "n_scale": n_scale,
+        "smear_cols": smear_cols,
+        "smear_fit_params": model.smear_fit_params,
+        "param_space": "scale: linear (A,e,M); smear: raw pre-softplus theta_smear",
+        "n_events": layout["seen"],
+        "sum_weight": layout["sw"],
+        "min_eig": min_eig,
+        "n_negative_eig": n_neg_eig,
+    }
+    # Estimated distance to minimum: EDM = ½ gᵀ V g (V = covariance = H⁻¹), the
+    # predicted remaining decrease in the NLL to reach the optimum (MINUIT
+    # convention). ≈0 at convergence; large ⇒ the fit hasn't reached a minimum.
+    grad = layout.get("grad")
+    if grad is not None:
+        out["grad"] = grad
+        out["grad_norm"] = float(grad.norm())
+        if cov is not None:
+            out["edm"] = 0.5 * float(grad @ (cov @ grad))
+    # θ_scale block in the legacy layout (consumed by the diagnostics for ±1σ
+    # bands + the correlation heatmap). This is the scale block of the JOINT
+    # inverse, so it carries the θ_scale↔θ_smear correlation.
+    if n_scale == 72:
+        out["hessian_24_3_24_3"] = H[:72, :72].view(24, 3, 24, 3)
+        if cov is not None:
+            cov_scale = cov[:72, :72]
+            out["covariance_24_3_24_3"] = cov_scale.view(24, 3, 24, 3)
+            out["sigma_scale_24_3"] = torch.sqrt(
+                torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
+    # Effective (physical, ≥0) σ on the smear a/c per η-bin via the delta method
+    # (eff = softplus(raw), |∂eff/∂raw| = sigmoid(raw)); inactive columns → 0.
+    if smear_cols and cov is not None:
+        n_eta, n_comp = model.theta_smear.shape
+        cov_smear = cov[n_scale:, n_scale:]
+        sig_raw = torch.sqrt(torch.clamp(torch.diag(cov_smear), min=0.0))
+        jac = torch.sigmoid(model.theta_smear.detach().cpu())  # [n_eta, n_comp]
+        sig_eff = torch.zeros(n_eta, n_comp)
+        k = 0
+        for b in range(n_eta):
+            for c in smear_cols:
+                sig_eff[b, c] = jac[b, c] * sig_raw[k]
+                k += 1
+        out["sigma_smear_eff_24_2"] = sig_eff
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main training loop
 # ---------------------------------------------------------------------------
@@ -821,7 +1026,49 @@ def train_loop(args: argparse.Namespace) -> int:
         train_stage1(args, model, s1_train, s1_val, stats)
     if args.stage in ("both", "fit"):
         train_stage2(args, model, s2_train, s2_val, stats, mc_as_data=args.validation)
+        if args.fisher_info:
+            _run_fisher_continuity(args, model, shard_files, stats, device)
     return 0
+
+
+def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
+    """Observed Fisher info for the two-stage fit (θ_scale + active θ_smear,
+    fixed flow + MLP) → ``<output>/fisher_info.pt``. Evaluated on the data the
+    fit used (``--fisher-split``, default the train split; half 1 in
+    validation mode), so the covariance has the right statistical scale."""
+    if not (model.scale_enabled or model.smearing_enabled):
+        print("skipping Fisher info: both --disable-scale and --disable-smearing.")
+        return
+    half = 1 if args.validation else None
+    loader = JpsiMassArrowLoader(
+        shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
+        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        drop_last=False, half=half)
+    print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
+          f"fixed flow + MLP) on split={args.fisher_split}"
+          + ("  half=1 (MC pseudo-data)" if args.validation else "")
+          + f"  [smear_fit={model.smear_fit_params}]")
+    t0 = time.time()
+    H, layout = compute_fisher_info_continuity(
+        model, loader, device, mc_as_data=args.validation,
+        n_gh=args.continuity_n_gh, n_iter=args.continuity_n_iter,
+        progress=args.progress)
+    out = _fisher_save_dict(H, layout, model)
+    path = os.path.join(args.output, "fisher_info.pt")
+    torch.save(out, path)
+    print(f"  wrote {path}: {H.shape[0]}×{H.shape[0]} info matrix over "
+          f"{len(out['labels'])} params ({layout['seen']:,} events, "
+          f"Σw={layout['sw']:.2e}); "
+          f"{'PD, inverted' if out['ok'] else 'NOT positive-definite → pinv (cov approximate)'} "
+          f"in {time.time()-t0:.1f}s")
+    if out.get("edm") is not None:
+        print(f"  EDM (½ gᵀV g, est. NLL distance to minimum) = {out['edm']:.3e}"
+              f"  (‖grad‖={out['grad_norm']:.3e})")
+    if out["n_negative_eig"] != 0:
+        print(f"  WARNING: observed information has {out['n_negative_eig']} "
+              f"non-positive eigenvalue(s) (min={out['min_eig']:.3e}) — the fit is "
+              f"not at a clean optimum or some η-bins are event-starved; the "
+              f"corresponding variances are unreliable.")
 
 
 def _train_loop_legacy(args: argparse.Namespace) -> int:
@@ -1439,8 +1686,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="Number of hidden layers in the mixture MLP.")
     # Fisher
     p.add_argument("--fisher-info", action="store_true",
-                   help="After training, compute + save the plug-in Fisher "
-                   "information (Hessian + covariance) on θ_scale.")
+                   help="After training, compute + save the observed Fisher "
+                   "information (Hessian + covariance) → <output>/fisher_info.pt. "
+                   "Two-stage pipeline: over θ_scale + the ACTIVE θ_smear column(s) "
+                   "jointly, with the flow and background MLP held fixed (fixed-φ / "
+                   "conditional). Legacy pipeline: θ_scale only.")
+    p.add_argument("--fisher-split", default="train",
+                   choices=("train", "val", "holdout", "all"),
+                   help="(two-stage) Loader split the Fisher info is summed over. "
+                   "Default 'train' = the data the fit used, so the covariance has "
+                   "the correct statistical scale (∝ 1/N_fit). In --validation mode "
+                   "the half-1 MC pseudo-data of this split is used.")
     # Mixed-precision + torch.compile (same convention as
     # train_muon_response_flow.py).
     p.add_argument(
