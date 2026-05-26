@@ -1221,10 +1221,22 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     model.theta_scale.requires_grad_(model.scale_enabled)
     model.theta_smear.requires_grad_(model.smearing_enabled)
 
-    print(f"\nwarm-start Poisson bootstrap: {B} replicas × ≤{args.bootstrap_epochs} "
-          f"epochs on split={args.fisher_split}"
+    # Convergence settings synchronised with the nominal stage-2 fit: the
+    # per-replica early stop (patience + threshold), epoch cap, and LR schedule
+    # all default to the nominal fit's, so each replica converges as thoroughly
+    # as the nominal (monitored on the replica's reweighted NLL, since a
+    # bootstrap replica has no separate validation set).
+    patience = (args.bootstrap_patience if args.bootstrap_patience is not None
+                else args.patience)
+    max_epochs = (args.bootstrap_epochs if args.bootstrap_epochs is not None
+                  else (args.fit_epochs or args.epochs))
+    print(f"\nwarm-start Poisson bootstrap: {B} replicas × ≤{max_epochs} epochs "
+          f"on split={args.fisher_split}"
           + ("  half=1 (MC pseudo-data)" if mc_as_data else "")
-          + f"  [smear_fit={model.smear_fit_params}]")
+          + f"  [smear_fit={model.smear_fit_params}; "
+          + ("no early stop" if args.no_early_stop
+             else f"patience={patience}, threshold={args.patience_threshold:g}")
+          + f", lr-schedule={args.lr_schedule}]")
     gen = torch.Generator(device=device)
     replicas, eff_smears, conv_epochs = [], [], []
     n_batches_total = None   # learned on the first epoch → % on the inner bar after
@@ -1238,10 +1250,11 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         if model.smearing_enabled:
             groups.append({"params": [model.theta_smear], "lr": args.fit_smear_lr})
         optim = torch.optim.Adam(groups)           # fresh Adam state, re-raised LR
+        sched, sched_kind = _make_scheduler(args, optim, max_epochs)  # same as nominal
         seed = args.bootstrap_seed + b
         best = float("inf"); no_improve = 0; used = 0
         model.train()
-        for epoch in range(args.bootstrap_epochs):
+        for epoch in range(max_epochs):
             gen.manual_seed(seed)                  # same per-event Poisson each epoch
             tr_sum = 0.0; tr_w = 0.0; n_seen = 0
             # Inner per-epoch bar over batches so a (slow) epoch visibly advances;
@@ -1278,11 +1291,20 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
                 n_batches_total = n_seen
             used = epoch + 1
             nll = tr_sum / max(tr_w, 1e-30)
-            if nll < best - args.patience_threshold:
+            improved = nll < best - args.patience_threshold
+            if improved:
                 best = nll; no_improve = 0
             else:
                 no_improve += 1
-            if no_improve >= args.bootstrap_patience:
+            # Same LR schedule + early-stop coupling as the nominal fit: a LR
+            # reduction resets the early-stop counter (so it only fires once the
+            # reductions are exhausted), monitored on the replica's reweighted NLL.
+            if sched is not None:
+                lr_before = [g["lr"] for g in optim.param_groups]
+                sched.step(nll) if sched_kind == "plateau" else sched.step()
+                if any(g["lr"] < lb - 1e-12 for g, lb in zip(optim.param_groups, lr_before)):
+                    no_improve = 0
+            if not improved and not args.no_early_stop and no_improve >= patience:
                 break
         replicas.append(_record_active_theta(model, smear_cols))
         if smear_cols:
@@ -1301,12 +1323,12 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     path = os.path.join(args.output, "bootstrap_cov.pt")
     torch.save(out, path)
     ce = torch.tensor(conv_epochs, dtype=torch.float32)
-    n_hit_cap = int((ce >= args.bootstrap_epochs).sum())
+    n_hit_cap = int((ce >= max_epochs).sum()) if not args.no_early_stop else 0
     print(f"  wrote {path}: {B} replicas over {TH.shape[1]} params; "
           f"epochs/replica median={int(ce.median())} max={int(ce.max())} "
           f"in {time.time()-t0:.1f}s")
     if n_hit_cap:
-        print(f"  WARNING: {n_hit_cap}/{B} replica(s) hit the {args.bootstrap_epochs}-epoch "
+        print(f"  WARNING: {n_hit_cap}/{B} replica(s) hit the {max_epochs}-epoch "
               f"cap without plateauing — they may be under-converged (variance "
               f"underestimated). Raise --bootstrap-epochs.")
     if "sigma_scale_24_3" in out:
@@ -2035,14 +2057,18 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "background MLP jointly on the data Poisson(1)-reweighted, and the "
                    "covariance of {θ̂_b} folds in the background uncertainty with no "
                    "Hessian. 0 = off.")
-    p.add_argument("--bootstrap-epochs", type=int, default=30,
-                   help="Max epochs per bootstrap replica (warm-started, so few are "
-                   "needed; capped here). Replicas hitting the cap without plateauing "
-                   "are flagged as possibly under-converged.")
-    p.add_argument("--bootstrap-patience", type=int, default=3,
-                   help="Per-replica early stop: epochs without reweighted-NLL "
-                   "improvement (> --patience-threshold) before the replica is "
-                   "considered converged.")
+    p.add_argument("--bootstrap-epochs", type=int, default=None,
+                   help="Max epochs per bootstrap replica. Default (None) inherits "
+                   "the nominal stage-2 cap (--fit-epochs or --epochs). Replicas "
+                   "hitting the cap without plateauing are flagged as possibly "
+                   "under-converged.")
+    p.add_argument("--bootstrap-patience", type=int, default=None,
+                   help="Per-replica early-stop patience (epochs without "
+                   "reweighted-NLL improvement > --patience-threshold). Default "
+                   "(None) inherits the nominal fit's --patience, so each replica "
+                   "converges with the SAME early-stop / threshold / LR-schedule "
+                   "(--lr-schedule + --lr-reduce-*) as the nominal fit — monitored "
+                   "on the replica's reweighted NLL (a replica has no separate val).")
     p.add_argument("--bootstrap-seed", type=int, default=12345,
                    help="Base seed for the per-replica Poisson(1) event weights "
                    "(replica b uses seed + b; reset each epoch so an event keeps its "
