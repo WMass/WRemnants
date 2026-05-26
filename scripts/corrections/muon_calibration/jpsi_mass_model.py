@@ -1235,7 +1235,8 @@ class JpsiMassMixtureModel(nn.Module):
     #     = 1 + s_adv'(m') + (V'/2√V)·ε                       (kernel Jacobian)
     #
     # s_adv(m') = Σ_k v_k(m')·θ_scale_k  (advective mass shift; v = analytic J),
-    # V(m')     = Σ_k κ_k(m')·softplus(θ_smear)_k ≥ 0  (smear variance).
+    # V(m')     = Σ_k κ_k(m')·softplus(θ_smear)_k² ≥ 0  (smear variance; the
+    #             effective softplus(θ) are qop STDs, so σ_qop² = a²+c²k²).
     # This evaluates the FROZEN flow only as point values at the source m'(ε)
     # (no flow derivatives), captures advection+smear to all orders in θ and the
     # x-variation of v, V (source-evaluation + Jacobian), and is normalised by
@@ -1270,7 +1271,14 @@ class JpsiMassMixtureModel(nn.Module):
         ka = dm_dqop * dm_dqop
         kc = ka * (k * k)
         kappa = torch.stack([ka[..., 0], kc[..., 0], ka[..., 1], kc[..., 1]], dim=-1)
-        V = (kappa * theta_smear_eff_pm).sum(-1).clamp_min(0.0)
+        # V = κ·σ_qop² = κ_a·a_eff² + κ_c·c_eff².  ``theta_smear_eff_pm`` is the
+        # effective (a, c) = softplus(θ), which are qop STDs (matching
+        # σ_qop² = a²+c²k² in sigma_qop_pm), so they enter V SQUARED. Using them
+        # linearly inflated V by ~1/a_eff: with κ_a ~ (m/2qop)² ~ 10³ and the
+        # default a_eff=1e-3, a linear V gave √V ~ 1 GeV (≫ the 0.36 GeV window),
+        # flinging the GH source points out of the flow's support and driving
+        # the fit to a non-finite density.
+        V = (kappa * theta_smear_eff_pm.pow(2)).sum(-1).clamp_min(0.0)
         return s_adv, V
 
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
