@@ -1102,6 +1102,8 @@ def train_loop(args: argparse.Namespace) -> int:
         train_stage2(args, model, s2_train, s2_val, stats, mc_as_data=args.validation)
         if args.fisher_info:
             _run_fisher_continuity(args, model, shard_files, stats, device)
+        if args.empirical_fisher:
+            _run_empirical_fisher(args, model, shard_files, stats, device)
         if args.bootstrap > 0:
             run_bootstrap_continuity(args, model, shard_files, stats, device,
                                      mc_as_data=args.validation)
@@ -1338,6 +1340,223 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
               f"{float(ss[:,2].median()):.2e})")
 
 
+def _theta_cov_extras(cov_theta: torch.Tensor, model, smear_cols, n_scale: int) -> dict:
+    """Diagnostics-compatible extras from a θ-block covariance (cpu): the
+    θ_scale block in the 24×3×24×3 layout, its √diag σ, and the delta-method
+    effective σ for the raw θ_smear. Shared by the Fisher / empirical builders."""
+    out: dict = {}
+    if n_scale == 72:
+        cs = cov_theta[:72, :72]
+        out["covariance_24_3_24_3"] = cs.view(24, 3, 24, 3)
+        out["sigma_scale_24_3"] = torch.sqrt(
+            torch.clamp(torch.diag(cs), min=0.0)).view(24, 3)
+    if smear_cols:
+        n_eta, n_comp = model.theta_smear.shape
+        cv = cov_theta[n_scale:, n_scale:]
+        sig_raw = torch.sqrt(torch.clamp(torch.diag(cv), min=0.0))
+        jac = torch.sigmoid(model.theta_smear.detach().cpu())  # ∂ softplus/∂ raw
+        sig_eff = torch.zeros(n_eta, n_comp)
+        k = 0
+        for b in range(n_eta):
+            for c in smear_cols:
+                sig_eff[b, c] = jac[b, c] * sig_raw[k]
+                k += 1
+        out["sigma_smear_eff_24_2"] = sig_eff
+    return out
+
+
+def compute_empirical_fisher_joint(
+    model: JpsiMassMixtureModel,
+    loader: JpsiMassArrowLoader,
+    device: str,
+    *,
+    mc_as_data: bool = False,
+    n_gh: int = 5,
+    n_iter: int = 2,
+    chunk_events: int = 64,
+    max_events: int = 0,
+    progress: bool = True,
+    vectorized: bool = True,
+):
+    """Joint (θ, φ) empirical Fisher ``J = Σ_i w_i s_i s_iᵀ`` over θ_scale + the
+    active θ_smear + ALL background-MLP params, from per-event scores
+    ``s_i = ∇_(θ,φ) log p_{θ,φ}(x_i)`` (the data branch). PSD by construction
+    (sum of outer products), so its pseudo-inverse never yields a negative
+    variance; the θ-block of ``pinv(J)`` is the nuisance-marginalised θ
+    covariance — background included — and uses only FIRST derivatives (no MLP
+    Hessian). Per-event scores are taken in chunks via ``is_grads_batched`` with
+    a per-event-loop fallback. Returns ``(J [n_act, n_act] cpu, layout)`` with
+    the active vector ordered ``[θ-active | mlp]``."""
+    model.eval()
+    for p in model.flow.parameters():
+        p.requires_grad_(False)
+    for p in model.mlp.parameters():
+        p.requires_grad_(True)
+    model.theta_scale.requires_grad_(model.scale_enabled)
+    model.theta_smear.requires_grad_(model.smearing_enabled)
+
+    params, names, numels = [], [], []
+    if model.scale_enabled:
+        params.append(model.theta_scale); names.append("scale")
+        numels.append(model.theta_scale.numel())
+    smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
+    if model.smearing_enabled:
+        params.append(model.theta_smear); names.append("smear")
+        numels.append(model.theta_smear.numel())
+    mlp_params = list(model.mlp.parameters())
+    n_mlp = int(sum(p.numel() for p in mlp_params))
+    for p in mlp_params:
+        params.append(p); names.append("mlp"); numels.append(p.numel())
+    if not params or (not model.scale_enabled and not smear_cols):
+        raise RuntimeError("empirical Fisher: no active θ parameters.")
+
+    # Active flat indices into the concatenated score: θ_scale (all) + active
+    # θ_smear cols + all MLP — θ first, then φ.
+    active_idx, off, n_theta_active = [], 0, 0
+    for nm, ne in zip(names, numels):
+        if nm == "scale":
+            active_idx += list(range(off, off + ne)); n_theta_active += ne
+        elif nm == "smear":
+            n_eta, n_comp = model.theta_smear.shape
+            a = [off + b * n_comp + c for b in range(n_eta) for c in smear_cols]
+            active_idx += a; n_theta_active += len(a)
+        else:
+            active_idx += list(range(off, off + ne))
+        off += ne
+    active_idx = torch.tensor(active_idx, dtype=torch.long, device=device)
+    n_act = int(active_idx.numel())
+
+    J = torch.zeros((n_act, n_act), device=device, dtype=torch.float32)
+    sw = 0.0; seen = 0; hit_cap = False
+    use_batched = bool(vectorized)
+    bar = tqdm(loader, desc="emp-fisher", disable=not progress, unit="batch")
+    for batch in bar:
+        if max_events > 0 and seen >= max_events:
+            hit_cap = True; break
+        batch = _move_batch(batch, device)
+        data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
+        di = data_mask.nonzero(as_tuple=True)[0]
+        if di.numel() == 0:
+            continue
+        per = model.data_nll_continuity(
+            batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
+            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            n_gh=n_gh, n_iter=n_iter)
+        per_d = per[di]
+        w_d = batch["w"][di].detach()
+        nd = int(per_d.shape[0])
+        for s0 in range(0, nd, max(1, chunk_events)):
+            s1 = min(s0 + chunk_events, nd)
+            c = s1 - s0
+            S = None
+            if use_batched:
+                try:
+                    eye = torch.zeros((c, nd), device=device, dtype=per_d.dtype)
+                    eye[torch.arange(c, device=device),
+                        torch.arange(s0, s1, device=device)] = 1.0
+                    g = torch.autograd.grad(
+                        per_d, params, grad_outputs=eye, is_grads_batched=True,
+                        retain_graph=True, allow_unused=True)
+                    S = torch.cat([
+                        (gi if gi is not None else torch.zeros((c,) + p.shape,
+                         device=device, dtype=per_d.dtype)).reshape(c, -1)
+                        for gi, p in zip(g, params)], dim=1)
+                except (RuntimeError, NotImplementedError) as e:
+                    use_batched = False
+                    bar.write(f"  note: vectorised per-event score unavailable "
+                              f"({type(e).__name__}); using the per-event loop")
+            if S is None:
+                rows = []
+                for j in range(s0, s1):
+                    gj = torch.autograd.grad(per_d[j], params, retain_graph=True,
+                                             allow_unused=True)
+                    rows.append(torch.cat([
+                        (x if x is not None else torch.zeros_like(p)).reshape(-1)
+                        for x, p in zip(gj, params)]))
+                S = torch.stack(rows)
+            S = S[:, active_idx]                       # [c, n_act]
+            wc = w_d[s0:s1]
+            J += (S * wc.unsqueeze(1)).t() @ S         # Σ w_i s_i s_iᵀ
+        seen += nd; sw += float(w_d.sum())
+        bar.set_postfix_str(f"events={seen:,}")
+    bar.close()
+    if seen == 0:
+        raise RuntimeError("empirical Fisher: zero data-branch events seen.")
+    J = 0.5 * (J + J.T)                                # symmetrise (numerical)
+    layout = {"n_theta_active": n_theta_active,
+              "n_scale": (model.theta_scale.numel() if model.scale_enabled else 0),
+              "smear_cols": smear_cols, "n_mlp": n_mlp,
+              "sw": sw, "seen": seen, "hit_cap": hit_cap}
+    return J.detach().cpu(), layout
+
+
+def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
+    """Joint (θ,φ) empirical Fisher → ``<output>/empirical_fisher.pt`` (PSD,
+    background-included θ covariance via pinv; diagnostics-compatible)."""
+    if not (model.scale_enabled or model.smearing_enabled):
+        print("skipping empirical Fisher: both --disable-scale and --disable-smearing.")
+        return
+    half = 1 if args.validation else None
+    loader = JpsiMassArrowLoader(
+        shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
+        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        drop_last=False, half=half)
+    print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
+          f"split={args.fisher_split}"
+          + ("  half=1 (MC pseudo-data)" if args.validation else "")
+          + f"  [smear_fit={model.smear_fit_params}]"
+          + (f"; ≤{args.empirical_fisher_max_events:,} events"
+             if args.empirical_fisher_max_events > 0 else ""))
+    t0 = time.time()
+    J, layout = compute_empirical_fisher_joint(
+        model, loader, device, mc_as_data=args.validation,
+        n_gh=args.continuity_n_gh, n_iter=args.continuity_n_iter,
+        chunk_events=args.empirical_fisher_chunk,
+        max_events=args.empirical_fisher_max_events,
+        progress=args.progress, vectorized=args.fisher_vectorized)
+    # If capped, scale J to full statistics (J ∝ Σw): a cheap weight-only pass
+    # for Σw_total, then J ← J · Σw_total/Σw_seen so the covariance has the
+    # correct 1/N_fit scale.
+    if layout["hit_cap"] and layout["sw"] > 0:
+        sw_total = 0.0
+        for batch in loader:
+            dm = (~batch["is_data_mask"] if args.validation else batch["is_data_mask"])
+            sw_total += float((batch["w"] * dm.to(batch["w"].dtype)).sum())
+        if sw_total > layout["sw"]:
+            scale = sw_total / layout["sw"]
+            J = J * scale
+            print(f"  scaled J by Σw_total/Σw_seen = {scale:.2f} "
+                  f"(subsampled {layout['seen']:,} events)")
+            layout["sw"] = sw_total
+    jd = layout["n_theta_active"] + layout["n_mlp"]
+    rank = int(torch.linalg.matrix_rank(J).item())
+    cov_joint = torch.linalg.pinv(J)
+    n_t = layout["n_theta_active"]
+    cov_theta = cov_joint[:n_t, :n_t].contiguous()
+    out = {
+        "method": "joint (theta,phi) empirical Fisher, pinv",
+        "covariance": cov_theta,
+        "labels": _active_param_labels(model, layout["smear_cols"]),
+        "n_scale": layout["n_scale"], "smear_cols": layout["smear_cols"],
+        "smear_fit_params": model.smear_fit_params,
+        "n_events": layout["seen"], "sum_weight": layout["sw"],
+        "n_theta_active": n_t, "n_mlp": layout["n_mlp"],
+        "joint_dim": jd, "joint_rank": rank,
+        "param_space": "scale: linear (A,e,M); smear: raw pre-softplus theta_smear",
+    }
+    out.update(_theta_cov_extras(cov_theta, model, layout["smear_cols"], layout["n_scale"]))
+    path = os.path.join(args.output, "empirical_fisher.pt")
+    torch.save(out, path)
+    print(f"  wrote {path}: joint {jd}×{jd} (θ:{n_t}, φ:{layout['n_mlp']}), "
+          f"rank {rank}/{jd}; θ-block {n_t}×{n_t} via pinv ({layout['seen']:,} "
+          f"events, Σw={layout['sw']:.2e}) in {time.time()-t0:.1f}s")
+    if "sigma_scale_24_3" in out:
+        ss = out["sigma_scale_24_3"]
+        print(f"  empirical σ(A,e,M) median over bins = "
+              f"({float(ss[:,0].median()):.2e}, {float(ss[:,1].median()):.2e}, "
+              f"{float(ss[:,2].median()):.2e})")
+
+
 def _load_full_fit(args, device):
     """Load a FULL stage-2 fit (flow + MLP + θ) from ``--checkpoint`` for
     ``--stage uncertainties``. Adopts the model-defining settings (flow arch,
@@ -1401,12 +1620,15 @@ def _run_uncertainties_stage(args, device) -> int:
     os.makedirs(args.output, exist_ok=True)
     with open(os.path.join(args.output, "preproc_stats.json"), "w") as f:
         json.dump(_stats_to_dict(stats), f, indent=2)
-    if not args.fisher_info and args.bootstrap <= 0:
-        print("warning: --stage uncertainties but neither --fisher-info nor "
-              "--bootstrap (>0) requested — nothing to compute.", file=sys.stderr)
+    if not args.fisher_info and not args.empirical_fisher and args.bootstrap <= 0:
+        print("warning: --stage uncertainties but none of --fisher-info / "
+              "--empirical-fisher / --bootstrap (>0) requested — nothing to "
+              "compute.", file=sys.stderr)
         return 0
     if args.fisher_info:
         _run_fisher_continuity(args, model, shard_files, stats, device)
+    if args.empirical_fisher:
+        _run_empirical_fisher(args, model, shard_files, stats, device)
     if args.bootstrap > 0:
         run_bootstrap_continuity(args, model, shard_files, stats, device,
                                  mc_as_data=args.validation)
@@ -2048,7 +2270,26 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "(is_grads_batched) second backward instead of a per-row loop. "
                    "Faster but holds ~n_param copies of the backward graph; "
                    "automatically falls back to the loop on engine failure / OOM. "
-                   "Use --no-fisher-vectorized to force the loop.")
+                   "Use --no-fisher-vectorized to force the loop. Also governs the "
+                   "per-event score in --empirical-fisher.")
+    # Joint (theta, phi) empirical Fisher: J = Σ w_i s_i s_iᵀ over θ + the MLP,
+    # PSD → pinv covariance (background-included, Hessian-free, no negative σ).
+    p.add_argument("--empirical-fisher", action="store_true",
+                   help="(two-stage) After the fit, compute the JOINT (θ, MLP) "
+                   "empirical Fisher J = Σ w_i s_i s_iᵀ from per-event scores and "
+                   "write the θ-block of pinv(J) → <output>/empirical_fisher.pt. "
+                   "PSD by construction (no negative/clamped σ), background "
+                   "uncertainty included (the MLP is in the joint), and Hessian-"
+                   "free (first derivatives only). Cost is O(N_events) per-event "
+                   "gradients — see --empirical-fisher-max-events.")
+    p.add_argument("--empirical-fisher-max-events", type=int, default=50000,
+                   help="Cap on events used for the empirical Fisher (0 = all). "
+                   "J is an average per-event quantity, so a representative subset "
+                   "is rescaled by Σw_total/Σw_seen to the full-statistics "
+                   "covariance scale.")
+    p.add_argument("--empirical-fisher-chunk", type=int, default=64,
+                   help="Events per is_grads_batched call when extracting "
+                   "per-event scores (memory ≈ chunk × backward graph).")
     # Warm-start Poisson bootstrap (Hessian-free covariance incl. the background)
     p.add_argument("--bootstrap", type=int, default=0,
                    help="(two-stage) After the stage-2 fit, run this many warm-start "
