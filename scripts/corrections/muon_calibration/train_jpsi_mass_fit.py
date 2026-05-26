@@ -463,6 +463,33 @@ def _smear_active_cols(model) -> List[int]:
             if float(model.smear_param_mask[c]) != 0.0]
 
 
+def _active_param_labels(model, smear_cols) -> List[str]:
+    """Per-active-parameter labels in the [θ_scale | active θ_smear] order
+    shared by the Fisher and bootstrap covariances."""
+    comp = ["A", "e", "M"]
+    smear_comp = ["a", "c"]
+    labels: List[str] = []
+    if model.scale_enabled:
+        for b in range(model.theta_scale.shape[0]):
+            for c in range(model.theta_scale.shape[1]):
+                labels.append(f"{comp[c]}[{b}]")
+    for b in range(model.theta_smear.shape[0]):
+        for c in smear_cols:
+            labels.append(f"{smear_comp[c]}[{b}](raw)")
+    return labels
+
+
+def _record_active_theta(model, smear_cols) -> torch.Tensor:
+    """Flat active parameter vector ``[θ_scale (linear) | active θ_smear (raw)]``
+    on cpu, matching the Fisher's active ordering (bin-major, col-minor)."""
+    parts = []
+    if model.scale_enabled:
+        parts.append(model.theta_scale.detach().reshape(-1))
+    if smear_cols:
+        parts.append(model.theta_smear.detach()[:, smear_cols].reshape(-1))
+    return torch.cat(parts).detach().cpu()
+
+
 def _hessian_block_loop(g_full, params, active_idx, n_act):
     """Per-batch active Hessian block ``[n_act, n_act]`` by one second backward
     per row (robust; works through the nested autograd in the continuity
@@ -649,16 +676,7 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
 
     n_scale = layout["n_scale"]
     smear_cols = layout["smear_cols"]
-    comp = ["A", "e", "M"]
-    smear_comp = ["a", "c"]
-    labels: List[str] = []
-    if n_scale:
-        for b in range(model.theta_scale.shape[0]):
-            for c in range(model.theta_scale.shape[1]):
-                labels.append(f"{comp[c]}[{b}]")
-    for b in range(model.theta_smear.shape[0]):
-        for c in smear_cols:
-            labels.append(f"{smear_comp[c]}[{b}](raw)")
+    labels = _active_param_labels(model, smear_cols)
 
     out: dict = {
         "hessian": H,
@@ -1078,6 +1096,9 @@ def train_loop(args: argparse.Namespace) -> int:
         train_stage2(args, model, s2_train, s2_val, stats, mc_as_data=args.validation)
         if args.fisher_info:
             _run_fisher_continuity(args, model, shard_files, stats, device)
+        if args.bootstrap > 0:
+            run_bootstrap_continuity(args, model, shard_files, stats, device,
+                                     mc_as_data=args.validation)
     return 0
 
 
@@ -1119,6 +1140,163 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
               f"non-positive eigenvalue(s) (min={out['min_eig']:.3e}) — the fit is "
               f"not at a clean optimum or some η-bins are event-starved; the "
               f"corresponding variances are unreliable.")
+
+
+def _bootstrap_save_dict(cov, mean, TH, eff_smears, conv_epochs, model, smear_cols):
+    """Package the warm-start bootstrap covariance, diagnostics-compatible with
+    fisher_info.pt (same θ_scale-block / σ keys; no Hessian/EDM keys)."""
+    n_scale = model.theta_scale.numel() if model.scale_enabled else 0
+    out = {
+        "method": "warm-start Poisson bootstrap",
+        "covariance": cov,
+        "mean": mean,
+        "replicas": TH,                       # [B, n_act] raw active vectors
+        "labels": _active_param_labels(model, smear_cols),
+        "n_scale": n_scale,
+        "smear_cols": smear_cols,
+        "smear_fit_params": model.smear_fit_params,
+        "n_replicas": int(TH.shape[0]),
+        "convergence_epochs": conv_epochs,
+        "param_space": "scale: linear (A,e,M); smear: raw pre-softplus theta_smear",
+    }
+    if n_scale == 72:
+        cov_scale = cov[:72, :72]
+        out["covariance_24_3_24_3"] = cov_scale.view(24, 3, 24, 3)
+        out["sigma_scale_24_3"] = torch.sqrt(
+            torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
+    # Effective (physical) smear σ straight from the replicas' softplus values —
+    # the bootstrap gives the effective-space spread exactly (no delta method).
+    if smear_cols and eff_smears:
+        EFF = torch.stack(eff_smears)                       # [B, n_smear_active]
+        sig = EFF.std(0, unbiased=True) if EFF.shape[0] > 1 else torch.zeros(EFF.shape[1])
+        n_eta, n_comp = model.theta_smear.shape
+        sig_eff = torch.zeros(n_eta, n_comp)
+        k = 0
+        for b in range(n_eta):
+            for c in smear_cols:
+                sig_eff[b, c] = sig[k]
+                k += 1
+        out["sigma_smear_eff_24_2"] = sig_eff
+    return out
+
+
+def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
+                             mc_as_data: bool) -> None:
+    """Warm-start Poisson bootstrap of the stage-2 fit → ``<output>/bootstrap_cov.pt``.
+
+    Each replica restarts from the nominal (θ̂, φ̂), resets Adam to the initial
+    fit LRs (re-raised, so the replica can actually relax), and refits θ AND the
+    background MLP jointly on the SAME data Poisson(1)-reweighted (an independent
+    per-event count, fixed across the replica's epochs), until its reweighted NLL
+    plateaus. The covariance of {θ̂_b} folds in the background (and every other)
+    uncertainty with no Hessian. Warm-starting only changes how each replica
+    reaches its optimum, not where — provided it re-converges (hence the per-
+    replica early stop on the reweighted NLL)."""
+    B = int(args.bootstrap)
+    if B <= 0:
+        return
+    if not (model.scale_enabled or model.smearing_enabled):
+        print("skipping bootstrap: both --disable-scale and --disable-smearing.")
+        return
+    smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
+    half = 1 if mc_as_data else None
+    loader = JpsiMassArrowLoader(
+        shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
+        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        drop_last=False, half=half)
+    nominal_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+    # Freeze the flow; float the MLP + active θ (the MLP must re-fit per replica
+    # so its uncertainty enters the spread).
+    for p in model.flow.parameters():
+        p.requires_grad_(False)
+    for p in model.mlp.parameters():
+        p.requires_grad_(True)
+    model.theta_scale.requires_grad_(model.scale_enabled)
+    model.theta_smear.requires_grad_(model.smearing_enabled)
+
+    print(f"\nwarm-start Poisson bootstrap: {B} replicas × ≤{args.bootstrap_epochs} "
+          f"epochs on split={args.fisher_split}"
+          + ("  half=1 (MC pseudo-data)" if mc_as_data else "")
+          + f"  [smear_fit={model.smear_fit_params}]")
+    gen = torch.Generator(device=device)
+    replicas, eff_smears, conv_epochs = [], [], []
+    t0 = time.time()
+    rbar = tqdm(range(B), desc="bootstrap", disable=not args.progress, unit="replica")
+    for b in rbar:
+        model.load_state_dict(nominal_sd)          # warm-start from the nominal fit
+        groups = [{"params": model.mlp.parameters(), "lr": args.fit_mlp_lr}]
+        if model.scale_enabled:
+            groups.append({"params": [model.theta_scale], "lr": args.fit_scale_lr})
+        if model.smearing_enabled:
+            groups.append({"params": [model.theta_smear], "lr": args.fit_smear_lr})
+        optim = torch.optim.Adam(groups)           # fresh Adam state, re-raised LR
+        seed = args.bootstrap_seed + b
+        best = float("inf"); no_improve = 0; used = 0
+        model.train()
+        for epoch in range(args.bootstrap_epochs):
+            gen.manual_seed(seed)                  # same per-event Poisson each epoch
+            tr_sum = 0.0; tr_w = 0.0
+            for batch in loader:
+                batch = _move_batch(batch, device)
+                data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
+                if not bool(data_mask.any()):
+                    continue
+                pois = torch.poisson(
+                    torch.ones(batch["mll"].shape[0], device=device), generator=gen)
+                w = batch["w"] * pois * data_mask.to(batch["w"].dtype)
+                sw = float(w.sum().clamp_min(1e-30))
+                if sw <= 0:
+                    continue
+                per = model.data_nll_continuity(
+                    batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
+                    batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+                    n_gh=args.continuity_n_gh, n_iter=args.continuity_n_iter)
+                loss = (w * per).sum() / sw
+                if not torch.isfinite(loss):
+                    continue
+                optim.zero_grad(set_to_none=True)
+                loss.backward()
+                optim.step()
+                tr_sum += float(loss.item()) * sw; tr_w += sw
+            used = epoch + 1
+            nll = tr_sum / max(tr_w, 1e-30)
+            if nll < best - args.patience_threshold:
+                best = nll; no_improve = 0
+            else:
+                no_improve += 1
+            if no_improve >= args.bootstrap_patience:
+                break
+        replicas.append(_record_active_theta(model, smear_cols))
+        if smear_cols:
+            eff_smears.append(
+                model.effective_theta_smear().detach()[:, smear_cols].reshape(-1).cpu())
+        conv_epochs.append(used)
+        rbar.set_postfix_str(f"ep={used} nll={best:+.4f}")
+    rbar.close()
+    model.load_state_dict(nominal_sd)              # leave the model at the nominal fit
+
+    TH = torch.stack(replicas)                     # [B, n_act]
+    mean = TH.mean(0)
+    Xc = TH - mean
+    cov = (Xc.t() @ Xc) / max(B - 1, 1)
+    out = _bootstrap_save_dict(cov, mean, TH, eff_smears, conv_epochs, model, smear_cols)
+    path = os.path.join(args.output, "bootstrap_cov.pt")
+    torch.save(out, path)
+    ce = torch.tensor(conv_epochs, dtype=torch.float32)
+    n_hit_cap = int((ce >= args.bootstrap_epochs).sum())
+    print(f"  wrote {path}: {B} replicas over {TH.shape[1]} params; "
+          f"epochs/replica median={int(ce.median())} max={int(ce.max())} "
+          f"in {time.time()-t0:.1f}s")
+    if n_hit_cap:
+        print(f"  WARNING: {n_hit_cap}/{B} replica(s) hit the {args.bootstrap_epochs}-epoch "
+              f"cap without plateauing — they may be under-converged (variance "
+              f"underestimated). Raise --bootstrap-epochs.")
+    if "sigma_scale_24_3" in out:
+        ss = out["sigma_scale_24_3"]
+        print(f"  bootstrap σ(A,e,M) median over bins = "
+              f"({float(ss[:,0].median()):.2e}, {float(ss[:,1].median()):.2e}, "
+              f"{float(ss[:,2].median()):.2e})")
 
 
 def _train_loop_legacy(args: argparse.Namespace) -> int:
@@ -1754,6 +1932,26 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "Faster but holds ~n_param copies of the backward graph; "
                    "automatically falls back to the loop on engine failure / OOM. "
                    "Use --no-fisher-vectorized to force the loop.")
+    # Warm-start Poisson bootstrap (Hessian-free covariance incl. the background)
+    p.add_argument("--bootstrap", type=int, default=0,
+                   help="(two-stage) After the stage-2 fit, run this many warm-start "
+                   "Poisson-bootstrap replicas → <output>/bootstrap_cov.pt. Each "
+                   "replica restarts from the nominal (θ̂, φ̂), re-fits θ + the "
+                   "background MLP jointly on the data Poisson(1)-reweighted, and the "
+                   "covariance of {θ̂_b} folds in the background uncertainty with no "
+                   "Hessian. 0 = off.")
+    p.add_argument("--bootstrap-epochs", type=int, default=30,
+                   help="Max epochs per bootstrap replica (warm-started, so few are "
+                   "needed; capped here). Replicas hitting the cap without plateauing "
+                   "are flagged as possibly under-converged.")
+    p.add_argument("--bootstrap-patience", type=int, default=3,
+                   help="Per-replica early stop: epochs without reweighted-NLL "
+                   "improvement (> --patience-threshold) before the replica is "
+                   "considered converged.")
+    p.add_argument("--bootstrap-seed", type=int, default=12345,
+                   help="Base seed for the per-replica Poisson(1) event weights "
+                   "(replica b uses seed + b; reset each epoch so an event keeps its "
+                   "count across the replica's epochs).")
     # Mixed-precision + torch.compile (same convention as
     # train_muon_response_flow.py).
     p.add_argument(
