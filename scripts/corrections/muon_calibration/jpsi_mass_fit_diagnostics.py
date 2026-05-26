@@ -463,6 +463,35 @@ def _save_fig(fig, output_dir: str, stem: str, formats=("png", "pdf"), dpi: int 
     return out_paths
 
 
+def _chi2_compat_zero(theta: np.ndarray, cov: np.ndarray):
+    """χ² for the compatibility of ``theta`` with zero given covariance ``cov``:
+    ``χ² = θᵀ C⁺ θ`` with ``dof = rank(C)`` (generalised χ² — robust to a
+    rank-deficient / pinv covariance, where the zero-variance directions are
+    dropped from both θ and the dof). Returns ``(chi2, dof, p_value)`` with
+    ``p`` the upper-tail χ² probability."""
+    theta = np.asarray(theta, dtype=np.float64).reshape(-1)
+    cov = np.asarray(cov, dtype=np.float64)
+    cov = 0.5 * (cov + cov.T)
+    w = np.linalg.eigvalsh(cov)
+    wmax = float(w.max()) if w.size else 0.0
+    tol = cov.shape[0] * np.finfo(np.float64).eps * max(wmax, 0.0)
+    dof = int((w > tol).sum())
+    cinv = np.linalg.pinv(cov, rcond=1e-12)
+    chi2 = float(theta @ cinv @ theta)
+    p = float("nan")
+    if dof > 0 and np.isfinite(chi2):
+        try:
+            from scipy.stats import chi2 as _chi2dist
+            p = float(_chi2dist.sf(chi2, dof))
+        except Exception:
+            try:
+                from scipy.special import gammaincc
+                p = float(gammaincc(dof / 2.0, chi2 / 2.0))
+            except Exception:
+                p = float("nan")
+    return chi2, dof, p
+
+
 def _select_slice(eta_abs: np.ndarray, slice_def):
     """Boolean mask for a |η| slice (lo, hi) or None for inclusive."""
     if slice_def is None:
@@ -616,6 +645,7 @@ def plot_theta_vs_eta(
     eta_edges: np.ndarray,    # [n_eta + 1]
     output_dir: str,
     edm: "float | None" = None,
+    chi2_info=None,
 ):
     n_eta, n_comp = theta.shape
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
@@ -635,7 +665,12 @@ def plot_theta_vs_eta(
         ax.set_ylabel(component_names[i])
         ax.grid(True, alpha=0.3)
     axes[-1].set_xlabel("η-bin center")
-    axes[0].set_title(name)
+    title = name
+    if chi2_info is not None:
+        chi2, dof, p = chi2_info
+        title += (f"   (vs 0: χ²/dof = {chi2:.1f}/{dof} = {chi2 / max(dof, 1):.2f}, "
+                  f"p = {p:.3g})")
+    axes[0].set_title(title)
     if edm is not None:
         fig.text(0.995, 0.005, f"EDM = {edm:.2e}", ha="right", va="bottom",
                  fontsize=8, color="0.4")
@@ -1049,6 +1084,7 @@ def main() -> int:
     # Fisher info → ±1σ for θ_scale (and θ_smear, when present).
     sigma_scale = None
     sigma_smear = None
+    cov_scale_flat = None   # 72×72 θ_scale covariance block (for the χ² test)
     edm = None
     if args.fisher and os.path.exists(args.fisher):
         f = torch.load(args.fisher, weights_only=False)
@@ -1060,10 +1096,9 @@ def main() -> int:
         if edm is not None:
             print(f"  fit EDM (½ gᵀV g) = {edm:.3e}")
         cov_pt = f.get("covariance_24_3_24_3")
-        cov_flat = None
         if cov_pt is not None:
-            cov_flat = cov_pt.reshape(72, 72).cpu().numpy()
-            sigma_scale = np.sqrt(np.maximum(np.diag(cov_flat), 0.0)).reshape(24, 3)
+            cov_scale_flat = cov_pt.reshape(72, 72).cpu().numpy()
+            sigma_scale = np.sqrt(np.maximum(np.diag(cov_scale_flat), 0.0)).reshape(24, 3)
         ss = f.get("sigma_smear_eff_24_2")
         if ss is not None:
             sigma_smear = ss.cpu().numpy()
@@ -1075,9 +1110,9 @@ def main() -> int:
             print("plotting covariance / correlation matrix...")
             plot_cov_corr(full_cov.detach().cpu().numpy(), f.get("labels"),
                           int(f.get("n_scale", 72)), out_dir, edm=edm)
-        elif cov_flat is not None:
+        elif cov_scale_flat is not None:
             print("plotting correlation matrix (θ_scale block)...")
-            plot_fisher_correlation(cov_flat, out_dir)
+            plot_fisher_correlation(cov_scale_flat, out_dir)
         else:
             print("  warning: no covariance in the file; skipping matrix plot.")
     else:
@@ -1088,9 +1123,18 @@ def main() -> int:
     print("plotting θ vs η...")
     if model.scale_enabled:
         theta_scale = ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
+        # χ² for compatibility of all θ_scale (A,e,M over the η bins) with zero,
+        # using the full θ_scale covariance block (correlations included).
+        chi2_info = None
+        if cov_scale_flat is not None:
+            chi2, dof, pval = _chi2_compat_zero(theta_scale.reshape(-1), cov_scale_flat)
+            chi2_info = (chi2, dof, pval)
+            print(f"  θ_scale compatibility with 0: χ²/dof = {chi2:.1f}/{dof} = "
+                  f"{chi2 / max(dof, 1):.2f}, p = {pval:.3g}")
         plot_theta_vs_eta(
             theta_scale, sigma_scale, ["A", "e [GeV]", "M"],
             "theta_scale_vs_eta", stats.eta_edges, out_dir, edm=edm,
+            chi2_info=chi2_info,
         )
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
