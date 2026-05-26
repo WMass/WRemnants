@@ -1506,6 +1506,7 @@ def build_flow(
     sospf_degree: int = 4,
     sospf_polynomials: int = 3,
     sospf_quad_n: int = -1,
+    nsf_bins: int = 8,
 ) -> nn.Module:
     """Build a conditional flow via zuko. Architecture-dispatched.
 
@@ -1597,6 +1598,20 @@ def build_flow(
             hidden_features=[hidden_features] * n_hidden_layers,
             activation=act_cls,
         )
+    if arch in ("nsf", "rqs"):
+        # Neural Spline Flow — monotonic rational-quadratic spline transforms
+        # (Durkan et al., 2019). Knot widths/heights/derivatives are softmax/
+        # softplus-bounded and the map is linear outside ``[-bound, bound]``
+        # (bound=5), so there is no erf/exp saturation or overflow — it needs
+        # none of the GF guards. ``nsf_bins`` = number of spline knots.
+        return zuko.flows.NSF(
+            features=n_features,
+            context=n_cond,
+            transforms=n_transforms,
+            bins=nsf_bins,
+            hidden_features=[hidden_features] * n_hidden_layers,
+            activation=act_cls,
+        )
     if arch == "glow":
         return _build_glow(
             n_features=n_features,
@@ -1638,7 +1653,7 @@ def build_flow(
         )
     raise ValueError(
         f"unknown architecture '{architecture}'; "
-        f"available: 'realnvp', 'glow', 'maf', 'gf', 'sospf'"
+        f"available: 'realnvp', 'glow', 'maf', 'gf', 'sospf', 'nsf'"
     )
 
 

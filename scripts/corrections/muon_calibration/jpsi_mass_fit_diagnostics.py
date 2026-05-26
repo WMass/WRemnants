@@ -1,0 +1,1010 @@
+"""Diagnostic plots for the J/ψ unbinned mass-fit calibration.
+
+Inputs:
+  --checkpoint <run>/checkpoint_best.pt   model + stats + θ_scale + θ_smear
+  --fisher     <run>/fisher_info.pt       Hessian + covariance (optional;
+                                          omit → θ ±σ bands skipped)
+  --shards     <run>/shards/              per-bucket Arrow files
+
+Outputs (under --output, default ``<checkpoint_dir>/diagnostics/``):
+  1. mll_closure_inclusive.png  + mll_closure_eta{0..3}.png
+     m_ll histograms (data + MC, weighted) with overlaid model curves
+     (signal + Bernstein backgrounds + total mixture) per |η_+| slice.
+  2. theta_scale_vs_eta.png
+     A, e, M per η-bin with Fisher ±1σ bands.
+  3. theta_smear_vs_eta.png
+     a, c per η-bin (no Fisher: θ_smear is a nuisance, not in the
+     advertised covariance; can be added later if needed).
+  4. fisher_correlation.png
+     72×72 correlation heatmap with η-bin grid lines + (A,e,M) labels.
+  5. mll_pulls_inclusive.png  + mll_pulls_eta{0..3}.png
+     Per-bin (data − model)/√model histograms; expect ~N(0,1).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from typing import List
+
+import matplotlib
+
+matplotlib.use("Agg")  # noqa: E402 — must precede pyplot
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from tqdm import tqdm  # noqa: E402
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from jpsi_mass_arrow_loader import (  # noqa: E402
+    JpsiMassArrowLoader,
+    discover_shards,
+)
+from jpsi_mass_model import (  # noqa: E402
+    JpsiMassMixtureModel, _event_mll, N_THETA_SCALE_PM, N_THETA_SMEAR_PM,
+)
+from train_jpsi_mass_fit import _move_batch, _stats_from_dict  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint loading
+# ---------------------------------------------------------------------------
+
+
+def load_model_from_checkpoint(checkpoint_path: str, device: str):
+    """Rebuild the trained model from a checkpoint dict."""
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    args = ckpt["args"]
+    stats = _stats_from_dict(ckpt["stats"])
+    model = JpsiMassMixtureModel(
+        m_lo=stats.m_lo,
+        m_hi=stats.m_hi,
+        mll_log_scale=stats.mll_log_scale,
+        mll_mean=stats.mll_mean,
+        mll_std=stats.mll_std,
+        y_event_mean=torch.from_numpy(stats.y_event_mean),
+        y_event_std_tensor=torch.from_numpy(stats.y_event_std),
+        muon_kin_mean=torch.from_numpy(stats.muon_kin_mean),
+        muon_kin_std_tensor=torch.from_numpy(stats.muon_kin_std),
+        flow_arch=args.get("flow_arch", "gf"),
+        flow_n_transforms=args["flow_n_transforms"],
+        flow_hidden_features=args["flow_hidden"],
+        flow_n_hidden_layers=args["flow_n_hidden"],
+        flow_gf_components=args["gf_components"],
+        flow_nsf_bins=args.get("nsf_bins", 8),
+        mlp_hidden=args["mlp_hidden"],
+        mlp_n_layers=args["mlp_n_layers"],
+        linearize_scale=args.get("linearize_scale", False),
+        smear_init_a=args.get("smear_init_a", 0.0),
+        smear_init_c=args.get("smear_init_c", 0.0),
+        smearing_enabled=not args.get("disable_smearing", False),
+        scale_enabled=not args.get("disable_scale", False),
+        detach_flow_on_data=args.get("detach_flow_on_data", False),
+        fixed_theta_sampling=args.get("fixed_theta_sampling", False),
+        qop_floor_frac=args.get("qop_floor_frac", 0.0),
+        smear_fit_params=args.get("smear_fit_params", "both"),
+        # Two-stage ("both"/"flow"/"fit") checkpoints have a θ-free flow;
+        # legacy (or older) checkpoints condition the flow on θ.
+        theta_conditioning=(args.get("stage", "legacy") == "legacy"),
+    ).to(device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+    return model, stats, args, ckpt
+
+
+# ---------------------------------------------------------------------------
+# Model evaluation on a loader: per-event signal/bkg densities on a grid
+# ---------------------------------------------------------------------------
+
+
+@torch.no_grad()
+def _flow_density_on_grid(
+    model, batch, idx, m_grid_std, *, chunk_events: int = 4096,
+) -> torch.Tensor:
+    """``[len(idx), n_grid]`` log p_flow(m_grid | y_e, θ_scale_pm, θ_smear_pm).
+
+    The flow is evaluated at every m_grid point for every event in
+    ``idx``, conditioned on the event's (y, μ_kin, θ_scale_pm, θ_smear_pm)
+    at the *fitted* model nuisances (both scale and smearing) — no noise
+    sampling, no smearing-kernel ε; exactly what the data branch uses at
+    inference. Chunked over the event axis so each flow call only sees
+    ``chunk_events × n_grid`` inputs.
+    """
+    n = idx.shape[0]
+    n_grid = m_grid_std.shape[0]
+    chunk_events = max(1, int(chunk_events))
+
+    theta_scale_pm = (
+        model._scale_per_event(model.theta_scale, batch["b_pm"][idx])
+        if model.scale_enabled else None
+    )
+    theta_smear_pm = (
+        model._smear_per_event(model.theta_smear, batch["b_pm"][idx])
+        if model.smearing_enabled else None
+    )
+    cond = model._build_flow_cond(
+        batch["muon_kin_std"][idx],
+        theta_scale_pm, theta_smear_pm,
+    )
+
+    out = torch.empty((n, n_grid), device=m_grid_std.device, dtype=cond.dtype)
+    for start in range(0, n, chunk_events):
+        end = min(start + chunk_events, n)
+        sub = end - start
+        m_expand = (
+            m_grid_std.unsqueeze(0).expand(sub, n_grid).reshape(sub * n_grid, 1)
+        )
+        cond_expand = (
+            cond[start:end].unsqueeze(1).expand(sub, n_grid, -1)
+            .reshape(sub * n_grid, -1)
+        )
+        log_p_std = model.flow(m_expand, cond_expand).reshape(sub, n_grid)
+        out[start:end] = log_p_std - model.mll_log_scale
+    return out
+
+
+@torch.no_grad()
+def _tilt_density_on_grid(
+    model, batch, idx, m_centers_dev, *, chunk_events: int = 2048,
+    n_gh: int = 5, n_iter: int = 2,
+) -> torch.Tensor:
+    """``[len(idx), n_grid]`` log p_s(m_grid | c_e, θ_fit) — the #2 direct-eval
+    signal density (``_continuity_logp``) evaluated at each grid mass, exactly
+    what the stage-2 fit optimises. ``m_centers_dev`` is the physical bin grid.
+    Per event, pt scales as ``pt·(m_grid/m_obs)`` (pt∝m at fixed conditioning)."""
+    n = idx.shape[0]
+    G = m_centers_dev.shape[0]
+    eta = batch["eta_pm"][idx]; q = batch["q_pm"][idx]; b = batch["b_pm"][idx]
+    mk = batch["muon_kin_std"][idx]; pt = batch["pt_pm"][idx]
+    m_obs = batch["mll"][idx]
+    out = torch.empty((n, G), device=m_centers_dev.device, dtype=mk.dtype)
+    for start in range(0, n, max(1, chunk_events)):
+        end = min(start + chunk_events, n); sub = end - start
+        mg = m_centers_dev.view(1, G).expand(sub, G)                # [sub,G]
+        scale = (mg / m_obs[start:end].view(sub, 1)).unsqueeze(-1)  # [sub,G,1]
+        rep = lambda x: x[start:end].unsqueeze(1).expand(
+            sub, G, *x.shape[1:]).reshape(sub * G, *x.shape[1:])
+        pt_g = (pt[start:end].unsqueeze(1) * scale).reshape(sub * G, 2)
+        lp = model._continuity_logp(
+            mg.reshape(-1), rep(mk), pt_g, rep(eta), rep(q), rep(b),
+            n_gh=n_gh, n_iter=n_iter)
+        out[start:end] = lp.reshape(sub, G)
+    return out
+
+
+@torch.no_grad()
+def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4096):
+    """``[len(idx), n_grid]`` log p₀(m_grid | c) — the *nominal* (θ=0) flow
+    density, i.e. the stage-1 template with no scale/smear correction. Point
+    evaluations of the frozen flow at the grid masses."""
+    n = idx.shape[0]; G = m_centers_dev.shape[0]
+    mk = batch["muon_kin_std"][idx]
+    out = torch.empty((n, G), device=m_centers_dev.device, dtype=mk.dtype)
+    for start in range(0, n, max(1, chunk_events)):
+        end = min(start + chunk_events, n); sub = end - start
+        mg = m_centers_dev.view(1, G).expand(sub, G).reshape(-1)
+        mke = mk[start:end].unsqueeze(1).expand(sub, G, mk.shape[-1]).reshape(sub * G, -1)
+        out[start:end] = model.log_p_nominal(mg, mke).reshape(sub, G)
+    return out
+
+
+@torch.no_grad()
+def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
+    """Directly shift+smear MC reco at the fitted θ — the empirical comparison
+    the model signal curve should reproduce. Advection: ``m += s_adv`` with the
+    analytic Jacobian; smear: Gaussian mass kick of variance
+    ``V = Σ_k κ_k·softplus(θ_smear)_k ≥ 0`` (same response as the #2 density)."""
+    mll_pre = _event_mll(ptm, etam, phim)
+    nrow = mll_pre.shape[0]
+    tsp = (model._scale_per_event(model.theta_scale, bm) if model.scale_enabled
+           else mll_pre.new_zeros((nrow, N_THETA_SCALE_PM)))
+    tse = (model._smear_per_event(model.theta_smear, bm) if model.smearing_enabled
+           else mll_pre.new_zeros((nrow, N_THETA_SMEAR_PM)))
+    s_adv, V = model._continuity_response(mll_pre, mll_pre, ptm, etam, qm, tsp, tse)
+    return (mll_pre + s_adv + V.clamp_min(0.0).sqrt() * torch.randn_like(mll_pre)).detach()
+
+
+@torch.no_grad()
+def evaluate_predictions(
+    model: JpsiMassMixtureModel,
+    loader: JpsiMassArrowLoader,
+    device: str,
+    m_centers: torch.Tensor,
+    m_grid_std: torch.Tensor,
+    bin_width: float,
+    *,
+    chunk_events: int = 4096,
+    max_events: int = 0,
+    progress: bool = True,
+    seed: int = 42,
+    n_gh: int = 5,
+    n_iter: int = 2,
+):
+    """Stream the loader once; collect per-event aggregates AND per-event
+    × per-bin signal densities for the model curves.
+
+    Continuity checkpoints (``theta_conditioning=False``): the signal grid
+    density is the **#2 direct-eval** ``_tilt_density_on_grid`` (the same
+    forward-folded flow density the fit optimises) and the MC comparison is the
+    **direct fold** (``_continuity_mc_fold``: advective shift + √V smear).
+    Legacy checkpoints use the θ-conditioned flow and the exact/linearised fold.
+
+    Per data event: store m_ll, w, |η_+|, MLP outputs ``f = (f_0, f_1, f_s)``,
+    and ``pred_signal_data[e, j] = p_flow(m_bin_j | y_e, fitted θ_scale+θ_smear)``.
+    Per MC event: store m_fold (forward-fold of scale+smear at the fitted
+    nuisances), w, |η_+|, and
+    ``pred_signal_mc[e, j] = p_flow(m_bin_j | y_e, fitted θ_scale+θ_smear)``.
+
+    Cost: O((N_data + N_mc) × n_grid) flow forwards — bounded by
+    ``--grid-chunk-events`` per call and ``--max-events`` per pass.
+
+    Returns dict (1-D unless noted):
+      mll_data, w_data, eta_data           — per data event
+      f_data                                — [N_data, 3]
+      pred_signal_data                      — [N_data, n_grid]
+      mll_mc_fold, w_mc, eta_mc            — per MC event (scale+smear fold)
+      pred_signal_mc                        — [N_mc, n_grid]
+      bin_width                              — scalar passed-through
+    """
+    # Save + seed RNG so the smearing-kernel ε is deterministic across
+    # diagnostic runs.
+    cpu_state = torch.random.get_rng_state()
+    cuda_state = None
+    cuda_avail = device.startswith("cuda") and torch.cuda.is_available()
+    if cuda_avail:
+        try:
+            cuda_state = torch.cuda.get_rng_state(device)
+        except Exception:
+            cuda_state = None
+    torch.manual_seed(seed)
+    if cuda_avail:
+        torch.cuda.manual_seed_all(seed)
+
+    m_grid_std_dev = m_grid_std.to(device)
+    m_centers_dev = m_centers.to(device)
+    n_grid = m_centers.shape[0]
+    continuity = not getattr(model, "theta_conditioning", True)
+    if continuity:
+        print("  (continuity model: signal curve = tilt p₀·exp(δ−logZ); "
+              "MC = direct linearised-shift + variance-smear fold)")
+
+    def _sig_grid(idx):
+        if continuity:
+            return _tilt_density_on_grid(
+                model, batch, idx, m_centers_dev, chunk_events=chunk_events,
+                n_gh=n_gh, n_iter=n_iter)
+        return _flow_density_on_grid(
+            model, batch, idx, m_grid_std_dev, chunk_events=chunk_events)
+
+    out = {
+        "mll_data": [], "w_data": [], "eta_data": [], "f_data": [],
+        "pred_signal_data": [],
+        "mll_mc_fold": [], "w_mc": [], "eta_mc": [],
+        "pred_signal_mc": [],
+        # continuity only: the nominal (θ=0, unshifted/unsmeared) MC + flow,
+        # to overlay the stage-1 closure alongside the folded stage-2 one.
+        "mll_mc_nominal": [], "pred_nominal_mc": [],
+    }
+
+    total_events = 0
+    bar = tqdm(loader, desc="eval", disable=not progress, unit="batch")
+    try:
+        for batch in bar:
+            if max_events > 0 and total_events >= max_events:
+                break
+            batch = _move_batch(batch, device)
+            is_data = batch["is_data_mask"]
+            is_mc = ~is_data
+
+            if bool(is_data.any()):
+                data_idx = is_data.nonzero(as_tuple=True)[0]
+                f = model.f_data(batch["muon_kin_std"][data_idx])  # [n_data, 3]
+                # Signal density at every bin centre for every data event at the
+                # fitted θ: tilt (continuity) or θ-conditioned flow (legacy).
+                log_p_grid = _sig_grid(data_idx)  # [n_data, n_grid] log-density (1/GeV)
+                out["mll_data"].append(batch["mll"][data_idx].cpu().numpy())
+                out["w_data"].append(batch["w"][data_idx].cpu().numpy())
+                out["eta_data"].append(batch["eta_pm"][data_idx, 0].cpu().numpy())
+                out["f_data"].append(f.cpu().numpy())
+                out["pred_signal_data"].append(log_p_grid.exp().cpu().numpy())
+
+            if bool(is_mc.any()):
+                mc_idx = is_mc.nonzero(as_tuple=True)[0]
+                # Directly shift+smear the MC at the *fitted* θ — the empirical
+                # template the model signal curve should reproduce.
+                ptm = batch["pt_pm"][mc_idx]
+                etam = batch["eta_pm"][mc_idx]
+                phim = batch["phi_pm"][mc_idx]
+                qm = batch["q_pm"][mc_idx]
+                bm = batch["b_pm"][mc_idx]
+                if continuity:
+                    mll_fold = _continuity_mc_fold(model, ptm, etam, phim, qm, bm)
+                else:
+                    pt_cur = ptm
+                    scale_shift = 0.0
+                    if model.scale_enabled:
+                        if model.linearize_scale:
+                            mll_pre = _event_mll(ptm, etam, phim)
+                            j_pm = model.jacobian_mll_linearized(mll_pre, ptm, qm, bm)
+                            scale_shift = (
+                                j_pm * model._scale_per_event(model.theta_scale, bm)
+                            ).sum(-1)
+                        else:
+                            dqop = model._delta_qop_analytic(model.theta_scale, ptm, etam, qm, bm)
+                            pt_cur = model._apply_scale_pt(ptm, etam, qm, dqop, sign=+1.0)
+                    if model.smearing_enabled:
+                        sig = model.sigma_qop_pm(model.theta_smear, pt_cur, etam, bm)
+                        pt_cur = model.apply_smear_pt(
+                            pt_cur, etam, qm, sig, torch.randn_like(sig))
+                    mll_fold = _event_mll(pt_cur, etam, phim) + scale_shift
+                # Signal density on the grid for every MC event (tilt / flow).
+                log_p_grid_mc = _sig_grid(mc_idx)  # [n_mc, n_grid]
+                out["mll_mc_fold"].append(mll_fold.cpu().numpy())
+                out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
+                out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
+                out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
+                if continuity:
+                    # nominal (θ=0): raw reco mass + the untilted flow density p₀.
+                    out["mll_mc_nominal"].append(batch["mll"][mc_idx].cpu().numpy())
+                    out["pred_nominal_mc"].append(
+                        _nominal_density_on_grid(
+                            model, batch, mc_idx, m_centers_dev,
+                            chunk_events=chunk_events).exp().cpu().numpy())
+
+            total_events += int(batch["mll"].shape[0])
+            bar.set_postfix_str(f"n_events={total_events:,}")
+    finally:
+        bar.close()
+        torch.random.set_rng_state(cpu_state)
+        if cuda_state is not None:
+            torch.cuda.set_rng_state(cuda_state, device)
+
+    for k, lst in out.items():
+        if lst:
+            out[k] = np.concatenate(lst, axis=0)
+        else:
+            if k == "f_data":
+                out[k] = np.zeros((0, 3))
+            elif k in ("pred_signal_data", "pred_signal_mc", "pred_nominal_mc"):
+                out[k] = np.zeros((0, n_grid))
+            else:
+                out[k] = np.zeros((0,))
+    out["bin_width"] = bin_width
+    out["continuity"] = continuity
+    return out
+
+
+def _bernstein_bin_integrals(m_lo: float, m_hi: float, m_edges: np.ndarray):
+    """∫_bin p_0 dm and ∫_bin p_1 dm, closed form.
+
+    p_0(m) = 2(1 − u)/width, p_1(m) = 2u/width, u = (m − m_lo)/width
+    so ∫(1 − u) du = u − u²/2 and ∫u du = u²/2 ⇒ each per-bin integral
+    is 2·ΔF(u). Returns ``(I_0_per_bin, I_1_per_bin)`` each shape
+    ``[len(m_edges) − 1]``.
+    """
+    width = m_hi - m_lo
+    u = (m_edges - m_lo) / width
+    F0 = lambda x: x - 0.5 * x * x  # noqa: E731
+    F1 = lambda x: 0.5 * x * x      # noqa: E731
+    return 2.0 * (F0(u[1:]) - F0(u[:-1])), 2.0 * (F1(u[1:]) - F1(u[:-1]))
+
+
+def _model_pred_histograms(
+    evals, m_edges: np.ndarray, m_lo: float, m_hi: float,
+    slice_mask_data,
+):
+    """``(signal, bkg0, bkg1)`` per-bin predicted counts for one slice.
+
+    signal[j] = Δm · Σ_data w_e · f_s(y_e) · p_flow(m_bin_j | y_e, σ_e)
+              (grid eval over data events — flow density at each bin centre)
+
+    bkg_k[j] = (Σ_data w_e · f_k(y_e)) · ∫_bin_j p_k(m) dm
+              (analytic Bernstein integrals × MLP mixture weights)
+    """
+    n_bins = len(m_edges) - 1
+    bin_width = float(m_edges[1] - m_edges[0])
+    sig = np.zeros(n_bins)
+    bk0 = np.zeros(n_bins)
+    bk1 = np.zeros(n_bins)
+
+    if evals["mll_data"].size and slice_mask_data.any():
+        w_d = evals["w_data"][slice_mask_data]
+        f_d = evals["f_data"][slice_mask_data]
+        pred = evals["pred_signal_data"][slice_mask_data]  # [n_d, n_bins]
+        # Signal: Δm · Σ_e w_e · f_s(y_e) · p_flow_e_at_bin
+        weights = (w_d * f_d[:, 2])[:, None]  # [n_d, 1]
+        sig = bin_width * (pred * weights).sum(axis=0)
+        # Bernstein bkg analytic.
+        sum_f0_w = float((w_d * f_d[:, 0]).sum())
+        sum_f1_w = float((w_d * f_d[:, 1]).sum())
+        I0_bin, I1_bin = _bernstein_bin_integrals(m_lo, m_hi, m_edges)
+        bk0 = sum_f0_w * I0_bin
+        bk1 = sum_f1_w * I1_bin
+
+    return sig, bk0, bk1
+
+
+# ---------------------------------------------------------------------------
+# Plot helpers
+# ---------------------------------------------------------------------------
+
+
+def _save_fig(fig, output_dir: str, stem: str, formats=("png", "pdf"), dpi: int = 110):
+    """Write ``fig`` as ``<stem>.<ext>`` for each requested format.
+    Returns the list of written paths (for the diagnostic stdout line).
+    """
+    out_paths = []
+    for ext in formats:
+        path = os.path.join(output_dir, f"{stem}.{ext}")
+        fig.savefig(path, dpi=dpi)
+        out_paths.append(path)
+    plt.close(fig)
+    return out_paths
+
+
+def _select_slice(eta_abs: np.ndarray, slice_def):
+    """Boolean mask for a |η| slice (lo, hi) or None for inclusive."""
+    if slice_def is None:
+        return np.ones_like(eta_abs, dtype=bool)
+    lo, hi = slice_def
+    return (eta_abs >= lo) & (eta_abs < hi)
+
+
+def plot_mll_closure(
+    evals, m_centers_np, eta_slice_edges, m_lo: float, m_hi: float,
+    output_dir: str,
+):
+    """Plot data + forward-folded-MC histograms with overlaid model curves,
+    per |η_+| slice. The model signal curve is the flow density evaluated on
+    a per-event × per-bin grid at the fitted θ_scale + θ_smear conditioning;
+    the green MC curve is the MC forward-folded (scale+smear) at the same
+    fitted nuisances — the two are independent estimates of the signal."""
+    m_edges = np.concatenate([
+        [m_centers_np[0] - evals["bin_width"] / 2],
+        m_centers_np[:-1] + evals["bin_width"] / 2,
+        [m_centers_np[-1] + evals["bin_width"] / 2],
+    ])
+
+    slices = [("inclusive", None)] + [
+        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
+        for i in range(len(eta_slice_edges) - 1)
+    ]
+
+    for tag, slice_def in slices:
+        data_mask = (
+            _select_slice(np.abs(evals["eta_data"]), slice_def)
+            if evals["eta_data"].size else np.zeros((0,), bool)
+        )
+        mc_mask = (
+            _select_slice(np.abs(evals["eta_mc"]), slice_def)
+            if evals["eta_mc"].size else np.zeros((0,), bool)
+        )
+        if data_mask.sum() == 0 and mc_mask.sum() == 0:
+            continue
+
+        fig, (ax, axr) = plt.subplots(
+            2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
+            figsize=(8, 6),
+        )
+
+        # Data hist.
+        if data_mask.any():
+            data_hist, _ = np.histogram(
+                evals["mll_data"][data_mask], bins=m_edges,
+                weights=evals["w_data"][data_mask],
+            )
+            ax.errorbar(
+                m_centers_np, data_hist, yerr=np.sqrt(np.abs(data_hist)),
+                fmt="o", color="k", markersize=3, label="data", zorder=3,
+            )
+        else:
+            data_hist = np.zeros(m_centers_np.shape[0])
+
+        # MC histogram forward-folded at the fitted nuisances (scale then
+        # smear), scaled so its integral matches the data's expected signal
+        # weight ``Σ w_data · f_s(y_data)`` within this slice. With that
+        # normalisation the curve sits on the same scale as the data
+        # points + the model signal prediction (and coincides with the
+        # latter by construction — useful as a visual consistency check).
+        if mc_mask.any():
+            mc_hist_raw, _ = np.histogram(
+                evals["mll_mc_fold"][mc_mask], bins=m_edges,
+                weights=evals["w_mc"][mc_mask],
+            )
+            w_mc_sum = float(evals["w_mc"][mc_mask].sum())
+            scale = 0.0
+            if data_mask.any() and w_mc_sum > 0:
+                w_d = evals["w_data"][data_mask]
+                f_d = evals["f_data"][data_mask]
+                total_signal_w = float((w_d * f_d[:, 2]).sum())
+                scale = total_signal_w / w_mc_sum
+            mc_hist = mc_hist_raw * scale
+            cont = bool(evals.get("continuity", False))
+            mc_label = (
+                "MC (directly shifted+smeared, scaled to data signal weight)"
+                if cont else
+                "MC (scale+smear folded, scaled to data signal weight)")
+            ax.step(
+                m_edges[:-1], mc_hist, where="post", color="C2", lw=1.2,
+                label=mc_label,
+            )
+        else:
+            mc_hist = np.zeros(m_centers_np.shape[0])
+
+        # Model components — analytic bkg + grid-eval signal (tilt / flow).
+        signal, bkg0, bkg1 = _model_pred_histograms(
+            evals, m_edges, m_lo, m_hi, data_mask,
+        )
+        total = signal + bkg0 + bkg1
+        cont = bool(evals.get("continuity", False))
+        sig_label = ("model signal (tilt p₀·e^δ at fitted θ)" if cont
+                     else "model signal (flow at fitted scale+smear)")
+        if total.sum() > 0:
+            ax.plot(m_centers_np, total, color="C0", lw=1.5, label="model total")
+            ax.plot(m_centers_np, signal, color="C1", lw=1.0, ls="--",
+                    label=sig_label)
+            ax.fill_between(
+                m_centers_np, 0, bkg0 + bkg1, alpha=0.3, color="C3",
+                label="model bkg (Bernstein)",
+            )
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = data_hist / np.where(total > 0, total, np.nan)
+                ratio_err = np.sqrt(np.abs(data_hist)) / np.where(
+                    total > 0, total, np.nan
+                )
+            axr.errorbar(
+                m_centers_np, ratio, yerr=ratio_err, fmt="o",
+                color="k", markersize=3,
+            )
+            axr.axhline(1.0, color="C0", lw=1)
+
+        ax.set_ylabel("events / bin (weighted)")
+        ax.set_title(
+            f"m_ll closure — {tag}"
+            + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]"
+               if slice_def else "")
+        )
+        # Headroom so the (5-entry) legend sits above the curves, not on them.
+        ymax = max(
+            float((data_hist + np.sqrt(np.abs(data_hist))).max()),
+            float(mc_hist.max()),
+            float(total.max()),
+        )
+        if ymax > 0:
+            ax.set_ylim(0, ymax * 1.45)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        axr.set_xlabel("m_ll [GeV]")
+        axr.set_ylabel("data / model")
+        axr.set_ylim(0.6, 1.4)
+
+        fig.tight_layout()
+        for p in _save_fig(fig, output_dir, f"mll_closure_{tag}"):
+            print(f"  wrote {p}")
+
+
+def plot_theta_vs_eta(
+    theta: np.ndarray,       # [n_eta, n_comp]
+    sigma: "np.ndarray | None",  # [n_eta, n_comp] or None
+    component_names: List[str],
+    name: str,
+    eta_edges: np.ndarray,    # [n_eta + 1]
+    output_dir: str,
+):
+    n_eta, n_comp = theta.shape
+    eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
+
+    fig, axes = plt.subplots(n_comp, 1, sharex=True, figsize=(8, 2.5 * n_comp))
+    if n_comp == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        if sigma is not None:
+            ax.errorbar(
+                eta_centers, theta[:, i], yerr=sigma[:, i],
+                fmt="o", color="k", markersize=4, capsize=2,
+            )
+        else:
+            ax.plot(eta_centers, theta[:, i], "o-", color="k", markersize=4)
+        ax.axhline(0, color="0.5", lw=0.8, ls=":")
+        ax.set_ylabel(component_names[i])
+        ax.grid(True, alpha=0.3)
+    axes[-1].set_xlabel("η-bin center")
+    axes[0].set_title(name)
+    fig.tight_layout()
+    for p in _save_fig(fig, output_dir, name):
+        print(f"  wrote {p}")
+
+
+def plot_fisher_correlation(cov: np.ndarray, output_dir: str):
+    """72×72 correlation heatmap, with η-bin grid lines + (A,e,M) tick labels."""
+    n = cov.shape[0]
+    d = np.sqrt(np.diag(cov))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr = cov / np.outer(d, d)
+    corr = np.where(np.isfinite(corr), corr, 0.0)
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    im = ax.imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r")
+    # η-bin grid lines (3 cols per η-bin).
+    for k in range(3, n, 3):
+        ax.axhline(k - 0.5, color="k", lw=0.3, alpha=0.4)
+        ax.axvline(k - 0.5, color="k", lw=0.3, alpha=0.4)
+    ax.set_xticks(np.arange(1, n, 6))
+    ax.set_xticklabels([f"η{j//3}" for j in range(1, n, 6)], fontsize=7, rotation=90)
+    ax.set_yticks(np.arange(1, n, 6))
+    ax.set_yticklabels([f"η{j//3}" for j in range(1, n, 6)], fontsize=7)
+    ax.set_title("Fisher correlation matrix (A, e, M per η-bin)")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    for p in _save_fig(fig, output_dir, "fisher_correlation"):
+        print(f"  wrote {p}")
+
+
+def plot_mc_closure(
+    evals, m_centers_np, eta_slice_edges, output_dir: str,
+):
+    """MC closure: forward-folded-MC histogram (points) vs flow-density
+    curve (line), both at the fitted scale + smearing.
+
+    Empirical: histogram of m_fold_e — the MC reco forward-folded through
+    scale then smearing at the fitted θ_scale / θ_smear — weighted by w_mc.
+
+    Model curve: ``Δm · Σ_e w_e · p_flow(m_bin_j | y_e, fitted θ_scale+θ_smear)`` —
+    per-event × per-bin flow density at the fitted nuisances, summed over
+    MC events. The two should agree when the flow has correctly learned the
+    forward-fold distribution; this is the analogue of the dashed orange
+    "model signal" curve on the data plot (no Bernstein bkg, MC is
+    signal-only).
+    """
+    bin_width = float(m_centers_np[1] - m_centers_np[0])
+    m_edges = np.concatenate([
+        [m_centers_np[0] - bin_width / 2],
+        m_centers_np[:-1] + bin_width / 2,
+        [m_centers_np[-1] + bin_width / 2],
+    ])
+
+    slices = [("inclusive", None)] + [
+        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
+        for i in range(len(eta_slice_edges) - 1)
+    ]
+
+    for tag, slice_def in slices:
+        mc_mask = (
+            _select_slice(np.abs(evals["eta_mc"]), slice_def)
+            if evals["eta_mc"].size else np.zeros((0,), bool)
+        )
+        if mc_mask.sum() == 0:
+            continue
+
+        mc_hist, _ = np.histogram(
+            evals["mll_mc_fold"][mc_mask], bins=m_edges,
+            weights=evals["w_mc"][mc_mask],
+        )
+        # Model curve: Δm · Σ_mc w_e · p_signal(m_bin | c_e, fitted θ).
+        w = evals["w_mc"][mc_mask][:, None]  # [n_mc, 1]
+        pred = evals["pred_signal_mc"][mc_mask]  # [n_mc, n_grid]
+        model_curve = bin_width * (pred * w).sum(axis=0)
+        cont = bool(evals.get("continuity", False))
+        mc_label = ("MC (shifted+smeared, fitted θ)" if cont
+                    else "MC (scale+smear folded)")
+        model_label = ("flow (folded, tilt at fitted θ)" if cont
+                       else "flow (at fitted scale+smear)")
+        # Nominal (θ=0, unshifted/unsmeared) MC + flow, when available.
+        has_nom = cont and evals.get("mll_mc_nominal", np.zeros((0,))).size > 0
+        if has_nom:
+            nom_hist, _ = np.histogram(
+                evals["mll_mc_nominal"][mc_mask], bins=m_edges,
+                weights=evals["w_mc"][mc_mask])
+            nom_curve = bin_width * (evals["pred_nominal_mc"][mc_mask] * w).sum(axis=0)
+
+        fig, (ax, axr) = plt.subplots(
+            2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
+            figsize=(8, 6),
+        )
+        if has_nom:
+            ax.step(m_edges[:-1], nom_hist, where="post", color="0.6", lw=1.0,
+                    label="MC (nominal, θ=0)", zorder=2)
+            ax.plot(m_centers_np, nom_curve, color="C0", ls=":", lw=1.3,
+                    label="flow (nominal p₀, θ=0)", zorder=2)
+        ax.errorbar(
+            m_centers_np, mc_hist, yerr=np.sqrt(np.abs(mc_hist)),
+            fmt="o", color="k", markersize=3, label=mc_label, zorder=3,
+        )
+        ax.plot(
+            m_centers_np, model_curve, color="C1", ls="--", lw=1.5,
+            label=model_label,
+        )
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = mc_hist / np.where(model_curve > 0, model_curve, np.nan)
+            ratio_err = np.sqrt(np.abs(mc_hist)) / np.where(
+                model_curve > 0, model_curve, np.nan,
+            )
+        axr.errorbar(m_centers_np, ratio, yerr=ratio_err, fmt="o",
+                     color="k", markersize=3, label="folded")
+        if has_nom:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rnom = nom_hist / np.where(nom_curve > 0, nom_curve, np.nan)
+            axr.plot(m_centers_np, rnom, color="0.6", lw=1.0, label="nominal")
+            axr.legend(loc="upper right", fontsize=6, ncol=2)
+        axr.axhline(1.0, color="C1", lw=1)
+        axr.set_ylim(0.6, 1.4)
+
+        ax.set_ylabel("events / bin (weighted)")
+        ax.set_title(
+            f"MC closure — {tag}"
+            + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]"
+               if slice_def else "")
+        )
+        # Headroom so the legend sits above the curves, not on them.
+        ymax = max(
+            float((mc_hist + np.sqrt(np.abs(mc_hist))).max()),
+            float(model_curve.max()),
+            float(nom_hist.max()) if has_nom else 0.0,
+            float(nom_curve.max()) if has_nom else 0.0,
+        )
+        if ymax > 0:
+            ax.set_ylim(0, ymax * 1.35)
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        axr.set_xlabel("m_ll [GeV]")
+        axr.set_ylabel("MC / model")
+
+        fig.tight_layout()
+        for p in _save_fig(fig, output_dir, f"mc_closure_{tag}"):
+            print(f"  wrote {p}")
+
+
+def plot_pulls(
+    evals, m_centers_np, eta_slice_edges, m_lo: float, m_hi: float,
+    output_dir: str,
+):
+    """Per-bin (data − model)/√model pulls; expect ~N(0,1) if model is OK."""
+    m_edges = np.concatenate([
+        [m_centers_np[0] - evals["bin_width"] / 2],
+        m_centers_np[:-1] + evals["bin_width"] / 2,
+        [m_centers_np[-1] + evals["bin_width"] / 2],
+    ])
+
+    slices = [("inclusive", None)] + [
+        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
+        for i in range(len(eta_slice_edges) - 1)
+    ]
+
+    for tag, slice_def in slices:
+        data_mask = (
+            _select_slice(np.abs(evals["eta_data"]), slice_def)
+            if evals["eta_data"].size else np.zeros((0,), bool)
+        )
+        mc_mask = (
+            _select_slice(np.abs(evals["eta_mc"]), slice_def)
+            if evals["eta_mc"].size else np.zeros((0,), bool)
+        )
+        if data_mask.sum() == 0:
+            continue
+
+        w_sel = evals["w_data"][data_mask]
+        data_hist, _ = np.histogram(
+            evals["mll_data"][data_mask], bins=m_edges, weights=w_sel,
+        )
+        signal_curve, p0_curve, p1_curve = _model_pred_histograms(
+            evals, m_edges, m_lo, m_hi, data_mask,
+        )
+        total_curve = signal_curve + p0_curve + p1_curve
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pulls = (data_hist - total_curve) / np.sqrt(
+                np.where(total_curve > 0, total_curve, np.nan)
+            )
+        pulls_finite = pulls[np.isfinite(pulls)]
+
+        fig, (ax_b, ax_h) = plt.subplots(1, 2, figsize=(10, 4))
+        ax_b.stem(m_centers_np, pulls, markerfmt="ko", basefmt="grey", linefmt="k-")
+        ax_b.axhline(0, color="grey", lw=0.5)
+        ax_b.set_xlabel("m_ll [GeV]")
+        ax_b.set_ylabel("(data − model) / √model")
+        ax_b.set_title(
+            f"per-bin pulls — {tag}"
+            + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]" if slice_def else "")
+        )
+
+        ax_h.hist(pulls_finite, bins=20, range=(-5, 5),
+                  histtype="step", color="k", lw=1.2)
+        # Overlay N(0,1) reference scaled to integral=n_bins.
+        x = np.linspace(-5, 5, 200)
+        ax_h.plot(
+            x, len(pulls_finite) * 10 / 20 * np.exp(-0.5 * x * x) / np.sqrt(2 * np.pi),
+            color="C0", lw=1, label="N(0,1)",
+        )
+        ax_h.set_xlabel("pull")
+        ax_h.set_ylabel("bins")
+        ax_h.legend(fontsize=8)
+        ax_h.text(
+            0.05, 0.95,
+            f"mean={np.nanmean(pulls_finite):+.2f}\n"
+            f"std={np.nanstd(pulls_finite):.2f}\n"
+            f"n={len(pulls_finite)}",
+            transform=ax_h.transAxes, va="top", fontsize=8,
+        )
+
+        fig.tight_layout()
+        for p in _save_fig(fig, output_dir, f"mll_pulls_{tag}"):
+            print(f"  wrote {p}")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="jpsi_mass_fit_diagnostics",
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument("--checkpoint", required=True,
+                   help="Path to checkpoint_best.pt from train_jpsi_mass_fit.")
+    p.add_argument("--shards", required=True,
+                   help="Path to the shard directory (or list).")
+    p.add_argument("--fisher", default=None,
+                   help="Path to fisher_info.pt (optional; enables θ_scale ±σ "
+                   "bands and the correlation heatmap).")
+    p.add_argument("--output", default=None,
+                   help="Output directory (default: <checkpoint_dir>/diagnostics/).")
+    p.add_argument("--device", default=("cuda:0" if torch.cuda.is_available() else "cpu"))
+    p.add_argument("--batch-size", type=int, default=65536,
+                   help="Loader batch size. Bigger is fine here — no "
+                   "backward pass, only forward + collect to host.")
+    p.add_argument("--n-mll-bins", type=int, default=50,
+                   help="Number of m_ll bins. Cost of the per-event "
+                   "grid eval scales linearly in this.")
+    p.add_argument("--grid-chunk-events", type=int, default=4096,
+                   help="Cap on events processed per flow call inside "
+                   "the per-event × per-bin grid eval — bounds memory "
+                   "(chunk_events × n_mll_bins expanded inputs per call).")
+    p.add_argument("--max-events", type=int, default=0,
+                   help="Stop after this many events (0 = run to end). "
+                   "Bounds the grid-eval cost (O(N × n_mll_bins) flow "
+                   "forwards) on full-statistics shards.")
+    p.add_argument("--split", default="holdout", choices=("train", "val", "holdout", "all"),
+                   help="Which loader split to evaluate on. 'holdout' is the "
+                   "untouched-by-training default and the canonical choice.")
+    p.add_argument("--eval-seed", type=int, default=42,
+                   help="Fixed seed for the smearing-kernel ε on MC events. "
+                   "Keeps the predicted-signal histogram deterministic across "
+                   "diagnostic runs.")
+    p.add_argument("--continuity-n-gh", type=int, default=5,
+                   help="Gauss–Hermite nodes for the #2 direct-eval signal "
+                   "density on continuity checkpoints (match the fit).")
+    p.add_argument("--continuity-n-iter", type=int, default=2,
+                   help="Fixed-point iterations for the #2 source solve.")
+    return p.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
+    out_dir = args.output or os.path.join(
+        os.path.dirname(args.checkpoint), "diagnostics",
+    )
+    os.makedirs(out_dir, exist_ok=True)
+
+    device = args.device
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        print("CUDA requested but unavailable; using CPU.")
+        device = "cpu"
+
+    print(f"loading checkpoint: {args.checkpoint}")
+    model, stats, train_args, ckpt = load_model_from_checkpoint(args.checkpoint, device)
+
+    # Loader.
+    shard_files = discover_shards([args.shards])
+    if not shard_files:
+        print(f"error: no .arrow shards found under {args.shards!r}", file=sys.stderr)
+        return 1
+    print(f"found {len(shard_files)} shard(s); split={args.split}")
+    loader = JpsiMassArrowLoader(
+        shard_files, stats,
+        batch_size=args.batch_size,
+        split=args.split,
+        val_fraction=float(train_args.get("val_fraction", 0.10)),
+        holdout_fraction=float(train_args.get("holdout_fraction", 0.05)),
+        drop_last=False,
+    )
+
+    # m_ll grid.
+    m_edges = torch.linspace(stats.m_lo, stats.m_hi, args.n_mll_bins + 1)
+    bin_width = float((m_edges[1] - m_edges[0]).item())
+    m_centers = 0.5 * (m_edges[:-1] + m_edges[1:])
+    m_centers_np = m_centers.cpu().numpy()
+    m_grid_std = (m_centers - stats.mll_mean) / stats.mll_std
+
+    # η slices for the per-slice closure plots.
+    eta_slice_edges = np.array([0.0, 0.6, 1.2, 1.8, 2.4])
+
+    print(
+        f"evaluating model on the loader (batch_size={args.batch_size}, "
+        f"n_mll_bins={args.n_mll_bins}, "
+        f"grid_chunk_events={args.grid_chunk_events}"
+        f"{', max_events=' + str(args.max_events) if args.max_events else ''})..."
+    )
+    evals = evaluate_predictions(
+        model, loader, device, m_centers, m_grid_std, bin_width,
+        chunk_events=args.grid_chunk_events,
+        max_events=args.max_events,
+        progress=True,
+        seed=args.eval_seed,
+        n_gh=args.continuity_n_gh,
+        n_iter=args.continuity_n_iter,
+    )
+    print(
+        f"  collected {evals['mll_data'].shape[0]} data events, "
+        f"{evals['mll_mc_fold'].shape[0]} MC events"
+    )
+
+    # Plot 1: m_ll closure.
+    print("plotting m_ll closure...")
+    plot_mll_closure(
+        evals, m_centers_np, eta_slice_edges,
+        stats.m_lo, stats.m_hi, out_dir,
+    )
+
+    # Fisher info → ±1σ for θ_scale.
+    sigma_scale = None
+    if args.fisher and os.path.exists(args.fisher):
+        f = torch.load(args.fisher, weights_only=False)
+        cov_pt = f.get("covariance_24_3_24_3")
+        if cov_pt is not None:
+            cov_flat = cov_pt.reshape(72, 72).cpu().numpy()
+            sigma_scale_flat = np.sqrt(np.maximum(np.diag(cov_flat), 0.0))
+            sigma_scale = sigma_scale_flat.reshape(24, 3)
+            print("plotting Fisher correlation matrix...")
+            plot_fisher_correlation(cov_flat, out_dir)
+        else:
+            print("  warning: covariance not in fisher_info.pt (Hessian "
+                  "inversion may have failed); skipping correlation plot.")
+    else:
+        print("no fisher_info.pt → skipping θ_scale ±σ bands + correlation plot.")
+
+    # Plots 2, 3: θ vs η — only for the *enabled* nuisances (a disabled one
+    # is an inert, fixed parameter; plotting it would be misleading).
+    print("plotting θ vs η...")
+    if model.scale_enabled:
+        theta_scale = ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
+        plot_theta_vs_eta(
+            theta_scale, sigma_scale, ["A", "e [GeV]", "M"],
+            "theta_scale_vs_eta", stats.eta_edges, out_dir,
+        )
+    else:
+        print("  --disable-scale: skipping theta_scale_vs_eta")
+    if model.smearing_enabled:
+        # softplus-reparameterised — plot the *effective* (physical, ≥0) a, c.
+        theta_smear_eff = model.effective_theta_smear().detach().cpu().numpy()
+        plot_theta_vs_eta(
+            theta_smear_eff, None, ["a [1/GeV] (eff)", "c (eff)"],
+            "theta_smear_vs_eta", stats.eta_edges, out_dir,
+        )
+    else:
+        print("  --disable-smearing: skipping theta_smear_vs_eta")
+
+    # Plot 5: pulls.
+    print("plotting per-bin pulls...")
+    plot_pulls(
+        evals, m_centers_np, eta_slice_edges,
+        stats.m_lo, stats.m_hi, out_dir,
+    )
+
+    # Plot 6: MC closure (forward-folded MC vs flow density curve, both at
+    # the fitted scale + smearing). Re-uses pred_signal_mc — no second pass.
+    print("plotting MC closure...")
+    plot_mc_closure(evals, m_centers_np, eta_slice_edges, out_dir)
+
+    print(f"\nall diagnostics written under {out_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
