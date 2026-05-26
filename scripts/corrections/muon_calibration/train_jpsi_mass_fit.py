@@ -2282,11 +2282,11 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "uncertainty included (the MLP is in the joint), and Hessian-"
                    "free (first derivatives only). Cost is O(N_events) per-event "
                    "gradients — see --empirical-fisher-max-events.")
-    p.add_argument("--empirical-fisher-max-events", type=int, default=50000,
-                   help="Cap on events used for the empirical Fisher (0 = all). "
-                   "J is an average per-event quantity, so a representative subset "
-                   "is rescaled by Σw_total/Σw_seen to the full-statistics "
-                   "covariance scale.")
+    p.add_argument("--empirical-fisher-max-events", type=int, default=0,
+                   help="Cap on events used for the empirical Fisher (default 0 = "
+                   "all events). If set >0, J (an average per-event quantity) is "
+                   "computed on that representative subset and rescaled by "
+                   "Σw_total/Σw_seen to the full-statistics covariance scale.")
     p.add_argument("--empirical-fisher-chunk", type=int, default=64,
                    help="Events per is_grads_batched call when extracting "
                    "per-event scores (memory ≈ chunk × backward graph).")
