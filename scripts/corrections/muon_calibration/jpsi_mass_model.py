@@ -1281,6 +1281,47 @@ class JpsiMassMixtureModel(nn.Module):
         V = (kappa * theta_smear_eff_pm.pow(2)).sum(-1).clamp_min(0.0)
         return s_adv, V
 
+    def _source_rho_std(self, m_obs, pt_obs, eta_pm, q_pm, b_pm, xig):
+        """Standardised SOURCE ρ for the flow conditioning, per GH node ``[B, G]``.
+
+        ρ is a flow *condition*, not its target, so propagating the transformed
+        value carries no Jacobian — we just recompute it from the
+        un-transformed per-muon pt and feed it in. The scale is un-applied
+        exactly (``_apply_scale_pt`` inverse). The smear is a per-muon qop jitter
+        that the #2 scheme collapsed to a scalar mass-noise √V·ε; we restore its
+        ρ effect via the conditional-mean per-muon shift given that mass node,
+        ``E[δqop_μ | δm] = (J^m_μ σ_qop_μ² / √V)·ε`` (J^m_μ = ∂m/∂qop_μ = −m/2qop_μ),
+        un-applied per node. (The uncorrelated residual ρ-noise — a higher-order
+        term needing a 2-D smear integral — is dropped.)"""
+        B = m_obs.shape[0]; G = xig.shape[-1]
+        # 1) un-apply the scale (obs → truth), per event.
+        pt1 = pt_obs
+        if self.scale_enabled:
+            dqop_s = self._delta_qop_analytic(self.theta_scale, pt_obs, eta_pm, q_pm, b_pm)
+            pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
+        # 2) un-apply the conditional-mean smear qop shift, per GH node.
+        if self.smearing_enabled:
+            sinth = _sintheta_from_eta(eta_pm)
+            qop1 = q_pm * sinth / pt1                                  # [B,2]
+            k1 = 1.0 / pt1
+            eff = self._smear_per_event(self.theta_smear, b_pm)        # [B,4]=(a±,c±)
+            a = eff[:, 0::2]; c = eff[:, 1::2]                         # [B,2]
+            sig2 = a * a + c * c * k1 * k1                             # σ_qop² [B,2]
+            Jm = -0.5 * m_obs.unsqueeze(-1) / qop1                     # ∂m/∂qop [B,2]
+            V = (Jm * Jm * sig2).sum(-1, keepdim=True)                 # [B,1] > 0
+            coef = Jm * sig2 / V.sqrt()                               # J^m σ²/√V [B,2]
+            dqop_sm = coef.unsqueeze(1) * xig.view(1, G, 1)           # [B,G,2]
+            pt_src = self._apply_scale_pt(
+                pt1.unsqueeze(1).expand(B, G, 2),
+                eta_pm.unsqueeze(1).expand(B, G, 2),
+                q_pm.unsqueeze(1).expand(B, G, 2), dqop_sm, sign=-1.0)  # [B,G,2]
+            rho_src = (pt_src[..., 0] - pt_src[..., 1]) / (pt_src[..., 0] + pt_src[..., 1])
+        else:
+            r = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
+            rho_src = r.unsqueeze(1).expand(B, G)
+        rho_idx = N_MUON_KIN - 1
+        return (rho_src - self.muon_kin_mean[rho_idx]) / self.muon_kin_std[rho_idx]
+
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
                          n_gh: int = 5, n_iter: int = 2):
         """``log p_θ(m_obs | c)`` per event via the #2 direct evaluation."""
@@ -1331,9 +1372,16 @@ class JpsiMassMixtureModel(nn.Module):
                 s_advj, Vj = resp(mp_j)
                 Gx = (mp_j + s_advj + _smear(Vj)).sum()
                 Gp = torch.autograd.grad(Gx, mp_j)[0].detach()
-        # frozen-flow density at the source points (POINT values only)
-        mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).reshape(B * G, -1)
-        logp0 = self.log_p_nominal(mp.reshape(-1), mk_g).reshape(B, G)
+        # frozen-flow density at the source points (POINT values only).
+        # Propagate the transform through the ρ conditioning: ρ is a flow
+        # CONDITION (no Jacobian), so the source ρ — scale un-applied, smear
+        # conditional-mean per node — replaces the observed ρ. η/φ are exactly
+        # transform-invariant, so the rest of muon_kin is unchanged.
+        mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
+        if self.scale_enabled or self.smearing_enabled:
+            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std(
+                m_obs, pt_obs, eta_pm, q_pm, b_pm, xi)
+        logp0 = self.log_p_nominal(mp.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
         log_terms = logW.view(1, G) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
         return torch.logsumexp(log_terms, dim=1)
 

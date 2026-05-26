@@ -310,6 +310,21 @@ def _scale_advection_np(mll, pt_pm, q_pm, b_pm, theta_inj):
     return s.astype(np.float32)
 
 
+def _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, theta_inj):
+    """ρ after applying the injected θ_scale (forward, truth→obs) to the muon
+    pt — matching the model's ``_delta_qop_analytic`` + ``_apply_scale_pt``
+    (sign=+1, floor inactive for the small injected shift). Returns ``[N]``.
+    The fit's ``_source_rho_std`` un-applies the same scale, so ρ_src → ρ_MC."""
+    sinth = 1.0 / np.cosh(eta_pm)                     # [N,2]
+    k = 1.0 / pt_pm
+    A = theta_inj[b_pm, 0]; e = theta_inj[b_pm, 1]; M = theta_inj[b_pm, 2]
+    dqop = q_pm * sinth * ((A - e * k) * k + q_pm * M)
+    qop = q_pm * sinth / pt_pm
+    pt_inj = q_pm * sinth / (qop + dqop)              # forward
+    return ((pt_inj[:, 0] - pt_inj[:, 1]) /
+            (pt_inj[:, 0] + pt_inj[:, 1])).astype(np.float32)
+
+
 def _batch_tensors(
     cols: dict,
     stats: JpsiMassPreprocStats,
@@ -338,7 +353,11 @@ def _batch_tensors(
     mll = cols["mll"].astype(np.float32)
     if inject_theta_scale is not None:
         s = _scale_advection_np(mll, pt_pm, q_pm, b_pm, inject_theta_scale)
-        mll = mll + np.where(is_data_mask, 0.0, s).astype(np.float32)  # MC rows only
+        mll = mll + np.where(is_data_mask, 0.0, s).astype(np.float32)   # MC rows only
+        # Inject the matching ρ shift: recompute ρ from the scale-injected pt so
+        # the (pseudo-)data conditioning is consistent with the mass injection.
+        rho_inj = _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale)
+        muon_kin[:, -1] = np.where(is_data_mask, muon_kin[:, -1], rho_inj)
     mll_std = ((mll - stats.mll_mean) / stats.mll_std).astype(np.float32)
 
     y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)
