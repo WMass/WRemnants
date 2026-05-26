@@ -463,6 +463,44 @@ def _smear_active_cols(model) -> List[int]:
             if float(model.smear_param_mask[c]) != 0.0]
 
 
+def _hessian_block_loop(g_full, params, active_idx, n_act):
+    """Per-batch active Hessian block ``[n_act, n_act]`` by one second backward
+    per row (robust; works through the nested autograd in the continuity
+    density). ``g_full`` is the flat first-order gradient with its graph kept."""
+    H = torch.zeros((n_act, n_act), device=g_full.device, dtype=g_full.dtype)
+    for r in range(n_act):
+        i = int(active_idx[r])
+        row = torch.autograd.grad(
+            g_full[i], params, retain_graph=True, allow_unused=True)
+        row_full = torch.cat([
+            (ri if ri is not None else torch.zeros_like(p)).reshape(-1)
+            for ri, p in zip(row, params)])
+        H[r] = row_full[active_idx]
+    return H
+
+
+def _hessian_block_batched(g_active, params, active_idx, n_act):
+    """Per-batch active Hessian block ``[n_act, n_act]`` in ONE vectorised second
+    backward via ``is_grads_batched`` (vmaps the per-row vjp over the identity
+    basis). Faster than the loop but holds ~n_act copies of the backward graph,
+    and the engine's vmap may not support every op in this double-backward path
+    (the inner ``autograd.grad`` of the change-of-variables Jacobian, the
+    fixed-point clamps) — the caller falls back to the loop on failure/OOM."""
+    eye = torch.eye(n_act, device=g_active.device, dtype=g_active.dtype)
+    rows = torch.autograd.grad(
+        g_active, params, grad_outputs=eye,
+        is_grads_batched=True, retain_graph=True, allow_unused=True)
+    parts = []
+    for ri, p in zip(rows, params):
+        if ri is None:
+            parts.append(torch.zeros(n_act, p.numel(),
+                                     device=g_active.device, dtype=g_active.dtype))
+        else:
+            parts.append(ri.reshape(n_act, -1))
+    row_full = torch.cat(parts, dim=1)        # [n_act, n_full]
+    return row_full[:, active_idx]            # [n_act, n_act]
+
+
 def compute_fisher_info_continuity(
     model: JpsiMassMixtureModel,
     loader: JpsiMassArrowLoader,
@@ -472,6 +510,7 @@ def compute_fisher_info_continuity(
     n_gh: int = 5,
     n_iter: int = 2,
     progress: bool = True,
+    vectorized: bool = True,
 ):
     """Observed (plug-in) Fisher information for the two-stage continuity fit,
     over ``theta_scale`` + the ACTIVE ``theta_smear`` columns jointly, with the
@@ -528,6 +567,7 @@ def compute_fisher_info_continuity(
     grad = torch.zeros(n_act, device=device, dtype=torch.float32)  # Σ ∂(NLL)/∂θ
     sw = 0.0
     seen = 0
+    use_batched = bool(vectorized)  # may flip to False after a fallback
     bar = tqdm(loader, desc="fisher", disable=not progress, unit="batch")
     for batch in bar:
         batch = _move_batch(batch, device)
@@ -544,15 +584,25 @@ def compute_fisher_info_continuity(
             continue
         g = torch.autograd.grad(nll, params, create_graph=True)
         g_full = torch.cat([gi.reshape(-1) for gi in g])
-        grad += g_full[active_idx].detach()
-        for r in range(n_act):
-            i = int(active_idx[r])
-            row = torch.autograd.grad(
-                g_full[i], params, retain_graph=True, allow_unused=True)
-            row_full = torch.cat([
-                (ri if ri is not None else torch.zeros_like(p)).reshape(-1)
-                for ri, p in zip(row, params)])
-            H[r] += row_full[active_idx].detach()
+        g_active = g_full[active_idx]
+        grad += g_active.detach()
+        # Vectorised second backward (one vmapped vjp over the identity basis);
+        # fall back to the per-row loop on any engine failure / OOM, once.
+        if use_batched:
+            try:
+                Hb = _hessian_block_batched(g_active, params, active_idx, n_act)
+            except (RuntimeError, NotImplementedError) as e:
+                use_batched = False
+                if device.startswith("cuda"):
+                    torch.cuda.empty_cache()
+                bar.write(
+                    f"  note: vectorised Hessian unavailable "
+                    f"({type(e).__name__}: {str(e).splitlines()[0][:80]}); "
+                    f"using the per-row loop")
+                Hb = _hessian_block_loop(g_full, params, active_idx, n_act)
+        else:
+            Hb = _hessian_block_loop(g_full, params, active_idx, n_act)
+        H += Hb.detach()
         sw += float(w.sum().item())
         seen += int(data_mask.sum().item())
         bar.set_postfix_str(f"events={seen:,}")
@@ -1052,7 +1102,7 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
     H, layout = compute_fisher_info_continuity(
         model, loader, device, mc_as_data=args.validation,
         n_gh=args.continuity_n_gh, n_iter=args.continuity_n_iter,
-        progress=args.progress)
+        progress=args.progress, vectorized=args.fisher_vectorized)
     out = _fisher_save_dict(H, layout, model)
     path = os.path.join(args.output, "fisher_info.pt")
     torch.save(out, path)
@@ -1697,6 +1747,13 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "Default 'train' = the data the fit used, so the covariance has "
                    "the correct statistical scale (∝ 1/N_fit). In --validation mode "
                    "the half-1 MC pseudo-data of this split is used.")
+    p.add_argument("--fisher-vectorized", default=True,
+                   action=argparse.BooleanOptionalAction,
+                   help="(two-stage) Compute the Hessian with one vmapped "
+                   "(is_grads_batched) second backward instead of a per-row loop. "
+                   "Faster but holds ~n_param copies of the backward graph; "
+                   "automatically falls back to the loop on engine failure / OOM. "
+                   "Use --no-fisher-vectorized to force the loop.")
     # Mixed-precision + torch.compile (same convention as
     # train_muon_response_flow.py).
     p.add_argument(
