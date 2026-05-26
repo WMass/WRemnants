@@ -135,9 +135,16 @@ def _make_scheduler(args, optim, epochs):
     ``none`` keeps it fixed. Returns ``(scheduler | None, kind)``."""
     kind = getattr(args, "lr_schedule", "none")
     if kind == "plateau":
+        # threshold_mode="abs": detect a plateau by the SAME absolute NLL
+        # decrease the early-stop uses (val < best - patience_threshold).
+        # The default "rel" mode tests val < best*(1-threshold), which with a
+        # NEGATIVE NLL (a log-density) moves the bar toward zero — i.e. a flat
+        # or slightly-worse epoch still "improves" — so the LR would never
+        # reduce while the absolute-threshold early-stop fires anyway.
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
             optim, mode="min", factor=args.lr_reduce_factor,
-            patience=args.lr_reduce_patience, min_lr=args.min_lr), kind
+            patience=args.lr_reduce_patience, min_lr=args.min_lr,
+            threshold=args.patience_threshold, threshold_mode="abs"), kind
     if kind == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(
             optim, T_max=max(1, epochs), eta_min=args.min_lr), kind
@@ -534,7 +541,11 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
     if sched_kind != "none":
         print(f"  lr schedule: {sched_kind}"
               + (f" (factor={args.lr_reduce_factor:g}, patience={args.lr_reduce_patience}, "
-                 f"min_lr={args.min_lr:g}); early-stop fires only after lr reductions are exhausted"
+                 f"min_lr={args.min_lr:g}); each lr reduction resets the early-stop "
+                 f"counter (early-stop deferred while the lr keeps dropping; with "
+                 f"lr-reduce-patience {args.lr_reduce_patience} < patience {args.patience} "
+                 f"the lr typically reaches min_lr first, but early-stop can still fire "
+                 f"at a higher lr if no reduction is pending)"
                  if sched_kind == "plateau"
                  else f" (T_max={epochs}, min_lr={args.min_lr:g})"))
 
@@ -603,8 +614,11 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
         torch.save(_ckpt(epoch, best_val, val_nll), last_ckpt)
         if improved:
             torch.save(_ckpt(epoch, best_val, val_nll), best_ckpt)
-        # Step the LR schedule; a reduction in ANY group restarts the early-stop
-        # window so we only stop once all reductions are exhausted (lr at min_lr).
+        # Step the LR schedule; a reduction in ANY group resets the early-stop
+        # counter, so early-stop is deferred while the lr is still dropping.
+        # With lr_reduce_patience < patience the lr therefore usually reaches
+        # min_lr before early-stop fires — but this is not guaranteed (e.g. if
+        # patience <= lr_reduce_patience, early-stop can fire at a higher lr).
         if sched is not None:
             lr_before = [g["lr"] for g in optim.param_groups]
             sched.step(val_nll) if sched_kind == "plateau" else sched.step()
