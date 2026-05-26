@@ -1037,6 +1037,12 @@ def train_loop(args: argparse.Namespace) -> int:
         print("warning: CUDA requested but not available; falling back to CPU")
         device = args.device = "cpu"
 
+    # --stage uncertainties: load an existing FULL fit (flow + MLP + θ) from
+    # --checkpoint and run only the uncertainty estimation (Fisher / bootstrap),
+    # no training. Handled in its own path.
+    if args.stage == "uncertainties":
+        return _run_uncertainties_stage(args, device)
+
     # --stage fit: load the flow checkpoint up front so its architecture and
     # stats drive the model build + standardisation (the model is rebuilt from
     # args before the flow weights are loaded, so they must match).
@@ -1044,10 +1050,10 @@ def train_loop(args: argparse.Namespace) -> int:
     flow_ckpt = None
     stats_override = None
     if args.stage == "fit":
-        flow_ckpt = args.flow_checkpoint or os.path.join(args.output, "flow_best.pt")
+        flow_ckpt = args.checkpoint or os.path.join(args.output, "flow_best.pt")
         if not os.path.exists(flow_ckpt):
             print(f"error: --stage fit needs a stage-1 flow; {flow_ckpt!r} not found "
-                  f"(run --stage flow first or pass --flow-checkpoint)", file=sys.stderr)
+                  f"(run --stage flow first or pass --checkpoint)", file=sys.stderr)
             return 1
         print(f"loading stage-1 flow checkpoint: {flow_ckpt}")
         flow_ck = torch.load(flow_ckpt, map_location=device, weights_only=False)
@@ -1297,6 +1303,81 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         print(f"  bootstrap σ(A,e,M) median over bins = "
               f"({float(ss[:,0].median()):.2e}, {float(ss[:,1].median()):.2e}, "
               f"{float(ss[:,2].median()):.2e})")
+
+
+def _load_full_fit(args, device):
+    """Load a FULL stage-2 fit (flow + MLP + θ) from ``--checkpoint`` for
+    ``--stage uncertainties``. Adopts the model-defining settings (flow arch,
+    MLP size, smear-fit choice, scale/smear enables, validation) and the
+    standardisation stats from the checkpoint so the rebuilt model matches the
+    saved weights exactly. Returns ``(path, stats, model)`` or ``None``."""
+    ck_path = args.checkpoint or os.path.join(args.output, "fit_best.pt")
+    if not os.path.exists(ck_path):
+        print(f"error: --stage uncertainties needs a fitted checkpoint; {ck_path!r} "
+              f"not found (point --checkpoint at a fit_best.pt / fit_last.pt).",
+              file=sys.stderr)
+        return None
+    print(f"loading fit checkpoint: {ck_path}")
+    ck = torch.load(ck_path, map_location=device, weights_only=False)
+    ck_args = ck.get("args", {}) or {}
+    ck_stage = ck_args.get("stage", "legacy")
+    if ck_stage == "flow":
+        print("  warning: --checkpoint is a stage-1 FLOW checkpoint (θ not fit); "
+              "the uncertainty will be evaluated at the un-fit θ.", file=sys.stderr)
+    # Adopt the model-defining settings from the checkpoint.
+    _apply_flow_arch_from_ckpt(args, ck_args)
+    for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "linearize_scale",
+              "qop_floor_frac", "smear_init_a", "smear_init_c",
+              "disable_scale", "disable_smearing", "validation"):
+        if k in ck_args:
+            setattr(args, k, ck_args[k])
+    # Stats: --stats-in overrides; else the fit's own stats.
+    if args.stats_in is not None and os.path.exists(args.stats_in):
+        with open(args.stats_in) as f:
+            stats = _stats_from_dict(json.load(f))
+        print(f"  preproc stats from {args.stats_in}")
+    elif "stats" in ck:
+        stats = _stats_from_dict(ck["stats"])
+        print("  preproc stats from the checkpoint")
+    else:
+        print("error: no stats in checkpoint and no --stats-in given.", file=sys.stderr)
+        return None
+    model = _build_model(args, stats, device,
+                         theta_conditioning=(ck_stage == "legacy"))
+    model.load_state_dict(ck["state_dict"])
+    model.eval()
+    return ck_path, stats, model
+
+
+def _run_uncertainties_stage(args, device) -> int:
+    """--stage uncertainties: load an existing fit and run only the Fisher info
+    and/or the warm-start bootstrap on it (no training)."""
+    loaded = _load_full_fit(args, device)
+    if loaded is None:
+        return 1
+    ck_path, stats, model = loaded
+    print(f"=== stage uncertainties: full fit loaded (flow + MLP + θ) — "
+          f"scale={'on' if model.scale_enabled else 'off'}, "
+          f"smear={'on' if model.smearing_enabled else 'off'}, "
+          f"smear_fit={model.smear_fit_params}"
+          + ("  [validation: MC pseudo-data]" if args.validation else "") + " ===")
+    shard_files = discover_shards(args.inputs)
+    if not shard_files:
+        print("error: no Arrow shards found under inputs", file=sys.stderr)
+        return 1
+    os.makedirs(args.output, exist_ok=True)
+    with open(os.path.join(args.output, "preproc_stats.json"), "w") as f:
+        json.dump(_stats_to_dict(stats), f, indent=2)
+    if not args.fisher_info and args.bootstrap <= 0:
+        print("warning: --stage uncertainties but neither --fisher-info nor "
+              "--bootstrap (>0) requested — nothing to compute.", file=sys.stderr)
+        return 0
+    if args.fisher_info:
+        _run_fisher_continuity(args, model, shard_files, stats, device)
+    if args.bootstrap > 0:
+        run_bootstrap_continuity(args, model, shard_files, stats, device,
+                                 mc_as_data=args.validation)
+    return 0
 
 
 def _train_loop_legacy(args: argparse.Namespace) -> int:
@@ -1739,22 +1820,25 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     )
     # Two-stage continuity pipeline (default) vs legacy forward-fold.
     p.add_argument(
-        "--stage", choices=["both", "flow", "fit", "legacy"], default="both",
+        "--stage", choices=["both", "flow", "fit", "uncertainties", "legacy"],
+        default="both",
         help="Two-stage continuity training: 'flow' = stage 1 (nominal flow on "
         "simulation, no θ conditioning); 'fit' = stage 2 (freeze flow, fit θ + "
         "background on data via the analytic continuity tilt); 'both' = run 1 "
-        "then 2 in-process (default); 'legacy' = old single-stage forward-fold "
-        "with θ-conditioned flow.",
+        "then 2 in-process (default); 'uncertainties' = load an existing FULL fit "
+        "from --checkpoint and run only the Fisher info (--fisher-info) and/or "
+        "warm-start bootstrap (--bootstrap), no training; 'legacy' = old "
+        "single-stage forward-fold with θ-conditioned flow.",
     )
     p.add_argument(
-        "--flow-checkpoint", type=str, default=None,
-        help="Stage-1 flow checkpoint to load for '--stage fit' "
-        "(default: <output>/flow_best.pt). The flow architecture "
-        "(--flow-arch/--flow-n-transforms/--flow-hidden/--flow-n-hidden/"
-        "--gf-components/--nsf-bins) and the preproc stats are read from this "
-        "checkpoint automatically, so they need not be re-specified; only the "
-        "flow weights are loaded (the MLP and θ start fresh). Pass --stats-in "
-        "to override the stats.",
+        "--checkpoint", type=str, default=None,
+        help="Checkpoint to load. '--stage fit': a stage-1 FLOW checkpoint "
+        "(default <output>/flow_best.pt); only its flow weights are loaded (MLP + θ "
+        "start fresh). '--stage uncertainties': a FULL fit checkpoint "
+        "(default <output>/fit_best.pt; point it at fit_last.pt to use the latest) "
+        "— flow + MLP + θ are all loaded. Either way the flow architecture and the "
+        "preproc stats are read from the checkpoint automatically (so they need not "
+        "be re-specified); pass --stats-in to override the stats.",
     )
     p.add_argument(
         "--validation", action="store_true",
