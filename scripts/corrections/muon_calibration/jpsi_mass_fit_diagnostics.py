@@ -615,6 +615,7 @@ def plot_theta_vs_eta(
     name: str,
     eta_edges: np.ndarray,    # [n_eta + 1]
     output_dir: str,
+    edm: "float | None" = None,
 ):
     n_eta, n_comp = theta.shape
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
@@ -635,6 +636,9 @@ def plot_theta_vs_eta(
         ax.grid(True, alpha=0.3)
     axes[-1].set_xlabel("η-bin center")
     axes[0].set_title(name)
+    if edm is not None:
+        fig.text(0.995, 0.005, f"EDM = {edm:.2e}", ha="right", va="bottom",
+                 fontsize=8, color="0.4")
     fig.tight_layout()
     for p in _save_fig(fig, output_dir, name):
         print(f"  wrote {p}")
@@ -665,7 +669,8 @@ def plot_fisher_correlation(cov: np.ndarray, output_dir: str):
         print(f"  wrote {p}")
 
 
-def plot_cov_corr(cov: np.ndarray, labels, n_scale: int, output_dir: str):
+def plot_cov_corr(cov: np.ndarray, labels, n_scale: int, output_dir: str,
+                  edm: "float | None" = None):
     """Side-by-side covariance (symmetric-log) + correlation ([-1,1]) heatmaps of
     the FULL joint parameter covariance (θ_scale + the active θ_smear), with the
     scale/smear block separator and sparse per-parameter tick labels.
@@ -707,7 +712,10 @@ def plot_cov_corr(cov: np.ndarray, labels, n_scale: int, output_dir: str):
         ax.set_xticklabels(tlabels, fontsize=6, rotation=90)
         ax.set_yticks(ticks)
         ax.set_yticklabels(tlabels, fontsize=6)
-    fig.suptitle("parameter covariance / correlation (θ_scale + active θ_smear)")
+    suptitle = "parameter covariance / correlation (θ_scale + active θ_smear)"
+    if edm is not None:
+        suptitle += f"    EDM = {edm:.2e}"
+    fig.suptitle(suptitle)
     fig.tight_layout()
     for p in _save_fig(fig, output_dir, "covariance_correlation"):
         print(f"  wrote {p}")
@@ -1041,14 +1049,16 @@ def main() -> int:
     # Fisher info → ±1σ for θ_scale (and θ_smear, when present).
     sigma_scale = None
     sigma_smear = None
+    edm = None
     if args.fisher and os.path.exists(args.fisher):
         f = torch.load(args.fisher, weights_only=False)
         if f.get("n_negative_eig", 0) not in (0, None):
             print(f"  warning: fisher_info.pt has {f['n_negative_eig']} "
                   f"non-positive eigenvalue(s) (min={f.get('min_eig', float('nan')):.2e}) "
                   f"— σ bands for affected params are unreliable.")
-        if f.get("edm") is not None:
-            print(f"  fit EDM (½ gᵀV g) = {f['edm']:.3e}")
+        edm = f.get("edm")
+        if edm is not None:
+            print(f"  fit EDM (½ gᵀV g) = {edm:.3e}")
         cov_pt = f.get("covariance_24_3_24_3")
         cov_flat = None
         if cov_pt is not None:
@@ -1064,7 +1074,7 @@ def main() -> int:
         if full_cov is not None:
             print("plotting covariance / correlation matrix...")
             plot_cov_corr(full_cov.detach().cpu().numpy(), f.get("labels"),
-                          int(f.get("n_scale", 72)), out_dir)
+                          int(f.get("n_scale", 72)), out_dir, edm=edm)
         elif cov_flat is not None:
             print("plotting correlation matrix (θ_scale block)...")
             plot_fisher_correlation(cov_flat, out_dir)
@@ -1080,7 +1090,7 @@ def main() -> int:
         theta_scale = ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
         plot_theta_vs_eta(
             theta_scale, sigma_scale, ["A", "e [GeV]", "M"],
-            "theta_scale_vs_eta", stats.eta_edges, out_dir,
+            "theta_scale_vs_eta", stats.eta_edges, out_dir, edm=edm,
         )
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
@@ -1089,7 +1099,7 @@ def main() -> int:
         theta_smear_eff = model.effective_theta_smear().detach().cpu().numpy()
         plot_theta_vs_eta(
             theta_smear_eff, sigma_smear, ["a [1/GeV] (eff)", "c (eff)"],
-            "theta_smear_vs_eta", stats.eta_edges, out_dir,
+            "theta_smear_vs_eta", stats.eta_edges, out_dir, edm=edm,
         )
     else:
         print("  --disable-smearing: skipping theta_smear_vs_eta")
