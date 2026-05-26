@@ -464,20 +464,24 @@ def _save_fig(fig, output_dir: str, stem: str, formats=("png", "pdf"), dpi: int 
 
 
 def _chi2_compat_zero(theta: np.ndarray, cov: np.ndarray):
-    """χ² for the compatibility of ``theta`` with zero given covariance ``cov``:
-    ``χ² = θᵀ C⁺ θ`` with ``dof = rank(C)`` (generalised χ² — robust to a
-    rank-deficient / pinv covariance, where the zero-variance directions are
-    dropped from both θ and the dof). Returns ``(chi2, dof, p_value)`` with
-    ``p`` the upper-tail χ² probability."""
+    """χ² for the compatibility of ``theta`` with zero given covariance ``cov``,
+    via the eigendecomposition restricted to the POSITIVE-variance directions:
+    ``χ² = Σ_{λ_k>0} (v_kᵀθ)² / λ_k``, ``dof = #{λ_k > 0}``. This is a proper
+    (≥0) generalised χ² that drops both zero-variance (rank-deficient / pinv)
+    and any negative-eigenvalue directions (a non-PD Hessian covariance), so it
+    is well-defined for every estimator. Returns ``(chi2, dof, p_value)``."""
     theta = np.asarray(theta, dtype=np.float64).reshape(-1)
     cov = np.asarray(cov, dtype=np.float64)
     cov = 0.5 * (cov + cov.T)
-    w = np.linalg.eigvalsh(cov)
+    w, V = np.linalg.eigh(cov)
     wmax = float(w.max()) if w.size else 0.0
     tol = cov.shape[0] * np.finfo(np.float64).eps * max(wmax, 0.0)
-    dof = int((w > tol).sum())
-    cinv = np.linalg.pinv(cov, rcond=1e-12)
-    chi2 = float(theta @ cinv @ theta)
+    pos = w > tol
+    dof = int(pos.sum())
+    chi2 = 0.0
+    if dof > 0:
+        proj = V[:, pos].T @ theta            # θ along the positive-variance dirs
+        chi2 = float(np.sum(proj * proj / w[pos]))
     p = float("nan")
     if dof > 0 and np.isfinite(chi2):
         try:
@@ -646,6 +650,7 @@ def plot_theta_vs_eta(
     output_dir: str,
     edm: "float | None" = None,
     chi2_info=None,
+    ref: "np.ndarray | None" = None,   # [n_eta, n_comp] reference (e.g. injected)
 ):
     n_eta, n_comp = theta.shape
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
@@ -657,18 +662,24 @@ def plot_theta_vs_eta(
         if sigma is not None:
             ax.errorbar(
                 eta_centers, theta[:, i], yerr=sigma[:, i],
-                fmt="o", color="k", markersize=4, capsize=2,
+                fmt="o", color="k", markersize=4, capsize=2, label="fit",
             )
         else:
-            ax.plot(eta_centers, theta[:, i], "o-", color="k", markersize=4)
+            ax.plot(eta_centers, theta[:, i], "o-", color="k", markersize=4, label="fit")
         ax.axhline(0, color="0.5", lw=0.8, ls=":")
+        if ref is not None:
+            ax.plot(eta_centers, ref[:, i], color="C3", ls="--", lw=1.3,
+                    label="injected")
         ax.set_ylabel(component_names[i])
         ax.grid(True, alpha=0.3)
+    if ref is not None:
+        axes[0].legend(loc="best", fontsize=8)
     axes[-1].set_xlabel("η-bin center")
     title = name
     if chi2_info is not None:
         chi2, dof, p = chi2_info
-        title += (f"   (vs 0: χ²/dof = {chi2:.1f}/{dof} = {chi2 / max(dof, 1):.2f}, "
+        cmp = "injected" if ref is not None else "0"
+        title += (f"   (vs {cmp}: χ²/dof = {chi2:.1f}/{dof} = {chi2 / max(dof, 1):.2f}, "
                   f"p = {p:.3g})")
     axes[0].set_title(title)
     if edm is not None:
@@ -1027,6 +1038,21 @@ def main() -> int:
         print("checkpoint was trained with --validation: routing simulation "
               "through the data branch as pseudo-data for the m_ll closure / pulls")
 
+    # Injected θ_scale shift (validation closure with a non-zero target): read
+    # the values the fit was trained with, replay the same m_ll injection in the
+    # pseudo-data, and use them as the χ² reference + dashed line on the θ plot.
+    inject_np = None
+    if mc_as_data:
+        ia = float(train_args.get("inject_A", 0.0) or 0.0)
+        ie = float(train_args.get("inject_e", 0.0) or 0.0)
+        im = float(train_args.get("inject_M", 0.0) or 0.0)
+        if ia or ie or im:
+            n_eta = len(stats.eta_edges) - 1
+            inject_np = np.zeros((n_eta, 3), dtype=np.float64)
+            inject_np[:, 0] = ia; inject_np[:, 1] = ie; inject_np[:, 2] = im
+            print(f"checkpoint injected θ_scale (A,e,M)=({ia:g},{ie:g},{im:g}) — "
+                  f"replaying the pseudo-data injection; closure target = injected")
+
     print(f"found {len(shard_files)} shard(s); split={args.split}")
     loader = JpsiMassArrowLoader(
         shard_files, stats,
@@ -1035,6 +1061,7 @@ def main() -> int:
         val_fraction=float(train_args.get("val_fraction", 0.10)),
         holdout_fraction=float(train_args.get("holdout_fraction", 0.05)),
         drop_last=False,
+        inject_theta_scale=inject_np,
     )
 
     # m_ll grid.
@@ -1123,18 +1150,24 @@ def main() -> int:
     print("plotting θ vs η...")
     if model.scale_enabled:
         theta_scale = ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
-        # χ² for compatibility of all θ_scale (A,e,M over the η bins) with zero,
-        # using the full θ_scale covariance block (correlations included).
+        # χ² for compatibility of all θ_scale (A,e,M over the η bins) with the
+        # reference (the injected values if a shift was injected, else 0), using
+        # the full θ_scale covariance block (correlations included).
+        ref = inject_np if inject_np is not None else None
         chi2_info = None
         if cov_scale_flat is not None:
-            chi2, dof, pval = _chi2_compat_zero(theta_scale.reshape(-1), cov_scale_flat)
+            resid = theta_scale.reshape(-1)
+            if ref is not None:
+                resid = resid - ref.reshape(-1)
+            chi2, dof, pval = _chi2_compat_zero(resid, cov_scale_flat)
             chi2_info = (chi2, dof, pval)
-            print(f"  θ_scale compatibility with 0: χ²/dof = {chi2:.1f}/{dof} = "
+            tgt = "injected" if ref is not None else "0"
+            print(f"  θ_scale compatibility with {tgt}: χ²/dof = {chi2:.1f}/{dof} = "
                   f"{chi2 / max(dof, 1):.2f}, p = {pval:.3g}")
         plot_theta_vs_eta(
             theta_scale, sigma_scale, ["A", "e [GeV]", "M"],
             "theta_scale_vs_eta", stats.eta_edges, out_dir, edm=edm,
-            chi2_info=chi2_info,
+            chi2_info=chi2_info, ref=ref,
         )
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")

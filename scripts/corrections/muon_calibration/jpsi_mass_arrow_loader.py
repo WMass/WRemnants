@@ -298,31 +298,53 @@ def _bucketize_eta(eta: np.ndarray, edges: np.ndarray) -> np.ndarray:
     return np.clip(idx, 0, len(edges) - 2).astype(np.int64)
 
 
+def _scale_advection_np(mll, pt_pm, q_pm, b_pm, theta_inj):
+    """Analytic advective m_ll shift Σ_μ v_μ·θ_inj[b_μ] for an injected
+    θ_scale, matching the model's ``_continuity_response`` (per muon
+    v = (−m/2, (m/2)/pt, −(m/2)·q·pt) for (A, e, M)). ``theta_inj`` is
+    ``[n_eta, 3]``; inputs are ``[N]`` / ``[N, 2]``. Returns ``[N]``."""
+    k = 1.0 / pt_pm                                   # [N, 2]
+    A = theta_inj[b_pm, 0]; e = theta_inj[b_pm, 1]; M = theta_inj[b_pm, 2]  # [N,2]
+    mh = 0.5 * mll[:, None]                            # [N, 1]
+    s = (-mh * A + mh * k * e - mh * q_pm * pt_pm * M).sum(axis=1)
+    return s.astype(np.float32)
+
+
 def _batch_tensors(
     cols: dict,
     stats: JpsiMassPreprocStats,
+    inject_theta_scale: "np.ndarray | None" = None,
 ) -> dict[str, torch.Tensor]:
-    """Build the tensor batch from one Arrow record batch's columns."""
+    """Build the tensor batch from one Arrow record batch's columns.
+
+    ``inject_theta_scale`` ([n_eta, 3], validation closure only): the MC
+    (``is_data == 0``) m_ll is shifted by the advective scale shift at that
+    injected θ_scale, so the (pseudo-)data look as if they carried that
+    calibration and the fit should recover it.
+    """
     y_event, muon_kin = _per_event_features(cols)
-
-    mll = cols["mll"].astype(np.float32)
-    mll_std = ((mll - stats.mll_mean) / stats.mll_std).astype(np.float32)
-
-    y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)
-    muon_kin_std = _standardise(muon_kin, stats.muon_kin_mean, stats.muon_kin_std)
 
     b_plus = _bucketize_eta(cols["eta_plus"], stats.eta_edges)
     b_minus = _bucketize_eta(cols["eta_minus"], stats.eta_edges)
     b_pm = np.stack([b_plus, b_minus], axis=1)
 
-    is_data_mask = (cols["is_data"].astype(np.uint8) != 0)
-
-    w = cols["nominal_weight"].astype(np.float32, copy=False)
-
     pt_pm = np.stack([cols["pt_plus"], cols["pt_minus"]], axis=1).astype(np.float32)
     eta_pm = np.stack([cols["eta_plus"], cols["eta_minus"]], axis=1).astype(np.float32)
     phi_pm = np.stack([cols["phi_plus"], cols["phi_minus"]], axis=1).astype(np.float32)
     q_pm = np.stack([cols["q_plus"], cols["q_minus"]], axis=1).astype(np.float32)
+
+    is_data_mask = (cols["is_data"].astype(np.uint8) != 0)
+
+    mll = cols["mll"].astype(np.float32)
+    if inject_theta_scale is not None:
+        s = _scale_advection_np(mll, pt_pm, q_pm, b_pm, inject_theta_scale)
+        mll = mll + np.where(is_data_mask, 0.0, s).astype(np.float32)  # MC rows only
+    mll_std = ((mll - stats.mll_mean) / stats.mll_std).astype(np.float32)
+
+    y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)
+    muon_kin_std = _standardise(muon_kin, stats.muon_kin_mean, stats.muon_kin_std)
+
+    w = cols["nominal_weight"].astype(np.float32, copy=False)
 
     return {
         "mll": torch.from_numpy(mll),
@@ -375,6 +397,7 @@ class JpsiMassArrowLoader(IterableDataset):
         rank: int = 0,
         pin_memory: bool = False,
         half: "int | None" = None,
+        inject_theta_scale: "np.ndarray | None" = None,
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
@@ -395,6 +418,12 @@ class JpsiMassArrowLoader(IterableDataset):
         # train/val/holdout slice; None = all events. Used by the MC-closure
         # validation mode to give stage 1 and stage 2 disjoint simulation.
         self.half = half
+        # Injected θ_scale [n_eta, 3] (validation closure): shifts the MC m_ll
+        # by the advective scale shift so the (pseudo-)data carry that
+        # calibration; None = no injection.
+        self.inject_theta_scale = (
+            np.asarray(inject_theta_scale, dtype=np.float64)
+            if inject_theta_scale is not None else None)
 
     # -- helpers --------------------------------------------------------
 
@@ -460,12 +489,12 @@ class JpsiMassArrowLoader(IterableDataset):
                         rem = {c: cols[c][self.batch_size :] for c in _RAW_COLUMNS}
                         accum = {c: [rem[c]] for c in _RAW_COLUMNS}
                         accum_n -= self.batch_size
-                        yield _batch_tensors(emit, self.stats)
+                        yield _batch_tensors(emit, self.stats, self.inject_theta_scale)
 
         # Final partial batch.
         if accum_n > 0 and not self.drop_last:
             cols = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
-            yield _batch_tensors(cols, self.stats)
+            yield _batch_tensors(cols, self.stats, self.inject_theta_scale)
 
 
 # ---------------------------------------------------------------------------

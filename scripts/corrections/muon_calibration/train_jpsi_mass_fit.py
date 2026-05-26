@@ -777,20 +777,34 @@ def _setup_common(args, *, stats_override=None):
     return shard_files, stats, train_loader, val_loader
 
 
-def _make_loaders(args, shard_files, stats, *, half=None):
+def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None):
     """Build the ``(train, val)`` loaders for one stage. ``half`` selects a
     deterministic disjoint event half (0/1) — used by the MC-closure
     validation mode (stage 1 ← half 0, stage 2 ← half 1); ``None`` = all
-    events."""
+    events. ``inject_theta`` ([n_eta, 3]) injects a known θ_scale shift into
+    the (pseudo-)data m_ll (validation closure)."""
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=True, half=half)
+        drop_last=True, half=half, inject_theta_scale=inject_theta)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half)
+        drop_last=False, half=half, inject_theta_scale=inject_theta)
     return train_loader, val_loader
+
+
+def _inject_theta_np(args, n_eta):
+    """``[n_eta, 3]`` injected θ_scale (constant A, e, M across η) for the
+    validation closure, or ``None`` if no shift was requested."""
+    a = float(getattr(args, "inject_A", 0.0) or 0.0)
+    e = float(getattr(args, "inject_e", 0.0) or 0.0)
+    m = float(getattr(args, "inject_M", 0.0) or 0.0)
+    if a == 0.0 and e == 0.0 and m == 0.0:
+        return None
+    t = np.zeros((int(n_eta), 3), dtype=np.float64)
+    t[:, 0] = a; t[:, 1] = e; t[:, 2] = m
+    return t
 
 
 # Args that fix the flow's parameter shapes — these must match the saved flow
@@ -1088,11 +1102,19 @@ def train_loop(args: argparse.Namespace) -> int:
     # pseudo-data). The disjoint halves keep stage 2 from fitting θ against the
     # very events stage 1's flow was trained on; the closure target is θ → 0.
     if args.validation:
-        print("\n*** MC-closure validation mode: simulation for both stages "
-              "(stage 1 ← half 0, stage 2 ← half 1 as pseudo-data); target θ → 0 ***")
-        s1_train, s1_val = _make_loaders(args, shard_files, stats, half=0)
-        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1)
+        inj = _inject_theta_np(args, len(stats.eta_edges) - 1)
+        tgt = ("θ → 0" if inj is None else
+               f"θ → injected (A,e,M)=({args.inject_A:g},{args.inject_e:g},{args.inject_M:g})")
+        print(f"\n*** MC-closure validation mode: simulation for both stages "
+              f"(stage 1 ← half 0, stage 2 ← half 1 as pseudo-data); target {tgt} ***")
+        if inj is not None:
+            print("    injecting the θ_scale shift into the stage-2 pseudo-data m_ll")
+        s1_train, s1_val = _make_loaders(args, shard_files, stats, half=0)  # flow: NOT injected
+        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1, inject_theta=inj)
     else:
+        if _inject_theta_np(args, len(stats.eta_edges) - 1) is not None:
+            print("warning: --inject-A/e/M only apply in --validation mode; ignoring.",
+                  file=sys.stderr)
         s1_train, s1_val = train_loader, val_loader
         s2_train, s2_val = train_loader, val_loader
 
@@ -1119,10 +1141,11 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
         print("skipping Fisher info: both --disable-scale and --disable-smearing.")
         return
     half = 1 if args.validation else None
+    inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half)
+        drop_last=False, half=half, inject_theta_scale=inj)
     print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
           f"fixed flow + MLP) on split={args.fisher_split}"
           + ("  half=1 (MC pseudo-data)" if args.validation else "")
@@ -1208,10 +1231,11 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         return
     smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
     half = 1 if mc_as_data else None
+    inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half)
+        drop_last=False, half=half, inject_theta_scale=inj)
     nominal_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
     # Freeze the flow; float the MLP + active θ (the MLP must re-fit per replica
@@ -1527,10 +1551,11 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         print("skipping empirical Fisher: both --disable-scale and --disable-smearing.")
         return
     half = 1 if args.validation else None
+    inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half)
+        drop_last=False, half=half, inject_theta_scale=inj)
     print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
           f"split={args.fisher_split}"
           + ("  half=1 (MC pseudo-data)" if args.validation else "")
@@ -1613,7 +1638,8 @@ def _load_full_fit(args, device):
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "linearize_scale",
               "qop_floor_frac", "smear_init_a", "smear_init_c",
-              "disable_scale", "disable_smearing", "validation"):
+              "disable_scale", "disable_smearing", "validation",
+              "inject_A", "inject_e", "inject_M"):
         if k in ck_args:
             setattr(args, k, ck_args[k])
     # Stats: --stats-in overrides; else the fit's own stats.
@@ -2138,6 +2164,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "trained on; the closure target is θ → 0. Two-stage pipeline only "
         "(ignored for --stage legacy); any real data in the inputs is unused.",
     )
+    # Inject a known θ_scale shift into the validation pseudo-data (closure with
+    # a non-zero target): the stage-2 pseudo-data m_ll is advected by this scale,
+    # so the fit should recover it. A constant shift per component over all η
+    # bins. Only active with --validation.
+    p.add_argument("--inject-A", type=float, default=0.0,
+                   help="(--validation) Inject this constant A scale shift into "
+                   "the pseudo-data; the fit should recover it (closure target).")
+    p.add_argument("--inject-e", type=float, default=0.0,
+                   help="(--validation) Inject this constant e [GeV] scale shift.")
+    p.add_argument("--inject-M", type=float, default=0.0,
+                   help="(--validation) Inject this constant M scale shift.")
     p.add_argument("--flow-epochs", type=int, default=0,
                    help="Max epochs for stage 1 (0 → use --epochs).")
     p.add_argument("--fit-epochs", type=int, default=0,
