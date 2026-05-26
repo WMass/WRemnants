@@ -1490,6 +1490,36 @@ def compute_empirical_fisher_joint(
     return J.detach().cpu(), layout
 
 
+def _empirical_cov_theta_block(J: torch.Tensor, n_theta: int, ridge: float) -> torch.Tensor:
+    """θ-block covariance from the joint empirical Fisher ``J`` (PSD).
+
+    ``ridge == 0`` → Moore–Penrose ``pinv(J)``: unconstrained / degenerate
+    directions land in the null space and get **zero** variance (the misleading
+    σ≈0 on a near-degenerate parameter, e.g. the A/e degeneracy over the J/ψ
+    pt range).
+
+    ``ridge > 0`` → scale-aware ridge ``cov = (J + ridge·diag(J))⁻¹``, computed
+    as a plain inverse in the per-parameter standardised space
+    ``D⁻¹(D⁻¹JD⁻¹ + ridge·I)⁻¹D⁻¹`` with ``D = √diag(J)``. A flat direction then
+    reads as a LARGE but finite variance (~1/(ridge·J_ii)) rather than 0, and
+    the regularisation is proportional to each parameter's own information
+    (dimensionless ``ridge``), so it is well-behaved across the mixed-unit
+    A/e/M/smear/MLP blocks."""
+    J = 0.5 * (J + J.T)
+    if ridge <= 0.0:
+        cov = torch.linalg.pinv(J)
+    else:
+        d = torch.sqrt(torch.clamp(torch.diag(J), min=0.0))
+        dmax = float(d.max()) if d.numel() else 1.0
+        dinv = 1.0 / torch.clamp(d, min=1e-12 * (dmax if dmax > 0 else 1.0))
+        Jt = J * dinv.unsqueeze(0) * dinv.unsqueeze(1)            # D⁻¹ J D⁻¹ (PSD)
+        n = Jt.shape[0]
+        eye = torch.eye(n, dtype=J.dtype, device=J.device)
+        cov = torch.linalg.inv(Jt + ridge * eye)                 # PD → plain inv
+        cov = cov * dinv.unsqueeze(0) * dinv.unsqueeze(1)        # back to raw units
+    return cov[:n_theta, :n_theta].contiguous()
+
+
 def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     """Joint (θ,φ) empirical Fisher → ``<output>/empirical_fisher.pt`` (PSD,
     background-included θ covariance via pinv; diagnostics-compatible)."""
@@ -1530,11 +1560,13 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
             layout["sw"] = sw_total
     jd = layout["n_theta_active"] + layout["n_mlp"]
     rank = int(torch.linalg.matrix_rank(J).item())
-    cov_joint = torch.linalg.pinv(J)
     n_t = layout["n_theta_active"]
-    cov_theta = cov_joint[:n_t, :n_t].contiguous()
+    ridge = float(args.empirical_fisher_ridge)
+    cov_theta = _empirical_cov_theta_block(J, n_t, ridge)
     out = {
-        "method": "joint (theta,phi) empirical Fisher, pinv",
+        "method": (f"joint (theta,phi) empirical Fisher, ridge={ridge:g}"
+                   if ridge > 0 else "joint (theta,phi) empirical Fisher, pinv"),
+        "ridge": ridge,
         "covariance": cov_theta,
         "labels": _active_param_labels(model, layout["smear_cols"]),
         "n_scale": layout["n_scale"], "smear_cols": layout["smear_cols"],
@@ -1548,8 +1580,9 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     path = os.path.join(args.output, "empirical_fisher.pt")
     torch.save(out, path)
     print(f"  wrote {path}: joint {jd}×{jd} (θ:{n_t}, φ:{layout['n_mlp']}), "
-          f"rank {rank}/{jd}; θ-block {n_t}×{n_t} via pinv ({layout['seen']:,} "
-          f"events, Σw={layout['sw']:.2e}) in {time.time()-t0:.1f}s")
+          f"rank {rank}/{jd}; θ-block {n_t}×{n_t} via "
+          f"{'ridge=' + format(ridge, 'g') if ridge > 0 else 'pinv'} "
+          f"({layout['seen']:,} events, Σw={layout['sw']:.2e}) in {time.time()-t0:.1f}s")
     if "sigma_scale_24_3" in out:
         ss = out["sigma_scale_24_3"]
         print(f"  empirical σ(A,e,M) median over bins = "
@@ -2290,6 +2323,14 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument("--empirical-fisher-chunk", type=int, default=64,
                    help="Events per is_grads_batched call when extracting "
                    "per-event scores (memory ≈ chunk × backward graph).")
+    p.add_argument("--empirical-fisher-ridge", type=float, default=0.0,
+                   help="Ridge for the empirical-Fisher covariance. 0 (default) → "
+                   "Moore–Penrose pinv: unconstrained / degenerate directions get "
+                   "σ=0 (e.g. the A/e near-degeneracy over the J/ψ pt range reads "
+                   "as σ(e)≈0). >0 → scale-aware ridge cov=(J + ridge·diag(J))⁻¹, "
+                   "so a degenerate direction reads as a LARGE finite σ instead. "
+                   "Dimensionless (relative to each parameter's own information); "
+                   "try ~1e-3.")
     # Warm-start Poisson bootstrap (Hessian-free covariance incl. the background)
     p.add_argument("--bootstrap", type=int, default=0,
                    help="(two-stage) After the stage-2 fit, run this many warm-start "
