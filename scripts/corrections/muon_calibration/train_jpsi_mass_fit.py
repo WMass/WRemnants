@@ -1227,6 +1227,7 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
           + f"  [smear_fit={model.smear_fit_params}]")
     gen = torch.Generator(device=device)
     replicas, eff_smears, conv_epochs = [], [], []
+    n_batches_total = None   # learned on the first epoch → % on the inner bar after
     t0 = time.time()
     rbar = tqdm(range(B), desc="bootstrap", disable=not args.progress, unit="replica")
     for b in rbar:
@@ -1242,8 +1243,14 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         model.train()
         for epoch in range(args.bootstrap_epochs):
             gen.manual_seed(seed)                  # same per-event Poisson each epoch
-            tr_sum = 0.0; tr_w = 0.0
-            for batch in loader:
+            tr_sum = 0.0; tr_w = 0.0; n_seen = 0
+            # Inner per-epoch bar over batches so a (slow) epoch visibly advances;
+            # total is learned on epoch 1 so later epochs render a % bar.
+            ebar = tqdm(loader, total=n_batches_total, leave=False,
+                        desc=f"  replica {b + 1}/{B} epoch {epoch + 1}/{args.bootstrap_epochs}",
+                        disable=not args.progress, unit="batch")
+            for batch in ebar:
+                n_seen += 1
                 batch = _move_batch(batch, device)
                 data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
                 if not bool(data_mask.any()):
@@ -1265,6 +1272,10 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
                 loss.backward()
                 optim.step()
                 tr_sum += float(loss.item()) * sw; tr_w += sw
+                ebar.set_postfix_str(f"nll={tr_sum / max(tr_w, 1e-30):+.4f}")
+            ebar.close()
+            if n_batches_total is None:
+                n_batches_total = n_seen
             used = epoch + 1
             nll = tr_sum / max(tr_w, 1e-30)
             if nll < best - args.patience_threshold:
