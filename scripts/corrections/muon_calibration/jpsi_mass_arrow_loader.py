@@ -374,9 +374,12 @@ class JpsiMassArrowLoader(IterableDataset):
         world_size: int = 1,
         rank: int = 0,
         pin_memory: bool = False,
+        half: "int | None" = None,
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
+        if half not in (None, 0, 1):
+            raise ValueError(f"half must be None, 0, or 1, got {half!r}")
         self.shard_files = list(shard_files)
         self.my_shards = self.shard_files[rank::world_size]
         self.stats = stats
@@ -388,6 +391,10 @@ class JpsiMassArrowLoader(IterableDataset):
         self.pin_memory = bool(pin_memory)
         self.world_size = int(world_size)
         self.rank = int(rank)
+        # Deterministic disjoint event half (0/1) selected before the
+        # train/val/holdout slice; None = all events. Used by the MC-closure
+        # validation mode to give stage 1 and stage 2 disjoint simulation.
+        self.half = half
 
     # -- helpers --------------------------------------------------------
 
@@ -425,6 +432,14 @@ class JpsiMassArrowLoader(IterableDataset):
                 # this is cheap; zero-copy where possible because Arrow
                 # IPC is memory-mapped on disk.
                 table = reader.read_all()
+                if self.half is not None:
+                    # Deterministic disjoint half by row-index parity (half 0 =
+                    # even rows, half 1 = odd). The sharder pre-shuffles rows
+                    # globally, so parity is a clean ~50/50 mix. Applied before
+                    # the split below so each half carries its own
+                    # train/val/holdout windows.
+                    idx = np.arange(self.half, table.num_rows, 2)
+                    table = table.take(pa.array(idx))
                 n_rows = table.num_rows
                 start_row, stop_row = self._split_range(
                     n_rows, self.val_fraction, self.holdout_fraction, self.split,

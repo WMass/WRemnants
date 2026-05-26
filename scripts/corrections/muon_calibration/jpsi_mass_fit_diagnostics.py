@@ -223,6 +223,7 @@ def evaluate_predictions(
     seed: int = 42,
     n_gh: int = 5,
     n_iter: int = 2,
+    mc_as_data: bool = False,
 ):
     """Stream the loader once; collect per-event aggregates AND per-event
     × per-bin signal densities for the model curves.
@@ -271,6 +272,10 @@ def evaluate_predictions(
     if continuity:
         print("  (continuity model: signal curve = tilt p₀·exp(δ−logZ); "
               "MC = direct linearised-shift + variance-smear fold)")
+    if mc_as_data:
+        print("  (validation: simulation routed through the data branch as "
+              "pseudo-data for the m_ll closure / pulls, in addition to the "
+              "MC-branch closure)")
 
     def _sig_grid(idx):
         if continuity:
@@ -299,9 +304,15 @@ def evaluate_predictions(
             batch = _move_batch(batch, device)
             is_data = batch["is_data_mask"]
             is_mc = ~is_data
+            # Validation (MC-closure) checkpoints fit θ on simulation as
+            # pseudo-data, so route MC through the data branch too. The MC
+            # branch always uses the simulation rows, so in that mode the same
+            # events feed both closures.
+            data_sel = is_mc if mc_as_data else is_data
+            mc_sel = is_mc
 
-            if bool(is_data.any()):
-                data_idx = is_data.nonzero(as_tuple=True)[0]
+            if bool(data_sel.any()):
+                data_idx = data_sel.nonzero(as_tuple=True)[0]
                 f = model.f_data(batch["muon_kin_std"][data_idx])  # [n_data, 3]
                 # Signal density at every bin centre for every data event at the
                 # fitted θ: tilt (continuity) or θ-conditioned flow (legacy).
@@ -312,8 +323,8 @@ def evaluate_predictions(
                 out["f_data"].append(f.cpu().numpy())
                 out["pred_signal_data"].append(log_p_grid.exp().cpu().numpy())
 
-            if bool(is_mc.any()):
-                mc_idx = is_mc.nonzero(as_tuple=True)[0]
+            if bool(mc_sel.any()):
+                mc_idx = mc_sel.nonzero(as_tuple=True)[0]
                 # Directly shift+smear the MC at the *fitted* θ — the empirical
                 # template the model signal curve should reproduce.
                 ptm = batch["pt_pm"][mc_idx]
@@ -375,6 +386,7 @@ def evaluate_predictions(
                 out[k] = np.zeros((0,))
     out["bin_width"] = bin_width
     out["continuity"] = continuity
+    out["mc_as_data"] = mc_as_data
     return out
 
 
@@ -468,6 +480,10 @@ def plot_mll_closure(
         m_centers_np[:-1] + evals["bin_width"] / 2,
         [m_centers_np[-1] + evals["bin_width"] / 2],
     ])
+    # Validation runs fit θ on simulation as pseudo-data — label the "data"
+    # points accordingly.
+    pseudo = bool(evals.get("mc_as_data", False))
+    data_label = "MC (pseudo-data)" if pseudo else "data"
 
     slices = [("inclusive", None)] + [
         (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
@@ -499,7 +515,7 @@ def plot_mll_closure(
             )
             ax.errorbar(
                 m_centers_np, data_hist, yerr=np.sqrt(np.abs(data_hist)),
-                fmt="o", color="k", markersize=3, label="data", zorder=3,
+                fmt="o", color="k", markersize=3, label=data_label, zorder=3,
             )
         else:
             data_hist = np.zeros(m_centers_np.shape[0])
@@ -565,7 +581,7 @@ def plot_mll_closure(
 
         ax.set_ylabel("events / bin (weighted)")
         ax.set_title(
-            f"m_ll closure — {tag}"
+            f"m_ll closure{' (MC pseudo-data)' if pseudo else ''} — {tag}"
             + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]"
                if slice_def else "")
         )
@@ -579,7 +595,7 @@ def plot_mll_closure(
             ax.set_ylim(0, ymax * 1.45)
         ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
         axr.set_xlabel("m_ll [GeV]")
-        axr.set_ylabel("data / model")
+        axr.set_ylabel(f"{'pseudo-data' if pseudo else 'data'} / model")
         axr.set_ylim(0.6, 1.4)
 
         fig.tight_layout()
@@ -763,6 +779,8 @@ def plot_pulls(
     output_dir: str,
 ):
     """Per-bin (data − model)/√model pulls; expect ~N(0,1) if model is OK."""
+    pseudo = bool(evals.get("mc_as_data", False))
+    label = "pseudo-data" if pseudo else "data"
     m_edges = np.concatenate([
         [m_centers_np[0] - evals["bin_width"] / 2],
         m_centers_np[:-1] + evals["bin_width"] / 2,
@@ -805,9 +823,9 @@ def plot_pulls(
         ax_b.stem(m_centers_np, pulls, markerfmt="ko", basefmt="grey", linefmt="k-")
         ax_b.axhline(0, color="grey", lw=0.5)
         ax_b.set_xlabel("m_ll [GeV]")
-        ax_b.set_ylabel("(data − model) / √model")
+        ax_b.set_ylabel(f"({label} − model) / √model")
         ax_b.set_title(
-            f"per-bin pulls — {tag}"
+            f"per-bin pulls{' (MC pseudo-data)' if pseudo else ''} — {tag}"
             + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]" if slice_def else "")
         )
 
@@ -905,6 +923,14 @@ def main() -> int:
     if not shard_files:
         print(f"error: no .arrow shards found under {args.shards!r}", file=sys.stderr)
         return 1
+    # Validation (MC-closure) checkpoints fit θ on simulation as pseudo-data;
+    # auto-detect so the m_ll closure / pulls treat simulation as the data
+    # branch (otherwise those plots are empty — there are no is_data rows).
+    mc_as_data = bool(train_args.get("validation", False))
+    if mc_as_data:
+        print("checkpoint was trained with --validation: routing simulation "
+              "through the data branch as pseudo-data for the m_ll closure / pulls")
+
     print(f"found {len(shard_files)} shard(s); split={args.split}")
     loader = JpsiMassArrowLoader(
         shard_files, stats,
@@ -939,11 +965,18 @@ def main() -> int:
         seed=args.eval_seed,
         n_gh=args.continuity_n_gh,
         n_iter=args.continuity_n_iter,
+        mc_as_data=mc_as_data,
     )
-    print(
-        f"  collected {evals['mll_data'].shape[0]} data events, "
-        f"{evals['mll_mc_fold'].shape[0]} MC events"
-    )
+    if mc_as_data:
+        print(
+            f"  collected {evals['mll_data'].shape[0]} MC pseudo-data events "
+            f"(same simulation also drives the MC-branch closure)"
+        )
+    else:
+        print(
+            f"  collected {evals['mll_data'].shape[0]} data events, "
+            f"{evals['mll_mc_fold'].shape[0]} MC events"
+        )
 
     # Plot 1: m_ll closure.
     print("plotting m_ll closure...")

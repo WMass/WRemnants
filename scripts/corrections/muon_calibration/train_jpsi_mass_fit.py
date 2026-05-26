@@ -469,14 +469,23 @@ def compute_fisher_info(
 # ---------------------------------------------------------------------------
 
 
-def _setup_common(args):
-    """Shards + stats + train/val loaders (shared by both stages)."""
+def _setup_common(args, *, stats_override=None):
+    """Shards + stats + train/val loaders (shared by both stages).
+
+    ``stats_override`` (used by ``--stage fit``) supplies the standardisation
+    stats from the flow checkpoint, taking precedence over ``--stats-in`` /
+    recomputation so the data branch standardises exactly as the flow was
+    trained.
+    """
     shard_files = discover_shards(args.inputs)
     if not shard_files:
         print("error: no Arrow shards found under --inputs", file=sys.stderr)
         return None
     print(f"discovered {len(shard_files)} shard(s)")
-    if args.stats_in is not None and os.path.exists(args.stats_in):
+    if stats_override is not None:
+        stats = stats_override
+        print("using preproc stats from the flow checkpoint")
+    elif args.stats_in is not None and os.path.exists(args.stats_in):
         with open(args.stats_in) as f:
             stats = _stats_from_dict(json.load(f))
         print(f"loaded preproc stats from {args.stats_in}")
@@ -491,15 +500,53 @@ def _setup_common(args):
     with open(stats_path, "w") as f:
         json.dump(_stats_to_dict(stats), f, indent=2)
     print(f"wrote {stats_path}")
+    train_loader, val_loader = _make_loaders(args, shard_files, stats)
+    return shard_files, stats, train_loader, val_loader
+
+
+def _make_loaders(args, shard_files, stats, *, half=None):
+    """Build the ``(train, val)`` loaders for one stage. ``half`` selects a
+    deterministic disjoint event half (0/1) — used by the MC-closure
+    validation mode (stage 1 ← half 0, stage 2 ← half 1); ``None`` = all
+    events."""
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=True)
+        drop_last=True, half=half)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False)
-    return shard_files, stats, train_loader, val_loader
+        drop_last=False, half=half)
+    return train_loader, val_loader
+
+
+# Args that fix the flow's parameter shapes — these must match the saved flow
+# when reloading it for --stage fit (the model is rebuilt from args before the
+# flow weights are loaded). The MLP size and θ-smear fit choice are NOT here:
+# only the flow is loaded from the checkpoint, so those stay free stage-2 knobs.
+_FLOW_ARCH_KEYS = (
+    "flow_arch", "flow_n_transforms", "flow_hidden", "flow_n_hidden",
+    "gf_components", "nsf_bins",
+)
+
+
+def _apply_flow_arch_from_ckpt(args, ck_args: dict) -> None:
+    """Override the flow-architecture args on ``args`` with the values stored
+    in the flow checkpoint so the rebuilt flow matches the saved weights.
+    Logs any field that changed; silently keeps the CLI value for keys the
+    checkpoint doesn't carry (older checkpoints)."""
+    changed = []
+    for k in _FLOW_ARCH_KEYS:
+        if k in ck_args:
+            old = getattr(args, k, None)
+            new = ck_args[k]
+            if old != new:
+                changed.append(f"{k}: {old}→{new}")
+            setattr(args, k, new)
+    if changed:
+        print("  flow-architecture args set from checkpoint: " + ", ".join(changed))
+    else:
+        print("  flow-architecture args already match the checkpoint")
 
 
 def _build_model(args, stats, device, *, theta_conditioning):
@@ -656,9 +703,16 @@ def train_stage1(args, model, train_loader, val_loader, stats) -> float:
                        epochs=args.flow_epochs or args.epochs)
 
 
-def train_stage2(args, model, train_loader, val_loader, stats) -> float:
-    """Stage 2: freeze the flow, fit θ + background MLP on data (continuity)."""
-    print("\n=== stage 2: θ + background fit on data (frozen flow, #2 direct-eval) ===")
+def train_stage2(args, model, train_loader, val_loader, stats,
+                 *, mc_as_data: bool = False) -> float:
+    """Stage 2: freeze the flow, fit θ + background MLP on data (continuity).
+
+    With ``mc_as_data`` (MC-closure validation mode) the simulation rows are
+    treated as the pseudo-data branch (``~is_data_mask``) so θ is fit against a
+    disjoint half of simulation; the closure target is θ → 0.
+    """
+    src = "MC pseudo-data" if mc_as_data else "data"
+    print(f"\n=== stage 2: θ + background fit on {src} (frozen flow, #2 direct-eval) ===")
     # Freeze the flow; it is the nominal template from stage 1.
     for p in model.flow.parameters():
         p.requires_grad_(False)
@@ -680,11 +734,13 @@ def train_stage2(args, model, train_loader, val_loader, stats) -> float:
           f"n_iter={args.continuity_n_iter}); normalised by construction")
 
     def step2(model, batch):
+        # In validation mode the simulation rows play the role of data.
+        data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
         per = model.data_nll_continuity(
             batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], batch["is_data_mask"],
+            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
             n_gh=args.continuity_n_gh, n_iter=args.continuity_n_iter)
-        w = batch["w"] * batch["is_data_mask"].to(batch["w"].dtype)
+        w = batch["w"] * data_mask.to(batch["w"].dtype)
         sw = float(w.sum().clamp_min(1e-30))
         return (w * per).sum() / sw, sw
 
@@ -697,13 +753,37 @@ def train_loop(args: argparse.Namespace) -> int:
     """Dispatch: legacy single-stage forward-fold, or the two-stage continuity
     pipeline (stage 1 flow → stage 2 fit)."""
     if args.stage == "legacy":
+        if args.validation:
+            print("warning: --validation has no effect with --stage legacy "
+                  "(it applies only to the two-stage pipeline); ignoring.",
+                  file=sys.stderr)
         return _train_loop_legacy(args)
 
     device = args.device
     if device.startswith("cuda") and not torch.cuda.is_available():
         print("warning: CUDA requested but not available; falling back to CPU")
         device = args.device = "cpu"
-    setup = _setup_common(args)
+
+    # --stage fit: load the flow checkpoint up front so its architecture and
+    # stats drive the model build + standardisation (the model is rebuilt from
+    # args before the flow weights are loaded, so they must match).
+    flow_ck = None
+    flow_ckpt = None
+    stats_override = None
+    if args.stage == "fit":
+        flow_ckpt = args.flow_checkpoint or os.path.join(args.output, "flow_best.pt")
+        if not os.path.exists(flow_ckpt):
+            print(f"error: --stage fit needs a stage-1 flow; {flow_ckpt!r} not found "
+                  f"(run --stage flow first or pass --flow-checkpoint)", file=sys.stderr)
+            return 1
+        print(f"loading stage-1 flow checkpoint: {flow_ckpt}")
+        flow_ck = torch.load(flow_ckpt, map_location=device, weights_only=False)
+        _apply_flow_arch_from_ckpt(args, flow_ck.get("args", {}) or {})
+        # Reuse the flow's own standardisation unless the user forces --stats-in.
+        if args.stats_in is None and flow_ck.get("stats") is not None:
+            stats_override = _stats_from_dict(flow_ck["stats"])
+
+    setup = _setup_common(args, stats_override=stats_override)
     if setup is None:
         return 1
     shard_files, stats, train_loader, val_loader = setup
@@ -714,20 +794,33 @@ def train_loop(args: argparse.Namespace) -> int:
           f"smear={'on' if model.smearing_enabled else 'off'} "
           f"smear_fit={model.smear_fit_params}")
 
-    if args.stage in ("both", "flow"):
-        train_stage1(args, model, train_loader, val_loader, stats)
     if args.stage == "fit":
-        # Load the stage-1 flow (and template) before fitting.
-        flow_ckpt = args.flow_checkpoint or os.path.join(args.output, "flow_best.pt")
-        if not os.path.exists(flow_ckpt):
-            print(f"error: --stage fit needs a stage-1 flow; {flow_ckpt!r} not found "
-                  f"(run --stage flow first or pass --flow-checkpoint)", file=sys.stderr)
-            return 1
-        ck = torch.load(flow_ckpt, map_location=device, weights_only=False)
-        model.load_state_dict(ck["state_dict"])
-        print(f"loaded stage-1 flow from {flow_ckpt}")
+        # Load ONLY the flow weights; the background MLP and θ start fresh
+        # (stage 1 leaves them at init anyway) so the MLP size / smear-fit
+        # choice remain free stage-2 knobs.
+        flow_sd = {k[len("flow."):]: v for k, v in flow_ck["state_dict"].items()
+                   if k.startswith("flow.")}
+        model.flow.load_state_dict(flow_sd)
+        print(f"loaded flow weights from {flow_ckpt} ({len(flow_sd)} tensors; "
+              f"mlp + θ start fresh)")
+
+    # MC-closure validation: both stages run on simulation, with a deterministic
+    # disjoint half each (stage 1 ← half 0, stage 2 ← half 1 treated as
+    # pseudo-data). The disjoint halves keep stage 2 from fitting θ against the
+    # very events stage 1's flow was trained on; the closure target is θ → 0.
+    if args.validation:
+        print("\n*** MC-closure validation mode: simulation for both stages "
+              "(stage 1 ← half 0, stage 2 ← half 1 as pseudo-data); target θ → 0 ***")
+        s1_train, s1_val = _make_loaders(args, shard_files, stats, half=0)
+        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1)
+    else:
+        s1_train, s1_val = train_loader, val_loader
+        s2_train, s2_val = train_loader, val_loader
+
+    if args.stage in ("both", "flow"):
+        train_stage1(args, model, s1_train, s1_val, stats)
     if args.stage in ("both", "fit"):
-        train_stage2(args, model, train_loader, val_loader, stats)
+        train_stage2(args, model, s2_train, s2_val, stats, mc_as_data=args.validation)
     return 0
 
 
@@ -1181,7 +1274,22 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--flow-checkpoint", type=str, default=None,
         help="Stage-1 flow checkpoint to load for '--stage fit' "
-        "(default: <output>/flow_best.pt).",
+        "(default: <output>/flow_best.pt). The flow architecture "
+        "(--flow-arch/--flow-n-transforms/--flow-hidden/--flow-n-hidden/"
+        "--gf-components/--nsf-bins) and the preproc stats are read from this "
+        "checkpoint automatically, so they need not be re-specified; only the "
+        "flow weights are loaded (the MLP and θ start fresh). Pass --stats-in "
+        "to override the stats.",
+    )
+    p.add_argument(
+        "--validation", action="store_true",
+        help="MC-closure validation mode: use simulation for BOTH stages "
+        "instead of data for stage 2. A deterministic disjoint half of the "
+        "simulation events trains the stage-1 flow (half 0); the other half "
+        "(half 1) is treated as pseudo-data for the stage-2 θ fit. The disjoint "
+        "split prevents stage 2 from fitting θ against the events stage 1 "
+        "trained on; the closure target is θ → 0. Two-stage pipeline only "
+        "(ignored for --stage legacy); any real data in the inputs is unused.",
     )
     p.add_argument("--flow-epochs", type=int, default=0,
                    help="Max epochs for stage 1 (0 → use --epochs).")
