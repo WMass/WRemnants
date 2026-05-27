@@ -92,6 +92,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         fixed_theta_sampling=args.get("fixed_theta_sampling", False),
         qop_floor_frac=args.get("qop_floor_frac", 0.0),
         smear_fit_params=args.get("smear_fit_params", "both"),
+        smear_mode=args.get("smear_mode", "convolution"),
         # Two-stage ("both"/"flow"/"fit") checkpoints have a θ-free flow;
         # legacy (or older) checkpoints condition the flow on θ.
         theta_conditioning=(args.get("stage", "legacy") == "legacy"),
@@ -199,14 +200,20 @@ def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4
 
 @torch.no_grad()
 def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
-    """Directly shift+smear MC reco at the fitted θ — the empirical comparison
-    the model signal curve should reproduce. Advection: ``m += s_adv`` with the
-    analytic Jacobian; smear: Gaussian mass kick of variance
-    ``V = Σ_k κ_k·softplus(θ_smear)_k ≥ 0`` (same response as the #2 density)."""
+    """Directly fold MC reco at the fitted θ — the empirical comparison the
+    model signal curve should reproduce. Advection ``m += s_adv`` (scale), then
+    smear: 'convolution' = a √V Gaussian mass kick; 'width' = the deterministic
+    density stretch ``m → μ + (1+s)(m − μ)`` (no randomness)."""
     mll_pre = _event_mll(ptm, etam, phim)
     nrow = mll_pre.shape[0]
     tsp = (model._scale_per_event(model.theta_scale, bm) if model.scale_enabled
            else mll_pre.new_zeros((nrow, N_THETA_SCALE_PM)))
+    if getattr(model, "smear_mode", "convolution") == "width":
+        zsm = mll_pre.new_zeros((nrow, N_THETA_SMEAR_PM))
+        s_adv, _ = model._continuity_response(mll_pre, mll_pre, ptm, etam, qm, tsp, zsm)
+        s = model._width_factor(bm, ptm) if model.smearing_enabled else mll_pre.new_zeros(nrow)
+        mu = model.mll_mean_buf
+        return (mu + (1.0 + s).clamp_min(0.05) * (mll_pre + s_adv - mu)).detach()
     tse = (model._smear_per_event(model.theta_smear, bm) if model.smearing_enabled
            else mll_pre.new_zeros((nrow, N_THETA_SMEAR_PM)))
     s_adv, V = model._continuity_response(mll_pre, mll_pre, ptm, etam, qm, tsp, tse)

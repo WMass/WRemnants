@@ -449,9 +449,20 @@ class JpsiMassMixtureModel(nn.Module):
         # ``data_nll_continuity``). θ parameters still exist when scale/smear
         # are enabled — they're just not fed to the flow.
         theta_conditioning: bool = True,
+        # Smear model. 'convolution' (default): the physical per-muon qop
+        # Gaussian smear, collapsed to a mass-variance V and applied as a
+        # stochastic mass convolution (GH quadrature; softplus(θ_smear) ≥ 0, one-
+        # sided). 'width': a deterministic, invertible, TWO-SIDED density
+        # width-scale x = μ + (1+s)(m−μ) with s(c) = Σ_μ (a_b + c_b·k_μ) read
+        # linearly from θ_smear (no softplus) — no convolution / GH, converges to
+        # s=0 in closure, and the smear does not touch the ρ conditioning.
+        smear_mode: str = "convolution",
     ):
         super().__init__()
         self.smearing_enabled = bool(smearing_enabled)
+        if smear_mode not in ("convolution", "width"):
+            raise ValueError(f"smear_mode must be 'convolution' or 'width', got {smear_mode!r}")
+        self.smear_mode = str(smear_mode)
         self.scale_enabled = bool(scale_enabled)
         self.linearize_scale = bool(linearize_scale)
         self.detach_flow_on_data = bool(detach_flow_on_data)
@@ -528,8 +539,13 @@ class JpsiMassMixtureModel(nn.Module):
         # softplus⁻¹(smear_init) so the *effective* (softplus) init equals the
         # requested physical value.
         with torch.no_grad():
-            self.theta_smear[:, 0].fill_(_softplus_inv(smear_init_a))
-            self.theta_smear[:, 1].fill_(_softplus_inv(smear_init_c))
+            if self.smear_mode == "width":
+                # 'width': θ_smear are signed width coefficients used linearly;
+                # init at 0 → s=0 (identity, no smear), two-sided from there.
+                self.theta_smear.zero_()
+            else:
+                self.theta_smear[:, 0].fill_(_softplus_inv(smear_init_a))
+                self.theta_smear[:, 1].fill_(_softplus_inv(smear_init_c))
 
         # Fixed sampling centres for ``fixed_theta_sampling`` — the *initial*
         # nuisance values (θ_scale = 0, θ_smear = softplus⁻¹(smear_init)).
@@ -623,9 +639,11 @@ class JpsiMassMixtureModel(nn.Module):
         return torch.sqrt(var.clamp_min(1e-24))
 
     def effective_theta_smear(self) -> torch.Tensor:
-        """``softplus(theta_smear)`` masked to the fitted terms — the physical
-        (a, c) ≥ 0 per η-bin actually used by the kernel and conditioning. A
-        non-fitted term reads back as exactly 0."""
+        """Per-η-bin effective smear, masked to the fitted terms. 'convolution':
+        ``softplus(theta_smear) ≥ 0`` (the qop-resolution a, c). 'width': the
+        signed width coefficients (theta_smear used linearly, two-sided)."""
+        if self.smear_mode == "width":
+            return self.theta_smear * self.smear_param_mask
         return F.softplus(self.theta_smear) * self.smear_param_mask
 
     # ------------------------------------------------------------------
@@ -1322,9 +1340,86 @@ class JpsiMassMixtureModel(nn.Module):
         rho_idx = N_MUON_KIN - 1
         return (rho_src - self.muon_kin_mean[rho_idx]) / self.muon_kin_std[rho_idx]
 
+    def _width_factor(self, b_pm, pt_pm):
+        """Per-event signed width factor ``s`` for the 'width' smear: the
+        deterministic mass-density stretch ``x = μ + (1+s)(m−μ)``.
+        ``s = Σ_μ (a_b + c_b·k_μ)`` read LINEARLY (two-sided, no softplus) from
+        θ_smear, masked to the fitted term(s)."""
+        a = self.theta_smear[b_pm, 0] * self.smear_param_mask[0]   # [B,2]
+        c = self.theta_smear[b_pm, 1] * self.smear_param_mask[1]
+        k = 1.0 / pt_pm
+        return (a + c * k).sum(-1)                                 # [B]
+
+    def _scale_source_rho_std(self, pt_obs, eta_pm, q_pm, b_pm):
+        """Standardised SOURCE ρ from un-applying the scale only (no smear) —
+        used by the 'width' smear, whose deterministic mass stretch leaves ρ
+        untouched. Returns ``[B]``."""
+        pt1 = pt_obs
+        if self.scale_enabled:
+            dqop_s = self._delta_qop_analytic(self.theta_scale, pt_obs, eta_pm, q_pm, b_pm)
+            pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
+        rho = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
+        idx = N_MUON_KIN - 1
+        return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
+
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
                          n_gh: int = 5, n_iter: int = 2):
-        """``log p_θ(m_obs | c)`` per event via the #2 direct evaluation."""
+        """``log p_θ(m_obs | c)`` — dispatch on the smear model."""
+        if self.smear_mode == "width":
+            return self._continuity_logp_width(
+                m_obs, mk, pt_obs, eta_pm, q_pm, b_pm, n_iter=n_iter)
+        return self._continuity_logp_conv(
+            m_obs, mk, pt_obs, eta_pm, q_pm, b_pm, n_gh=n_gh, n_iter=n_iter)
+
+    def _continuity_logp_width(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
+                               n_iter: int = 2):
+        """'width' smear: ``log p_θ(x|c)`` via the DETERMINISTIC, invertible map
+        ``x = μ + (1+s)(m' + s_adv(m') − μ)`` (scale advection + signed mass
+        width-scale, μ = mean m_ll). No convolution / GH — a single change of
+        variables: invert for the source m' (fixed point for the advection) and
+        divide by the Jacobian ``G' = dx/dm'``. The smear leaves ρ untouched, so
+        the conditioning only carries the scale's ρ shift."""
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
+                          if self.scale_enabled
+                          else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
+        zeros_sm = m_obs.new_zeros((B, N_THETA_SMEAR_PM))
+        mu = self.mll_mean_buf
+        s = (self._width_factor(b_pm, pt_obs) if self.smearing_enabled
+             else m_obs.new_zeros(B))
+        one_plus_s = (1.0 + s).clamp_min(0.05)              # keep invertible
+
+        def s_adv_of(me):
+            return self._continuity_response(
+                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm, zeros_sm)[0]
+
+        # invert: un-width (m'' = μ + (x−μ)/(1+s)), then un-advect (fixed point).
+        mpp = mu + (m_obs - mu) / one_plus_s
+        mp = mpp.clone()
+        for _ in range(n_iter):
+            mp = mpp - s_adv_of(mp)
+        # Jacobian G' = dx/dm' = (1+s)·d(m'+s_adv)/dm' by autograd in m'.
+        if mp.requires_grad:
+            Gx = (mu + one_plus_s * (mp + s_adv_of(mp) - mu)).sum()
+            Gp = torch.autograd.grad(Gx, mp, create_graph=True)[0]
+        else:
+            with torch.enable_grad():
+                mpj = mp.detach().requires_grad_(True)
+                Gx = (mu + one_plus_s * (mpj + s_adv_of(mpj) - mu)).sum()
+                Gp = torch.autograd.grad(Gx, mpj)[0].detach()
+        # Conditioning: scale-propagated ρ only (the width smear doesn't move ρ).
+        mk_src = mk
+        if self.scale_enabled:
+            mk_src = mk.clone()
+            mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
+                pt_obs, eta_pm, q_pm, b_pm)
+        logp0 = self.log_p_nominal(mp, mk_src)
+        return logp0 - torch.log(Gp.abs().clamp_min(1e-6))
+
+    def _continuity_logp_conv(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
+                              n_gh: int = 5, n_iter: int = 2):
+        """``log p_θ(m_obs | c)`` per event via the #2 direct evaluation
+        (stochastic convolution smear)."""
         theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
                           if self.scale_enabled
                           else self.theta_scale.new_zeros((b_pm.shape[0], N_THETA_SCALE_PM)))

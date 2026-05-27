@@ -854,6 +854,7 @@ def _build_model(args, stats, device, *, theta_conditioning):
         scale_enabled=not args.disable_scale,
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
         theta_conditioning=theta_conditioning,
+        smear_mode=getattr(args, "smear_mode", "convolution"),
     ).to(device)
 
 
@@ -1639,7 +1640,7 @@ def _load_full_fit(args, device):
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "linearize_scale",
               "qop_floor_frac", "smear_init_a", "smear_init_c",
               "disable_scale", "disable_smearing", "validation",
-              "inject_A", "inject_e", "inject_M"):
+              "inject_A", "inject_e", "inject_M", "smear_mode"):
         if k in ck_args:
             setattr(args, k, ck_args[k])
     # Stats: --stats-in overrides; else the fit's own stats.
@@ -2273,6 +2274,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "bin is ill-posed and yields the unphysical bin-to-bin zig-zag. The "
         "non-fitted term is set to 0 (post-softplus) — removed from the σ_qop "
         "kernel and the conditioning entirely, not floated.",
+    )
+    p.add_argument(
+        "--smear-mode", choices=["convolution", "width"], default="convolution",
+        help="Smear model (two-stage continuity). 'convolution' (default): the "
+        "physical per-muon qop Gaussian smear, applied as a stochastic mass "
+        "convolution (Gauss-Hermite; softplus(θ_smear) ≥ 0, one-sided — can only "
+        "broaden). 'width': a DETERMINISTIC, invertible, TWO-SIDED density "
+        "width-scale x = μ + (1+s)(m−μ), s read linearly from θ_smear (no "
+        "softplus, no GH/fixed-point smear, no ρ propagation) — can sharpen or "
+        "broaden and converges to s=0 in closure. (a,c → constant + 1/pt width "
+        "coefficients; --smear-fit-params still selects which are floated.)",
     )
     p.add_argument(
         "--smear-noise-sigma",
