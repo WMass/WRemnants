@@ -83,19 +83,10 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         flow_nsf_bins=args.get("nsf_bins", 8),
         mlp_hidden=args["mlp_hidden"],
         mlp_n_layers=args["mlp_n_layers"],
-        linearize_scale=args.get("linearize_scale", False),
-        smear_init_a=args.get("smear_init_a", 0.0),
-        smear_init_c=args.get("smear_init_c", 0.0),
         smearing_enabled=not args.get("disable_smearing", False),
         scale_enabled=not args.get("disable_scale", False),
-        detach_flow_on_data=args.get("detach_flow_on_data", False),
-        fixed_theta_sampling=args.get("fixed_theta_sampling", False),
         qop_floor_frac=args.get("qop_floor_frac", 0.0),
         smear_fit_params=args.get("smear_fit_params", "both"),
-        smear_mode=args.get("smear_mode", "convolution"),
-        # Two-stage ("both"/"flow"/"fit") checkpoints have a θ-free flow;
-        # legacy (or older) checkpoints condition the flow on θ.
-        theta_conditioning=(args.get("stage", "legacy") == "legacy"),
     ).to(device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
@@ -108,55 +99,10 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
 
 
 @torch.no_grad()
-def _flow_density_on_grid(
-    model, batch, idx, m_grid_std, *, chunk_events: int = 4096,
-) -> torch.Tensor:
-    """``[len(idx), n_grid]`` log p_flow(m_grid | y_e, θ_scale_pm, θ_smear_pm).
-
-    The flow is evaluated at every m_grid point for every event in
-    ``idx``, conditioned on the event's (y, μ_kin, θ_scale_pm, θ_smear_pm)
-    at the *fitted* model nuisances (both scale and smearing) — no noise
-    sampling, no smearing-kernel ε; exactly what the data branch uses at
-    inference. Chunked over the event axis so each flow call only sees
-    ``chunk_events × n_grid`` inputs.
-    """
-    n = idx.shape[0]
-    n_grid = m_grid_std.shape[0]
-    chunk_events = max(1, int(chunk_events))
-
-    theta_scale_pm = (
-        model._scale_per_event(model.theta_scale, batch["b_pm"][idx])
-        if model.scale_enabled else None
-    )
-    theta_smear_pm = (
-        model._smear_per_event(model.theta_smear, batch["b_pm"][idx])
-        if model.smearing_enabled else None
-    )
-    cond = model._build_flow_cond(
-        batch["muon_kin_std"][idx],
-        theta_scale_pm, theta_smear_pm,
-    )
-
-    out = torch.empty((n, n_grid), device=m_grid_std.device, dtype=cond.dtype)
-    for start in range(0, n, chunk_events):
-        end = min(start + chunk_events, n)
-        sub = end - start
-        m_expand = (
-            m_grid_std.unsqueeze(0).expand(sub, n_grid).reshape(sub * n_grid, 1)
-        )
-        cond_expand = (
-            cond[start:end].unsqueeze(1).expand(sub, n_grid, -1)
-            .reshape(sub * n_grid, -1)
-        )
-        log_p_std = model.flow(m_expand, cond_expand).reshape(sub, n_grid)
-        out[start:end] = log_p_std - model.mll_log_scale
-    return out
-
-
 @torch.no_grad()
 def _tilt_density_on_grid(
     model, batch, idx, m_centers_dev, *, chunk_events: int = 2048,
-    n_gh: int = 5, n_iter: int = 2,
+    n_iter: int = 2,
 ) -> torch.Tensor:
     """``[len(idx), n_grid]`` log p_s(m_grid | c_e, θ_fit) — the #2 direct-eval
     signal density (``_continuity_logp``) evaluated at each grid mass, exactly
@@ -177,7 +123,7 @@ def _tilt_density_on_grid(
         pt_g = (pt[start:end].unsqueeze(1) * scale).reshape(sub * G, 2)
         lp = model._continuity_logp(
             mg.reshape(-1), rep(mk), pt_g, rep(eta), rep(q), rep(b),
-            n_gh=n_gh, n_iter=n_iter)
+            n_iter=n_iter)
         out[start:end] = lp.reshape(sub, G)
     return out
 
@@ -201,14 +147,13 @@ def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4
 @torch.no_grad()
 def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
     """Fold MC reco at the fitted θ — the empirical template the model signal
-    curve should reproduce. INDEPENDENT of ``smear_mode``: always the per-muon
-    PHYSICAL fold — apply the fitted scale δqop and an independent Gaussian
-    σ_qop smear to each muon's pt, then RECOMPUTE m_ll from the folded
-    4-vectors. The smear σ_qop uses the fitted smear params directly via
-    ``model.fold_sigma_qop_pm`` (softplus(θ) for 'convolution', the signed width
-    coeffs clipped at 0 for 'width'). This is the exact operation the continuity
-    density approximates (linearized advection + collapsed √V / width stretch),
-    so the closure overlay exposes those approximations. (ρ is a flow condition,
+    curve should reproduce. The per-muon PHYSICAL fold: apply the fitted scale
+    δqop and an independent Gaussian σ_qop smear to each muon's pt, then
+    RECOMPUTE m_ll from the folded 4-vectors. The smear σ_qop uses the fitted
+    width coefficients directly via ``model.fold_sigma_qop_pm`` (the signed
+    (a, c) clipped at 0). This is the exact operation the continuity density
+    approximates (linearized advection + the deterministic width stretch), so
+    the closure overlay exposes those approximations. (ρ is a flow condition,
     not histogrammed/binned here, so it is not recomputed — no effect on the
     m_ll closure plots.)"""
     pt_cur = ptm
@@ -234,18 +179,16 @@ def evaluate_predictions(
     max_events: int = 0,
     progress: bool = True,
     seed: int = 42,
-    n_gh: int = 5,
     n_iter: int = 2,
     mc_as_data: bool = False,
 ):
     """Stream the loader once; collect per-event aggregates AND per-event
     × per-bin signal densities for the model curves.
 
-    Continuity checkpoints (``theta_conditioning=False``): the signal grid
-    density is the **#2 direct-eval** ``_tilt_density_on_grid`` (the same
-    forward-folded flow density the fit optimises) and the MC comparison is the
-    **direct fold** (``_continuity_mc_fold``: advective shift + √V smear).
-    Legacy checkpoints use the θ-conditioned flow and the exact/linearised fold.
+    The signal grid density is the **#2 direct-eval** ``_tilt_density_on_grid``
+    (the same forward-folded flow density the fit optimises) and the MC
+    comparison is the **per-muon physical fold** (``_continuity_mc_fold``:
+    scale δqop + Gaussian σ_qop smear, m_ll recomputed).
 
     Per data event: store m_ll, w, |η_+|, MLP outputs ``f = (f_0, f_1, f_s)``,
     and ``pred_signal_data[e, j] = p_flow(m_bin_j | y_e, fitted θ_scale+θ_smear)``.
@@ -281,22 +224,17 @@ def evaluate_predictions(
     m_grid_std_dev = m_grid_std.to(device)
     m_centers_dev = m_centers.to(device)
     n_grid = m_centers.shape[0]
-    continuity = not getattr(model, "theta_conditioning", True)
-    if continuity:
-        print("  (continuity model: signal curve = tilt p₀·exp(δ−logZ); "
-              "MC = direct linearised-shift + variance-smear fold)")
+    print("  (continuity model: signal curve = #2 direct-eval tilt; "
+          "MC = per-muon scale+smear fold with m_ll recomputed)")
     if mc_as_data:
         print("  (validation: simulation routed through the data branch as "
               "pseudo-data for the m_ll closure / pulls, in addition to the "
               "MC-branch closure)")
 
     def _sig_grid(idx):
-        if continuity:
-            return _tilt_density_on_grid(
-                model, batch, idx, m_centers_dev, chunk_events=chunk_events,
-                n_gh=n_gh, n_iter=n_iter)
-        return _flow_density_on_grid(
-            model, batch, idx, m_grid_std_dev, chunk_events=chunk_events)
+        return _tilt_density_on_grid(
+            model, batch, idx, m_centers_dev, chunk_events=chunk_events,
+            n_iter=n_iter)
 
     out = {
         "mll_data": [], "w_data": [], "eta_data": [], "f_data": [],
@@ -345,39 +283,19 @@ def evaluate_predictions(
                 phim = batch["phi_pm"][mc_idx]
                 qm = batch["q_pm"][mc_idx]
                 bm = batch["b_pm"][mc_idx]
-                if continuity:
-                    mll_fold = _continuity_mc_fold(model, ptm, etam, phim, qm, bm)
-                else:
-                    pt_cur = ptm
-                    scale_shift = 0.0
-                    if model.scale_enabled:
-                        if model.linearize_scale:
-                            mll_pre = _event_mll(ptm, etam, phim)
-                            j_pm = model.jacobian_mll_linearized(mll_pre, ptm, qm, bm)
-                            scale_shift = (
-                                j_pm * model._scale_per_event(model.theta_scale, bm)
-                            ).sum(-1)
-                        else:
-                            dqop = model._delta_qop_analytic(model.theta_scale, ptm, etam, qm, bm)
-                            pt_cur = model._apply_scale_pt(ptm, etam, qm, dqop, sign=+1.0)
-                    if model.smearing_enabled:
-                        sig = model.sigma_qop_pm(model.theta_smear, pt_cur, etam, bm)
-                        pt_cur = model.apply_smear_pt(
-                            pt_cur, etam, qm, sig, torch.randn_like(sig))
-                    mll_fold = _event_mll(pt_cur, etam, phim) + scale_shift
-                # Signal density on the grid for every MC event (tilt / flow).
+                mll_fold = _continuity_mc_fold(model, ptm, etam, phim, qm, bm)
+                # Signal density on the grid for every MC event (#2 tilt).
                 log_p_grid_mc = _sig_grid(mc_idx)  # [n_mc, n_grid]
                 out["mll_mc_fold"].append(mll_fold.cpu().numpy())
                 out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
-                if continuity:
-                    # nominal (θ=0): raw reco mass + the untilted flow density p₀.
-                    out["mll_mc_nominal"].append(batch["mll"][mc_idx].cpu().numpy())
-                    out["pred_nominal_mc"].append(
-                        _nominal_density_on_grid(
-                            model, batch, mc_idx, m_centers_dev,
-                            chunk_events=chunk_events).exp().cpu().numpy())
+                # nominal (θ=0): raw reco mass + the untilted flow density p₀.
+                out["mll_mc_nominal"].append(batch["mll"][mc_idx].cpu().numpy())
+                out["pred_nominal_mc"].append(
+                    _nominal_density_on_grid(
+                        model, batch, mc_idx, m_centers_dev,
+                        chunk_events=chunk_events).exp().cpu().numpy())
 
             total_events += int(batch["mll"].shape[0])
             bar.set_postfix_str(f"n_events={total_events:,}")
@@ -398,7 +316,7 @@ def evaluate_predictions(
             else:
                 out[k] = np.zeros((0,))
     out["bin_width"] = bin_width
-    out["continuity"] = continuity
+    out["continuity"] = True
     out["mc_as_data"] = mc_as_data
     return out
 
@@ -1014,9 +932,6 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="Fixed seed for the smearing-kernel ε on MC events. "
                    "Keeps the predicted-signal histogram deterministic across "
                    "diagnostic runs.")
-    p.add_argument("--continuity-n-gh", type=int, default=5,
-                   help="Gauss–Hermite nodes for the #2 direct-eval signal "
-                   "density on continuity checkpoints (match the fit).")
     p.add_argument("--continuity-n-iter", type=int, default=2,
                    help="Fixed-point iterations for the #2 source solve.")
     return p.parse_args(argv)
@@ -1098,7 +1013,6 @@ def main() -> int:
         max_events=args.max_events,
         progress=True,
         seed=args.eval_seed,
-        n_gh=args.continuity_n_gh,
         n_iter=args.continuity_n_iter,
         mc_as_data=mc_as_data,
     )

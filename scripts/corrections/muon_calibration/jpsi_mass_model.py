@@ -1,39 +1,26 @@
-"""Mixture model + θ-conditioned flow for the unbinned J/ψ mass calibration.
+"""Mixture model + flow for the unbinned J/ψ mass calibration.
 
-Forward-folding design (both nuisances applied to MC, flow conditioned on
-both; the θ gradients flow only through the flow's conditioning input):
+Two-stage continuity design. The flow models only the NOMINAL (θ=0) mass shape
+``p₀(m | muon_kin)`` and never conditions on θ; the θ-dependence is supplied
+analytically in stage 2 (the continuity tilt, ``data_nll_continuity``).
 
 * ``theta_scale`` ∈ R^{24×3}  — per-η-bin (A, e, M) muon scale nuisances.
-* ``theta_smear`` ∈ R^{24×2}  — per-η-bin (a, c) muon smearing nuisances,
-  ``σ²_qop_i = a²_{b_i} + c²_{b_i} · k²_i``.
+* ``theta_smear`` ∈ R^{24×2}  — per-η-bin (a, c) signed width-smear coefficients.
 
-The flow is a conditional density ``p(m | y, θ_scale_pm, σ_qop_pm)``.
+Stage 1 (``log_p_nominal``): train the conditional flow ``p₀(m | muon_kin)`` on
+simulation at θ=0 (leak-free kinematic conditioning only).
 
-MC branch (trains the flow's θ-dependence — NO θ gradient):
-  Sample θ̃_scale ~ N(θ_scale.detach(), σ_scale²) and θ̃_smear ~
-  N(θ_smear.detach(), σ_smear²) [σ from Adam's 2nd moment, per epoch].
-  Apply BOTH transforms to the MC reco momenta at those *detached* sampled
-  values — smear (qop Gaussian kernel) then scale (exact T_scale forward,
-  or its linearised mass-shift; selected by ``linearize_scale``) — to get
-  m_final, and condition the flow on (θ̃_scale_pm, σ_qop_pm). The detach
-  means θ never gets a gradient from the transform; the flow simply learns
-  how its conditioning maps to the transformed-MC density.
+Stage 2 (``data_nll_continuity``, frozen flow): the signal density is the
+nominal flow forward-folded analytically by a deterministic, invertible map
+``x = μ + (1+s)(m' + s_adv(m') − μ)`` — a scale advection ``s_adv`` plus a signed
+mass-density width-scale ``s = Σ_μ (a_b + c_b·k_μ)`` (μ = mean m_ll). Evaluated
+at the source pre-image with the change-of-variables Jacobian (``_continuity_logp``)
+— no flow derivatives, normalised by construction; the smear is a pure mass-space
+stretch so it leaves the ρ conditioning untouched. Mixed with a degree-1
+Bernstein background via the MLP ``f(c)``:
 
-Data branch (fits θ — gradient via the conditioning only):
-  The data mass is NOT transformed. The flow is evaluated at the observed
-  m_obs, conditioned on the *live* model (θ_scale_pm, σ_qop_pm). The θ
-  gradient flows purely through that conditioning input (the flow's learned
-  θ-sensitivity), so the fit picks the θ whose transformed-MC template best
-  matches the data. Mixed with a degree-1 Bernstein background via the MLP:
-
-  data event:  p(m_obs | y, θ) = f_0(y) p_0 + f_1(y) p_1
-                 + (1 − f_0 − f_1) · p_flow(m_obs | y, θ_scale_pm, σ_qop_pm)
-  MC event:    p(m_final | y, θ̃) = p_flow(m_final | y, θ̃_scale_pm, σ̃_qop_pm)
-
-``detach_flow_on_data`` (default on) additionally excludes the flow's
-parameters from the data-branch gradient, so the template shape is pinned
-to MC and the data branch only floats θ and the mixture — removing the
-θ_scale ↔ flow-location degeneracy.
+  data event:  p(m | c, θ) = f_0(c) p_0 + f_1(c) p_1 + (1 − f_0 − f_1)·p_s(m | c, θ)
+  MC event:    p(m | c, θ) = p_s(m | c, θ)
 """
 
 from __future__ import annotations
@@ -172,18 +159,6 @@ def _install_gaussianization_guards(
 _install_gaussianization_guards()
 
 
-def _softplus_inv(y: float, floor: float = 1e-6) -> float:
-    """Inverse of ``softplus``: raw such that ``softplus(raw) = y``.
-
-    Used to initialise the unconstrained θ_smear parameter so its effective
-    (softplus) value equals the requested ``smear_init``. ``y`` is floored at
-    a tiny positive value (softplus⁻¹(0) = −∞), so an effective init of 0 maps
-    to a large-negative raw → effective ≈ 0 (negligible smearing).
-    """
-    y = max(float(y), floor)
-    return float(math.log(math.expm1(y)))
-
-
 def _noise_active(sigma) -> bool:
     """True if the given σ should trigger noise sampling.
 
@@ -288,29 +263,6 @@ def _event_mll(
     return torch.sqrt(m2.clamp_min(1e-12))
 
 
-_GH_CACHE: dict = {}
-
-
-def _gh_nodes(n: int, device, dtype):
-    """Gauss–Hermite nodes/log-weights for ``E_{ε~N(0,1)}[f] ≈ Σ_i W_i f(ξ_i)``.
-
-    ``∫ f(t) e^{-t²} dt ≈ Σ w_i^H f(t_i^H)`` ⇒ with ``ξ = √2 t^H`` and
-    ``W = w^H/√π`` (Σ W = 1) we get the standard-normal expectation. Cached.
-    Returns ``(ξ [n], logW [n])``.
-    """
-    key = (int(n), str(device), str(dtype))
-    if key not in _GH_CACHE:
-        import numpy as _np
-        t, w = _np.polynomial.hermite.hermgauss(int(n))
-        xi = _np.sqrt(2.0) * t
-        logW = _np.log(w) - 0.5 * _np.log(_np.pi)
-        _GH_CACHE[key] = (
-            torch.as_tensor(xi, device=device, dtype=dtype),
-            torch.as_tensor(logW, device=device, dtype=dtype),
-        )
-    return _GH_CACHE[key]
-
-
 # ---------------------------------------------------------------------------
 # Mixture MLP — unchanged
 # ---------------------------------------------------------------------------
@@ -360,7 +312,8 @@ def _freeze_param_grads(params):
 
 
 class JpsiMassMixtureModel(nn.Module):
-    """Unbinned J/ψ mass-fit model — θ-conditioned forward-folding design."""
+    """Unbinned J/ψ mass-fit model — two-stage continuity design (the flow models
+    the nominal shape p₀(m|muon_kin); θ enters analytically in stage 2)."""
 
     def __init__(
         self,
@@ -384,20 +337,7 @@ class JpsiMassMixtureModel(nn.Module):
         flow_nsf_bins: int = 8,
         mlp_hidden: int = 32,
         mlp_n_layers: int = 2,
-        smear_init_a: float = 0.0,
-        smear_init_c: float = 0.0,
         n_eta_bins: int = N_ETA_BINS,
-        # Use the linearised mass-shift T_scale on MC (m += J·θ) instead of
-        # the exact analytic qop transform. Only affects how the MC training
-        # mass is generated; the conditioning (θ_scale_pm) is identical.
-        linearize_scale: bool = False,
-        # Fixed reference scales used to standardise the per-muon nuisance
-        # conditioning (cond = θ_pm / ref). The raw params span ~1e-2…1e-5
-        # across (A,e,M,a,c); dividing by their characteristic magnitudes
-        # puts the flow's conditioning inputs at O(1), comparable to the
-        # already-standardised y / muon_kin. Order: (A, e, M), (a, c).
-        theta_scale_cond_scale: tuple = (1e-3, 1e-3, 1e-5),
-        theta_smear_cond_scale: tuple = (1e-3, 1e-4),
         # Debug toggle: drop the residual-smearing kernel + σ_qop_pm
         # conditioning entirely. ``theta_smear`` stays as a Parameter
         # (for state_dict shape consistency) but is unused; trainer is
@@ -408,21 +348,6 @@ class JpsiMassMixtureModel(nn.Module):
         # inert) Parameter; trainer excludes it from the optimizer. With both
         # scale and smearing disabled only the flow + MLP (background) train.
         scale_enabled: bool = True,
-        # When True, the flow's *parameters* receive no gradient from the
-        # data branch (the flow is updated by the MC branch only). The data
-        # branch still propagates gradient to the flow's conditioning inputs
-        # — θ_scale_pm and σ_qop_pm — and to the MLP. This pins the signal
-        # template's shape to the (trusted) MC, so the data branch can only
-        # float θ and the mixture, breaking the θ_scale ↔ flow-location
-        # degeneracy (an online "pretrain-flow-on-MC").
-        detach_flow_on_data: bool = False,
-        # When True, the MC-branch samples θ̃_scale / θ̃_smear around a FIXED
-        # centre (the initial nuisances: θ_scale = 0, θ_smear = init) with a
-        # fixed width, independent of the current model values — so the flow
-        # learns a stable θ-conditional family over a fixed region rather than
-        # one that follows the fit. When False (default), it samples around
-        # ``θ.detach()`` (the moving model value).
-        fixed_theta_sampling: bool = False,
         # Robustness floor for the qop→pt inversion. A scale/smear shift adds
         # to qop = q·sinθ/pt; if it drives qop through zero, pt → ∞ and the
         # reconstructed mass explodes (catastrophic at high |η| where |qop| is
@@ -436,39 +361,14 @@ class JpsiMassMixtureModel(nn.Module):
         # term are nearly degenerate over the narrow J/ψ pt range, so fitting
         # both per η-bin is ill-posed and yields the unphysical bin-to-bin
         # zig-zag. Fitting one removes the degeneracy; the non-fitted term is
-        # zeroed *post-softplus* (``smear_param_mask``) so it contributes
-        # exactly 0 to the σ_qop kernel and the conditioning, and receives no
-        # gradient (inert). smear_init_a / smear_init_c then only set the init
-        # of the fitted term.
+        # zeroed (``smear_param_mask``) so it contributes exactly 0 to the width
+        # factor s and receives no gradient (inert).
         smear_fit_params: str = "both",
-        # Whether the flow conditions on the per-muon nuisances (θ_scale_pm,
-        # θ_smear_pm). True = the legacy forward-fold design (flow learns the
-        # θ-dependence). False = the two-stage continuity design: the flow
-        # models only the nominal shape p₀(m|muon_kin) at θ=0, and the
-        # θ-dependence is supplied analytically (continuity equation, see
-        # ``data_nll_continuity``). θ parameters still exist when scale/smear
-        # are enabled — they're just not fed to the flow.
-        theta_conditioning: bool = True,
-        # Smear model. 'convolution' (default): the physical per-muon qop
-        # Gaussian smear, collapsed to a mass-variance V and applied as a
-        # stochastic mass convolution (GH quadrature; softplus(θ_smear) ≥ 0, one-
-        # sided). 'width': a deterministic, invertible, TWO-SIDED density
-        # width-scale x = μ + (1+s)(m−μ) with s(c) = Σ_μ (a_b + c_b·k_μ) read
-        # linearly from θ_smear (no softplus) — no convolution / GH, converges to
-        # s=0 in closure, and the smear does not touch the ρ conditioning.
-        smear_mode: str = "convolution",
     ):
         super().__init__()
         self.smearing_enabled = bool(smearing_enabled)
-        if smear_mode not in ("convolution", "width"):
-            raise ValueError(f"smear_mode must be 'convolution' or 'width', got {smear_mode!r}")
-        self.smear_mode = str(smear_mode)
         self.scale_enabled = bool(scale_enabled)
-        self.linearize_scale = bool(linearize_scale)
-        self.detach_flow_on_data = bool(detach_flow_on_data)
-        self.fixed_theta_sampling = bool(fixed_theta_sampling)
         self.qop_floor_frac = float(qop_floor_frac)
-        self.theta_conditioning = bool(theta_conditioning)
         self.flow_arch = str(flow_arch)
 
         # Per-bin smear fit mask: which of (a, c) float. The frozen column gets
@@ -486,29 +386,12 @@ class JpsiMassMixtureModel(nn.Module):
             persistent=False,
         )
 
-        # Per-muon reference scales for standardising the nuisance
-        # conditioning: [A_+,e_+,M_+,A_-,e_-,M_-] and [a_+,c_+,a_-,c_-].
-        self.register_buffer(
-            "theta_scale_cond_scale_buf",
-            torch.tensor(list(theta_scale_cond_scale) * 2, dtype=torch.float32),
-        )
-        self.register_buffer(
-            "theta_smear_cond_scale_buf",
-            torch.tensor(list(theta_smear_cond_scale) * 2, dtype=torch.float32),
-        )
-
-        # Flow conditions on (muon_kin_std[, theta_scale_pm][, theta_smear_pm]).
-        # Each θ block is dropped from the conditioner when disabled, so the
-        # architecture matches what we actually feed it. With
-        # ``theta_conditioning=False`` no θ block is fed at all — the flow sees
-        # only muon_kin (the two-stage continuity design).
-        n_flow_cond = N_MUON_KIN
-        if self.theta_conditioning:
-            n_flow_cond += (N_THETA_SCALE_PM if self.scale_enabled else 0)
-            n_flow_cond += (N_THETA_SMEAR_PM if self.smearing_enabled else 0)
+        # Two-stage continuity design: the flow models only the nominal shape
+        # p₀(m|muon_kin) at θ=0 — it never conditions on θ (the θ-dependence is
+        # supplied analytically in stage 2, see ``data_nll_continuity``).
         flow_inner = build_flow(
             n_features=1,
-            n_cond=n_flow_cond,
+            n_cond=N_MUON_KIN,
             n_transforms=flow_n_transforms,
             hidden_features=flow_hidden_features,
             n_hidden_layers=flow_n_hidden_layers,
@@ -528,39 +411,12 @@ class JpsiMassMixtureModel(nn.Module):
         self.theta_scale = nn.Parameter(
             torch.zeros(n_eta_bins, N_THETA_SCALE, dtype=torch.float32)
         )
+        # θ_smear are signed per-η-bin width coefficients (a, c) used LINEARLY
+        # (two-sided, no softplus): the deterministic density width-scale
+        # x = μ + (1+s)(m−μ) with s(c) = Σ_μ (a_b + c_b·k_μ). Init at 0 → s=0
+        # (identity, no smear), free to sharpen or broaden from there.
         self.theta_smear = nn.Parameter(
-            torch.full(
-                (n_eta_bins, N_THETA_SMEAR),
-                0.0,
-                dtype=torch.float32,
-            )
-        )
-        # Apply user-specified init. theta_smear is unconstrained; we store
-        # softplus⁻¹(smear_init) so the *effective* (softplus) init equals the
-        # requested physical value.
-        with torch.no_grad():
-            if self.smear_mode == "width":
-                # 'width': θ_smear are signed width coefficients used linearly;
-                # init at 0 → s=0 (identity, no smear), two-sided from there.
-                self.theta_smear.zero_()
-            else:
-                self.theta_smear[:, 0].fill_(_softplus_inv(smear_init_a))
-                self.theta_smear[:, 1].fill_(_softplus_inv(smear_init_c))
-
-        # Fixed sampling centres for ``fixed_theta_sampling`` — the *initial*
-        # nuisance values (θ_scale = 0, θ_smear = softplus⁻¹(smear_init)).
-        # When that flag is on, the MC-branch samples θ̃ around these fixed
-        # references with a fixed width, instead of around the (moving) model
-        # values — so the flow's learned θ-conditional family is independent
-        # of the fit trajectory. Non-persistent: reconstructed from smear_init
-        # at __init__, so old checkpoints (without these buffers) still load.
-        self.register_buffer(
-            "theta_scale_sample_center", self.theta_scale.detach().clone(),
-            persistent=False,
-        )
-        self.register_buffer(
-            "theta_smear_sample_center", self.theta_smear.detach().clone(),
-            persistent=False,
+            torch.zeros(n_eta_bins, N_THETA_SMEAR, dtype=torch.float32)
         )
 
         # Buffers — Bernstein window, density-rescale, standardisation stats.
@@ -604,60 +460,20 @@ class JpsiMassMixtureModel(nn.Module):
         """Look up ``[B, 6] = (A_+, e_+, M_+, A_-, e_-, M_-)`` from a θ_scale parameter."""
         return theta_scale[b_pm].reshape(b_pm.shape[0], -1)
 
-    def _smear_per_event(self, theta_smear: torch.Tensor, b_pm: torch.Tensor) -> torch.Tensor:
-        """Look up the per-event effective ``[B, 4] = (a_+, c_+, a_-, c_-)``.
-
-        ``theta_smear`` is the *unconstrained* parameter; the effective
-        (physical, ≥0) smearing terms are ``softplus(theta_smear)``. The same
-        softplus(a), softplus(c) feed the smear kernel (``sigma_qop_pm``) and
-        this conditioning, so they are consistent and there is no sign
-        degeneracy (softplus is monotone — the old a², c² kernel was even in
-        the sign of (a, c); softplus removes that).
-
-        A non-fitted term (per ``smear_fit_params``) is zeroed *post-softplus*
-        via ``smear_param_mask``, so it contributes exactly 0 to both the
-        kernel and the conditioning, and — being a multiply by 0 — receives no
-        gradient (the optimizer leaves it inert).
-        """
-        eff = F.softplus(theta_smear[b_pm]) * self.smear_param_mask  # [B,2,2]
-        return eff.reshape(b_pm.shape[0], -1)
-
-    def sigma_qop_pm(
-        self, theta_smear: torch.Tensor, pt_pm: torch.Tensor, eta_pm: torch.Tensor, b_pm: torch.Tensor
-    ) -> torch.Tensor:
-        """Per-muon σ_qop = sqrt((m_a·softplus(a_b))² + (m_c·softplus(c_b))² k²).
-
-        ``theta_smear`` is unconstrained; the effective a, c = softplus(·) ≥ 0.
-        A non-fitted term is zeroed post-softplus by ``smear_param_mask``
-        (``m_a, m_c`` ∈ {0,1}), so it drops out of the kernel entirely.
-        Returns ``[B, 2]``.
-        """
-        a_pm = F.softplus(theta_smear[b_pm, 0]) * self.smear_param_mask[0]
-        c_pm = F.softplus(theta_smear[b_pm, 1]) * self.smear_param_mask[1]
-        k_pm = 1.0 / pt_pm
-        var = a_pm * a_pm + c_pm * c_pm * (k_pm * k_pm)
-        return torch.sqrt(var.clamp_min(1e-24))
-
     def effective_theta_smear(self) -> torch.Tensor:
-        """Per-η-bin effective smear, masked to the fitted terms. 'convolution':
-        ``softplus(theta_smear) ≥ 0`` (the qop-resolution a, c). 'width': the
-        signed width coefficients (theta_smear used linearly, two-sided)."""
-        if self.smear_mode == "width":
-            return self.theta_smear * self.smear_param_mask
-        return F.softplus(self.theta_smear) * self.smear_param_mask
+        """Per-η-bin effective smear, masked to the fitted terms: the signed
+        width coefficients (theta_smear used linearly, two-sided)."""
+        return self.theta_smear * self.smear_param_mask
 
     def fold_sigma_qop_pm(
         self, pt_pm: torch.Tensor, eta_pm: torch.Tensor, b_pm: torch.Tensor
     ) -> torch.Tensor:
-        """Per-muon σ_qop for the validation FOLD, from the FITTED smear params,
-        valid in BOTH smear modes (the fold is mode-independent: it always
-        shifts + Gaussian-smears qop and recomputes m_ll). The effective (a, c)
-        — ``softplus(θ)`` for 'convolution', the signed width coefficients for
-        'width' — are the same per-muon qop coefficients, used here directly,
-        CLIPPED AT 0 (a qop smear is ≥ 0; a 'width' sharpening a,c < 0 → no
-        smear, and → 0 in closure) and combined as σ_qop = √(a² + c² k²).
-        Equals ``sigma_qop_pm`` in convolution mode (softplus is already ≥ 0).
-        Returns ``[B, 2]``."""
+        """Per-muon σ_qop for the validation FOLD, from the FITTED width
+        coefficients. The fold always shifts + Gaussian-smears qop and recomputes
+        m_ll; the effective (a, c) — the signed width coefficients — are the same
+        per-muon qop coefficients, used here directly, CLIPPED AT 0 (a qop smear
+        is ≥ 0; a width sharpening a,c < 0 → no smear, and → 0 in closure) and
+        combined as σ_qop = √(a² + c² k²). Returns ``[B, 2]``."""
         eff = self.effective_theta_smear()                 # [n_bins, 2], masked
         a_pm = eff[b_pm, 0].clamp_min(0.0)
         c_pm = eff[b_pm, 1].clamp_min(0.0)
@@ -757,18 +573,14 @@ class JpsiMassMixtureModel(nn.Module):
             ∂m_ll/∂e_i = +½ m_ll · k_i         (charge-even)
             ∂m_ll/∂M_i = −½ m_ll · q_i · pt_i  (charge-odd / sagitta)
 
-        The ``q_i`` lives on ``M`` (charge-odd), not on ``A``/``e`` — verified
-        by finite-differencing the exact ``T_scale`` transform. Returns
-        ``[B, 6]`` ordered ``(A_+, e_+, M_+, A_-, e_-, M_-)``; independent of
-        ``b_pm`` (those route the gradient to ``theta_scale`` via scatter).
+        Returns ``[B, 6]`` ordered ``(A_+, e_+, M_+, A_-, e_-, M_-)``; independent
+        of ``b_pm`` (those route the gradient to ``theta_scale`` via scatter).
         """
         k_pm = 1.0 / pt_pm
         m_half = 0.5 * mll
-        # [B, 2] per (+, −) for each of A, e, M.
         dA = -m_half.unsqueeze(-1).expand_as(q_pm)
         de = +m_half.unsqueeze(-1) * k_pm
         dM = -m_half.unsqueeze(-1) * q_pm * pt_pm
-        # Order: (A_+, e_+, M_+, A_-, e_-, M_-).
         return torch.stack(
             [dA[:, 0], de[:, 0], dM[:, 0], dA[:, 1], de[:, 1], dM[:, 1]], dim=-1
         )
@@ -800,35 +612,11 @@ class JpsiMassMixtureModel(nn.Module):
     # Conditioning vector for the flow
     # ------------------------------------------------------------------
 
-    def _build_flow_cond(
-        self,
-        muon_kin_std: torch.Tensor,
-        theta_scale_pm: "torch.Tensor | None",
-        theta_smear_pm: "torch.Tensor | None",
-    ) -> torch.Tensor:
-        """``[muon_kin_std[, θ_scale_pm/ref][, θ_smear_pm/ref]]``.
-
-        ``muon_kin_std`` is the leak-free kinematic conditioning (η_±, cos/sin
-        φ_±, ρ). Each nuisance enters as raw per-muon parameters standardised
-        by its fixed reference scale: ``θ_scale_pm = (A_+,e_+,M_+,A_-,e_-,M_-)``
-        and ``θ_smear_pm = (a_+,c_+,a_-,c_-)``. θ_scale_pm is dropped when scale
-        is off, θ_smear_pm when smearing is off (matching ``n_flow_cond``).
-        With ``theta_conditioning=False`` only ``muon_kin_std`` is returned (the
-        two-stage continuity design — the flow never sees θ).
-        """
-        parts = [muon_kin_std]
-        if self.theta_conditioning:
-            if self.scale_enabled and theta_scale_pm is not None:
-                parts.append(theta_scale_pm / self.theta_scale_cond_scale_buf)
-            if self.smearing_enabled and theta_smear_pm is not None:
-                parts.append(theta_smear_pm / self.theta_smear_cond_scale_buf)
-        return torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
-
     def _standardise_mll(self, mll: torch.Tensor) -> torch.Tensor:
         return (mll - self.mll_mean_buf) / self.mll_std_buf
 
     # ------------------------------------------------------------------
-    # Signal log-density at observed coords (data branch)
+    # Nominal (θ=0) flow density — the stage-1 template
     # ------------------------------------------------------------------
 
     def log_p_nominal(
@@ -837,151 +625,13 @@ class JpsiMassMixtureModel(nn.Module):
         """``log p₀(m | muon_kin)`` — the θ=0 nominal flow density (1/GeV).
 
         The stage-1 target: a plain conditional density on the (uncorrected)
-        reco mass, conditioned on the leak-free kinematics only. Requires
-        ``theta_conditioning=False``.
+        reco mass, conditioned on the leak-free kinematics only — the flow
+        never sees θ (the two-stage continuity design).
         """
-        cond = self._build_flow_cond(muon_kin_std_obs, None, None)
         mll_std = self._standardise_mll(mll_obs).clamp(
             -MLL_STD_FLOW_CLAMP, MLL_STD_FLOW_CLAMP
         )
-        return self.flow(mll_std.unsqueeze(-1), cond) - self.mll_log_scale
-
-    def log_p_signal_data(
-        self,
-        mll_obs: torch.Tensor,
-        pt_pm_obs: torch.Tensor,
-        eta_pm: torch.Tensor,
-        b_pm: torch.Tensor,
-        y_event_std_obs: torch.Tensor,
-        muon_kin_std_obs: torch.Tensor,
-    ) -> torch.Tensor:
-        """``log p_signal(m_obs | y_obs, θ_scale, θ_smear)`` per data event.
-
-        The data mass is **not** transformed. The flow is evaluated at the
-        observed m_obs, conditioned on the *live* model nuisances
-        (θ_scale_pm and θ_smear_pm). The θ_scale / θ_smear gradients flow
-        purely through this conditioning input — the flow's learned
-        θ-sensitivity, trained on the forward-folded MC branch. There is
-        no change-of-variables Jacobian because the observable is not
-        remapped.
-        """
-        theta_scale_pm = (
-            self._scale_per_event(self.theta_scale, b_pm)
-            if self.scale_enabled else None
-        )
-        theta_smear_pm = (
-            self._smear_per_event(self.theta_smear, b_pm)
-            if self.smearing_enabled else None
-        )
-        cond = self._build_flow_cond(
-            muon_kin_std_obs, theta_scale_pm, theta_smear_pm
-        )
-        mll_std = self._standardise_mll(mll_obs).clamp(
-            -MLL_STD_FLOW_CLAMP, MLL_STD_FLOW_CLAMP
-        )
-        log_p_std = self.flow(mll_std.unsqueeze(-1), cond)
-        return log_p_std - self.mll_log_scale
-
-    # ------------------------------------------------------------------
-    # Signal log-density for MC: forward-fold smear + scale, condition on
-    # the *sampled* (detached) nuisances so the flow learns the θ-dependence
-    # ------------------------------------------------------------------
-
-    def log_p_signal_mc(
-        self,
-        pt_pm: torch.Tensor,
-        eta_pm: torch.Tensor,
-        phi_pm: torch.Tensor,
-        q_pm: torch.Tensor,
-        b_pm: torch.Tensor,
-        y_event_std_obs: torch.Tensor,
-        muon_kin_std_obs: torch.Tensor,
-        scale_noise_sigma: "float | torch.Tensor" = 0.0,
-        smear_noise_sigma: "float | torch.Tensor" = 0.0,
-    ) -> torch.Tensor:
-        """``log p_flow(m_final | y, θ̃_scale_pm, θ̃_smear_pm)`` per MC event.
-
-        Both nuisances are forward-applied to the MC reco momenta at
-        *sampled, detached* values θ̃ ~ N(θ.detach(), σ²) (σ scalar, or a
-        per-parameter Tensor from Adam's 2nd moment — see ``_adaptive_sigma``
-        in the trainer; σ=0 → sample exactly at θ.detach()). The flow is
-        conditioned on those same sampled values and evaluated at the
-        resulting mass, so the gradient reaching θ from this branch is zero
-        — the branch trains the flow's conditional shape only. Order:
-        **scale first, then smear** — exact scale applies the analytic qop
-        forward to the momenta and the smear kernel acts on those scaled
-        momenta; the linearised scale (``m += J·θ``, J at the pre-smear
-        kinematics) is added to the smeared mass.
-        """
-        # ---- sampled, detached nuisances. Centre = the *fixed* init
-        # reference when ``fixed_theta_sampling`` (sampling independent of the
-        # model values), else the (moving) model value θ.detach(). Each
-        # nuisance is dropped entirely when its block is disabled.
-        if self.scale_enabled:
-            scale_center = (
-                self.theta_scale_sample_center if self.fixed_theta_sampling
-                else self.theta_scale.detach()
-            )
-            theta_scale_eff = (
-                scale_center + torch.randn_like(self.theta_scale) * scale_noise_sigma
-                if _noise_active(scale_noise_sigma) else scale_center
-            )
-            theta_scale_pm_eff = self._scale_per_event(theta_scale_eff, b_pm)
-        else:
-            theta_scale_eff = None
-            theta_scale_pm_eff = None
-
-        if self.smearing_enabled:
-            smear_center = (
-                self.theta_smear_sample_center if self.fixed_theta_sampling
-                else self.theta_smear.detach()
-            )
-            theta_smear_eff = (
-                smear_center
-                + torch.randn_like(self.theta_smear) * smear_noise_sigma
-                * self.smear_param_mask
-                if _noise_active(smear_noise_sigma) else smear_center
-            )
-            theta_smear_pm_eff = self._smear_per_event(theta_smear_eff, b_pm)
-            eps_pm = torch.randn_like(pt_pm)
-        else:
-            theta_smear_eff = None
-            theta_smear_pm_eff = None
-
-        # ---- forward fold: scale FIRST (if enabled), then smear (if enabled).
-        # Exact scale acts on the momenta (smear then acts on the scaled
-        # momenta); the linearised scale is a mass-shift added at the end with
-        # J evaluated at the pre-smear kinematics. When scale is disabled the
-        # momenta pass through unscaled and the shift is 0.
-        pt_cur = pt_pm
-        scale_shift = 0.0
-        if self.scale_enabled:
-            if self.linearize_scale:
-                mll_pre = _event_mll(pt_pm, eta_pm, phi_pm)
-                j_pm = self.jacobian_mll_linearized(mll_pre, pt_pm, q_pm, b_pm)
-                scale_shift = (j_pm * theta_scale_pm_eff).sum(-1)
-            else:
-                delta_qop = self._delta_qop_analytic(
-                    theta_scale_eff, pt_pm, eta_pm, q_pm, b_pm
-                )
-                pt_cur = self._apply_scale_pt(
-                    pt_pm, eta_pm, q_pm, delta_qop, sign=+1.0
-                )
-
-        if self.smearing_enabled:
-            sigma_pm = self.sigma_qop_pm(theta_smear_eff, pt_cur, eta_pm, b_pm)
-            pt_cur = self.apply_smear_pt(pt_cur, eta_pm, q_pm, sigma_pm, eps_pm)
-
-        mll_final = _event_mll(pt_cur, eta_pm, phi_pm) + scale_shift
-
-        mll_final_std = self._standardise_mll(mll_final).clamp(
-            -MLL_STD_FLOW_CLAMP, MLL_STD_FLOW_CLAMP
-        )
-        cond = self._build_flow_cond(
-            muon_kin_std_obs, theta_scale_pm_eff, theta_smear_pm_eff
-        )
-        log_p_std = self.flow(mll_final_std.unsqueeze(-1), cond)
-        return log_p_std - self.mll_log_scale
+        return self.flow(mll_std.unsqueeze(-1), muon_kin_std_obs) - self.mll_log_scale
 
     # ------------------------------------------------------------------
     # MLP coefficients (data branch only)
@@ -989,140 +639,6 @@ class JpsiMassMixtureModel(nn.Module):
 
     def f_data(self, muon_kin_std: torch.Tensor) -> torch.Tensor:
         return self.mlp(muon_kin_std)
-
-    # ------------------------------------------------------------------
-    # Per-event NLL (two branches), weighted sum
-    # ------------------------------------------------------------------
-
-    def event_nll(
-        self,
-        mll: torch.Tensor,
-        pt_pm: torch.Tensor,
-        eta_pm: torch.Tensor,
-        phi_pm: torch.Tensor,
-        q_pm: torch.Tensor,
-        b_pm: torch.Tensor,
-        y_event_std: torch.Tensor,
-        muon_kin_std: torch.Tensor,
-        is_data_mask: torch.Tensor,
-        scale_noise_sigma: "float | torch.Tensor" = 0.0,
-        smear_noise_sigma: "float | torch.Tensor" = 0.0,
-        eps: float = 1e-30,
-        mc_only: bool = False,
-    ) -> torch.Tensor:
-        """Per-event ``-ln p`` (shape ``[B]``, unweighted).
-
-        MC branch: forward-fold smear+scale at *sampled, detached* θ̃ and
-        condition the flow on the same θ̃ — trains the flow's conditional
-        shape, no θ gradient. Data branch: evaluate the flow at the
-        untransformed observed mass, conditioned on the *live* θ; the
-        θ_scale / θ_smear gradients flow only through that conditioning,
-        and the MLP sets the Bernstein-background mixture.
-
-        Implementation: **each branch's flow is evaluated only on its
-        own events**. We don't use ``torch.where(is_data, nll_data,
-        nll_mc)`` over forward-evaluated-everywhere branches because the
-        backward through the zuko GF base transform's ``jacobian.log()``
-        is ``grad_output / jacobian``; the zeroed-grad rows on the
-        masked-out branch hit ``0 / ~0 = NaN`` when the GMM-CDF jacobian
-        happens to be tiny (typical at random init for inputs between
-        the mixture components). Subset-and-scatter avoids that —
-        gradient only flows where the value was actually consumed.
-
-        Debug shortcut: when ``mc_only=True`` the data branch is skipped
-        entirely — no MLP / Bernstein compute, no ``log_p_signal_data``.
-        """
-        B = mll.shape[0]
-        per = torch.zeros(B, dtype=mll.dtype, device=mll.device)
-
-        is_mc = ~is_data_mask
-        # MC branch on MC-event subset only.
-        if bool(is_mc.any()):
-            mc_idx = is_mc.nonzero(as_tuple=True)[0]
-            log_p_mc = self.log_p_signal_mc(
-                pt_pm=pt_pm[mc_idx],
-                eta_pm=eta_pm[mc_idx],
-                phi_pm=phi_pm[mc_idx],
-                q_pm=q_pm[mc_idx],
-                b_pm=b_pm[mc_idx],
-                y_event_std_obs=y_event_std[mc_idx],
-                muon_kin_std_obs=muon_kin_std[mc_idx],
-                scale_noise_sigma=scale_noise_sigma,
-                smear_noise_sigma=smear_noise_sigma,
-            )
-            per = per.index_put((mc_idx,), -log_p_mc, accumulate=False)
-
-        if mc_only:
-            return per
-
-        # Data branch on data-event subset only.
-        is_data = is_data_mask
-        if bool(is_data.any()):
-            data_idx = is_data.nonzero(as_tuple=True)[0]
-            # Optionally exclude the flow's parameters from the data-branch
-            # gradient: the flow template is then fixed (MC-trained) w.r.t.
-            # the data NLL, while θ_scale / θ_smear (via the conditioning)
-            # and the MLP still get their data gradients.
-            _flow_freeze = (
-                self.flow.parameters() if self.detach_flow_on_data else []
-            )
-            with _freeze_param_grads(_flow_freeze):
-                log_ps = self.log_p_signal_data(
-                    mll_obs=mll[data_idx],
-                    pt_pm_obs=pt_pm[data_idx],
-                    eta_pm=eta_pm[data_idx],
-                    b_pm=b_pm[data_idx],
-                    y_event_std_obs=y_event_std[data_idx],
-                    muon_kin_std_obs=muon_kin_std[data_idx],
-                )
-
-            f = self.f_data(muon_kin_std[data_idx])
-            p0, p1 = bernstein_d1(mll[data_idx], float(self.m_lo), float(self.m_hi))
-            p_mix = f[:, 0] * p0 + f[:, 1] * p1 + f[:, 2] * torch.exp(log_ps)
-            nll_data = -torch.log(p_mix.clamp_min(eps))
-            per = per.index_put((data_idx,), nll_data, accumulate=False)
-
-        return per
-
-    def nll(
-        self,
-        mll: torch.Tensor,
-        pt_pm: torch.Tensor,
-        eta_pm: torch.Tensor,
-        phi_pm: torch.Tensor,
-        q_pm: torch.Tensor,
-        b_pm: torch.Tensor,
-        y_event_std: torch.Tensor,
-        muon_kin_std: torch.Tensor,
-        is_data_mask: torch.Tensor,
-        w: torch.Tensor,
-        scale_noise_sigma: "float | torch.Tensor" = 0.0,
-        smear_noise_sigma: "float | torch.Tensor" = 0.0,
-        eps: float = 1e-30,
-        mc_only: bool = False,
-    ) -> torch.Tensor:
-        """Weighted summed per-event NLL. Scalar.
-
-        With ``mc_only=True`` the per-row NLL is ``-log p_mc`` for every
-        row; combine with caller-side data-row weight masking to get
-        an MC-only loss.
-        """
-        per = self.event_nll(
-            mll=mll,
-            pt_pm=pt_pm,
-            eta_pm=eta_pm,
-            phi_pm=phi_pm,
-            q_pm=q_pm,
-            b_pm=b_pm,
-            y_event_std=y_event_std,
-            muon_kin_std=muon_kin_std,
-            is_data_mask=is_data_mask,
-            scale_noise_sigma=scale_noise_sigma,
-            smear_noise_sigma=smear_noise_sigma,
-            eps=eps,
-            mc_only=mc_only,
-        )
-        return (w * per).sum()
 
     # ------------------------------------------------------------------
     # Stage-2 continuity-equation data fit (frozen flow + analytic v, κ)
@@ -1141,7 +657,6 @@ class JpsiMassMixtureModel(nn.Module):
 
         Returns ``(log p₀, s, s′)`` (each ``[B]``): p₀ in 1/GeV,
         ``s = ∂_m log p₀``, ``s′ = ∂²_m log p₀``, via autograd in ``m``.
-        Requires ``theta_conditioning=False`` (flow conditions on muon_kin).
         """
         m = mll.detach().requires_grad_(True)
         mll_std = self._standardise_mll(m).clamp(-MLL_STD_FLOW_CLAMP, MLL_STD_FLOW_CLAMP)
@@ -1283,14 +798,13 @@ class JpsiMassMixtureModel(nn.Module):
     # ------------------------------------------------------------------
 
     def _continuity_response(self, m_eval, m_obs, pt_obs, eta_pm, q_pm,
-                             theta_scale_pm, theta_smear_eff_pm):
-        """Advective mass shift ``s_adv`` and smear variance ``V`` at evaluation
-        mass ``m_eval`` (broadcasting against the per-event observables), for the
-        analytic transform with ``pt(m_eval) = pt_obs · m_eval/m_obs``.
+                             theta_scale_pm):
+        """Advective mass shift ``s_adv`` at evaluation mass ``m_eval``
+        (broadcasting against the per-event observables), for the analytic scale
+        transform with ``pt(m_eval) = pt_obs · m_eval/m_obs``.
 
-        ``v = (−½m, ½m k, −½m q pt)`` per muon (the corrected scale Jacobian);
-        ``κ_a = (∂m/∂qop)² = (m/2qop)²``, ``κ_c = κ_a k²``. Returns
-        ``(s_adv, V)`` shaped like ``m_eval``. (Replaceable by a learned MLP.)
+        ``v = (−½m, ½m k, −½m q pt)`` per muon (the corrected scale Jacobian).
+        Returns ``s_adv`` shaped like ``m_eval``. (Replaceable by a learned MLP.)
         """
         scale = (m_eval / m_obs).unsqueeze(-1)             # [...,1]
         pt = pt_obs * scale                                # [...,2]
@@ -1301,63 +815,7 @@ class JpsiMassMixtureModel(nn.Module):
         dM = -mh * q_pm * pt                               # [...,2]
         v = torch.stack([dA[..., 0], de[..., 0], dM[..., 0],
                          dA[..., 0], de[..., 1], dM[..., 1]], dim=-1)
-        s_adv = (v * theta_scale_pm).sum(-1)
-        sintheta = _sintheta_from_eta(eta_pm)
-        qop = q_pm * sintheta / pt                         # [...,2]
-        dm_dqop = -(0.5 * m_eval).unsqueeze(-1) / qop      # −m/(2 qop)
-        ka = dm_dqop * dm_dqop
-        kc = ka * (k * k)
-        kappa = torch.stack([ka[..., 0], kc[..., 0], ka[..., 1], kc[..., 1]], dim=-1)
-        # V = κ·σ_qop² = κ_a·a_eff² + κ_c·c_eff².  ``theta_smear_eff_pm`` is the
-        # effective (a, c) = softplus(θ), which are qop STDs (matching
-        # σ_qop² = a²+c²k² in sigma_qop_pm), so they enter V SQUARED. Using them
-        # linearly inflated V by ~1/a_eff: with κ_a ~ (m/2qop)² ~ 10³ and the
-        # default a_eff=1e-3, a linear V gave √V ~ 1 GeV (≫ the 0.36 GeV window),
-        # flinging the GH source points out of the flow's support and driving
-        # the fit to a non-finite density.
-        V = (kappa * theta_smear_eff_pm.pow(2)).sum(-1).clamp_min(0.0)
-        return s_adv, V
-
-    def _source_rho_std(self, m_obs, pt_obs, eta_pm, q_pm, b_pm, xig):
-        """Standardised SOURCE ρ for the flow conditioning, per GH node ``[B, G]``.
-
-        ρ is a flow *condition*, not its target, so propagating the transformed
-        value carries no Jacobian — we just recompute it from the
-        un-transformed per-muon pt and feed it in. The scale is un-applied
-        exactly (``_apply_scale_pt`` inverse). The smear is a per-muon qop jitter
-        that the #2 scheme collapsed to a scalar mass-noise √V·ε; we restore its
-        ρ effect via the conditional-mean per-muon shift given that mass node,
-        ``E[δqop_μ | δm] = (J^m_μ σ_qop_μ² / √V)·ε`` (J^m_μ = ∂m/∂qop_μ = −m/2qop_μ),
-        un-applied per node. (The uncorrelated residual ρ-noise — a higher-order
-        term needing a 2-D smear integral — is dropped.)"""
-        B = m_obs.shape[0]; G = xig.shape[-1]
-        # 1) un-apply the scale (obs → truth), per event.
-        pt1 = pt_obs
-        if self.scale_enabled:
-            dqop_s = self._delta_qop_analytic(self.theta_scale, pt_obs, eta_pm, q_pm, b_pm)
-            pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
-        # 2) un-apply the conditional-mean smear qop shift, per GH node.
-        if self.smearing_enabled:
-            sinth = _sintheta_from_eta(eta_pm)
-            qop1 = q_pm * sinth / pt1                                  # [B,2]
-            k1 = 1.0 / pt1
-            eff = self._smear_per_event(self.theta_smear, b_pm)        # [B,4]=(a±,c±)
-            a = eff[:, 0::2]; c = eff[:, 1::2]                         # [B,2]
-            sig2 = a * a + c * c * k1 * k1                             # σ_qop² [B,2]
-            Jm = -0.5 * m_obs.unsqueeze(-1) / qop1                     # ∂m/∂qop [B,2]
-            V = (Jm * Jm * sig2).sum(-1, keepdim=True)                 # [B,1] > 0
-            coef = Jm * sig2 / V.sqrt()                               # J^m σ²/√V [B,2]
-            dqop_sm = coef.unsqueeze(1) * xig.view(1, G, 1)           # [B,G,2]
-            pt_src = self._apply_scale_pt(
-                pt1.unsqueeze(1).expand(B, G, 2),
-                eta_pm.unsqueeze(1).expand(B, G, 2),
-                q_pm.unsqueeze(1).expand(B, G, 2), dqop_sm, sign=-1.0)  # [B,G,2]
-            rho_src = (pt_src[..., 0] - pt_src[..., 1]) / (pt_src[..., 0] + pt_src[..., 1])
-        else:
-            r = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
-            rho_src = r.unsqueeze(1).expand(B, G)
-        rho_idx = N_MUON_KIN - 1
-        return (rho_src - self.muon_kin_mean[rho_idx]) / self.muon_kin_std[rho_idx]
+        return (v * theta_scale_pm).sum(-1)
 
     def _width_factor(self, b_pm, pt_pm):
         """Per-event signed width factor ``s`` for the 'width' smear: the
@@ -1382,27 +840,17 @@ class JpsiMassMixtureModel(nn.Module):
         return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
 
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
-                         n_gh: int = 5, n_iter: int = 2):
-        """``log p_θ(m_obs | c)`` — dispatch on the smear model."""
-        if self.smear_mode == "width":
-            return self._continuity_logp_width(
-                m_obs, mk, pt_obs, eta_pm, q_pm, b_pm, n_iter=n_iter)
-        return self._continuity_logp_conv(
-            m_obs, mk, pt_obs, eta_pm, q_pm, b_pm, n_gh=n_gh, n_iter=n_iter)
-
-    def _continuity_logp_width(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
-                               n_iter: int = 2):
-        """'width' smear: ``log p_θ(x|c)`` via the DETERMINISTIC, invertible map
+                         n_iter: int = 2):
+        """``log p_θ(x|c)`` per event via the DETERMINISTIC, invertible map
         ``x = μ + (1+s)(m' + s_adv(m') − μ)`` (scale advection + signed mass
-        width-scale, μ = mean m_ll). No convolution / GH — a single change of
-        variables: invert for the source m' (fixed point for the advection) and
-        divide by the Jacobian ``G' = dx/dm'``. The smear leaves ρ untouched, so
-        the conditioning only carries the scale's ρ shift."""
+        width-scale smear, μ = mean m_ll). A single change of variables: invert
+        for the source m' (fixed point for the advection) and divide by the
+        Jacobian ``G' = dx/dm'``. The smear is a pure mass-density stretch, so it
+        leaves ρ untouched — the conditioning only carries the scale's ρ shift."""
         B = m_obs.shape[0]
         theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
                           if self.scale_enabled
                           else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
-        zeros_sm = m_obs.new_zeros((B, N_THETA_SMEAR_PM))
         mu = self.mll_mean_buf
         s = (self._width_factor(b_pm, pt_obs) if self.smearing_enabled
              else m_obs.new_zeros(B))
@@ -1410,7 +858,7 @@ class JpsiMassMixtureModel(nn.Module):
 
         def s_adv_of(me):
             return self._continuity_response(
-                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm, zeros_sm)[0]
+                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm)
 
         # invert: un-width (m'' = μ + (x−μ)/(1+s)), then un-advect (fixed point).
         mpp = mu + (m_obs - mu) / one_plus_s
@@ -1435,70 +883,6 @@ class JpsiMassMixtureModel(nn.Module):
         logp0 = self.log_p_nominal(mp, mk_src)
         return logp0 - torch.log(Gp.abs().clamp_min(1e-6))
 
-    def _continuity_logp_conv(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
-                              n_gh: int = 5, n_iter: int = 2):
-        """``log p_θ(m_obs | c)`` per event via the #2 direct evaluation
-        (stochastic convolution smear)."""
-        theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
-                          if self.scale_enabled
-                          else self.theta_scale.new_zeros((b_pm.shape[0], N_THETA_SCALE_PM)))
-        theta_smear_eff = (self._smear_per_event(self.theta_smear, b_pm)
-                           if self.smearing_enabled
-                           else self.theta_smear.new_zeros((b_pm.shape[0], N_THETA_SMEAR_PM)))
-        xi, logW = _gh_nodes(n_gh, m_obs.device, m_obs.dtype)             # [G],[G]
-        B = m_obs.shape[0]; G = xi.shape[0]
-        mo = m_obs.unsqueeze(1)                                           # [B,1]
-        pto = pt_obs.unsqueeze(1); etao = eta_pm.unsqueeze(1)             # [B,1,2]
-        qo = q_pm.unsqueeze(1)
-        tsp = theta_scale_pm.unsqueeze(1); tse = theta_smear_eff.unsqueeze(1)
-        xig = xi.view(1, G)
-
-        def resp(me):  # me: [B,G]
-            return self._continuity_response(me, mo, pto, etao, qo, tsp, tse)
-
-        # √V·ε smear term, with NO ε-floor: softplus(θ_smear) > 0 makes the
-        # smear variance strictly positive whenever smearing is enabled, so √V
-        # and its m'-gradient are finite. When smearing is disabled V ≡ 0 and the
-        # term is dropped entirely (√0·ε = 0 exactly) — which also avoids
-        # autograd's 0·∞ from differentiating the bare √0 in G' below (V≡0 is a
-        # constant in m', so ∂√V/∂m' would be inf·0 = NaN without this).
-        def _smear(Vt):
-            return Vt.sqrt() * xig if self.smearing_enabled else 0.0
-        # fixed-point source solve  m' = m_obs − s_adv(m') − √V(m')·ε
-        mp = mo.expand(B, G).clone()
-        for _ in range(n_iter):
-            s_adv, V = resp(mp)
-            mp = mo - s_adv - _smear(V)
-        # change-of-variables Jacobian G'(m') = ∂x/∂m' by autograd in m'.
-        # The m-derivative is over the cheap analytic response (s_adv, V), not
-        # the flow, so this double-autograd is cheap. In the fit (grad on) we
-        # differentiate the *non-detached* source so G' carries θ's FULL
-        # dependence — explicit (s_adv', V') AND implicit (through m'(θ)); the
-        # latter matters for the smear gradient. Under no_grad (diagnostics) we
-        # only need the value, so a fresh leaf under enable_grad suffices.
-        if mp.requires_grad:
-            s_advj, Vj = resp(mp)
-            Gx = (mp + s_advj + _smear(Vj)).sum()
-            Gp = torch.autograd.grad(Gx, mp, create_graph=True)[0]
-        else:
-            with torch.enable_grad():
-                mp_j = mp.detach().requires_grad_(True)
-                s_advj, Vj = resp(mp_j)
-                Gx = (mp_j + s_advj + _smear(Vj)).sum()
-                Gp = torch.autograd.grad(Gx, mp_j)[0].detach()
-        # frozen-flow density at the source points (POINT values only).
-        # Propagate the transform through the ρ conditioning: ρ is a flow
-        # CONDITION (no Jacobian), so the source ρ — scale un-applied, smear
-        # conditional-mean per node — replaces the observed ρ. η/φ are exactly
-        # transform-invariant, so the rest of muon_kin is unchanged.
-        mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
-        if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std(
-                m_obs, pt_obs, eta_pm, q_pm, b_pm, xi)
-        logp0 = self.log_p_nominal(mp.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
-        log_terms = logW.view(1, G) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
-        return torch.logsumexp(log_terms, dim=1)
-
     def data_nll_continuity(
         self,
         mll: torch.Tensor,
@@ -1510,7 +894,6 @@ class JpsiMassMixtureModel(nn.Module):
         muon_kin_std: torch.Tensor,
         is_data_mask: torch.Tensor,
         eps: float = 1e-30,
-        n_gh: int = 5,
         n_iter: int = 2,
     ) -> torch.Tensor:
         """Per-event data NLL (``[B]``, unweighted) for stage 2.
@@ -1530,7 +913,7 @@ class JpsiMassMixtureModel(nn.Module):
         mk = muon_kin_std[data_idx]
         pt, eta, q, b = (pt_pm[data_idx], eta_pm[data_idx],
                          q_pm[data_idx], b_pm[data_idx])
-        log_ps = self._continuity_logp(m, mk, pt, eta, q, b, n_gh=n_gh, n_iter=n_iter)
+        log_ps = self._continuity_logp(m, mk, pt, eta, q, b, n_iter=n_iter)
         f = self.f_data(mk)
         p0b, p1b = bernstein_d1(m, float(self.m_lo), float(self.m_hi))
         p_mix = f[:, 0] * p0b + f[:, 1] * p1b + f[:, 2] * log_ps.exp()

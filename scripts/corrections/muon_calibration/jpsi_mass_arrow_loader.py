@@ -314,7 +314,7 @@ def _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, theta_inj):
     """ρ after applying the injected θ_scale (forward, truth→obs) to the muon
     pt — matching the model's ``_delta_qop_analytic`` + ``_apply_scale_pt``
     (sign=+1, floor inactive for the small injected shift). Returns ``[N]``.
-    The fit's ``_source_rho_std`` un-applies the same scale, so ρ_src → ρ_MC."""
+    The fit's ``_scale_source_rho_std`` un-applies the same scale, so ρ_src → ρ_MC."""
     sinth = 1.0 / np.cosh(eta_pm)                     # [N,2]
     k = 1.0 / pt_pm
     A = theta_inj[b_pm, 0]; e = theta_inj[b_pm, 1]; M = theta_inj[b_pm, 2]
