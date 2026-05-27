@@ -37,7 +37,7 @@ from jpsi_mass_arrow_loader import (
     discover_shards,
 )
 from jpsi_mass_model import (
-    JpsiMassMixtureModel, SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)
+    JpsiMassMixtureModel, SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C, THETA_SCALE_REF)
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +404,10 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
     if n_scale == 72:
         out["hessian_24_3_24_3"] = H[:72, :72].view(24, 3, 24, 3)
         if cov is not None:
-            cov_scale = cov[:72, :72]
+            # θ_scale is O(1); physical (A,e,M) = θ·THETA_SCALE_REF → rescale the
+            # covariance block to PHYSICAL units (cov_phys = cov·ref⊗ref).
+            ref72 = torch.tensor(list(THETA_SCALE_REF) * 24, dtype=cov.dtype)
+            cov_scale = cov[:72, :72] * ref72.unsqueeze(0) * ref72.unsqueeze(1)
             out["covariance_24_3_24_3"] = cov_scale.view(24, 3, 24, 3)
             out["sigma_scale_24_3"] = torch.sqrt(
                 torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
@@ -934,12 +937,14 @@ def _bootstrap_save_dict(cov, mean, TH, eff_smears, conv_epochs, model, smear_co
         "param_space": "scale: linear (A,e,M); smear: raw pre-softplus theta_smear",
     }
     if n_scale == 72:
-        cov_scale = cov[:72, :72]
+        # θ_scale O(1) → physical (A,e,M) = θ·THETA_SCALE_REF; cov_phys = cov·ref⊗ref.
+        ref72 = torch.tensor(list(THETA_SCALE_REF) * 24, dtype=cov.dtype)
+        cov_scale = cov[:72, :72] * ref72.unsqueeze(0) * ref72.unsqueeze(1)
         out["covariance_24_3_24_3"] = cov_scale.view(24, 3, 24, 3)
         out["sigma_scale_24_3"] = torch.sqrt(
             torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
-    # Effective (physical) smear σ straight from the replicas' softplus values —
-    # the bootstrap gives the effective-space spread exactly (no delta method).
+    # Physical smear σ straight from the replicas' effective_theta_smear (already
+    # physical) — the bootstrap gives the effective-space spread exactly.
     if smear_cols and eff_smears:
         EFF = torch.stack(eff_smears)                       # [B, n_smear_active]
         sig = EFF.std(0, unbiased=True) if EFF.shape[0] > 1 else torch.zeros(EFF.shape[1])
@@ -1119,7 +1124,9 @@ def _theta_cov_extras(cov_theta: torch.Tensor, model, smear_cols, n_scale: int) 
     effective σ for the raw θ_smear. Shared by the Fisher / empirical builders."""
     out: dict = {}
     if n_scale == 72:
-        cs = cov_theta[:72, :72]
+        # θ_scale O(1) → physical (A,e,M) = θ·THETA_SCALE_REF; cov_phys = cov·ref⊗ref.
+        ref72 = torch.tensor(list(THETA_SCALE_REF) * 24, dtype=cov_theta.dtype)
+        cs = cov_theta[:72, :72] * ref72.unsqueeze(0) * ref72.unsqueeze(1)
         out["covariance_24_3_24_3"] = cs.view(24, 3, 24, 3)
         out["sigma_scale_24_3"] = torch.sqrt(
             torch.clamp(torch.diag(cs), min=0.0)).view(24, 3)
@@ -1534,11 +1541,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="Max epochs for stage 1 (0 → use --epochs).")
     p.add_argument("--fit-epochs", type=int, default=0,
                    help="Max epochs for stage 2 (0 → use --epochs).")
-    p.add_argument("--fit-scale-lr", type=float, default=1e-5,
-                   help="Stage-2 Adam lr for θ_scale (continuity increments).")
+    p.add_argument("--fit-scale-lr", type=float, default=1e-3,
+                   help="Stage-2 Adam lr for θ_scale. θ_scale is O(1) (physical "
+                   "A,e,M = θ·THETA_SCALE_REF=(1e-4,1e-3,1e-5)), so all three "
+                   "components share a well-conditioned step at this O(1) lr.")
     p.add_argument("--fit-smear-lr", type=float, default=1e-3,
-                   help="Stage-2 Adam lr for θ_smear (softplus-raw; natural "
-                   "scale O(1)).")
+                   help="Stage-2 Adam lr for θ_smear (O(1); σ²_qop = θ·SMEAR_VAR_SCALE).")
     p.add_argument("--fit-mlp-lr", type=float, default=1e-3,
                    help="Stage-2 Adam lr for the background-fraction MLP.")
     p.add_argument("--fit-theta-mlp-lr", type=float, default=1e-3,

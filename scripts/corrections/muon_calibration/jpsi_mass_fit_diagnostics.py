@@ -51,7 +51,7 @@ from jpsi_mass_arrow_loader import (  # noqa: E402
 )
 from jpsi_mass_model import (  # noqa: E402
     JpsiMassMixtureModel, _event_mll, N_THETA_SCALE_PM, N_THETA_SMEAR_PM,
-    SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C,
+    SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C, THETA_SCALE_REF,
 )
 from train_jpsi_mass_fit import _move_batch, _stats_from_dict  # noqa: E402
 
@@ -1107,8 +1107,11 @@ def main() -> int:
         mlp_smear_grid = (ac_g[:, 0, :] * model.smear_param_mask * smear_scale).cpu().numpy()
         sigma_scale = sigma_smear = None
     if model.scale_enabled:
+        # binned θ_scale is the O(1) fit param → ×THETA_SCALE_REF for physical
+        # (A,e,M); the MLP grid is already physical (scale_ref inside the net).
         theta_scale = (mlp_scale_grid if mlp_scale_grid is not None
-                       else ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy())
+                       else ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
+                       * np.asarray(THETA_SCALE_REF))
         # χ² for compatibility of all θ_scale (A,e,M over the η bins) with the
         # reference (the injected values if a shift was injected, else 0), using
         # the full θ_scale covariance block (correlations included).

@@ -230,6 +230,12 @@ SMEAR_VAR_SCALE_C = 1e-6
 # sharpen region (V·∂²_m log p₀ large) gracefully, mirroring the old (1+s) ≥ 0.05.
 SMEAR_GP_FLOOR = 0.05
 
+# Fixed reference scales for the per-muon SCALE parameters (A, e, M). The
+# physical values are O(1e-4 / 1e-3 / 1e-5); these put the fitted (and injected)
+# θ_scale at O(1) so the standard scale LR works and all three components share a
+# well-conditioned step (physical A,e,M = θ_scale · THETA_SCALE_REF).
+THETA_SCALE_REF = (1e-4, 1e-3, 1e-5)
+
 
 # ---------------------------------------------------------------------------
 # Bernstein degree-1 background basis (unchanged)
@@ -312,7 +318,7 @@ class ThetaNet(nn.Module):
     init — the binned θ=0 init (no scale/smear correction)."""
 
     def __init__(self, hidden: int = 32, n_layers: int = 2,
-                 scale_ref=(1e-3, 1e-3, 1e-5)):
+                 scale_ref=THETA_SCALE_REF):
         super().__init__()
         layers: list[nn.Module] = []
         d_in = 3  # (η, cosφ, sinφ)
@@ -533,11 +539,13 @@ class JpsiMassMixtureModel(nn.Module):
     # ------------------------------------------------------------------
 
     def _scale_AeM_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
-        """Per-muon scale params ``[B, 2, 3] = (A, e, M)``. 'binned': the η-bin
-        table ``θ_scale[b]``; 'mlp': the continuous ``ThetaNet(η, φ)``."""
+        """Per-muon PHYSICAL scale params ``[B, 2, 3] = (A, e, M)``. 'binned': the
+        η-bin table θ_scale[b] (O(1) fit param) × THETA_SCALE_REF; 'mlp': the
+        continuous ThetaNet(η, φ), which already applies the same reference."""
         if self.theta_mode == "mlp":
             return self.theta_net(eta_pm, phi_pm)[0]
-        return self.theta_scale[b_pm]
+        ref = self.theta_scale.new_tensor(THETA_SCALE_REF)
+        return self.theta_scale[b_pm] * ref
 
     def _smear_ac_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
         """Per-muon SIGNED qop-resolution variance coefficients ``[B, 2, 2] =
