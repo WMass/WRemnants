@@ -567,6 +567,7 @@ def _build_model(args, stats, device):
         smearing_enabled=not args.disable_smearing,
         scale_enabled=not args.disable_scale,
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
+        smear_flow_steps=getattr(args, "smear_flow_steps", 1),
     ).to(device)
 
 
@@ -729,8 +730,9 @@ def train_stage2(args, model, train_loader, val_loader, stats,
     optim = torch.optim.Adam(groups)
     print(f"  optimizer groups: {', '.join(tags)}  "
           f"(lr mlp={args.fit_mlp_lr:g} scale={args.fit_scale_lr:g} smear={args.fit_smear_lr:g})")
-    print(f"  signal density: #2 direct-eval (deterministic width fold, "
-          f"n_iter={args.continuity_n_iter}); normalised by construction")
+    print(f"  signal density: #2 direct-eval (advection + probability-flow smear, "
+          f"flow_steps={getattr(args, 'smear_flow_steps', 1)}, n_iter="
+          f"{args.continuity_n_iter}); normalised by construction")
 
     def step2(model, batch):
         # In validation mode the simulation rows play the role of data.
@@ -1355,7 +1357,7 @@ def _load_full_fit(args, device):
               "the uncertainty will be evaluated at the un-fit θ.", file=sys.stderr)
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
-    for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params",
+    for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "smear_flow_steps",
               "qop_floor_frac",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1554,11 +1556,20 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--smear-fit-params", choices=["both", "a", "c"], default="both",
         help="Which per-η-bin smear terms to FIT: 'both', 'a' (constant term "
-        "only), or 'c' (∝1/pt term only). The constant a and the c·k term are "
+        "only), or 'c' (∝1/pt² term only). The constant a and the c·k² term are "
         "nearly degenerate over the narrow J/ψ pt range, so fitting both per "
-        "bin is ill-posed and yields the unphysical bin-to-bin zig-zag. The "
-        "non-fitted term is set to 0 (post-softplus) — removed from the σ_qop "
-        "kernel and the conditioning entirely, not floated.",
+        "bin is ill-posed and yields the unphysical bin-to-bin zig-zag (use 'a' "
+        "or 'c' to break it). The non-fitted term is zeroed — removed from the "
+        "σ_qop variance entirely, not floated.",
+    )
+    p.add_argument(
+        "--smear-flow-steps", type=int, default=1,
+        help="Euler steps integrating the smear's probability-flow ODE in the "
+        "density (the score-driven deterministic-diffusion change of variables). "
+        "1 = first-order (single score displacement); more steps integrate the "
+        "score flow more finely (more robust/accurate) at a higher nested-"
+        "autograd cost. The per-muon qop fold (closure plots) and the injection "
+        "are exact convolutions regardless.",
     )
     # θ_scale sampling widths, split per component (A, e, M) since they live
     # in different physical units. Each is the σ of the Gaussian added to that

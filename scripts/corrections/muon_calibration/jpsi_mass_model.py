@@ -15,8 +15,9 @@ nominal flow forward-folded analytically by a deterministic, invertible map
 ``x = μ + (1+s)(m' + s_adv(m') − μ)`` — a scale advection ``s_adv`` plus a signed
 mass-density stretch ``s`` (μ = mean m_ll). ``s`` is the variance-equivalent of a
 per-muon qop smear with VARIANCE ``σ²_qop = a + c·k²`` (signed/two-sided): the
-stretch adds the same m_ll variance the qop smear would (``_mass_stretch``), and
-the SAME (a, c) drive the per-muon qop fold in the validation plots. Evaluated at
+smear is applied as a score-driven probability-flow displacement that reproduces
+a Gaussian qop smear of mass-variance ``σ²_qop = a + c·k²`` (``_continuity_logp``),
+and the SAME (a, c) drive the per-muon qop fold in the validation plots. Evaluated at
 the source pre-image with the change-of-variables Jacobian (``_continuity_logp``)
 — no flow derivatives, normalised by construction; the smear is a pure mass-space
 stretch so it leaves the ρ conditioning untouched. Mixed with a degree-1
@@ -224,6 +225,11 @@ MUON_MASS_GEV = 0.1056583755
 SMEAR_VAR_SCALE_A = 1e-7
 SMEAR_VAR_SCALE_C = 1e-6
 
+# Invertibility floor on the probability-flow smear Jacobian G' = dx/dm'. A valid
+# forward (broadening) transport has G' > 0; the floor catches the fold/over-
+# sharpen region (V·∂²_m log p₀ large) gracefully, mirroring the old (1+s) ≥ 0.05.
+SMEAR_GP_FLOOR = 0.05
+
 
 # ---------------------------------------------------------------------------
 # Bernstein degree-1 background basis (unchanged)
@@ -375,11 +381,19 @@ class JpsiMassMixtureModel(nn.Module):
         # zeroed (``smear_param_mask``) so it contributes exactly 0 to the width
         # factor s and receives no gradient (inert).
         smear_fit_params: str = "both",
+        # Number of Euler steps integrating the smear's probability-flow ODE in
+        # the density (``_continuity_logp``). 1 = first-order (single score
+        # displacement); more steps integrate the score-driven flow more finely
+        # (smaller per-step Jacobian → more robust + accurate) at a higher
+        # nested-autograd cost. Frozen p₀ score per step (exact diffusion to
+        # first order in V).
+        smear_flow_steps: int = 1,
     ):
         super().__init__()
         self.smearing_enabled = bool(smearing_enabled)
         self.scale_enabled = bool(scale_enabled)
         self.qop_floor_frac = float(qop_floor_frac)
+        self.smear_flow_steps = max(1, int(smear_flow_steps))
         self.flow_arch = str(flow_arch)
 
         # Per-bin smear fit mask: which of (a, c) float. The frozen column gets
@@ -835,24 +849,29 @@ class JpsiMassMixtureModel(nn.Module):
                          dA[..., 0], de[..., 1], dM[..., 1]], dim=-1)
         return (v * theta_scale_pm).sum(-1)
 
-    def _mass_stretch(self, b_pm, pt_pm, eta_pm):
-        """Per-event signed mass-density stretch ``s`` for ``x = μ + (1+s)(m−μ)``,
-        the deterministic VARIANCE-EQUIVALENT of the per-muon qop smear — so the
-        density and the qop fold add the SAME m_ll variance from the same (a, c).
-
-        The qop smear ``σ²_qop,μ = a + c·k²`` adds mass variance
-        ``V = (μ/2)² Σ_μ σ²_qop,μ / qop_μ²`` (``∂m/∂qop = −m/2qop``,
-        ``1/qop² = pt²/sin²θ``). A stretch (1+s) takes ``Var → (1+s)²Var``, so
-        matching the added variance gives ``s = √(1 + V/Var₀) − 1`` (Var₀ =
-        mll_std²). Signed/two-sided: ``V < 0`` (unsmear) → ``s < 0`` (sharpen);
-        floored at 1+s ≥ 0.05 for invertibility."""
+    def _smear_mass_var(self, b_pm, pt_pm, eta_pm):
+        """Per-event SIGNED m_ll variance added by the per-muon qop smear
+        ``σ²_qop,μ = a + c·k²``: ``V = (μ/2)² Σ_μ σ²_qop,μ / qop_μ²`` (``∂m/∂qop =
+        −m/2qop``, ``1/qop² = pt²/sin²θ``). Two-sided (V<0 = unsmear). This is the
+        diffusion "time" of the probability-flow smear in ``_continuity_logp``."""
         vq = self._qop_var_pm(b_pm, pt_pm)                 # [B,2] signed σ²_qop
         sinth = _sintheta_from_eta(eta_pm)
         inv_qop2 = (pt_pm * pt_pm) / (sinth * sinth)       # 1/qop² = pt²/sin²θ
         mu = self.mll_mean_buf
-        v_mass = (0.5 * mu) ** 2 * (vq * inv_qop2).sum(-1)  # [B] signed mass var
-        ratio = 1.0 + v_mass / (self.mll_std_buf * self.mll_std_buf)
-        return torch.sqrt(ratio.clamp_min(0.0025)) - 1.0    # [B], 1+s ≥ 0.05
+        return (0.5 * mu) ** 2 * (vq * inv_qop2).sum(-1)    # [B] signed
+
+    def _flow_score(self, m, mk):
+        """Flow score ``∂_m log p₀(m | mk)``, via autograd. Differentiable w.r.t.
+        ``m`` when ``m`` carries grad — so the change-of-variables Jacobian of the
+        probability-flow smear picks up the local curvature ``∂²_m log p₀``.
+        Otherwise returns a detached value (the source fixed-point path)."""
+        if m.requires_grad:
+            lp = self.log_p_nominal(m, mk)
+            return torch.autograd.grad(lp.sum(), m, create_graph=True)[0]
+        with torch.enable_grad():
+            ml = m.detach().requires_grad_(True)
+            lp = self.log_p_nominal(ml, mk)
+            return torch.autograd.grad(lp.sum(), ml, create_graph=True)[0].detach()
 
     def _scale_source_rho_std(self, pt_obs, eta_pm, q_pm, b_pm):
         """Standardised SOURCE ρ from un-applying the scale only (no smear) —
@@ -868,47 +887,59 @@ class JpsiMassMixtureModel(nn.Module):
 
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
                          n_iter: int = 2):
-        """``log p_θ(x|c)`` per event via the DETERMINISTIC, invertible map
-        ``x = μ + (1+s)(m' + s_adv(m') − μ)`` (scale advection + signed mass
-        stretch s = variance-equivalent qop smear, μ = mean m_ll). A single change of variables: invert
-        for the source m' (fixed point for the advection) and divide by the
-        Jacobian ``G' = dx/dm'``. The smear is a pure mass-density stretch, so it
-        leaves ρ untouched — the conditioning only carries the scale's ρ shift."""
+        """``log p_θ(x|c)``: the frozen nominal flow pushed through an exactly-
+        normalized, INVERTIBLE TRANSPORT — a scale advection ``s_adv`` plus the
+        smear as a score-driven PROBABILITY-FLOW displacement
+        ``y ← y − (V/2n)·∂_m log p₀(y)`` (``smear_flow_steps`` Euler steps; the
+        deterministic equivalent of a Gaussian qop smear of mass-variance V,
+        broaden V>0 / sharpen V<0). Invert for the source m' by fixed point and
+        divide by the autograd Jacobian ``G' = dx/dm'`` — which carries the local
+        curvature ``∂²_m log p₀`` (vs the old Gaussian-shape global stretch).
+        ``G'`` is floored (SMEAR_GP_FLOOR) for invertibility; the floor only bites
+        where V·∂²_m log p₀ would fold the map. The smear is a pure mass-space
+        transport, so it leaves ρ untouched — only the scale's ρ shift is
+        propagated to the conditioning."""
         B = m_obs.shape[0]
         theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
                           if self.scale_enabled
                           else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
-        mu = self.mll_mean_buf
-        s = (self._mass_stretch(b_pm, pt_obs, eta_pm) if self.smearing_enabled
-             else m_obs.new_zeros(B))
-        one_plus_s = (1.0 + s).clamp_min(0.05)              # keep invertible
+        V = (self._smear_mass_var(b_pm, pt_obs, eta_pm) if self.smearing_enabled
+             else m_obs.new_zeros(B))                       # diffusion time (signed)
+        n_step = max(1, int(self.smear_flow_steps))
+        dt = V / (2.0 * n_step)
 
-        def s_adv_of(me):
-            return self._continuity_response(
-                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm)
-
-        # invert: un-width (m'' = μ + (x−μ)/(1+s)), then un-advect (fixed point).
-        mpp = mu + (m_obs - mu) / one_plus_s
-        mp = mpp.clone()
-        for _ in range(n_iter):
-            mp = mpp - s_adv_of(mp)
-        # Jacobian G' = dx/dm' = (1+s)·d(m'+s_adv)/dm' by autograd in m'.
-        if mp.requires_grad:
-            Gx = (mu + one_plus_s * (mp + s_adv_of(mp) - mu)).sum()
-            Gp = torch.autograd.grad(Gx, mp, create_graph=True)[0]
-        else:
-            with torch.enable_grad():
-                mpj = mp.detach().requires_grad_(True)
-                Gx = (mu + one_plus_s * (mpj + s_adv_of(mpj) - mu)).sum()
-                Gp = torch.autograd.grad(Gx, mpj)[0].detach()
-        # Conditioning: scale-propagated ρ only (the width smear doesn't move ρ).
         mk_src = mk
         if self.scale_enabled:
             mk_src = mk.clone()
             mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
                 pt_obs, eta_pm, q_pm, b_pm)
+
+        def s_adv_of(me):
+            return self._continuity_response(
+                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm)
+
+        def forward(mp):
+            # scale advection, then the probability-flow smear (score displacement)
+            y = mp + s_adv_of(mp)
+            if self.smearing_enabled:
+                for _ in range(n_step):
+                    y = y - dt * self._flow_score(y, mk_src)
+            return y
+
+        # invert for the source m': fixed point  m' = m_obs − (forward(m') − m').
+        # (Graph is built in training so m' carries the θ dependence, as for G'.)
+        mp = m_obs.clone()
+        for _ in range(n_iter):
+            mp = m_obs - (forward(mp) - mp)
+        # change-of-variables Jacobian G' = dx/dm' (autograd in m').
+        if mp.requires_grad:
+            Gp = torch.autograd.grad(forward(mp).sum(), mp, create_graph=True)[0]
+        else:
+            with torch.enable_grad():
+                mpj = mp.detach().requires_grad_(True)
+                Gp = torch.autograd.grad(forward(mpj).sum(), mpj)[0].detach()
         logp0 = self.log_p_nominal(mp, mk_src)
-        return logp0 - torch.log(Gp.abs().clamp_min(1e-6))
+        return logp0 - torch.log(Gp.clamp_min(SMEAR_GP_FLOOR))
 
     def data_nll_continuity(
         self,
