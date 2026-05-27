@@ -1515,11 +1515,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     # during warmup.
     # Flow / MLP hyperparams
     p.add_argument(
-        "--flow-arch", choices=("gf", "nsf"), default="nsf",
-        help="Signal flow architecture: 'nsf' = neural rational-quadratic "
-        "spline flow (default) — bounded (linear tails outside ±5), so it "
-        "avoids the erf/exp saturation the GF needs guards for. 'gf' = "
-        "Gaussianization flow (for comparison).",
+        "--flow-arch", choices=("gf", "nsf"), default="gf",
+        help="Signal flow architecture: 'gf' = Gaussianization flow (default) — "
+        "C∞-smooth density, so the continuity score/Hessian have no knot kinks. "
+        "'nsf' = neural rational-quadratic spline flow — bounded (linear tails "
+        "outside ±5), avoids the erf/exp saturation the GF needs guards for, but "
+        "only C¹ (the score kinks at the spline knots).",
     )
     p.add_argument(
         "--nsf-bins", type=int, default=8,
