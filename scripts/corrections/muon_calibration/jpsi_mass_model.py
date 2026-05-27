@@ -13,8 +13,11 @@ simulation at θ=0 (leak-free kinematic conditioning only).
 Stage 2 (``data_nll_continuity``, frozen flow): the signal density is the
 nominal flow forward-folded analytically by a deterministic, invertible map
 ``x = μ + (1+s)(m' + s_adv(m') − μ)`` — a scale advection ``s_adv`` plus a signed
-mass-density width-scale ``s = Σ_μ (a_b + c_b·k_μ)`` (μ = mean m_ll). Evaluated
-at the source pre-image with the change-of-variables Jacobian (``_continuity_logp``)
+mass-density stretch ``s`` (μ = mean m_ll). ``s`` is the variance-equivalent of a
+per-muon qop smear with VARIANCE ``σ²_qop = a + c·k²`` (signed/two-sided): the
+stretch adds the same m_ll variance the qop smear would (``_mass_stretch``), and
+the SAME (a, c) drive the per-muon qop fold in the validation plots. Evaluated at
+the source pre-image with the change-of-variables Jacobian (``_continuity_logp``)
 — no flow derivatives, normalised by construction; the smear is a pure mass-space
 stretch so it leaves the ρ conditioning untouched. Mixed with a degree-1
 Bernstein background via the MLP ``f(c)``:
@@ -212,6 +215,14 @@ N_FLOW_COND = N_MUON_KIN + N_THETA_SCALE_PM + N_THETA_SMEAR_PM  # 17
 
 # Muon rest mass in GeV (J/ψ analyses use this everywhere).
 MUON_MASS_GEV = 0.1056583755
+
+# Fixed reference scales for the per-muon qop-resolution VARIANCE parameters
+# (σ²_qop = a·SCALE_A + c·SCALE_C·k², k=1/pt). The physical qop variance is
+# O(1e-7) (σ_qop ~ 3e-4), a terrible optimizer scale; these put the fitted (and
+# injected) (a, c) at O(1) so the standard smear LR works and a runaway is
+# bounded to a physical σ_qop. a ~ O(1) ≈ a few-×10% m_ll-variance smear.
+SMEAR_VAR_SCALE_A = 1e-7
+SMEAR_VAR_SCALE_C = 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -411,10 +422,10 @@ class JpsiMassMixtureModel(nn.Module):
         self.theta_scale = nn.Parameter(
             torch.zeros(n_eta_bins, N_THETA_SCALE, dtype=torch.float32)
         )
-        # θ_smear are signed per-η-bin width coefficients (a, c) used LINEARLY
-        # (two-sided, no softplus): the deterministic density width-scale
-        # x = μ + (1+s)(m−μ) with s(c) = Σ_μ (a_b + c_b·k_μ). Init at 0 → s=0
-        # (identity, no smear), free to sharpen or broaden from there.
+        # θ_smear are signed per-η-bin qop-resolution VARIANCE coefficients
+        # (a, c): σ²_qop = a + c·k² (two-sided). They drive BOTH the per-muon qop
+        # fold (validation) and the mass-density stretch (density), consistently.
+        # Init at 0 → σ²_qop = 0 (identity), free to broaden or unsmear.
         self.theta_smear = nn.Parameter(
             torch.zeros(n_eta_bins, N_THETA_SMEAR, dtype=torch.float32)
         )
@@ -461,25 +472,32 @@ class JpsiMassMixtureModel(nn.Module):
         return theta_scale[b_pm].reshape(b_pm.shape[0], -1)
 
     def effective_theta_smear(self) -> torch.Tensor:
-        """Per-η-bin effective smear, masked to the fitted terms: the signed
-        width coefficients (theta_smear used linearly, two-sided)."""
+        """Per-η-bin effective smear (a, c), masked to the fitted terms. These
+        are the signed per-muon qop-resolution VARIANCE coefficients:
+        ``σ²_qop,μ = a + c·k²`` (k = 1/pt), two-sided — positive = broaden,
+        negative = unsmear (sharpen). The SAME (a, c) drive both the per-muon
+        qop fold and the mass-density stretch (see ``_qop_var_pm``)."""
         return self.theta_smear * self.smear_param_mask
+
+    def _qop_var_pm(self, b_pm: torch.Tensor, pt_pm: torch.Tensor) -> torch.Tensor:
+        """Per-muon SIGNED qop-resolution variance
+        ``σ²_qop,μ = a_b·SCALE_A + c_b·SCALE_C·k_μ²`` (k = 1/pt), from the fitted
+        (a, c) ∈ O(1). Signed = two-sided (un)smearing. ``a``, ``c`` are COMBINED
+        here, before any clipping. Returns ``[B, 2]``."""
+        eff = self.effective_theta_smear()                 # [n_bins, 2], masked
+        a_pm = eff[b_pm, 0] * SMEAR_VAR_SCALE_A
+        c_pm = eff[b_pm, 1] * SMEAR_VAR_SCALE_C
+        k2 = (1.0 / pt_pm) ** 2
+        return a_pm + c_pm * k2                             # [B, 2], signed
 
     def fold_sigma_qop_pm(
         self, pt_pm: torch.Tensor, eta_pm: torch.Tensor, b_pm: torch.Tensor
     ) -> torch.Tensor:
-        """Per-muon σ_qop for the validation FOLD, from the FITTED width
-        coefficients. The fold always shifts + Gaussian-smears qop and recomputes
-        m_ll; the effective (a, c) — the signed width coefficients — are the same
-        per-muon qop coefficients, used here directly, CLIPPED AT 0 (a qop smear
-        is ≥ 0; a width sharpening a,c < 0 → no smear, and → 0 in closure) and
-        combined as σ_qop = √(a² + c² k²). Returns ``[B, 2]``."""
-        eff = self.effective_theta_smear()                 # [n_bins, 2], masked
-        a_pm = eff[b_pm, 0].clamp_min(0.0)
-        c_pm = eff[b_pm, 1].clamp_min(0.0)
-        k_pm = 1.0 / pt_pm
-        var = a_pm * a_pm + c_pm * c_pm * (k_pm * k_pm)
-        return torch.sqrt(var.clamp_min(1e-24))
+        """Per-muon σ_qop for the validation FOLD, from the fitted (a, c): the
+        combined qop variance ``σ²_qop = a + c·k²`` CLIPPED AT 0 *after*
+        combining (a stochastic Gaussian qop kick can only broaden, so the
+        unsmearing region σ² < 0 → no kick). Returns ``[B, 2]``."""
+        return torch.sqrt(self._qop_var_pm(b_pm, pt_pm).clamp_min(0.0))
 
     # ------------------------------------------------------------------
     # T_scale (analytic + linearized)
@@ -817,15 +835,24 @@ class JpsiMassMixtureModel(nn.Module):
                          dA[..., 0], de[..., 1], dM[..., 1]], dim=-1)
         return (v * theta_scale_pm).sum(-1)
 
-    def _width_factor(self, b_pm, pt_pm):
-        """Per-event signed width factor ``s`` for the 'width' smear: the
-        deterministic mass-density stretch ``x = μ + (1+s)(m−μ)``.
-        ``s = Σ_μ (a_b + c_b·k_μ)`` read LINEARLY (two-sided, no softplus) from
-        θ_smear, masked to the fitted term(s)."""
-        a = self.theta_smear[b_pm, 0] * self.smear_param_mask[0]   # [B,2]
-        c = self.theta_smear[b_pm, 1] * self.smear_param_mask[1]
-        k = 1.0 / pt_pm
-        return (a + c * k).sum(-1)                                 # [B]
+    def _mass_stretch(self, b_pm, pt_pm, eta_pm):
+        """Per-event signed mass-density stretch ``s`` for ``x = μ + (1+s)(m−μ)``,
+        the deterministic VARIANCE-EQUIVALENT of the per-muon qop smear — so the
+        density and the qop fold add the SAME m_ll variance from the same (a, c).
+
+        The qop smear ``σ²_qop,μ = a + c·k²`` adds mass variance
+        ``V = (μ/2)² Σ_μ σ²_qop,μ / qop_μ²`` (``∂m/∂qop = −m/2qop``,
+        ``1/qop² = pt²/sin²θ``). A stretch (1+s) takes ``Var → (1+s)²Var``, so
+        matching the added variance gives ``s = √(1 + V/Var₀) − 1`` (Var₀ =
+        mll_std²). Signed/two-sided: ``V < 0`` (unsmear) → ``s < 0`` (sharpen);
+        floored at 1+s ≥ 0.05 for invertibility."""
+        vq = self._qop_var_pm(b_pm, pt_pm)                 # [B,2] signed σ²_qop
+        sinth = _sintheta_from_eta(eta_pm)
+        inv_qop2 = (pt_pm * pt_pm) / (sinth * sinth)       # 1/qop² = pt²/sin²θ
+        mu = self.mll_mean_buf
+        v_mass = (0.5 * mu) ** 2 * (vq * inv_qop2).sum(-1)  # [B] signed mass var
+        ratio = 1.0 + v_mass / (self.mll_std_buf * self.mll_std_buf)
+        return torch.sqrt(ratio.clamp_min(0.0025)) - 1.0    # [B], 1+s ≥ 0.05
 
     def _scale_source_rho_std(self, pt_obs, eta_pm, q_pm, b_pm):
         """Standardised SOURCE ρ from un-applying the scale only (no smear) —
@@ -843,7 +870,7 @@ class JpsiMassMixtureModel(nn.Module):
                          n_iter: int = 2):
         """``log p_θ(x|c)`` per event via the DETERMINISTIC, invertible map
         ``x = μ + (1+s)(m' + s_adv(m') − μ)`` (scale advection + signed mass
-        width-scale smear, μ = mean m_ll). A single change of variables: invert
+        stretch s = variance-equivalent qop smear, μ = mean m_ll). A single change of variables: invert
         for the source m' (fixed point for the advection) and divide by the
         Jacobian ``G' = dx/dm'``. The smear is a pure mass-density stretch, so it
         leaves ρ untouched — the conditioning only carries the scale's ρ shift."""
@@ -852,7 +879,7 @@ class JpsiMassMixtureModel(nn.Module):
                           if self.scale_enabled
                           else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
         mu = self.mll_mean_buf
-        s = (self._width_factor(b_pm, pt_obs) if self.smearing_enabled
+        s = (self._mass_stretch(b_pm, pt_obs, eta_pm) if self.smearing_enabled
              else m_obs.new_zeros(B))
         one_plus_s = (1.0 + s).clamp_min(0.05)              # keep invertible
 

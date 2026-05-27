@@ -51,6 +51,7 @@ from jpsi_mass_arrow_loader import (  # noqa: E402
 )
 from jpsi_mass_model import (  # noqa: E402
     JpsiMassMixtureModel, _event_mll, N_THETA_SCALE_PM, N_THETA_SMEAR_PM,
+    SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C,
 )
 from train_jpsi_mass_fit import _move_batch, _stats_from_dict  # noqa: E402
 
@@ -983,8 +984,10 @@ def main() -> int:
         isa = float(train_args.get("inject_a", 0.0) or 0.0)
         isc = float(train_args.get("inject_c", 0.0) or 0.0)
         if isa or isc:
+            # --inject-a/-c are O(1) fit units → scale to physical σ²_qop coeffs.
             inject_smear_np = np.zeros((n_eta, 2), dtype=np.float64)
-            inject_smear_np[:, 0] = isa; inject_smear_np[:, 1] = isc
+            inject_smear_np[:, 0] = isa * SMEAR_VAR_SCALE_A
+            inject_smear_np[:, 1] = isc * SMEAR_VAR_SCALE_C
             print(f"checkpoint injected smear (a,c)=({isa:g},{isc:g}) — replaying "
                   f"the per-muon qop fold into the pseudo-data")
 

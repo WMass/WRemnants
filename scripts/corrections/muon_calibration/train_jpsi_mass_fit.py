@@ -36,7 +36,8 @@ from jpsi_mass_arrow_loader import (
     compute_jpsi_mass_stats,
     discover_shards,
 )
-from jpsi_mass_model import JpsiMassMixtureModel
+from jpsi_mass_model import (
+    JpsiMassMixtureModel, SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)
 
 
 # ---------------------------------------------------------------------------
@@ -509,14 +510,16 @@ def _inject_theta_np(args, n_eta):
 
 
 def _inject_smear_np(args, n_eta):
-    """``[n_eta, 2]`` injected smear width coefficients (constant a, c across η)
-    for the validation closure, or ``None`` if no smear was requested."""
+    """``[n_eta, 2]`` injected qop-variance coefficients for the validation
+    closure (or ``None``). ``--inject-a/-c`` are in the O(1) fit units; here they
+    are scaled to the PHYSICAL σ²_qop = a·SCALE_A + c·SCALE_C·k² that the loader
+    applies, so a fit (same units) recovers the injected --inject-a/-c."""
     a = float(getattr(args, "inject_a", 0.0) or 0.0)
     c = float(getattr(args, "inject_c", 0.0) or 0.0)
     if a == 0.0 and c == 0.0:
         return None
     t = np.zeros((int(n_eta), 2), dtype=np.float64)
-    t[:, 0] = a; t[:, 1] = c
+    t[:, 0] = a * SMEAR_VAR_SCALE_A; t[:, 1] = c * SMEAR_VAR_SCALE_C
     return t
 
 
@@ -1479,13 +1482,16 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument("--inject-M", type=float, default=0.0,
                    help="(--validation) Inject this constant M scale shift.")
     p.add_argument("--inject-a", type=float, default=0.0,
-                   help="(--validation) Inject this constant smear 'a' (qop "
-                   "hit-resolution) width coefficient into the pseudo-data via "
+                   help="(--validation) Inject this constant qop-resolution "
+                   "VARIANCE coefficient 'a' (σ²_qop = a + c·k², the constant "
+                   "hit-resolution term, UNITS of qop²) into the pseudo-data via "
                    "the same per-muon qop fold as the validation plots — a "
-                   "Gaussian σ_qop = √(a²+c²k²) kick, m_ll recomputed.")
+                   "Gaussian √(a+c·k²) kick, m_ll recomputed. Same (a,c) the fit "
+                   "floats, so the fit recovers the injected values.")
     p.add_argument("--inject-c", type=float, default=0.0,
-                   help="(--validation) Inject this constant smear 'c' (∝1/pt, "
-                   "multiple-scattering) width coefficient (see --inject-a).")
+                   help="(--validation) Inject this constant qop-variance "
+                   "coefficient 'c' (the ∝k²=1/pt² multiple-scattering term; "
+                   "see --inject-a).")
     p.add_argument("--inject-smear-seed", type=int, default=12345,
                    help="Seed for the injected-smear Gaussian qop kick, so the "
                    "pseudo-data realisation is reproducible across epochs/runs.")

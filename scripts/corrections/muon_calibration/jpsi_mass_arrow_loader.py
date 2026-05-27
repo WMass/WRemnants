@@ -343,17 +343,17 @@ def _event_mll_np(pt_pm, eta_pm, phi_pm):
 def _smear_inject_dmll_np(mll, pt_pm, eta_pm, phi_pm, q_pm, b_pm, smear_inj, rng,
                           qop_floor_frac: float = 0.25):
     """Δm_ll ``[N]`` from injecting a per-muon qop Gaussian smear at the injected
-    width coefficients ``smear_inj`` ([n_eta, 2] = (a, c), clipped ≥ 0): exactly
-    the validation-plot fold path (``fold_sigma_qop_pm`` + ``apply_smear_pt`` +
-    ``_event_mll``) — σ_qop = √(a² + c²k²), an INDEPENDENT Gaussian qop kick per
+    qop-variance coefficients ``smear_inj`` ([n_eta, 2] = (a, c)): exactly the
+    validation-plot fold path (``fold_sigma_qop_pm`` + ``apply_smear_pt`` +
+    ``_event_mll``) — the COMBINED variance ``σ²_qop = a + c·k²`` clipped at 0
+    (an injected smear can only broaden), an INDEPENDENT Gaussian qop kick per
     muon, then recompute m_ll. ρ (a flow condition) is left untouched, as in the
     fold. Returned as the mass CHANGE so it composes additively with the scale
     advection."""
     sinth = 1.0 / np.cosh(eta_pm)                          # [N,2]
-    k = 1.0 / pt_pm
-    a = np.clip(smear_inj[b_pm, 0], 0.0, None)             # [N,2]
-    c = np.clip(smear_inj[b_pm, 1], 0.0, None)
-    sig = np.sqrt(a * a + c * c * k * k)                   # σ_qop [N,2]
+    k2 = (1.0 / pt_pm) ** 2                                # [N,2]
+    vq = smear_inj[b_pm, 0] + smear_inj[b_pm, 1] * k2      # σ²_qop = a + c·k² [N,2]
+    sig = np.sqrt(np.clip(vq, 0.0, None))                  # σ_qop [N,2]
     eps = rng.standard_normal(pt_pm.shape).astype(pt_pm.dtype)
     qop = q_pm * sinth / pt_pm
     qop_new = qop + sig * eps
