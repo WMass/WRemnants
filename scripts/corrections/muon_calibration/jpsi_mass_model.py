@@ -849,16 +849,21 @@ class JpsiMassMixtureModel(nn.Module):
                          dA[..., 0], de[..., 1], dM[..., 1]], dim=-1)
         return (v * theta_scale_pm).sum(-1)
 
-    def _smear_mass_var(self, b_pm, pt_pm, eta_pm):
-        """Per-event SIGNED m_ll variance added by the per-muon qop smear
-        ``σ²_qop,μ = a + c·k²``: ``V = (μ/2)² Σ_μ σ²_qop,μ / qop_μ²`` (``∂m/∂qop =
-        −m/2qop``, ``1/qop² = pt²/sin²θ``). Two-sided (V<0 = unsmear). This is the
-        diffusion "time" of the probability-flow smear in ``_continuity_logp``."""
-        vq = self._qop_var_pm(b_pm, pt_pm)                 # [B,2] signed σ²_qop
+    def _smear_mass_var(self, b_pm, pt_obs, eta_pm, m_eval, m_obs):
+        """Per-event SIGNED m_ll variance added by the per-muon qop smear,
+        evaluated at the mass ``m_eval`` (NOT a fixed reference): with
+        ``pt(m_eval) = pt_obs·m_eval/m_obs`` (pt ∝ m at fixed angles, as in
+        ``_continuity_response``) and ``σ²_qop,μ = a + c·k²``,
+        ``V = (m_eval/2)² Σ_μ σ²_qop,μ / qop_μ²`` (``∂m/∂qop = −m/2qop``,
+        ``1/qop² = pt²/sin²θ``) ``∝ a·m⁴ + c·m²``. Two-sided (V<0 = unsmear).
+        Evaluated at the source m' inside ``_continuity_logp`` so the smear's
+        mass-dependence enters the change-of-variables Jacobian (consistent with
+        the advection). This is the diffusion 'time' of the probability flow."""
+        pt = pt_obs * (m_eval / m_obs).unsqueeze(-1)       # pt(m_eval) [B,2]
+        vq = self._qop_var_pm(b_pm, pt)                    # [B,2] signed σ²_qop(pt)
         sinth = _sintheta_from_eta(eta_pm)
-        inv_qop2 = (pt_pm * pt_pm) / (sinth * sinth)       # 1/qop² = pt²/sin²θ
-        mu = self.mll_mean_buf
-        return (0.5 * mu) ** 2 * (vq * inv_qop2).sum(-1)    # [B] signed
+        inv_qop2 = (pt * pt) / (sinth * sinth)             # 1/qop² = pt²/sin²θ
+        return (0.5 * m_eval) ** 2 * (vq * inv_qop2).sum(-1)  # [B] signed
 
     def _flow_score(self, m, mk):
         """Flow score ``∂_m log p₀(m | mk)``, via autograd. Differentiable w.r.t.
@@ -903,10 +908,7 @@ class JpsiMassMixtureModel(nn.Module):
         theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
                           if self.scale_enabled
                           else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
-        V = (self._smear_mass_var(b_pm, pt_obs, eta_pm) if self.smearing_enabled
-             else m_obs.new_zeros(B))                       # diffusion time (signed)
         n_step = max(1, int(self.smear_flow_steps))
-        dt = V / (2.0 * n_step)
 
         mk_src = mk
         if self.scale_enabled:
@@ -919,9 +921,13 @@ class JpsiMassMixtureModel(nn.Module):
                 me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm)
 
         def forward(mp):
-            # scale advection, then the probability-flow smear (score displacement)
+            # scale advection, then the probability-flow smear (score displacement).
+            # V (diffusion time) is evaluated at the SOURCE mass mp — so its
+            # mass-dependence (V ∝ a·m⁴ + c·m²) enters the autograd Jacobian G'.
             y = mp + s_adv_of(mp)
             if self.smearing_enabled:
+                V = self._smear_mass_var(b_pm, pt_obs, eta_pm, mp, m_obs)
+                dt = V / (2.0 * n_step)
                 for _ in range(n_step):
                     y = y - dt * self._flow_score(y, mk_src)
             return y
