@@ -221,9 +221,12 @@ MUON_MASS_GEV = 0.1056583755
 # (σ²_qop = a·SCALE_A + c·SCALE_C·k², k=1/pt). The physical qop variance is
 # O(1e-7) (σ_qop ~ 3e-4), a terrible optimizer scale; these put the fitted (and
 # injected) (a, c) at O(1) so the standard smear LR works and a runaway is
-# bounded to a physical σ_qop. a ~ O(1) ≈ a few-×10% m_ll-variance smear.
+# bounded to a physical σ_qop. Calibrated so θ≈1 ≈ a +20% m_ll-variance smear on
+# the J/ψ sample: a≈8e-8 (c=0) and c≈2.3e-5 (a=0) each broaden Var(m_ll) by ~20%,
+# i.e. θ_a≈0.8 at SCALE_A and θ_c≈1.1 at SCALE_C. (SCALE_C was 1e-6, which left
+# θ_c≈20 — far from O(1) — so θ_c chronically under-converged at the smear LR.)
 SMEAR_VAR_SCALE_A = 1e-7
-SMEAR_VAR_SCALE_C = 1e-6
+SMEAR_VAR_SCALE_C = 2e-5
 
 # Invertibility floor on the probability-flow smear Jacobian G' = dx/dm'. A valid
 # forward (broadening) transport has G' > 0; the floor catches the fold/over-

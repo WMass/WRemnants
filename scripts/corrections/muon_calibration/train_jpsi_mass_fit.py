@@ -1550,9 +1550,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "(Adam's step is ~lr in the param's units, so this matches the "
                    "physical convergence of the old physical-θ lr 1e-5 = 0.1·REF_A; "
                    "1e-3 was ~100× too slow and left θ crawling short of the optimum.)")
-    p.add_argument("--fit-smear-lr", type=float, default=1e-2,
-                   help="Stage-2 Adam lr for θ_smear (O(1); σ²_qop = θ·SMEAR_VAR_SCALE). "
-                   "O(1)-appropriate, like --fit-scale-lr.")
+    p.add_argument("--fit-smear-lr", type=float, default=0.1,
+                   help="Stage-2 Adam lr for θ_smear (O(1); σ²_qop = θ·SMEAR_VAR_SCALE, "
+                   "with SCALE_C calibrated so a realistic c → θ_c≈1). Matches "
+                   "--fit-scale-lr: the smear signal is weak (small per-event "
+                   "gradient S/N), so an O(1) lr is needed to reach the optimum in "
+                   "a reasonable number of steps.")
     p.add_argument("--fit-mlp-lr", type=float, default=1e-3,
                    help="Stage-2 Adam lr for the background-fraction MLP.")
     p.add_argument("--fit-theta-mlp-lr", type=float, default=1e-3,

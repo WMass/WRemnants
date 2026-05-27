@@ -252,6 +252,10 @@ def evaluate_predictions(
         # continuity only: the nominal (θ=0, unshifted/unsmeared) MC + flow,
         # to overlay the stage-1 closure alongside the folded stage-2 one.
         "mll_mc_nominal": [], "pred_nominal_mc": [],
+        # validation-with-injection only: the INJECTED pseudo-data m_ll (the
+        # closure target the fold should reproduce). Distinct from the nominal
+        # whenever a θ/smear injection was replayed into the loader.
+        "mll_mc_pseudodata": [],
     }
 
     total_events = 0
@@ -298,8 +302,15 @@ def evaluate_predictions(
                 out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
-                # nominal (θ=0): raw reco mass + the untilted flow density p₀.
-                out["mll_mc_nominal"].append(batch["mll"][mc_idx].cpu().numpy())
+                # nominal (θ=0): the TRUE un-injected reco mass, recomputed from
+                # the (un-injected) per-muon pt — NOT batch["mll"], which carries
+                # the replayed validation injection. Plus the untilted flow p₀.
+                out["mll_mc_nominal"].append(
+                    _event_mll(ptm, etam, phim).cpu().numpy())
+                # The injected pseudo-data m_ll (= nominal + replayed injection),
+                # i.e. the closure target the fold should reproduce. Equals the
+                # nominal when no injection was replayed.
+                out["mll_mc_pseudodata"].append(batch["mll"][mc_idx].cpu().numpy())
                 out["pred_nominal_mc"].append(
                     _nominal_density_on_grid(
                         model, batch, mc_idx, m_centers_dev,
@@ -326,6 +337,12 @@ def evaluate_predictions(
     out["bin_width"] = bin_width
     out["continuity"] = True
     out["mc_as_data"] = mc_as_data
+    # Whether the loader replayed a validation injection into batch["mll"] — so
+    # the closure plot draws the injected pseudo-data curve only when it is
+    # genuinely distinct from the (un-injected) nominal.
+    out["injected"] = bool(
+        getattr(loader, "inject_theta_scale", None) is not None
+        or getattr(loader, "inject_theta_smear", None) is not None)
     return out
 
 
@@ -757,6 +774,17 @@ def plot_mc_closure(
                 evals["mll_mc_nominal"][mc_mask], bins=m_edges,
                 weights=evals["w_mc"][mc_mask])
             nom_curve = bin_width * (evals["pred_nominal_mc"][mc_mask] * w).sum(axis=0)
+        # Injected pseudo-data (the closure target) — only when an injection was
+        # replayed AND it is genuinely distinct from the nominal. This is the
+        # m_ll the fold should reproduce; the gap to the nominal is the injected
+        # shift/smear, the gap to the fold is the closure residual.
+        show_pseudo = (
+            cont and bool(evals.get("injected", False))
+            and evals.get("mll_mc_pseudodata", np.zeros((0,))).size > 0)
+        if show_pseudo:
+            pseudo_hist, _ = np.histogram(
+                evals["mll_mc_pseudodata"][mc_mask], bins=m_edges,
+                weights=evals["w_mc"][mc_mask])
 
         fig, (ax, axr) = plt.subplots(
             2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
@@ -767,6 +795,9 @@ def plot_mc_closure(
                     label="MC (nominal, θ=0)", zorder=2)
             ax.plot(m_centers_np, nom_curve, color="C0", ls=":", lw=1.3,
                     label="flow (nominal p₀, θ=0)", zorder=2)
+        if show_pseudo:
+            ax.step(m_edges[:-1], pseudo_hist, where="post", color="C2", lw=1.3,
+                    label="pseudo-data (injected θ — closure target)", zorder=2)
         ax.errorbar(
             m_centers_np, mc_hist, yerr=np.sqrt(np.abs(mc_hist)),
             fmt="o", color="k", markersize=3, label=mc_label, zorder=3,
@@ -785,6 +816,10 @@ def plot_mc_closure(
             ratio_err = np.sqrt(np.abs(mc_hist)) / denom
         axr.errorbar(m_centers_np, ratio, yerr=ratio_err, fmt="o",
                      color="k", markersize=3, label="MC (folded)", zorder=3)
+        if show_pseudo:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                axr.step(m_edges[:-1], pseudo_hist / denom, where="post",
+                         color="C2", lw=1.3, label="pseudo-data", zorder=2)
         if has_nom:
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.step(m_edges[:-1], nom_hist / denom, where="post",
@@ -807,6 +842,7 @@ def plot_mc_closure(
             float(model_curve.max()),
             float(nom_hist.max()) if has_nom else 0.0,
             float(nom_curve.max()) if has_nom else 0.0,
+            float(pseudo_hist.max()) if show_pseudo else 0.0,
         )
         if ymax > 0:
             ax.set_ylim(0, ymax * 1.35)
