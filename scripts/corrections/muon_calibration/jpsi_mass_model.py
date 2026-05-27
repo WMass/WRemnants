@@ -421,6 +421,14 @@ class JpsiMassMixtureModel(nn.Module):
         # zeroed (``smear_param_mask``) so it contributes exactly 0 to the width
         # factor s and receives no gradient (inert).
         smear_fit_params: str = "both",
+        # Which per-η-bin SCALE terms to fit — a subset of "AeM". A (constant
+        # δqop) and e (∝1/pt) are NEARLY DEGENERATE over the narrow J/ψ pt range
+        # (A's uniform m_ll scaling vs e's ∝(k₊+k₋) shift are ~collinear), so
+        # fitting both from J/ψ alone is ill-posed — the fit slides into large
+        # opposite-sign (A, e). Default "AM" drops the degenerate e (the J/ψ-
+        # identifiable subset: constant scale A + charge-odd sagitta M). The
+        # dropped term is zeroed (scale_param_mask) → 0 advection, no gradient.
+        scale_fit_params: str = "AM",
         # Number of Euler steps integrating the smear's probability-flow ODE in
         # the density (``_continuity_logp``). 1 = first-order (single score
         # displacement); more steps integrate the score-driven flow more finely
@@ -458,6 +466,19 @@ class JpsiMassMixtureModel(nn.Module):
         # checkpoints without this buffer still load.
         self.register_buffer(
             "smear_param_mask", torch.tensor(_mask, dtype=torch.float32),
+            persistent=False,
+        )
+        # Per-bin scale fit mask: which of (A, e, M) float (breaks the A/e
+        # degeneracy). The dropped term gets no gradient (multiply by 0) → held
+        # inert at 0. Non-persistent (reconstructed at __init__).
+        if not scale_fit_params or any(ch not in "AeM" for ch in scale_fit_params):
+            raise ValueError(
+                f"scale_fit_params must be a non-empty subset of 'AeM'; got "
+                f"{scale_fit_params!r}")
+        self.scale_fit_params = str(scale_fit_params)
+        _csmask = [1.0 if ch in scale_fit_params else 0.0 for ch in ("A", "e", "M")]
+        self.register_buffer(
+            "scale_param_mask", torch.tensor(_csmask, dtype=torch.float32),
             persistent=False,
         )
 
@@ -539,13 +560,15 @@ class JpsiMassMixtureModel(nn.Module):
     # ------------------------------------------------------------------
 
     def _scale_AeM_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
-        """Per-muon PHYSICAL scale params ``[B, 2, 3] = (A, e, M)``. 'binned': the
-        η-bin table θ_scale[b] (O(1) fit param) × THETA_SCALE_REF; 'mlp': the
-        continuous ThetaNet(η, φ), which already applies the same reference."""
+        """Per-muon PHYSICAL scale params ``[B, 2, 3] = (A, e, M)``, masked to the
+        fitted terms (scale_param_mask, default A,M only — drops the A/e-
+        degenerate e). 'binned': the η-bin table θ_scale[b] (O(1) fit param) ×
+        THETA_SCALE_REF; 'mlp': the ThetaNet(η, φ), which already applies REF."""
         if self.theta_mode == "mlp":
-            return self.theta_net(eta_pm, phi_pm)[0]
-        ref = self.theta_scale.new_tensor(THETA_SCALE_REF)
-        return self.theta_scale[b_pm] * ref
+            aem = self.theta_net(eta_pm, phi_pm)[0]
+        else:
+            aem = self.theta_scale[b_pm] * self.theta_scale.new_tensor(THETA_SCALE_REF)
+        return aem * self.scale_param_mask
 
     def _smear_ac_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
         """Per-muon SIGNED qop-resolution variance coefficients ``[B, 2, 2] =

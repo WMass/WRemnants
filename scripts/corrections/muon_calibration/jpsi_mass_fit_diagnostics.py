@@ -88,6 +88,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         scale_enabled=not args.get("disable_scale", False),
         qop_floor_frac=args.get("qop_floor_frac", 0.0),
         smear_fit_params=args.get("smear_fit_params", "both"),
+        scale_fit_params=args.get("scale_fit_params", "AM"),
         smear_flow_steps=args.get("smear_flow_steps", 1),
         theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
         theta_mlp_hidden=args.get("theta_mlp_hidden", 32),

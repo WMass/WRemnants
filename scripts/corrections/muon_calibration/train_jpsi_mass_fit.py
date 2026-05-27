@@ -572,6 +572,7 @@ def _build_model(args, stats, device):
         smearing_enabled=not args.disable_smearing,
         scale_enabled=not args.disable_scale,
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
+        scale_fit_params=getattr(args, "scale_fit_params", "AM"),
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
@@ -1396,7 +1397,8 @@ def _load_full_fit(args, device):
               "the uncertainty will be evaluated at the un-fit θ.", file=sys.stderr)
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
-    for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "smear_flow_steps",
+    for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
+              "smear_flow_steps",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1597,6 +1599,16 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "this fraction of |qop_orig|, so a smear/scale shift can neither flip "
         "the charge nor inflate pt by more than 1/this. Prevents catastrophic "
         "mass blow-ups at high |η| where |qop| is small. 0 disables.",
+    )
+    p.add_argument(
+        "--scale-fit-params", default="AM",
+        help="Which per-η-bin SCALE terms to FIT — a subset of 'AeM' (e.g. 'AM', "
+        "'A', 'AeM'). A (constant δqop) and e (∝1/pt) are NEARLY DEGENERATE over "
+        "the narrow J/ψ pt range, so fitting both from J/ψ alone is ill-posed — "
+        "the fit slides into large opposite-sign (A,e). Default 'AM' drops e (the "
+        "J/ψ-identifiable subset: constant scale A + charge-odd sagitta M). For a "
+        "single-parameter closure, fit only the injected term (e.g. inject-e → "
+        "--scale-fit-params e). Dropped terms are held inert at 0.",
     )
     p.add_argument(
         "--smear-fit-params", choices=["both", "a", "c"], default="both",
