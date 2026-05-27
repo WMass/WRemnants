@@ -200,36 +200,23 @@ def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4
 
 @torch.no_grad()
 def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
-    """Directly fold MC reco at the fitted θ — the empirical template the model
-    signal curve should reproduce.
-
-    'convolution': a PER-MUON PHYSICAL fold — apply the fitted scale δqop and an
-    independent Gaussian σ_qop smear to each muon's pt, then RECOMPUTE m_ll from
-    the folded 4-vectors. This is the exact operation the continuity density
-    approximates (linearized advection ``s_adv`` + collapsed ``√V`` mass kick),
+    """Fold MC reco at the fitted θ — the empirical template the model signal
+    curve should reproduce. INDEPENDENT of ``smear_mode``: always the per-muon
+    PHYSICAL fold — apply the fitted scale δqop and an independent Gaussian
+    σ_qop smear to each muon's pt, then RECOMPUTE m_ll from the folded
+    4-vectors. The smear σ_qop uses the fitted smear params directly via
+    ``model.fold_sigma_qop_pm`` (softplus(θ) for 'convolution', the signed width
+    coeffs clipped at 0 for 'width'). This is the exact operation the continuity
+    density approximates (linearized advection + collapsed √V / width stretch),
     so the closure overlay exposes those approximations. (ρ is a flow condition,
-    not histogrammed/binned here, so it is deliberately not recomputed — it has
-    no effect on the m_ll closure plots.)
-
-    'width': the deterministic density stretch ``m → μ + (1+s)(m − μ)`` about the
-    advected mass (a mass-space model, so the analytic ``s_adv`` is its scale)."""
-    mll_pre = _event_mll(ptm, etam, phim)
-    nrow = mll_pre.shape[0]
-    if getattr(model, "smear_mode", "convolution") == "width":
-        tsp = (model._scale_per_event(model.theta_scale, bm) if model.scale_enabled
-               else mll_pre.new_zeros((nrow, N_THETA_SCALE_PM)))
-        zsm = mll_pre.new_zeros((nrow, N_THETA_SMEAR_PM))
-        s_adv, _ = model._continuity_response(mll_pre, mll_pre, ptm, etam, qm, tsp, zsm)
-        s = model._width_factor(bm, ptm) if model.smearing_enabled else mll_pre.new_zeros(nrow)
-        mu = model.mll_mean_buf
-        return (mu + (1.0 + s).clamp_min(0.05) * (mll_pre + s_adv - mu)).detach()
-    # convolution: exact per-muon scale + independent Gaussian qop smear, m_ll recomputed.
+    not histogrammed/binned here, so it is not recomputed — no effect on the
+    m_ll closure plots.)"""
     pt_cur = ptm
     if model.scale_enabled:
         dqop_s = model._delta_qop_analytic(model.theta_scale, ptm, etam, qm, bm)
         pt_cur = model._apply_scale_pt(ptm, etam, qm, dqop_s, sign=+1.0)
     if model.smearing_enabled:
-        sig = model.sigma_qop_pm(model.theta_smear, pt_cur, etam, bm)
+        sig = model.fold_sigma_qop_pm(pt_cur, etam, bm)
         pt_cur = model.apply_smear_pt(pt_cur, etam, qm, sig, torch.randn_like(sig))
     return _event_mll(pt_cur, etam, phim).detach()
 

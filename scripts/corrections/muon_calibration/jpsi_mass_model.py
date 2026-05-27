@@ -646,6 +646,25 @@ class JpsiMassMixtureModel(nn.Module):
             return self.theta_smear * self.smear_param_mask
         return F.softplus(self.theta_smear) * self.smear_param_mask
 
+    def fold_sigma_qop_pm(
+        self, pt_pm: torch.Tensor, eta_pm: torch.Tensor, b_pm: torch.Tensor
+    ) -> torch.Tensor:
+        """Per-muon σ_qop for the validation FOLD, from the FITTED smear params,
+        valid in BOTH smear modes (the fold is mode-independent: it always
+        shifts + Gaussian-smears qop and recomputes m_ll). The effective (a, c)
+        — ``softplus(θ)`` for 'convolution', the signed width coefficients for
+        'width' — are the same per-muon qop coefficients, used here directly,
+        CLIPPED AT 0 (a qop smear is ≥ 0; a 'width' sharpening a,c < 0 → no
+        smear, and → 0 in closure) and combined as σ_qop = √(a² + c² k²).
+        Equals ``sigma_qop_pm`` in convolution mode (softplus is already ≥ 0).
+        Returns ``[B, 2]``."""
+        eff = self.effective_theta_smear()                 # [n_bins, 2], masked
+        a_pm = eff[b_pm, 0].clamp_min(0.0)
+        c_pm = eff[b_pm, 1].clamp_min(0.0)
+        k_pm = 1.0 / pt_pm
+        var = a_pm * a_pm + c_pm * c_pm * (k_pm * k_pm)
+        return torch.sqrt(var.clamp_min(1e-24))
+
     # ------------------------------------------------------------------
     # T_scale (analytic + linearized)
     # ------------------------------------------------------------------
