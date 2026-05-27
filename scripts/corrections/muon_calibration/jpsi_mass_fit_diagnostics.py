@@ -990,10 +990,10 @@ def main() -> int:
         isa = float(train_args.get("inject_a", 0.0) or 0.0)
         isc = float(train_args.get("inject_c", 0.0) or 0.0)
         if isa or isc:
-            # --inject-a/-c are O(1) fit units → scale to physical σ²_qop coeffs.
+            # --inject-a/-c are PHYSICAL σ²_qop coefficients — used directly.
             inject_smear_np = np.zeros((n_eta, 2), dtype=np.float64)
-            inject_smear_np[:, 0] = isa * SMEAR_VAR_SCALE_A
-            inject_smear_np[:, 1] = isc * SMEAR_VAR_SCALE_C
+            inject_smear_np[:, 0] = isa
+            inject_smear_np[:, 1] = isc
             print(f"checkpoint injected smear (a,c)=({isa:g},{isc:g}) — replaying "
                   f"the per-muon qop fold into the pseudo-data")
 
@@ -1101,8 +1101,10 @@ def main() -> int:
         eta_pm = torch.tensor(centers, dtype=torch.float32, device=device).unsqueeze(-1).expand(-1, 2)
         with torch.no_grad():
             AeM_g, ac_g = model.theta_net(eta_pm, torch.zeros_like(eta_pm))
-        mlp_scale_grid = AeM_g[:, 0, :].cpu().numpy()
-        mlp_smear_grid = (ac_g[:, 0, :] * model.smear_param_mask).cpu().numpy()
+        mlp_scale_grid = AeM_g[:, 0, :].cpu().numpy()           # physical (scale_ref)
+        # physical σ²_qop coefficients = O(1) net output × SMEAR_VAR_SCALE
+        smear_scale = ac_g.new_tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C])
+        mlp_smear_grid = (ac_g[:, 0, :] * model.smear_param_mask * smear_scale).cpu().numpy()
         sigma_scale = sigma_smear = None
     if model.scale_enabled:
         theta_scale = (mlp_scale_grid if mlp_scale_grid is not None
@@ -1129,12 +1131,14 @@ def main() -> int:
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
     if model.smearing_enabled:
-        # signed qop-variance coefficients (a, c); MLP mode samples the net.
+        # PHYSICAL qop-variance coefficients (a, c) (σ²_qop = a + c·k²); MLP mode
+        # samples the net. effective_theta_smear() already applies SMEAR_VAR_SCALE.
         theta_smear_eff = (mlp_smear_grid if mlp_smear_grid is not None
                            else model.effective_theta_smear().detach().cpu().numpy())
         plot_theta_vs_eta(
-            theta_smear_eff, sigma_smear, ["a (qop var)", "c (qop var)"],
+            theta_smear_eff, sigma_smear, ["a [qop²]", "c [qop²·GeV²]"],
             "theta_smear_vs_eta", stats.eta_edges, out_dir, edm=edm,
+            ref=(inject_smear_np if inject_smear_np is not None else None),
         )
     else:
         print("  --disable-smearing: skipping theta_smear_vs_eta")

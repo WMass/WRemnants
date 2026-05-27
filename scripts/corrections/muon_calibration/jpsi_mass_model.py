@@ -550,11 +550,13 @@ class JpsiMassMixtureModel(nn.Module):
         return ac * self.smear_param_mask
 
     def effective_theta_smear(self) -> torch.Tensor:
-        """Per-η-bin effective smear (a, c), masked (BINNED mode only — used for
-        the diagnostics curve / bootstrap). The signed qop-variance coefficients
-        ``σ²_qop = a + c·k²``. In 'mlp' mode evaluate ``theta_net`` on an η grid
-        instead."""
-        return self.theta_smear * self.smear_param_mask
+        """Per-η-bin PHYSICAL smear coefficients (a, c), masked (BINNED mode only
+        — used for the diagnostics curve / bootstrap σ). The fit parameter
+        ``theta_smear`` is O(1) for the optimizer; the physical qop-variance
+        coefficients (σ²_qop = a + c·k²) are ``theta_smear · SMEAR_VAR_SCALE``.
+        In 'mlp' mode evaluate ``theta_net`` on an η grid (× SMEAR_VAR_SCALE)."""
+        scale = self.theta_smear.new_tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C])
+        return self.theta_smear * self.smear_param_mask * scale
 
     def _scale_per_event(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
         """Per-event ``[B, 6] = (A_+, e_+, M_+, A_-, e_-, M_-)``."""

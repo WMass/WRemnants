@@ -408,18 +408,19 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
             out["covariance_24_3_24_3"] = cov_scale.view(24, 3, 24, 3)
             out["sigma_scale_24_3"] = torch.sqrt(
                 torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
-    # Effective (physical, ≥0) σ on the smear a/c per η-bin via the delta method
-    # (eff = softplus(raw), |∂eff/∂raw| = sigmoid(raw)); inactive columns → 0.
+    # PHYSICAL σ on the smear a/c per η-bin. The fit param θ_smear is O(1); the
+    # physical qop-variance coefficient is θ·SMEAR_VAR_SCALE, so σ_phys =
+    # SMEAR_VAR_SCALE·σ_raw (linear scaling). Inactive columns → 0.
     if smear_cols and cov is not None:
         n_eta, n_comp = model.theta_smear.shape
         cov_smear = cov[n_scale:, n_scale:]
         sig_raw = torch.sqrt(torch.clamp(torch.diag(cov_smear), min=0.0))
-        jac = torch.sigmoid(model.theta_smear.detach().cpu())  # [n_eta, n_comp]
+        smear_scale = (SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)
         sig_eff = torch.zeros(n_eta, n_comp)
         k = 0
         for b in range(n_eta):
             for c in smear_cols:
-                sig_eff[b, c] = jac[b, c] * sig_raw[k]
+                sig_eff[b, c] = smear_scale[c] * sig_raw[k]
                 k += 1
         out["sigma_smear_eff_24_2"] = sig_eff
     return out
@@ -510,16 +511,17 @@ def _inject_theta_np(args, n_eta):
 
 
 def _inject_smear_np(args, n_eta):
-    """``[n_eta, 2]`` injected qop-variance coefficients for the validation
-    closure (or ``None``). ``--inject-a/-c`` are in the O(1) fit units; here they
-    are scaled to the PHYSICAL σ²_qop = a·SCALE_A + c·SCALE_C·k² that the loader
-    applies, so a fit (same units) recovers the injected --inject-a/-c."""
+    """``[n_eta, 2]`` injected PHYSICAL qop-variance coefficients (a, c) for the
+    validation closure (or ``None``): σ²_qop = a + c·k², the values the loader
+    applies directly. ``--inject-a/-c`` are the physical coefficients (a ~ 1e-7,
+    c ~ 1e-6 are typical); the O(1) optimizer rescaling (SMEAR_VAR_SCALE) is an
+    internal detail applied to the fit parameter, not here."""
     a = float(getattr(args, "inject_a", 0.0) or 0.0)
     c = float(getattr(args, "inject_c", 0.0) or 0.0)
     if a == 0.0 and c == 0.0:
         return None
     t = np.zeros((int(n_eta), 2), dtype=np.float64)
-    t[:, 0] = a * SMEAR_VAR_SCALE_A; t[:, 1] = c * SMEAR_VAR_SCALE_C
+    t[:, 0] = a; t[:, 1] = c
     return t
 
 
@@ -1125,12 +1127,12 @@ def _theta_cov_extras(cov_theta: torch.Tensor, model, smear_cols, n_scale: int) 
         n_eta, n_comp = model.theta_smear.shape
         cv = cov_theta[n_scale:, n_scale:]
         sig_raw = torch.sqrt(torch.clamp(torch.diag(cv), min=0.0))
-        jac = torch.sigmoid(model.theta_smear.detach().cpu())  # ∂ softplus/∂ raw
+        smear_scale = (SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)  # θ→physical (linear)
         sig_eff = torch.zeros(n_eta, n_comp)
         k = 0
         for b in range(n_eta):
             for c in smear_cols:
-                sig_eff[b, c] = jac[b, c] * sig_raw[k]
+                sig_eff[b, c] = smear_scale[c] * sig_raw[k]
                 k += 1
         out["sigma_smear_eff_24_2"] = sig_eff
     return out
@@ -1514,16 +1516,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument("--inject-M", type=float, default=0.0,
                    help="(--validation) Inject this constant M scale shift.")
     p.add_argument("--inject-a", type=float, default=0.0,
-                   help="(--validation) Inject this constant qop-resolution "
-                   "VARIANCE coefficient 'a' (σ²_qop = a + c·k², the constant "
-                   "hit-resolution term, UNITS of qop²) into the pseudo-data via "
-                   "the same per-muon qop fold as the validation plots — a "
-                   "Gaussian √(a+c·k²) kick, m_ll recomputed. Same (a,c) the fit "
-                   "floats, so the fit recovers the injected values.")
+                   help="(--validation) Inject this constant PHYSICAL qop-variance "
+                   "coefficient 'a' (σ²_qop = a + c·k², the constant hit-resolution "
+                   "term; physical scale ~1e-7) into the pseudo-data via the same "
+                   "per-muon qop fold as the validation plots — a Gaussian "
+                   "√(a+c·k²) kick, m_ll recomputed. Physical units throughout "
+                   "(the O(1) optimizer rescaling is internal); the fit recovers "
+                   "the injected value (shown on the θ_smear plot).")
     p.add_argument("--inject-c", type=float, default=0.0,
-                   help="(--validation) Inject this constant qop-variance "
+                   help="(--validation) Inject this constant PHYSICAL qop-variance "
                    "coefficient 'c' (the ∝k²=1/pt² multiple-scattering term; "
-                   "see --inject-a).")
+                   "physical scale ~1e-6; see --inject-a).")
     p.add_argument("--inject-smear-seed", type=int, default=12345,
                    help="Seed for the injected-smear Gaussian qop kick, so the "
                    "pseudo-data realisation is reproducible across epochs/runs.")
