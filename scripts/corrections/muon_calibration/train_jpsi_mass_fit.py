@@ -473,20 +473,25 @@ def _setup_common(args, *, stats_override=None):
     return shard_files, stats, train_loader, val_loader
 
 
-def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None):
+def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None,
+                  inject_smear=None):
     """Build the ``(train, val)`` loaders for one stage. ``half`` selects a
     deterministic disjoint event half (0/1) — used by the MC-closure
     validation mode (stage 1 ← half 0, stage 2 ← half 1); ``None`` = all
-    events. ``inject_theta`` ([n_eta, 3]) injects a known θ_scale shift into
-    the (pseudo-)data m_ll (validation closure)."""
+    events. ``inject_theta`` ([n_eta, 3]) / ``inject_smear`` ([n_eta, 2]) inject
+    a known θ_scale shift / per-muon qop smear into the (pseudo-)data m_ll
+    (validation closure)."""
+    seed = int(getattr(args, "inject_smear_seed", 12345))
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=True, half=half, inject_theta_scale=inject_theta)
+        drop_last=True, half=half, inject_theta_scale=inject_theta,
+        inject_theta_smear=inject_smear, inject_seed=seed)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half, inject_theta_scale=inject_theta)
+        drop_last=False, half=half, inject_theta_scale=inject_theta,
+        inject_theta_smear=inject_smear, inject_seed=seed)
     return train_loader, val_loader
 
 
@@ -500,6 +505,18 @@ def _inject_theta_np(args, n_eta):
         return None
     t = np.zeros((int(n_eta), 3), dtype=np.float64)
     t[:, 0] = a; t[:, 1] = e; t[:, 2] = m
+    return t
+
+
+def _inject_smear_np(args, n_eta):
+    """``[n_eta, 2]`` injected smear width coefficients (constant a, c across η)
+    for the validation closure, or ``None`` if no smear was requested."""
+    a = float(getattr(args, "inject_a", 0.0) or 0.0)
+    c = float(getattr(args, "inject_c", 0.0) or 0.0)
+    if a == 0.0 and c == 0.0:
+        return None
+    t = np.zeros((int(n_eta), 2), dtype=np.float64)
+    t[:, 0] = a; t[:, 1] = c
     return t
 
 
@@ -787,17 +804,28 @@ def train_loop(args: argparse.Namespace) -> int:
     # very events stage 1's flow was trained on; the closure target is θ → 0.
     if args.validation:
         inj = _inject_theta_np(args, len(stats.eta_edges) - 1)
-        tgt = ("θ → 0" if inj is None else
-               f"θ → injected (A,e,M)=({args.inject_A:g},{args.inject_e:g},{args.inject_M:g})")
+        inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1)
+        tgt = "θ → 0"
+        if inj is not None or inj_sm is not None:
+            parts = []
+            if inj is not None:
+                parts.append(f"(A,e,M)=({args.inject_A:g},{args.inject_e:g},{args.inject_M:g})")
+            if inj_sm is not None:
+                parts.append(f"(a,c)=({args.inject_a:g},{args.inject_c:g})")
+            tgt = "θ → injected " + " ".join(parts)
         print(f"\n*** MC-closure validation mode: simulation for both stages "
               f"(stage 1 ← half 0, stage 2 ← half 1 as pseudo-data); target {tgt} ***")
         if inj is not None:
             print("    injecting the θ_scale shift into the stage-2 pseudo-data m_ll")
+        if inj_sm is not None:
+            print("    injecting the per-muon qop smear into the stage-2 pseudo-data m_ll")
         s1_train, s1_val = _make_loaders(args, shard_files, stats, half=0)  # flow: NOT injected
-        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1, inject_theta=inj)
+        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1,
+                                         inject_theta=inj, inject_smear=inj_sm)
     else:
-        if _inject_theta_np(args, len(stats.eta_edges) - 1) is not None:
-            print("warning: --inject-A/e/M only apply in --validation mode; ignoring.",
+        if (_inject_theta_np(args, len(stats.eta_edges) - 1) is not None
+                or _inject_smear_np(args, len(stats.eta_edges) - 1) is not None):
+            print("warning: --inject-A/e/M/a/c only apply in --validation mode; ignoring.",
                   file=sys.stderr)
         s1_train, s1_val = train_loader, val_loader
         s2_train, s2_val = train_loader, val_loader
@@ -826,10 +854,12 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
         return
     half = 1 if args.validation else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half, inject_theta_scale=inj)
+        drop_last=False, half=half, inject_theta_scale=inj,
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
     print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
           f"fixed flow + MLP) on split={args.fisher_split}"
           + ("  half=1 (MC pseudo-data)" if args.validation else "")
@@ -916,10 +946,12 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
     half = 1 if mc_as_data else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
+    inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half, inject_theta_scale=inj)
+        drop_last=False, half=half, inject_theta_scale=inj,
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
     nominal_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
     # Freeze the flow; float the MLP + active θ (the MLP must re-fit per replica
@@ -1235,10 +1267,12 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         return
     half = 1 if args.validation else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
-        drop_last=False, half=half, inject_theta_scale=inj)
+        drop_last=False, half=half, inject_theta_scale=inj,
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
     print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
           f"split={args.fisher_split}"
           + ("  half=1 (MC pseudo-data)" if args.validation else "")
@@ -1321,7 +1355,8 @@ def _load_full_fit(args, device):
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params",
               "qop_floor_frac",
               "disable_scale", "disable_smearing", "validation",
-              "inject_A", "inject_e", "inject_M"):
+              "inject_A", "inject_e", "inject_M",
+              "inject_a", "inject_c", "inject_smear_seed"):
         if k in ck_args:
             setattr(args, k, ck_args[k])
     # Stats: --stats-in overrides; else the fit's own stats.
@@ -1443,6 +1478,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="(--validation) Inject this constant e [GeV] scale shift.")
     p.add_argument("--inject-M", type=float, default=0.0,
                    help="(--validation) Inject this constant M scale shift.")
+    p.add_argument("--inject-a", type=float, default=0.0,
+                   help="(--validation) Inject this constant smear 'a' (qop "
+                   "hit-resolution) width coefficient into the pseudo-data via "
+                   "the same per-muon qop fold as the validation plots — a "
+                   "Gaussian σ_qop = √(a²+c²k²) kick, m_ll recomputed.")
+    p.add_argument("--inject-c", type=float, default=0.0,
+                   help="(--validation) Inject this constant smear 'c' (∝1/pt, "
+                   "multiple-scattering) width coefficient (see --inject-a).")
+    p.add_argument("--inject-smear-seed", type=int, default=12345,
+                   help="Seed for the injected-smear Gaussian qop kick, so the "
+                   "pseudo-data realisation is reproducible across epochs/runs.")
     p.add_argument("--flow-epochs", type=int, default=0,
                    help="Max epochs for stage 1 (0 → use --epochs).")
     p.add_argument("--fit-epochs", type=int, default=0,

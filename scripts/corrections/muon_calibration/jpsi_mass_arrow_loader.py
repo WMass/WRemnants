@@ -325,10 +325,52 @@ def _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, theta_inj):
             (pt_inj[:, 0] + pt_inj[:, 1])).astype(np.float32)
 
 
+_MUON_MASS_GEV = 0.1056583755
+
+
+def _event_mll_np(pt_pm, eta_pm, phi_pm):
+    """Two-body invariant mass ``[N]`` for muons of mass ``_MUON_MASS_GEV`` —
+    numpy twin of ``jpsi_mass_model._event_mll``. Inputs ``[N, 2]``."""
+    px = pt_pm * np.cos(phi_pm)
+    py = pt_pm * np.sin(phi_pm)
+    pz = pt_pm * np.sinh(eta_pm)
+    E = np.sqrt(px * px + py * py + pz * pz + _MUON_MASS_GEV * _MUON_MASS_GEV)
+    Etot = E.sum(1); Px = px.sum(1); Py = py.sum(1); Pz = pz.sum(1)
+    m2 = Etot * Etot - (Px * Px + Py * Py + Pz * Pz)
+    return np.sqrt(np.clip(m2, 1e-12, None))
+
+
+def _smear_inject_dmll_np(mll, pt_pm, eta_pm, phi_pm, q_pm, b_pm, smear_inj, rng,
+                          qop_floor_frac: float = 0.25):
+    """Δm_ll ``[N]`` from injecting a per-muon qop Gaussian smear at the injected
+    width coefficients ``smear_inj`` ([n_eta, 2] = (a, c), clipped ≥ 0): exactly
+    the validation-plot fold path (``fold_sigma_qop_pm`` + ``apply_smear_pt`` +
+    ``_event_mll``) — σ_qop = √(a² + c²k²), an INDEPENDENT Gaussian qop kick per
+    muon, then recompute m_ll. ρ (a flow condition) is left untouched, as in the
+    fold. Returned as the mass CHANGE so it composes additively with the scale
+    advection."""
+    sinth = 1.0 / np.cosh(eta_pm)                          # [N,2]
+    k = 1.0 / pt_pm
+    a = np.clip(smear_inj[b_pm, 0], 0.0, None)             # [N,2]
+    c = np.clip(smear_inj[b_pm, 1], 0.0, None)
+    sig = np.sqrt(a * a + c * c * k * k)                   # σ_qop [N,2]
+    eps = rng.standard_normal(pt_pm.shape).astype(pt_pm.dtype)
+    qop = q_pm * sinth / pt_pm
+    qop_new = qop + sig * eps
+    # sign-preserving floor, mirroring the model's qop→pt inversion guard.
+    s = np.sign(qop)
+    qop_new = s * np.maximum(qop_new * s, qop_floor_frac * np.abs(qop))
+    pt_new = q_pm * sinth / qop_new
+    dm = _event_mll_np(pt_new, eta_pm, phi_pm) - _event_mll_np(pt_pm, eta_pm, phi_pm)
+    return dm.astype(np.float32)
+
+
 def _batch_tensors(
     cols: dict,
     stats: JpsiMassPreprocStats,
     inject_theta_scale: "np.ndarray | None" = None,
+    inject_theta_smear: "np.ndarray | None" = None,
+    rng: "np.random.Generator | None" = None,
 ) -> dict[str, torch.Tensor]:
     """Build the tensor batch from one Arrow record batch's columns.
 
@@ -336,6 +378,10 @@ def _batch_tensors(
     (``is_data == 0``) m_ll is shifted by the advective scale shift at that
     injected θ_scale, so the (pseudo-)data look as if they carried that
     calibration and the fit should recover it.
+
+    ``inject_theta_smear`` ([n_eta, 2] = (a, c), validation closure only): the MC
+    m_ll additionally gets the per-muon qop Gaussian smear at those injected
+    width coefficients (same fold path as the validation plots; needs ``rng``).
     """
     y_event, muon_kin = _per_event_features(cols)
 
@@ -358,6 +404,12 @@ def _batch_tensors(
         # the (pseudo-)data conditioning is consistent with the mass injection.
         rho_inj = _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale)
         muon_kin[:, -1] = np.where(is_data_mask, muon_kin[:, -1], rho_inj)
+    if inject_theta_smear is not None:
+        # Per-muon qop Gaussian smear (same fold path as the validation plots),
+        # MC rows only. ρ is left untouched — the smear is a pure mass operation.
+        dms = _smear_inject_dmll_np(
+            mll, pt_pm, eta_pm, phi_pm, q_pm, b_pm, inject_theta_smear, rng)
+        mll = mll + np.where(is_data_mask, 0.0, dms).astype(np.float32)
     mll_std = ((mll - stats.mll_mean) / stats.mll_std).astype(np.float32)
 
     y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)
@@ -417,6 +469,8 @@ class JpsiMassArrowLoader(IterableDataset):
         pin_memory: bool = False,
         half: "int | None" = None,
         inject_theta_scale: "np.ndarray | None" = None,
+        inject_theta_smear: "np.ndarray | None" = None,
+        inject_seed: int = 12345,
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
@@ -443,6 +497,14 @@ class JpsiMassArrowLoader(IterableDataset):
         self.inject_theta_scale = (
             np.asarray(inject_theta_scale, dtype=np.float64)
             if inject_theta_scale is not None else None)
+        # Injected smear width coefficients [n_eta, 2] = (a, c) (validation
+        # closure): a per-muon qop Gaussian kick on the MC m_ll via the same
+        # fold path as the validation plots. Stochastic → seeded per __iter__
+        # (inject_seed) so the pseudo-data realisation is reproducible.
+        self.inject_theta_smear = (
+            np.asarray(inject_theta_smear, dtype=np.float64)
+            if inject_theta_smear is not None else None)
+        self.inject_seed = int(inject_seed)
 
     # -- helpers --------------------------------------------------------
 
@@ -471,6 +533,9 @@ class JpsiMassArrowLoader(IterableDataset):
     def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
         accum: dict[str, list[np.ndarray]] = {c: [] for c in _RAW_COLUMNS}
         accum_n = 0
+        # Reseed each pass so the injected smear realisation is reproducible
+        # (and identical across epochs → a fixed pseudo-data set).
+        rng = np.random.default_rng(self.inject_seed)
 
         for path in self.my_shards:
             with pa.OSFile(path, "rb") as src:
@@ -508,12 +573,16 @@ class JpsiMassArrowLoader(IterableDataset):
                         rem = {c: cols[c][self.batch_size :] for c in _RAW_COLUMNS}
                         accum = {c: [rem[c]] for c in _RAW_COLUMNS}
                         accum_n -= self.batch_size
-                        yield _batch_tensors(emit, self.stats, self.inject_theta_scale)
+                        yield _batch_tensors(
+                            emit, self.stats, self.inject_theta_scale,
+                            self.inject_theta_smear, rng)
 
         # Final partial batch.
         if accum_n > 0 and not self.drop_last:
             cols = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
-            yield _batch_tensors(cols, self.stats, self.inject_theta_scale)
+            yield _batch_tensors(
+                cols, self.stats, self.inject_theta_scale,
+                self.inject_theta_smear, rng)
 
 
 # ---------------------------------------------------------------------------

@@ -969,16 +969,24 @@ def main() -> int:
     # the values the fit was trained with, replay the same m_ll injection in the
     # pseudo-data, and use them as the χ² reference + dashed line on the θ plot.
     inject_np = None
+    inject_smear_np = None
     if mc_as_data:
+        n_eta = len(stats.eta_edges) - 1
         ia = float(train_args.get("inject_A", 0.0) or 0.0)
         ie = float(train_args.get("inject_e", 0.0) or 0.0)
         im = float(train_args.get("inject_M", 0.0) or 0.0)
         if ia or ie or im:
-            n_eta = len(stats.eta_edges) - 1
             inject_np = np.zeros((n_eta, 3), dtype=np.float64)
             inject_np[:, 0] = ia; inject_np[:, 1] = ie; inject_np[:, 2] = im
             print(f"checkpoint injected θ_scale (A,e,M)=({ia:g},{ie:g},{im:g}) — "
                   f"replaying the pseudo-data injection; closure target = injected")
+        isa = float(train_args.get("inject_a", 0.0) or 0.0)
+        isc = float(train_args.get("inject_c", 0.0) or 0.0)
+        if isa or isc:
+            inject_smear_np = np.zeros((n_eta, 2), dtype=np.float64)
+            inject_smear_np[:, 0] = isa; inject_smear_np[:, 1] = isc
+            print(f"checkpoint injected smear (a,c)=({isa:g},{isc:g}) — replaying "
+                  f"the per-muon qop fold into the pseudo-data")
 
     print(f"found {len(shard_files)} shard(s); split={args.split}")
     loader = JpsiMassArrowLoader(
@@ -989,6 +997,8 @@ def main() -> int:
         holdout_fraction=float(train_args.get("holdout_fraction", 0.05)),
         drop_last=False,
         inject_theta_scale=inject_np,
+        inject_theta_smear=inject_smear_np,
+        inject_seed=int(train_args.get("inject_smear_seed", 12345)),
     )
 
     # m_ll grid.
