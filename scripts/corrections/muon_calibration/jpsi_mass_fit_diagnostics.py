@@ -842,19 +842,23 @@ def plot_mc_closure(
             label=model_label,
         )
 
+        # Ratio panel: everything relative to the folded flow (the model), so
+        # the folded MC (closure), the nominal MC, AND the nominal flow all
+        # appear — the folded flow is the unit reference (axhline at 1).
+        denom = np.where(model_curve > 0, model_curve, np.nan)
         with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = mc_hist / np.where(model_curve > 0, model_curve, np.nan)
-            ratio_err = np.sqrt(np.abs(mc_hist)) / np.where(
-                model_curve > 0, model_curve, np.nan,
-            )
+            ratio = mc_hist / denom
+            ratio_err = np.sqrt(np.abs(mc_hist)) / denom
         axr.errorbar(m_centers_np, ratio, yerr=ratio_err, fmt="o",
-                     color="k", markersize=3, label="folded")
+                     color="k", markersize=3, label="MC (folded)", zorder=3)
         if has_nom:
             with np.errstate(divide="ignore", invalid="ignore"):
-                rnom = nom_hist / np.where(nom_curve > 0, nom_curve, np.nan)
-            axr.plot(m_centers_np, rnom, color="0.6", lw=1.0, label="nominal")
-            axr.legend(loc="upper right", fontsize=6, ncol=2)
-        axr.axhline(1.0, color="C1", lw=1)
+                axr.step(m_edges[:-1], nom_hist / denom, where="post",
+                         color="0.6", lw=1.0, label="MC (nominal)", zorder=2)
+                axr.plot(m_centers_np, nom_curve / denom, color="C0", ls=":",
+                         lw=1.3, label="flow (nominal)", zorder=2)
+            axr.legend(loc="upper right", fontsize=6, ncol=3)
+        axr.axhline(1.0, color="C1", lw=1)   # folded flow (model) = reference
         axr.set_ylim(0.6, 1.4)
 
         ax.set_ylabel("events / bin (weighted)")
@@ -874,7 +878,7 @@ def plot_mc_closure(
             ax.set_ylim(0, ymax * 1.35)
         ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
         axr.set_xlabel("m_ll [GeV]")
-        axr.set_ylabel("MC / model")
+        axr.set_ylabel("ratio to folded flow")
 
         fig.tight_layout()
         for p in _save_fig(fig, output_dir, f"mc_closure_{tag}"):
