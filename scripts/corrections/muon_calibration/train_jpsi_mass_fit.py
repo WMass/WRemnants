@@ -568,6 +568,9 @@ def _build_model(args, stats, device):
         scale_enabled=not args.disable_scale,
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
+        theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
+        theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
+        theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
     ).to(device)
 
 
@@ -648,8 +651,13 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
 
         extra = ""
         if stage_name == "fit":
-            extra = (f" θ_scale‖∞={model.theta_scale.abs().max().item():.3e}"
-                     f" θ_smear‖∞={model.theta_smear.abs().max().item():.3e}")
+            if model.theta_mode == "mlp":
+                wn = max((p.detach().abs().max().item()
+                          for p in model.theta_net.parameters()), default=0.0)
+                extra = f" θ_net‖w‖∞={wn:.3e}"
+            else:
+                extra = (f" θ_scale‖∞={model.theta_scale.abs().max().item():.3e}"
+                         f" θ_smear‖∞={model.theta_smear.abs().max().item():.3e}")
         print(f"[{stage_name}] epoch {epoch:>3}: train_nll={train_nll:+.4f} "
               f"val_nll={val_nll:+.4f} (Σw={v_w:.2e}) lr={lr_str} "
               f"dt={time.time()-t0:.1f}s{extra}")
@@ -717,19 +725,28 @@ def train_stage2(args, model, train_loader, val_loader, stats,
     # Freeze the flow; it is the nominal template from stage 1.
     for p in model.flow.parameters():
         p.requires_grad_(False)
-    # θ_scale is the advective shift (init 0, signed). θ_smear are the signed
-    # width coefficients (init 0 → s=0, identity).
-    with torch.no_grad():
-        model.theta_scale.zero_()
     groups = [{"params": model.mlp.parameters(), "lr": args.fit_mlp_lr}]
     tags = ["mlp"]
-    if not args.disable_scale:
-        groups.append({"params": [model.theta_scale], "lr": args.fit_scale_lr}); tags.append("θ_scale")
-    if not args.disable_smearing:
-        groups.append({"params": [model.theta_smear], "lr": args.fit_smear_lr}); tags.append("θ_smear")
+    if model.theta_mode == "mlp":
+        # Continuous θ(η,φ): float the ThetaNet (zero-init → 0). One group;
+        # the output reference scaling differentiates the A,e,M vs a,c magnitudes.
+        groups.append({"params": model.theta_net.parameters(),
+                       "lr": args.fit_theta_mlp_lr}); tags.append("θ_net")
+        print(f"  optimizer groups: {', '.join(tags)}  "
+              f"(lr mlp={args.fit_mlp_lr:g} θ_net={args.fit_theta_mlp_lr:g}); "
+              f"θ = ThetaNet(η, φ) [continuous]")
+    else:
+        # θ_scale is the advective shift (init 0, signed). θ_smear are the signed
+        # qop-variance coefficients (init 0 → σ²_qop=0, identity).
+        with torch.no_grad():
+            model.theta_scale.zero_()
+        if not args.disable_scale:
+            groups.append({"params": [model.theta_scale], "lr": args.fit_scale_lr}); tags.append("θ_scale")
+        if not args.disable_smearing:
+            groups.append({"params": [model.theta_smear], "lr": args.fit_smear_lr}); tags.append("θ_smear")
+        print(f"  optimizer groups: {', '.join(tags)}  "
+              f"(lr mlp={args.fit_mlp_lr:g} scale={args.fit_scale_lr:g} smear={args.fit_smear_lr:g})")
     optim = torch.optim.Adam(groups)
-    print(f"  optimizer groups: {', '.join(tags)}  "
-          f"(lr mlp={args.fit_mlp_lr:g} scale={args.fit_scale_lr:g} smear={args.fit_smear_lr:g})")
     print(f"  signal density: #2 direct-eval (advection + probability-flow smear, "
           f"flow_steps={getattr(args, 'smear_flow_steps', 1)}, n_iter="
           f"{args.continuity_n_iter}); normalised by construction")
@@ -857,6 +874,11 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
     if not (model.scale_enabled or model.smearing_enabled):
         print("skipping Fisher info: both --disable-scale and --disable-smearing.")
         return
+    if model.theta_mode == "mlp":
+        print("skipping observed Fisher info: not implemented for --theta-mlp "
+              "(binned 24×3 θ layout); use --empirical-fisher over the net weights "
+              "or re-run binned for the per-bin covariance.", file=sys.stderr)
+        return
     half = 1 if args.validation else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
@@ -944,6 +966,10 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     replica early stop on the reweighted NLL)."""
     B = int(args.bootstrap)
     if B <= 0:
+        return
+    if model.theta_mode == "mlp":
+        print("skipping bootstrap: not implemented for --theta-mlp (binned 24×3 "
+              "θ layout / per-bin covariance).", file=sys.stderr)
         return
     if not (model.scale_enabled or model.smearing_enabled):
         print("skipping bootstrap: both --disable-scale and --disable-smearing.")
@@ -1270,6 +1296,10 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     if not (model.scale_enabled or model.smearing_enabled):
         print("skipping empirical Fisher: both --disable-scale and --disable-smearing.")
         return
+    if model.theta_mode == "mlp":
+        print("skipping empirical Fisher: not implemented for --theta-mlp (binned "
+              "24×3 θ layout).", file=sys.stderr)
+        return
     half = 1 if args.validation else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
@@ -1358,7 +1388,7 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "smear_flow_steps",
-              "qop_floor_frac",
+              "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
               "inject_a", "inject_c", "inject_smear_seed"):
@@ -1508,6 +1538,10 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "scale O(1)).")
     p.add_argument("--fit-mlp-lr", type=float, default=1e-3,
                    help="Stage-2 Adam lr for the background-fraction MLP.")
+    p.add_argument("--fit-theta-mlp-lr", type=float, default=1e-3,
+                   help="Stage-2 Adam lr for the θ ThetaNet (--theta-mlp). One lr "
+                   "for all of (A,e,M,a,c); the net's output reference scaling "
+                   "sets the relative A,e,M vs a,c magnitudes.")
     p.add_argument("--continuity-n-iter", type=int, default=2,
                    help="Fixed-point iterations for the #2 source solve "
                    "(advection+smear pre-image).")
@@ -1571,6 +1605,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "autograd cost. The per-muon qop fold (closure plots) and the injection "
         "are exact convolutions regardless.",
     )
+    p.add_argument(
+        "--theta-mlp", action="store_true",
+        help="Replace the per-η-bin (A,e,M,a,c) tables with a small MLP mapping "
+        "each muon's (η, φ) → (A,e,M,a,c) CONTINUOUSLY (trained in stage 2 like "
+        "the background MLP). Note: the observed/empirical Fisher and bootstrap "
+        "uncertainties are binned-θ-only and are skipped in this mode.",
+    )
+    p.add_argument("--theta-mlp-hidden", type=int, default=32,
+                   help="(--theta-mlp) Hidden width of the θ ThetaNet.")
+    p.add_argument("--theta-mlp-layers", type=int, default=2,
+                   help="(--theta-mlp) Number of hidden layers of the θ ThetaNet.")
     # θ_scale sampling widths, split per component (A, e, M) since they live
     # in different physical units. Each is the σ of the Gaussian added to that
     # component (additive, physical units) — the fixed width with

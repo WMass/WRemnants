@@ -302,6 +302,40 @@ class MixtureMLP(nn.Module):
         return F.softmax(self.net(y_std), dim=-1)
 
 
+class ThetaNet(nn.Module):
+    """Per-muon calibration parameters (A, e, M, a, c) as a CONTINUOUS function
+    of the muon (η, φ), replacing the η-binned θ. Input features (η, cosφ, sinφ),
+    5 outputs. The (A, e, M) outputs are scaled by fixed references so the net
+    outputs sit at O(1) (A,e ~ 1e-3, M ~ 1e-5); (a, c) are the qop-resolution
+    variance coefficients in their O(1) units (SMEAR_VAR_SCALE_* applied
+    downstream). The final layer is ZERO-INITIALISED, so the net outputs 0 at
+    init — the binned θ=0 init (no scale/smear correction)."""
+
+    def __init__(self, hidden: int = 32, n_layers: int = 2,
+                 scale_ref=(1e-3, 1e-3, 1e-5)):
+        super().__init__()
+        layers: list[nn.Module] = []
+        d_in = 3  # (η, cosφ, sinφ)
+        for _ in range(max(1, n_layers)):
+            layers += [nn.Linear(d_in, hidden), nn.GELU()]
+            d_in = hidden
+        last = nn.Linear(d_in, N_THETA_SCALE + N_THETA_SMEAR)  # 5 = (A,e,M,a,c)
+        nn.init.zeros_(last.weight)
+        nn.init.zeros_(last.bias)
+        layers.append(last)
+        self.net = nn.Sequential(*layers)
+        self.register_buffer(
+            "scale_ref", torch.tensor(list(scale_ref), dtype=torch.float32))
+
+    def forward(self, eta_pm: torch.Tensor, phi_pm: torch.Tensor):
+        """``eta_pm``, ``phi_pm``: ``[B, 2]``. Returns ``(AeM [B,2,3], ac [B,2,2])``
+        — per-muon physical (A, e, M) and O(1) (a, c)."""
+        feat = torch.stack(
+            [eta_pm, torch.cos(phi_pm), torch.sin(phi_pm)], dim=-1)  # [B,2,3]
+        out = self.net(feat)                                        # [B,2,5]
+        return out[..., :N_THETA_SCALE] * self.scale_ref, out[..., N_THETA_SCALE:]
+
+
 @contextlib.contextmanager
 def _freeze_param_grads(params):
     """Temporarily set ``requires_grad=False`` on ``params`` for the duration
@@ -388,12 +422,22 @@ class JpsiMassMixtureModel(nn.Module):
         # nested-autograd cost. Frozen p₀ score per step (exact diffusion to
         # first order in V).
         smear_flow_steps: int = 1,
+        # θ parameterisation. 'binned' (default): per-η-bin (A,e,M,a,c) tables
+        # indexed by the muon's η-bin. 'mlp': a small ThetaNet maps each muon's
+        # (η, φ) → (A,e,M,a,c) CONTINUOUSLY (trained in stage 2 like the
+        # background MLP). The binned tables stay registered but inert in 'mlp'.
+        theta_mode: str = "binned",
+        theta_mlp_hidden: int = 32,
+        theta_mlp_layers: int = 2,
     ):
         super().__init__()
         self.smearing_enabled = bool(smearing_enabled)
         self.scale_enabled = bool(scale_enabled)
         self.qop_floor_frac = float(qop_floor_frac)
         self.smear_flow_steps = max(1, int(smear_flow_steps))
+        if theta_mode not in ("binned", "mlp"):
+            raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
+        self.theta_mode = str(theta_mode)
         self.flow_arch = str(flow_arch)
 
         # Per-bin smear fit mask: which of (a, c) float. The frozen column gets
@@ -443,6 +487,13 @@ class JpsiMassMixtureModel(nn.Module):
         self.theta_smear = nn.Parameter(
             torch.zeros(n_eta_bins, N_THETA_SMEAR, dtype=torch.float32)
         )
+        # 'mlp' θ: a small net maps each muon's (η, φ) → (A,e,M,a,c) continuously
+        # (zero-init → 0 at start). Replaces the binned tables above (which stay
+        # registered but inert). Trained in stage 2 like the background MLP.
+        self.theta_net = (
+            ThetaNet(hidden=theta_mlp_hidden, n_layers=theta_mlp_layers)
+            if self.theta_mode == "mlp" else None
+        )
 
         # Buffers — Bernstein window, density-rescale, standardisation stats.
         self.register_buffer("m_lo", torch.tensor(float(m_lo)))
@@ -481,37 +532,53 @@ class JpsiMassMixtureModel(nn.Module):
     # Per-event helpers
     # ------------------------------------------------------------------
 
-    def _scale_per_event(self, theta_scale: torch.Tensor, b_pm: torch.Tensor) -> torch.Tensor:
-        """Look up ``[B, 6] = (A_+, e_+, M_+, A_-, e_-, M_-)`` from a θ_scale parameter."""
-        return theta_scale[b_pm].reshape(b_pm.shape[0], -1)
+    def _scale_AeM_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
+        """Per-muon scale params ``[B, 2, 3] = (A, e, M)``. 'binned': the η-bin
+        table ``θ_scale[b]``; 'mlp': the continuous ``ThetaNet(η, φ)``."""
+        if self.theta_mode == "mlp":
+            return self.theta_net(eta_pm, phi_pm)[0]
+        return self.theta_scale[b_pm]
+
+    def _smear_ac_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
+        """Per-muon SIGNED qop-resolution variance coefficients ``[B, 2, 2] =
+        (a, c)`` (σ²_qop = a + c·k², two-sided), masked to the fitted term(s).
+        'binned': ``θ_smear[b]``; 'mlp': the continuous ``ThetaNet(η, φ)``."""
+        if self.theta_mode == "mlp":
+            ac = self.theta_net(eta_pm, phi_pm)[1]
+        else:
+            ac = self.theta_smear[b_pm]
+        return ac * self.smear_param_mask
 
     def effective_theta_smear(self) -> torch.Tensor:
-        """Per-η-bin effective smear (a, c), masked to the fitted terms. These
-        are the signed per-muon qop-resolution VARIANCE coefficients:
-        ``σ²_qop,μ = a + c·k²`` (k = 1/pt), two-sided — positive = broaden,
-        negative = unsmear (sharpen). The SAME (a, c) drive both the per-muon
-        qop fold and the mass-density stretch (see ``_qop_var_pm``)."""
+        """Per-η-bin effective smear (a, c), masked (BINNED mode only — used for
+        the diagnostics curve / bootstrap). The signed qop-variance coefficients
+        ``σ²_qop = a + c·k²``. In 'mlp' mode evaluate ``theta_net`` on an η grid
+        instead."""
         return self.theta_smear * self.smear_param_mask
 
-    def _qop_var_pm(self, b_pm: torch.Tensor, pt_pm: torch.Tensor) -> torch.Tensor:
+    def _scale_per_event(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
+        """Per-event ``[B, 6] = (A_+, e_+, M_+, A_-, e_-, M_-)``."""
+        return self._scale_AeM_pm(eta_pm, phi_pm, b_pm).reshape(b_pm.shape[0], -1)
+
+    def _qop_var_pm(self, eta_pm, phi_pm, b_pm, pt_pm) -> torch.Tensor:
         """Per-muon SIGNED qop-resolution variance
-        ``σ²_qop,μ = a_b·SCALE_A + c_b·SCALE_C·k_μ²`` (k = 1/pt), from the fitted
-        (a, c) ∈ O(1). Signed = two-sided (un)smearing. ``a``, ``c`` are COMBINED
-        here, before any clipping. Returns ``[B, 2]``."""
-        eff = self.effective_theta_smear()                 # [n_bins, 2], masked
-        a_pm = eff[b_pm, 0] * SMEAR_VAR_SCALE_A
-        c_pm = eff[b_pm, 1] * SMEAR_VAR_SCALE_C
+        ``σ²_qop,μ = a·SCALE_A + c·SCALE_C·k_μ²`` (k = 1/pt), from the per-muon
+        (a, c). ``a``, ``c`` are COMBINED here, before any clipping. ``[B, 2]``."""
+        ac = self._smear_ac_pm(eta_pm, phi_pm, b_pm)        # [B,2,2] masked
+        a_pm = ac[..., 0] * SMEAR_VAR_SCALE_A
+        c_pm = ac[..., 1] * SMEAR_VAR_SCALE_C
         k2 = (1.0 / pt_pm) ** 2
         return a_pm + c_pm * k2                             # [B, 2], signed
 
     def fold_sigma_qop_pm(
-        self, pt_pm: torch.Tensor, eta_pm: torch.Tensor, b_pm: torch.Tensor
+        self, pt_pm: torch.Tensor, eta_pm: torch.Tensor, phi_pm: torch.Tensor,
+        b_pm: torch.Tensor,
     ) -> torch.Tensor:
         """Per-muon σ_qop for the validation FOLD, from the fitted (a, c): the
         combined qop variance ``σ²_qop = a + c·k²`` CLIPPED AT 0 *after*
         combining (a stochastic Gaussian qop kick can only broaden, so the
         unsmearing region σ² < 0 → no kick). Returns ``[B, 2]``."""
-        return torch.sqrt(self._qop_var_pm(b_pm, pt_pm).clamp_min(0.0))
+        return torch.sqrt(self._qop_var_pm(eta_pm, phi_pm, b_pm, pt_pm).clamp_min(0.0))
 
     # ------------------------------------------------------------------
     # T_scale (analytic + linearized)
@@ -519,24 +586,24 @@ class JpsiMassMixtureModel(nn.Module):
 
     def _delta_qop_analytic(
         self,
-        theta_scale: torch.Tensor,
+        AeM_pm: torch.Tensor,
         pt_pm: torch.Tensor,
         eta_pm: torch.Tensor,
         q_pm: torch.Tensor,
-        b_pm: torch.Tensor,
     ) -> torch.Tensor:
         """Analytic δqop per muon (matches ``calculateQopUnc`` in
         ``muon_calibration.hpp``)::
 
             δqop_i = q_i · sinθ_i · [(A_i − e_i k_i) k_i + q_i M_i]
 
-        where (A, e, M) are looked up at the muon's η-bin.
+        ``AeM_pm`` is the per-muon ``[B, 2, 3] = (A, e, M)`` (from
+        ``_scale_AeM_pm`` — binned table or ThetaNet).
         """
         sintheta = _sintheta_from_eta(eta_pm)
         k_pm = 1.0 / pt_pm
-        A_pm = theta_scale[b_pm, 0]
-        e_pm = theta_scale[b_pm, 1]
-        M_pm = theta_scale[b_pm, 2]
+        A_pm = AeM_pm[..., 0]
+        e_pm = AeM_pm[..., 1]
+        M_pm = AeM_pm[..., 2]
         k_unc = (A_pm - e_pm * k_pm) * k_pm + q_pm * M_pm
         return q_pm * sintheta * k_unc
 
@@ -849,7 +916,7 @@ class JpsiMassMixtureModel(nn.Module):
                          dA[..., 0], de[..., 1], dM[..., 1]], dim=-1)
         return (v * theta_scale_pm).sum(-1)
 
-    def _smear_mass_var(self, b_pm, pt_obs, eta_pm, m_eval, m_obs):
+    def _smear_mass_var(self, eta_pm, phi_pm, b_pm, pt_obs, m_eval, m_obs):
         """Per-event SIGNED m_ll variance added by the per-muon qop smear,
         evaluated at the mass ``m_eval`` (NOT a fixed reference): with
         ``pt(m_eval) = pt_obs·m_eval/m_obs`` (pt ∝ m at fixed angles, as in
@@ -860,7 +927,7 @@ class JpsiMassMixtureModel(nn.Module):
         mass-dependence enters the change-of-variables Jacobian (consistent with
         the advection). This is the diffusion 'time' of the probability flow."""
         pt = pt_obs * (m_eval / m_obs).unsqueeze(-1)       # pt(m_eval) [B,2]
-        vq = self._qop_var_pm(b_pm, pt)                    # [B,2] signed σ²_qop(pt)
+        vq = self._qop_var_pm(eta_pm, phi_pm, b_pm, pt)    # [B,2] signed σ²_qop(pt)
         sinth = _sintheta_from_eta(eta_pm)
         inv_qop2 = (pt * pt) / (sinth * sinth)             # 1/qop² = pt²/sin²θ
         return (0.5 * m_eval) ** 2 * (vq * inv_qop2).sum(-1)  # [B] signed
@@ -878,19 +945,20 @@ class JpsiMassMixtureModel(nn.Module):
             lp = self.log_p_nominal(ml, mk)
             return torch.autograd.grad(lp.sum(), ml, create_graph=True)[0].detach()
 
-    def _scale_source_rho_std(self, pt_obs, eta_pm, q_pm, b_pm):
+    def _scale_source_rho_std(self, pt_obs, eta_pm, phi_pm, q_pm, b_pm):
         """Standardised SOURCE ρ from un-applying the scale only (no smear) —
-        used by the 'width' smear, whose deterministic mass stretch leaves ρ
-        untouched. Returns ``[B]``."""
+        the smear is a pure mass-space transport, so it leaves ρ untouched.
+        Returns ``[B]``."""
         pt1 = pt_obs
         if self.scale_enabled:
-            dqop_s = self._delta_qop_analytic(self.theta_scale, pt_obs, eta_pm, q_pm, b_pm)
+            AeM_pm = self._scale_AeM_pm(eta_pm, phi_pm, b_pm)
+            dqop_s = self._delta_qop_analytic(AeM_pm, pt_obs, eta_pm, q_pm)
             pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
         rho = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
         idx = N_MUON_KIN - 1
         return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
 
-    def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, q_pm, b_pm,
+    def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm,
                          n_iter: int = 2):
         """``log p_θ(x|c)``: the frozen nominal flow pushed through an exactly-
         normalized, INVERTIBLE TRANSPORT — a scale advection ``s_adv`` plus the
@@ -905,16 +973,16 @@ class JpsiMassMixtureModel(nn.Module):
         transport, so it leaves ρ untouched — only the scale's ρ shift is
         propagated to the conditioning."""
         B = m_obs.shape[0]
-        theta_scale_pm = (self._scale_per_event(self.theta_scale, b_pm)
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
                           if self.scale_enabled
-                          else self.theta_scale.new_zeros((B, N_THETA_SCALE_PM)))
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
         n_step = max(1, int(self.smear_flow_steps))
 
         mk_src = mk
         if self.scale_enabled:
             mk_src = mk.clone()
             mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
-                pt_obs, eta_pm, q_pm, b_pm)
+                pt_obs, eta_pm, phi_pm, q_pm, b_pm)
 
         def s_adv_of(me):
             return self._continuity_response(
@@ -926,7 +994,7 @@ class JpsiMassMixtureModel(nn.Module):
             # mass-dependence (V ∝ a·m⁴ + c·m²) enters the autograd Jacobian G'.
             y = mp + s_adv_of(mp)
             if self.smearing_enabled:
-                V = self._smear_mass_var(b_pm, pt_obs, eta_pm, mp, m_obs)
+                V = self._smear_mass_var(eta_pm, phi_pm, b_pm, pt_obs, mp, m_obs)
                 dt = V / (2.0 * n_step)
                 for _ in range(n_step):
                     y = y - dt * self._flow_score(y, mk_src)
@@ -975,9 +1043,9 @@ class JpsiMassMixtureModel(nn.Module):
             return per
         m = mll[data_idx]
         mk = muon_kin_std[data_idx]
-        pt, eta, q, b = (pt_pm[data_idx], eta_pm[data_idx],
-                         q_pm[data_idx], b_pm[data_idx])
-        log_ps = self._continuity_logp(m, mk, pt, eta, q, b, n_iter=n_iter)
+        pt, eta, phi, q, b = (pt_pm[data_idx], eta_pm[data_idx], phi_pm[data_idx],
+                              q_pm[data_idx], b_pm[data_idx])
+        log_ps = self._continuity_logp(m, mk, pt, eta, phi, q, b, n_iter=n_iter)
         f = self.f_data(mk)
         p0b, p1b = bernstein_d1(m, float(self.m_lo), float(self.m_hi))
         p_mix = f[:, 0] * p0b + f[:, 1] * p1b + f[:, 2] * log_ps.exp()

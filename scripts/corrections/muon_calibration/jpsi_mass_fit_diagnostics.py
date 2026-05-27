@@ -89,6 +89,9 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         qop_floor_frac=args.get("qop_floor_frac", 0.0),
         smear_fit_params=args.get("smear_fit_params", "both"),
         smear_flow_steps=args.get("smear_flow_steps", 1),
+        theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
+        theta_mlp_hidden=args.get("theta_mlp_hidden", 32),
+        theta_mlp_layers=args.get("theta_mlp_layers", 2),
     ).to(device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
@@ -113,6 +116,7 @@ def _tilt_density_on_grid(
     n = idx.shape[0]
     G = m_centers_dev.shape[0]
     eta = batch["eta_pm"][idx]; q = batch["q_pm"][idx]; b = batch["b_pm"][idx]
+    phi = batch["phi_pm"][idx]
     mk = batch["muon_kin_std"][idx]; pt = batch["pt_pm"][idx]
     m_obs = batch["mll"][idx]
     out = torch.empty((n, G), device=m_centers_dev.device, dtype=mk.dtype)
@@ -124,7 +128,7 @@ def _tilt_density_on_grid(
             sub, G, *x.shape[1:]).reshape(sub * G, *x.shape[1:])
         pt_g = (pt[start:end].unsqueeze(1) * scale).reshape(sub * G, 2)
         lp = model._continuity_logp(
-            mg.reshape(-1), rep(mk), pt_g, rep(eta), rep(q), rep(b),
+            mg.reshape(-1), rep(mk), pt_g, rep(eta), rep(phi), rep(q), rep(b),
             n_iter=n_iter)
         out[start:end] = lp.reshape(sub, G)
     return out
@@ -160,10 +164,11 @@ def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
     m_ll closure plots.)"""
     pt_cur = ptm
     if model.scale_enabled:
-        dqop_s = model._delta_qop_analytic(model.theta_scale, ptm, etam, qm, bm)
+        AeM = model._scale_AeM_pm(etam, phim, bm)
+        dqop_s = model._delta_qop_analytic(AeM, ptm, etam, qm)
         pt_cur = model._apply_scale_pt(ptm, etam, qm, dqop_s, sign=+1.0)
     if model.smearing_enabled:
-        sig = model.fold_sigma_qop_pm(pt_cur, etam, bm)
+        sig = model.fold_sigma_qop_pm(pt_cur, etam, phim, bm)
         pt_cur = model.apply_smear_pt(pt_cur, etam, qm, sig, torch.randn_like(sig))
     return _event_mll(pt_cur, etam, phim).detach()
 
@@ -1088,8 +1093,20 @@ def main() -> int:
     # Plots 2, 3: θ vs η — only for the *enabled* nuisances (a disabled one
     # is an inert, fixed parameter; plotting it would be misleading).
     print("plotting θ vs η...")
+    # 'mlp' θ: sample the continuous ThetaNet at the η-bin centres (φ=0 slice)
+    # so the same per-bin plot shows the learned function; no ±σ (no Fisher).
+    mlp_scale_grid = mlp_smear_grid = None
+    if model.theta_mode == "mlp":
+        centers = 0.5 * (np.asarray(stats.eta_edges[:-1]) + np.asarray(stats.eta_edges[1:]))
+        eta_pm = torch.tensor(centers, dtype=torch.float32, device=device).unsqueeze(-1).expand(-1, 2)
+        with torch.no_grad():
+            AeM_g, ac_g = model.theta_net(eta_pm, torch.zeros_like(eta_pm))
+        mlp_scale_grid = AeM_g[:, 0, :].cpu().numpy()
+        mlp_smear_grid = (ac_g[:, 0, :] * model.smear_param_mask).cpu().numpy()
+        sigma_scale = sigma_smear = None
     if model.scale_enabled:
-        theta_scale = ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
+        theta_scale = (mlp_scale_grid if mlp_scale_grid is not None
+                       else ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy())
         # χ² for compatibility of all θ_scale (A,e,M over the η bins) with the
         # reference (the injected values if a shift was injected, else 0), using
         # the full θ_scale covariance block (correlations included).
@@ -1112,10 +1129,11 @@ def main() -> int:
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
     if model.smearing_enabled:
-        # softplus-reparameterised — plot the *effective* (physical, ≥0) a, c.
-        theta_smear_eff = model.effective_theta_smear().detach().cpu().numpy()
+        # signed qop-variance coefficients (a, c); MLP mode samples the net.
+        theta_smear_eff = (mlp_smear_grid if mlp_smear_grid is not None
+                           else model.effective_theta_smear().detach().cpu().numpy())
         plot_theta_vs_eta(
-            theta_smear_eff, sigma_smear, ["a [1/GeV] (eff)", "c (eff)"],
+            theta_smear_eff, sigma_smear, ["a (qop var)", "c (qop var)"],
             "theta_smear_vs_eta", stats.eta_edges, out_dir, edm=edm,
         )
     else:
