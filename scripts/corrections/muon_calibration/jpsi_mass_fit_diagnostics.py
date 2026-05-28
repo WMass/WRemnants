@@ -1321,9 +1321,14 @@ def main() -> int:
             AeM_g, ac_g = model.theta_net(eta_grid, phi_grid)
         # Keep muon-0 output and reshape back to (n_eta, n_phi_all, n_comp).
         AeM_g = AeM_g[:, 0, :].view(n_eta_c, n_phi_all, 3)              # physical scale (×scale_ref inside the net)
+        # Effective smear: route the raw MLP (a, c) through
+        # _smear_raw_to_effective so the softplus positivity reparam (when
+        # --smear-param-form softplus) is applied here too — same operator the
+        # model uses internally for the MLP smear branch in _smear_ac_pm.
+        # Then multiply by SMEAR_VAR_SCALE for the physical units.
         smear_scale = ac_g.new_tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C])
-        ac_phys = (ac_g[:, 0, :] * model.smear_param_mask * smear_scale
-                  ).view(n_eta_c, n_phi_all, 2)
+        ac_eff = model._smear_raw_to_effective(ac_g[:, 0, :])           # softplus(ac)·mask if 'softplus', else ac·mask
+        ac_phys = (ac_eff * smear_scale).view(n_eta_c, n_phi_all, 2)
         # Split: first n_phi_avg are the φ-average grid; rest are the slices.
         AeM_avg, AeM_slc = AeM_g[:, :n_phi_avg, :], AeM_g[:, n_phi_avg:, :]
         ac_avg,  ac_slc  = ac_phys[:, :n_phi_avg, :], ac_phys[:, n_phi_avg:, :]
