@@ -1119,7 +1119,19 @@ class JpsiMassMixtureModel(nn.Module):
                     Gp = torch.autograd.grad(forward(mpj).sum(), mpj)[0].detach()
             log_Gp = _softlog_below_floor(Gp, SMEAR_GP_FLOOR)
         logp0 = self.log_p_nominal(mp, mk_src)
-        return logp0 - log_Gp
+        log_p_theta = logp0 - log_Gp
+        # Cap log_p_theta from ABOVE only (the overflow direction). The
+        # downstream mixture in `data_nll_continuity` takes `.exp()` of this:
+        # for jacobian_form='exp' the unbounded sharpening reward can drive
+        # log_Gp → −∞ on a single event → log_p_theta → +∞ → `.exp()` → inf
+        # → NaN loss. The physical log-density on this m-window lives in
+        # ~[−30, +5], so cap = +50 leaves the operating regime untouched.
+        # No LOWER cap: the softlog barrier deliberately drives log_p_theta
+        # very negative to penalise unphysical G' < 0, and `.exp()` of a
+        # large-negative number underflows cleanly to 0 (the mixture then
+        # collapses to the Bernstein background — no NaN). nan_to_num catches
+        # any residual NaN (rare, from autograd at boundary mp values).
+        return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
 
     def _log_jacobian_exp(self, mp, mk_src, s_adv_of, eta_pm, phi_pm, b_pm,
                           pt_obs, m_obs):
@@ -1130,7 +1142,17 @@ class JpsiMassMixtureModel(nn.Module):
         the SOURCE mass m' (frozen along the smear trajectory). Always finite
         — no floor — but a different operator approximation than the autograd
         Jacobian of the N-step Euler forward map (see _continuity_logp
-        docstring). Live grads to θ are preserved when ``mp.requires_grad``."""
+        docstring). Live grads to θ are preserved when ``mp.requires_grad``.
+
+        Both factors are guarded with ``nan_to_num``: ``∂²_m log p₀`` exposes
+        the flow's tail singularities (where the Jacobian floor in the GF
+        monotonic transform produces a step) more directly than the softlog
+        path's autograd Gp (which combines everything through the chain rule
+        — sharp pieces of the score and its derivative tend to cancel). A
+        small minority of events at the m-window boundary can return inf/NaN
+        d2, and even one such event poisons the batch mean. We mask those
+        contributions to zero rather than dropping the events — the model is
+        at the edge of its validity there anyway."""
         # ∂s_adv/∂m' (scale-advection Jacobian contribution, =0 if scale disabled).
         if self.scale_enabled:
             if mp.requires_grad:
@@ -1142,7 +1164,8 @@ class JpsiMassMixtureModel(nn.Module):
                     mpj = mp.detach().requires_grad_(True)
                     s_prime = torch.autograd.grad(
                         s_adv_of(mpj).sum(), mpj)[0].detach()
-            log_J_scale = torch.log1p(s_prime)
+            log_J_scale = torch.nan_to_num(
+                torch.log1p(s_prime), nan=0.0, posinf=0.0, neginf=0.0)
         else:
             log_J_scale = mp.new_zeros(mp.shape)
         # −V·∂²_m log p₀(m')/2 (smear contribution, =0 if smear disabled).
@@ -1157,7 +1180,8 @@ class JpsiMassMixtureModel(nn.Module):
                     mpj = mp.detach().requires_grad_(True)
                     score = self._flow_score(mpj, mk_src)
                     d2 = torch.autograd.grad(score.sum(), mpj)[0].detach()
-            log_J_smear = -0.5 * V * d2
+            log_J_smear = torch.nan_to_num(
+                -0.5 * V * d2, nan=0.0, posinf=0.0, neginf=0.0)
         else:
             log_J_smear = mp.new_zeros(mp.shape)
         return log_J_scale + log_J_smear
