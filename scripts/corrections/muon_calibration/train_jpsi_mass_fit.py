@@ -584,6 +584,8 @@ def _build_model(args, stats, device):
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
         scale_fit_params=getattr(args, "scale_fit_params", "AM"),
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
+        smear_operator=getattr(args, "smear_operator", "pf_ode"),
+        n_gh_nodes=getattr(args, "n_gh_nodes", 8),
         jacobian_form=getattr(args, "jacobian_form", "softlog"),
         smear_param_form=getattr(args, "smear_param_form", "linear"),
         norm_correction=getattr(args, "norm_correction", "none"),
@@ -1437,7 +1439,8 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
-              "smear_flow_steps", "jacobian_form", "smear_param_form",
+              "smear_flow_steps", "smear_operator", "n_gh_nodes",
+              "jacobian_form", "smear_param_form",
               "norm_correction", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
@@ -1687,7 +1690,28 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "1 = first-order (single score displacement); more steps integrate the "
         "score flow more finely (more robust/accurate) at a higher nested-"
         "autograd cost. The per-muon qop fold (closure plots) and the injection "
-        "are exact convolutions regardless.",
+        "are exact convolutions regardless. Ignored when --smear-operator="
+        "gh_convolution.",
+    )
+    p.add_argument(
+        "--smear-operator", choices=("pf_ode", "gh_convolution"), default="pf_ode",
+        help="Smear operator for the continuity density. 'pf_ode' (default): "
+        "deterministic probability-flow ODE — fast but over-broadens at large "
+        "V/σ² (the model density is wider than the actual Gaussian convolution "
+        "the pseudo-data uses, biasing the fit to under-recover θ_smear at "
+        "forward |η|). 'gh_convolution': EXACT stochastic Gaussian convolution "
+        "via Gauss-Hermite quadrature (--n-gh-nodes nodes). Same operator as "
+        "the per-muon qop fold that generates pseudo-data, so the closure-target "
+        "curve overlaps the pseudo-data at any V (no operator-level residual). "
+        "Cost: ~n_gh × the bare density. Requires V ≥ 0 (clamps internally; "
+        "pair with --smear-param-form softplus for the cleanest guarantee).",
+    )
+    p.add_argument(
+        "--n-gh-nodes", type=int, default=8,
+        help="Number of Gauss-Hermite quadrature nodes for the gh_convolution "
+        "operator (ignored for pf_ode). 8 is usually plenty (truncation error "
+        "is exponential in n_gh for smooth p_0); bump to 12–16 for very large "
+        "smears where the per-node sources span the m-window.",
     )
     p.add_argument(
         "--norm-correction", choices=("none", "linear", "flow_cdf"), default="none",

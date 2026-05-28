@@ -90,6 +90,8 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         smear_fit_params=args.get("smear_fit_params", "both"),
         scale_fit_params=args.get("scale_fit_params", "AM"),
         smear_flow_steps=args.get("smear_flow_steps", 1),
+        smear_operator=args.get("smear_operator", "pf_ode"),
+        n_gh_nodes=args.get("n_gh_nodes", 8),
         jacobian_form=args.get("jacobian_form", "softlog"),
         smear_param_form=args.get("smear_param_form", "linear"),
         norm_correction=args.get("norm_correction", "none"),

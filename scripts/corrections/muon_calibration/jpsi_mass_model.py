@@ -236,6 +236,30 @@ SMEAR_VAR_SCALE_C = 2e-5
 SMEAR_GP_FLOOR = 0.05
 
 
+# Gauss-Hermite nodes for the analytic Gaussian-convolution smear operator
+# (smear_operator="gh_convolution"). Cached per (n, device, dtype).
+_GH_CACHE: dict = {}
+
+
+def _gh_nodes(n: int, device, dtype):
+    """Gauss–Hermite nodes/log-weights for ``E_{ε~N(0,1)}[f] ≈ Σ_i W_i f(ξ_i)``.
+
+    ``∫ f(t) e^{-t²} dt ≈ Σ w_i^H f(t_i^H)`` ⇒ with ``ξ = √2 t^H`` and
+    ``W = w^H/√π`` (so Σ W = 1) we get the standard-normal expectation.
+    Cached. Returns ``(ξ [n], logW [n])``."""
+    key = (int(n), str(device), str(dtype))
+    if key not in _GH_CACHE:
+        import numpy as _np
+        t, w = _np.polynomial.hermite.hermgauss(int(n))
+        xi = _np.sqrt(2.0) * t
+        logW = _np.log(w) - 0.5 * _np.log(_np.pi)
+        _GH_CACHE[key] = (
+            torch.as_tensor(xi, device=device, dtype=dtype),
+            torch.as_tensor(logW, device=device, dtype=dtype),
+        )
+    return _GH_CACHE[key]
+
+
 def _softlog_below_floor(g: torch.Tensor, floor: float = SMEAR_GP_FLOOR) -> torch.Tensor:
     """``log(g.clamp_min(floor))`` PLUS a quadratic barrier ``(floor − g)⁺² /
     (2·floor²)`` for ``g < floor``. Drop-in replacement for the hard
@@ -467,6 +491,24 @@ class JpsiMassMixtureModel(nn.Module):
         # nested-autograd cost. Frozen p₀ score per step (exact diffusion to
         # first order in V).
         smear_flow_steps: int = 1,
+        # Smear operator for the continuity density. 'pf_ode' (default): the
+        # deterministic probability-flow ODE ``y ← y − (V/2N)·∂_m log p_0(y)``
+        # (N = smear_flow_steps), with Jacobian via jacobian_form. Cheap but
+        # diverges from the true Gaussian convolution at large V/σ² — for
+        # Gaussian p_0 the PF-ODE gives σ_out = σ·exp(V/2σ²), while the true
+        # convolution gives σ_out = √(σ²+V); they agree to leading order but
+        # the PF-ODE over-broadens exponentially at large V (e.g. +50% σ at
+        # V/σ² ≈ 2). 'gh_convolution': EXACT stochastic Gaussian convolution
+        # ``p_θ(x|c) = E_ε[p_0(m'(ε)|c)/|G'|]`` via Gauss-Hermite quadrature
+        # over ε ~ N(0,1) (``n_gh_nodes`` nodes), with x = m' + s_adv(m') +
+        # √V(m')·ε and G'(m') = 1 + s_adv'(m') + (V'/(2√V))·ε computed via
+        # autograd. Matches the per-muon qop fold operator (which IS Gaussian
+        # convolution); the closure-target curve (flow at injected θ) overlaps
+        # the pseudo-data by construction at large V. Requires V ≥ 0 (clamps
+        # internally); use with smear_param_form='softplus' to guarantee it
+        # without clamping.
+        smear_operator: str = "pf_ode",
+        n_gh_nodes: int = 8,
         # Positivity reparameterisation for θ_smear. 'linear' (default): the
         # raw θ_smear is the O(1) coefficient directly (physical (a, c) =
         # θ·SMEAR_VAR_SCALE, signed — supports both broadening V>0 and the
@@ -529,6 +571,12 @@ class JpsiMassMixtureModel(nn.Module):
         self.scale_enabled = bool(scale_enabled)
         self.qop_floor_frac = float(qop_floor_frac)
         self.smear_flow_steps = max(1, int(smear_flow_steps))
+        if smear_operator not in ("pf_ode", "gh_convolution"):
+            raise ValueError(
+                f"smear_operator must be 'pf_ode' or 'gh_convolution'; "
+                f"got {smear_operator!r}")
+        self.smear_operator = str(smear_operator)
+        self.n_gh_nodes = max(2, int(n_gh_nodes))
         if jacobian_form not in ("softlog", "exp"):
             raise ValueError(
                 f"jacobian_form must be 'softlog' or 'exp'; got {jacobian_form!r}")
@@ -1102,6 +1150,24 @@ class JpsiMassMixtureModel(nn.Module):
 
     def _continuity_logp(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm,
                          n_iter: int = 2):
+        """``log p_θ(x|c)`` — dispatches on ``self.smear_operator``.
+
+        ``"gh_convolution"``: EXACT stochastic Gaussian convolution via
+        Gauss-Hermite quadrature (matches the per-muon qop fold operator that
+        generates the pseudo-data; converges to the convolution by construction
+        at any V). See ``_continuity_logp_gh``.
+
+        ``"pf_ode"`` (default, doc below): deterministic probability-flow
+        ODE — cheaper but over-broadens at large V/σ²."""
+        if self.smear_operator == "gh_convolution":
+            return self._continuity_logp_gh(
+                m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm,
+                n_gh=self.n_gh_nodes, n_iter=n_iter)
+        return self._continuity_logp_pf_ode(
+            m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm, n_iter=n_iter)
+
+    def _continuity_logp_pf_ode(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
+                                b_pm, n_iter: int = 2):
         """``log p_θ(x|c)``: the frozen nominal flow pushed through an exactly-
         normalized, INVERTIBLE TRANSPORT — a scale advection ``s_adv`` plus the
         smear as a score-driven PROBABILITY-FLOW displacement
@@ -1197,6 +1263,150 @@ class JpsiMassMixtureModel(nn.Module):
         # collapses to the Bernstein background — no NaN). nan_to_num catches
         # any residual NaN (rare, from autograd at boundary mp values).
         return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
+
+    def _continuity_logp_gh(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
+                             b_pm, n_gh: int = 8, n_iter: int = 2):
+        """``log p_θ(x|c)`` via the EXACT Gaussian convolution operator,
+        implemented as Gauss-Hermite quadrature of the per-event source map:
+
+            ``p_θ(x|c) = E_{ε~N(0,1)}[ p_0(m'(ε)|c_src) / |G'(m'(ε))| ]``
+            ``       ≈ Σ_i W_i · p_0(m'_i | c_src,i) / |G'_i|``
+
+        where, for each GH node ε = ξ_i:
+            ``x = m'_i + s_adv(m'_i) + √V(m'_i)·ξ_i``  (forward map)
+            ``G'(m') = 1 + s_adv'(m') + (V'(m')/(2√V(m')))·ε``  (autograd Jacobian)
+
+        Equivalent — by construction — to the per-muon qop fold that generates
+        the validation pseudo-data, so the closure-target curve (flow at
+        injected θ) overlaps the pseudo-data at ALL V (no operator-level
+        residual; only GH quadrature truncation, which is exponential in n_gh
+        for smooth p_0). Cost: ``n_gh`` per-node `p_0` evaluations + the
+        autograd through the source map.
+
+        Requires V ≥ 0 (Gaussian variance is non-negative); we ``clamp_min(0)``
+        the per-muon σ²_qop before the √V term. With smear_param_form='softplus'
+        this is automatic; with 'linear' the clamp enforces it (the fit loses
+        access to V < 0 sharpening, which is fine — that region is unphysical
+        for a stochastic smear anyway). The ``jacobian_form`` switch is
+        ignored here (the Jacobian is the source-map's exact autograd-derived
+        ``G'`` — no PF-ODE-style score-flow Jacobian to soft-floor).
+
+        The source ρ for the flow conditioning per GH node carries the smear's
+        conditional-mean per-muon qop shift (``E[δqop_μ | δm] = (J^m_μ σ²_qop,μ
+        /√V)·ε``, un-applied per node) — see ``_source_rho_std_gh``.
+        """
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
+                          if self.scale_enabled
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
+        xi, logW = _gh_nodes(n_gh, m_obs.device, m_obs.dtype)            # [G], [G]
+        G = xi.shape[0]
+
+        # Broadcast all event conditioning with a singleton "GH node" dim.
+        mo  = m_obs.unsqueeze(1)                                          # [B, 1]
+        pto = pt_obs.unsqueeze(1)                                         # [B, 1, 2]
+        etao = eta_pm.unsqueeze(1)                                        # [B, 1, 2]
+        phio = phi_pm.unsqueeze(1)                                        # [B, 1, 2]
+        qo  = q_pm.unsqueeze(1)                                           # [B, 1, 2]
+        bpo = b_pm.unsqueeze(1).expand(B, G, b_pm.shape[-1])              # [B, G, 2]
+        tsp = theta_scale_pm.unsqueeze(1)                                 # [B, 1, 6]
+        xig = xi.view(1, G)                                               # [1, G]
+
+        def resp(me):
+            """Return (s_adv, V) at evaluation mass me [B, G]."""
+            s_adv = self._continuity_response(me, mo, pto, etao, qo, tsp)
+            if self.smearing_enabled:
+                # _smear_mass_var: pt = pto*(me/mo).unsqueeze(-1) → [B,G,2];
+                # broadcasts with etao, phio, bpo[B,G,2]. Returns V [B, G].
+                V = self._smear_mass_var(etao, phio, bpo, pto, me, mo).clamp_min(0.0)
+            else:
+                V = me.new_zeros(me.shape)
+            return s_adv, V
+
+        def _smear_disp(Vt):
+            """The √V·ε displacement per GH node; vanishes exactly if disabled."""
+            if self.smearing_enabled:
+                return Vt.sqrt() * xig
+            return me_zero  # populated below before use
+
+        # Pre-allocate the zero displacement (used only when smearing_enabled=False).
+        me_zero = m_obs.new_zeros((B, G))
+
+        # Fixed-point source solve  m'_i = m_obs − s_adv(m'_i) − √V(m'_i)·ξ_i.
+        mp = mo.expand(B, G).clone()
+        for _ in range(n_iter):
+            s_adv, V = resp(mp)
+            mp = mo - s_adv - _smear_disp(V)
+
+        # Source-map Jacobian G' = ∂x/∂m' by autograd at the converged source.
+        # In training (mp.requires_grad) we keep the graph so the gradient flows
+        # through θ (which sources V, s_adv, and the dependence m'(θ)); in eval
+        # we run under enable_grad on a fresh leaf.
+        if mp.requires_grad:
+            s_advj, Vj = resp(mp)
+            Gx = (mp + s_advj + _smear_disp(Vj)).sum()
+            Gp = torch.autograd.grad(Gx, mp, create_graph=True)[0]
+        else:
+            with torch.enable_grad():
+                mp_j = mp.detach().requires_grad_(True)
+                s_advj, Vj = resp(mp_j)
+                Gx = (mp_j + s_advj + _smear_disp(Vj)).sum()
+                Gp = torch.autograd.grad(Gx, mp_j)[0].detach()
+
+        # Frozen-flow density at the per-node source points. ρ in the
+        # conditioning is propagated per-node (scale un-applied + smear's
+        # conditional-mean δqop un-applied per ε); η/φ are transform-invariant.
+        mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
+        if self.scale_enabled or self.smearing_enabled:
+            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
+                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
+        logp0 = self.log_p_nominal(
+            mp.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
+
+        # log p_θ(x) = logsumexp_i[ logW_i + log p_0(m'_i) − log|G'_i| ].
+        log_terms = logW.view(1, G) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
+        log_p_theta = torch.logsumexp(log_terms, dim=1)
+        # Same upper-cap and NaN guard as the PF-ODE branch — see the
+        # _continuity_logp_pf_ode tail for rationale.
+        return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
+
+    def _source_rho_std_gh(self, m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xig):
+        """Standardised source ρ per GH node ``[B, G]`` for the
+        ``gh_convolution`` operator's conditioning. Un-applies the scale (event-
+        level, no GH dependence) and the smear's conditional-mean per-muon qop
+        shift (per GH node ε = ξ_i, via ``E[δqop_μ | δm] = (J^m_μ σ²_qop,μ/√V)·ε``,
+        with ``J^m_μ = ∂m/∂qop_μ = −m/(2 qop_μ)``). η, φ are exactly
+        transform-invariant and don't need propagating."""
+        B = m_obs.shape[0]
+        G = xig.shape[-1]
+        # 1) un-apply the scale (obs → truth), per event.
+        pt1 = pt_obs
+        if self.scale_enabled:
+            AeM_pm = self._scale_AeM_pm(eta_pm, phi_pm, b_pm)
+            dqop_s = self._delta_qop_analytic(AeM_pm, pt_obs, eta_pm, q_pm)
+            pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
+        # 2) un-apply the smear's conditional-mean qop shift, per GH node.
+        if self.smearing_enabled:
+            sinth = _sintheta_from_eta(eta_pm)
+            qop1 = q_pm * sinth / pt1                          # [B, 2]
+            sig2 = self._qop_var_pm(
+                eta_pm, phi_pm, b_pm, pt1).clamp_min(0.0)      # [B, 2] σ²_qop at source pt
+            Jm = -0.5 * m_obs.unsqueeze(-1) / qop1             # [B, 2]  ∂m/∂qop
+            V = (Jm * Jm * sig2).sum(-1, keepdim=True).clamp_min(1e-12)  # [B, 1]
+            coef = Jm * sig2 / V.sqrt()                        # [B, 2]
+            dqop_sm = coef.unsqueeze(1) * xig.view(1, G, 1)    # [B, G, 2]
+            pt_src = self._apply_scale_pt(
+                pt1.unsqueeze(1).expand(B, G, 2),
+                eta_pm.unsqueeze(1).expand(B, G, 2),
+                q_pm.unsqueeze(1).expand(B, G, 2),
+                dqop_sm, sign=-1.0)                            # [B, G, 2]
+            rho_src = (pt_src[..., 0] - pt_src[..., 1]) / (
+                pt_src[..., 0] + pt_src[..., 1])
+        else:
+            r = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
+            rho_src = r.unsqueeze(1).expand(B, G)
+        idx = N_MUON_KIN - 1
+        return (rho_src - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
 
     def _log_jacobian_exp(self, mp, mk_src, s_adv_of, eta_pm, phi_pm, b_pm,
                           pt_obs, m_obs):
