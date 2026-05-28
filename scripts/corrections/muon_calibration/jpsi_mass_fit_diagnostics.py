@@ -713,6 +713,9 @@ def plot_theta_vs_eta(
     edm: "float | None" = None,
     chi2_info=None,
     ref: "np.ndarray | None" = None,   # [n_eta, n_comp] reference (e.g. injected)
+    band: "np.ndarray | None" = None,  # [n_eta, n_comp] φ-std for shaded band
+    slices: "np.ndarray | None" = None,    # [n_eta, n_slices, n_comp] φ-slices
+    slice_labels: "list | None" = None,    # length n_slices, e.g. ['φ=0', ...]
 ):
     n_eta, n_comp = theta.shape
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
@@ -720,22 +723,42 @@ def plot_theta_vs_eta(
     fig, axes = plt.subplots(n_comp, 1, sharex=True, figsize=(8, 2.5 * n_comp))
     if n_comp == 1:
         axes = [axes]
+    slice_colors = ["C0", "C1", "C2", "C4", "C5"]   # skip C3 (reserved for ref)
     for i, ax in enumerate(axes):
+        # φ-spread band (MLP mode only — `band` carries the std over φ at each η).
+        if band is not None:
+            ax.fill_between(
+                eta_centers, theta[:, i] - band[:, i], theta[:, i] + band[:, i],
+                color="0.5", alpha=0.18, label="±1σ over φ", linewidth=0)
+        # Individual φ slices (faint coloured lines).
+        if slices is not None:
+            n_slices = slices.shape[1]
+            for s_i in range(n_slices):
+                lab = (slice_labels[s_i] if slice_labels and s_i < len(slice_labels)
+                       else f"slice {s_i}")
+                ax.plot(eta_centers, slices[:, s_i, i],
+                        color=slice_colors[s_i % len(slice_colors)],
+                        lw=0.9, alpha=0.6, label=lab)
+        # Main: error bars (binned θ has ±σ) or φ-mean line (MLP).
+        main_label = "fit" if band is None else "fit (φ-mean)"
         if sigma is not None:
             ax.errorbar(
                 eta_centers, theta[:, i], yerr=sigma[:, i],
-                fmt="o", color="k", markersize=4, capsize=2, label="fit",
+                fmt="o", color="k", markersize=4, capsize=2, label=main_label,
             )
         else:
-            ax.plot(eta_centers, theta[:, i], "o-", color="k", markersize=4, label="fit")
+            ax.plot(eta_centers, theta[:, i], "o-", color="k", markersize=4,
+                    label=main_label)
         ax.axhline(0, color="0.5", lw=0.8, ls=":")
         if ref is not None:
             ax.plot(eta_centers, ref[:, i], color="C3", ls="--", lw=1.3,
                     label="injected")
         ax.set_ylabel(component_names[i])
         ax.grid(True, alpha=0.3)
-    if ref is not None:
-        axes[0].legend(loc="best", fontsize=8)
+    if ref is not None or slices is not None or band is not None:
+        axes[0].legend(loc="best", fontsize=7, ncol=max(1,
+            (1 + int(ref is not None) + int(band is not None)
+             + (slices.shape[1] if slices is not None else 0)) // 4 + 1))
     axes[-1].set_xlabel("η-bin center")
     title = name
     if chi2_info is not None:
@@ -1263,15 +1286,53 @@ def main() -> int:
     # 'mlp' θ: sample the continuous ThetaNet at the η-bin centres (φ=0 slice)
     # so the same per-bin plot shows the learned function; no ±σ (no Fisher).
     mlp_scale_grid = mlp_smear_grid = None
+    mlp_scale_band = mlp_smear_band = None
+    mlp_scale_slices = mlp_smear_slices = None
+    mlp_slice_labels = None
     if model.theta_mode == "mlp":
+        # Sample the ThetaNet on a 2D (η-centre, φ) grid: 16 points uniformly
+        # spaced over [0, 2π) for the φ-average and ±std band, plus 4 cardinal
+        # slices {0, π/2, π, −π/2} for the overlaid curves. Both muons are
+        # given the same (η, φ) since the ThetaNet is per-muon (the symmetry
+        # is implicit). The conditioner sees (cos φ, sin φ), so uniform φ on
+        # the circle gives an exact mean + std with no statistical noise.
         centers = 0.5 * (np.asarray(stats.eta_edges[:-1]) + np.asarray(stats.eta_edges[1:]))
-        eta_pm = torch.tensor(centers, dtype=torch.float32, device=device).unsqueeze(-1).expand(-1, 2)
+        centers_t = torch.as_tensor(centers, dtype=torch.float32, device=device)
+        n_eta_c = int(centers_t.shape[0])
+        # φ-average sampling (16 uniform points → exact integral over the circle).
+        n_phi_avg = 16
+        phi_avg = torch.linspace(
+            0.0, 2 * np.pi * (1.0 - 1.0 / n_phi_avg), n_phi_avg,
+            dtype=torch.float32, device=device)
+        # Overlaid φ-slices for the reader.
+        phi_slice_vals = torch.tensor(
+            [0.0, np.pi / 2, np.pi, -np.pi / 2],
+            dtype=torch.float32, device=device)
+        mlp_slice_labels = ["φ=0", "φ=π/2", "φ=π", "φ=−π/2"]
+        all_phi = torch.cat([phi_avg, phi_slice_vals])
+        n_phi_all = int(all_phi.shape[0])
+        # Build the (n_eta * n_phi, 2) per-muon η/φ grids (both muons share
+        # (η, φ) — the ThetaNet's output for muon 0 is what gets plotted).
+        eta_grid = centers_t[:, None, None].expand(
+            n_eta_c, n_phi_all, 2).reshape(-1, 2)
+        phi_grid = all_phi[None, :, None].expand(
+            n_eta_c, n_phi_all, 2).reshape(-1, 2)
         with torch.no_grad():
-            AeM_g, ac_g = model.theta_net(eta_pm, torch.zeros_like(eta_pm))
-        mlp_scale_grid = AeM_g[:, 0, :].cpu().numpy()           # physical (scale_ref)
-        # physical σ²_qop coefficients = O(1) net output × SMEAR_VAR_SCALE
+            AeM_g, ac_g = model.theta_net(eta_grid, phi_grid)
+        # Keep muon-0 output and reshape back to (n_eta, n_phi_all, n_comp).
+        AeM_g = AeM_g[:, 0, :].view(n_eta_c, n_phi_all, 3)              # physical scale (×scale_ref inside the net)
         smear_scale = ac_g.new_tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C])
-        mlp_smear_grid = (ac_g[:, 0, :] * model.smear_param_mask * smear_scale).cpu().numpy()
+        ac_phys = (ac_g[:, 0, :] * model.smear_param_mask * smear_scale
+                  ).view(n_eta_c, n_phi_all, 2)
+        # Split: first n_phi_avg are the φ-average grid; rest are the slices.
+        AeM_avg, AeM_slc = AeM_g[:, :n_phi_avg, :], AeM_g[:, n_phi_avg:, :]
+        ac_avg,  ac_slc  = ac_phys[:, :n_phi_avg, :], ac_phys[:, n_phi_avg:, :]
+        mlp_scale_grid = AeM_avg.mean(dim=1).cpu().numpy()              # [n_eta, 3]  φ-mean
+        mlp_scale_band = AeM_avg.std(dim=1).cpu().numpy()               # [n_eta, 3]  φ-std
+        mlp_smear_grid = ac_avg.mean(dim=1).cpu().numpy()               # [n_eta, 2]
+        mlp_smear_band = ac_avg.std(dim=1).cpu().numpy()                # [n_eta, 2]
+        mlp_scale_slices = AeM_slc.cpu().numpy()                        # [n_eta, 4, 3]
+        mlp_smear_slices = ac_slc.cpu().numpy()                         # [n_eta, 4, 2]
         sigma_scale = sigma_smear = None
     if model.scale_enabled:
         # binned θ_scale is the O(1) fit param → ×THETA_SCALE_REF for physical
@@ -1297,6 +1358,8 @@ def main() -> int:
             theta_scale, sigma_scale, ["A", "e [GeV]", "M"],
             "theta_scale_vs_eta", stats.eta_edges, out_dir, edm=edm,
             chi2_info=chi2_info, ref=ref,
+            band=mlp_scale_band, slices=mlp_scale_slices,
+            slice_labels=mlp_slice_labels,
         )
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
@@ -1309,6 +1372,8 @@ def main() -> int:
             theta_smear_eff, sigma_smear, ["a [qop²]", "c [qop²·GeV²]"],
             "theta_smear_vs_eta", stats.eta_edges, out_dir, edm=edm,
             ref=(inject_smear_np if inject_smear_np is not None else None),
+            band=mlp_smear_band, slices=mlp_smear_slices,
+            slice_labels=mlp_slice_labels,
         )
     else:
         print("  --disable-smearing: skipping theta_smear_vs_eta")
