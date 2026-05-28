@@ -479,6 +479,24 @@ class JpsiMassMixtureModel(nn.Module):
         # the two-sided fit (the model can no longer represent MC that is too
         # broad vs data).
         smear_param_form: str = "linear",
+        # Per-event normalisation correction for the transformed-flow density.
+        # The forward map T_θ is NOT boundary-preserving on [m_lo, m_hi]:
+        # broadening T pushes some probability mass outside the window, so
+        # Z(θ;c) = ∫_window p_θ(x|c) dx < 1 and the bare `log p_θ(x)` carries a
+        # `-log Z` bias per event that always pulls the fit toward smaller
+        # broadening (the bias was measured at +0.34 per event at the truth in
+        # forward |η| bins for a c=5e-5 injection). Three modes:
+        #
+        # "none" (default): no correction (current behaviour preserved).
+        # "linear": leading-order boundary expansion `1 - Z ≈ p_0(m_lo)·(m_lo
+        #   − T(m_lo))_+ + p_0(m_hi)·(T(m_hi) − m_hi)_+` — 2 boundary forward
+        #   evals + 2 flow evals per event. Valid for small V.
+        # "flow_cdf": exact via Z = F_0(T⁻¹(m_hi)|c) − F_0(T⁻¹(m_lo)|c), where
+        #   F_0 is the flow's CDF (the GF's monotonic transform composed with
+        #   the standard normal CDF Φ). Inverts T at the boundaries (~2 extra
+        #   fixed-point inversions per event) and evaluates the CDF at the
+        #   preimages. Exact up to inversion discretisation.
+        norm_correction: str = "none",
         # Background mixture. True (default): the data branch's per-event NLL
         # is the full f_data(c)-weighted signal/Bernstein mixture (the model
         # for real data, which has genuine non-resonant background). False:
@@ -520,6 +538,11 @@ class JpsiMassMixtureModel(nn.Module):
                 f"smear_param_form must be 'linear' or 'softplus'; "
                 f"got {smear_param_form!r}")
         self.smear_param_form = str(smear_param_form)
+        if norm_correction not in ("none", "linear", "flow_cdf"):
+            raise ValueError(
+                f"norm_correction must be 'none', 'linear', or 'flow_cdf'; "
+                f"got {norm_correction!r}")
+        self.norm_correction = str(norm_correction)
         self.background_enabled = bool(background_enabled)
         if theta_mode not in ("binned", "mlp"):
             raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
@@ -1228,6 +1251,119 @@ class JpsiMassMixtureModel(nn.Module):
             log_J_smear = mp.new_zeros(mp.shape)
         return log_J_scale + log_J_smear
 
+    def _flow_log_cdf(self, m: torch.Tensor, mk: torch.Tensor) -> torch.Tensor:
+        """``log F_0(m | mk)`` — the FLOW's CDF at observed mass ``m``.
+
+        For the GF flow with standard-normal base, ``F_0(m|c) =
+        Φ(T_mono(m_std|c))`` where ``T_mono`` is the conditional Gaussianisation
+        flow's monotonic transform (zuko's ``dist.transform``) acting on the
+        standardised mass. The standardisation is monotone increasing so the
+        CDF transforms trivially: ``F_data(m) = F_data_std(m_std)``. Returns
+        ``[B]`` log-CDF values clamped from below for log safety."""
+        m_std = self._standardise_mll(m).clamp(
+            -MLL_STD_FLOW_CLAMP, MLL_STD_FLOW_CLAMP).unsqueeze(-1)
+        dist = self.flow.flow(mk)
+        z = dist.transform(m_std).squeeze(-1)
+        F = 0.5 * (1.0 + torch.erf(z / math.sqrt(2.0)))
+        return F.clamp(min=1e-30).log()
+
+    def _norm_correction_log_Z(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
+                               b_pm, n_iter: int = 2) -> torch.Tensor:
+        """Per-event ``log Z(θ;c) = log ∫_{m_lo}^{m_hi} p_θ(x|c) dx`` — the
+        normalisation of the transformed-flow density on the m-window. Bare
+        ``log p_θ(x)`` is normalised on ``T(window)``, NOT on the window; this
+        correction restores the proper truncated-likelihood NLL by subtracting
+        ``log Z`` from the per-event signal log-density. Dispatches on
+        ``self.norm_correction``:
+
+        * ``"none"``: return 0 (no correction).
+        * ``"linear"``: leading-order boundary-leakage estimate
+          ``1 − Z ≈ p_0(m_lo|c)·(m_lo − T(m_lo))_+ + p_0(m_hi|c)·(T(m_hi) − m_hi)_+``
+          — only the positive parts of the boundary shift contribute (a
+          narrowing T pushes mass INTO the window, no leakage). Cheap: 2
+          boundary forward-map evals + 2 flow density evals per event.
+        * ``"flow_cdf"``: EXACT via the flow's CDF
+          ``Z(θ;c) = F_0(T⁻¹(m_hi)|c) − F_0(T⁻¹(m_lo)|c)``. Inverts T at the
+          two boundary x-values by fixed-point (n_iter steps, mirroring
+          ``_continuity_logp``) and evaluates F_0 via the GF monotonic
+          transform + Φ. ~2× the per-event work of the bare density.
+        """
+        if self.norm_correction == "none":
+            return m_obs.new_zeros(m_obs.shape)
+
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
+                          if self.scale_enabled
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
+        n_step = max(1, int(self.smear_flow_steps))
+
+        mk_src = mk
+        if self.scale_enabled:
+            mk_src = mk.clone()
+            mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
+                pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+
+        def s_adv_of(me):
+            return self._continuity_response(
+                me, m_obs, pt_obs, eta_pm, q_pm, theta_scale_pm)
+
+        def forward(mp):
+            y = mp + s_adv_of(mp)
+            if self.smearing_enabled:
+                V = self._smear_mass_var(eta_pm, phi_pm, b_pm, pt_obs, mp, m_obs)
+                dt = V / (2.0 * n_step)
+                for _ in range(n_step):
+                    y = y - dt * self._flow_score(y, mk_src)
+            return y
+
+        m_lo = m_obs.new_full(m_obs.shape, float(self.m_lo))
+        m_hi = m_obs.new_full(m_obs.shape, float(self.m_hi))
+
+        if self.norm_correction == "linear":
+            # 1 − Z ≈ Σ_boundary p_0(boundary)·max(0, boundary-shift). The
+            # max() picks up only broadening (T pushing the source OUT); a
+            # narrowing T has no leakage so contributes 0.
+            t_lo = forward(m_lo)
+            t_hi = forward(m_hi)
+            left_leak = (m_lo - t_lo).clamp(min=0.0)
+            right_leak = (t_hi - m_hi).clamp(min=0.0)
+            log_p_lo = self.log_p_nominal(m_lo, mk_src)
+            log_p_hi = self.log_p_nominal(m_hi, mk_src)
+            leakage = (log_p_lo.exp() * left_leak
+                       + log_p_hi.exp() * right_leak)
+            # clamp at a sub-1 ceiling so log(1−leakage) stays finite even if
+            # the linear estimate overshoots in pathological cases
+            return torch.log1p(-leakage.clamp(0.0, 1.0 - 1e-6))
+
+        # "flow_cdf": invert T at x = m_lo, m_hi by BISECTION on [m_lo, m_hi].
+        # T is monotonic on the window (G' = 1 + V/(2σ²) > 0 at the peak), so
+        # bisection converges unconditionally; the per-event fixed-point
+        # `mp = x - (T(mp) - mp)` used in `_continuity_logp` is contractive
+        # near a stable observation but becomes expansive / oscillates at the
+        # boundaries when V/(2σ²) is large (large smear gradient there), so we
+        # use bisection here instead. 24 iterations give ~22-bit precision on
+        # the m-window — far below grid noise.
+        n_bisect = 24
+        @torch.no_grad()
+        def bisect(target):
+            lo = m_obs.new_full(m_obs.shape, float(self.m_lo))
+            hi = m_obs.new_full(m_obs.shape, float(self.m_hi))
+            for _ in range(n_bisect):
+                mid = 0.5 * (lo + hi)
+                t_mid = forward(mid)
+                go_right = t_mid < target
+                lo = torch.where(go_right, mid, lo)
+                hi = torch.where(go_right, hi, mid)
+            return 0.5 * (lo + hi)
+        mp_lo = bisect(m_lo)
+        mp_hi = bisect(m_hi)
+        log_F_lo = self._flow_log_cdf(mp_lo, mk_src)
+        log_F_hi = self._flow_log_cdf(mp_hi, mk_src)
+        # Z = F_hi − F_lo; floor at eps in case bisection lands on the same
+        # preimage (e.g., when T's image misses the window entirely).
+        Z = (log_F_hi.exp() - log_F_lo.exp()).clamp(min=1e-30)
+        return Z.log()
+
     def data_nll_continuity(
         self,
         mll: torch.Tensor,
@@ -1259,6 +1395,14 @@ class JpsiMassMixtureModel(nn.Module):
         pt, eta, phi, q, b = (pt_pm[data_idx], eta_pm[data_idx], phi_pm[data_idx],
                               q_pm[data_idx], b_pm[data_idx])
         log_ps = self._continuity_logp(m, mk, pt, eta, phi, q, b, n_iter=n_iter)
+        if self.norm_correction != "none":
+            # Truncated-likelihood correction: the transformed-flow density is
+            # naturally normalised on T(window), not on the window itself, so
+            # log p_θ(x) carries a -log Z(θ;c) bias. Subtract per-event log Z
+            # to restore the correct normalisation over the observation window.
+            log_Z = self._norm_correction_log_Z(
+                m, mk, pt, eta, phi, q, b, n_iter=n_iter)
+            log_ps = log_ps - log_Z
         if self.background_enabled:
             f = self.f_data(mk)
             p0b, p1b = bernstein_d1(m, float(self.m_lo), float(self.m_hi))

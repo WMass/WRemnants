@@ -586,6 +586,7 @@ def _build_model(args, stats, device):
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
         jacobian_form=getattr(args, "jacobian_form", "softlog"),
         smear_param_form=getattr(args, "smear_param_form", "linear"),
+        norm_correction=getattr(args, "norm_correction", "none"),
         background_enabled=not getattr(args, "no_background", False),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
@@ -1436,7 +1437,8 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
-              "smear_flow_steps", "jacobian_form", "smear_param_form", "no_background",
+              "smear_flow_steps", "jacobian_form", "smear_param_form",
+              "norm_correction", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1687,6 +1689,21 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "autograd cost. The per-muon qop fold (closure plots) and the injection "
         "are exact convolutions regardless.",
     )
+    p.add_argument(
+        "--norm-correction", choices=("none", "linear", "flow_cdf"), default="none",
+        help="Per-event normalisation correction for the transformed-flow "
+        "density. The forward map T_θ is NOT boundary-preserving on [m_lo, "
+        "m_hi]: broadening pushes some probability mass outside the window, so "
+        "Z(θ;c) = ∫_window p_θ(x|c) dx < 1 and `log p_θ(x)` carries a -log Z "
+        "bias that pulls the fit toward smaller broadening (measured ~+0.34 "
+        "per event at the truth in forward |η| bins for a c=5e-5 injection). "
+        "'none' (default): no correction, preserves current behaviour. "
+        "'linear': leading-order boundary expansion, "
+        "1-Z ≈ Σ_boundary p_0(boundary)·(boundary shift outward)_+ — 2 forward "
+        "+ 2 flow evals per event, valid for small V. "
+        "'flow_cdf': EXACT via Z = F_0(T⁻¹(m_hi)) - F_0(T⁻¹(m_lo)), the GF "
+        "flow's CDF (monotonic transform composed with Φ) at the boundary "
+        "preimages — ~2× the per-event work of the bare density.")
     p.add_argument(
         "--smear-param-form", choices=("linear", "softplus"), default="linear",
         help="Positivity reparameterisation for θ_smear. 'linear' (default): "

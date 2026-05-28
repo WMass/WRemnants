@@ -92,6 +92,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         smear_flow_steps=args.get("smear_flow_steps", 1),
         jacobian_form=args.get("jacobian_form", "softlog"),
         smear_param_form=args.get("smear_param_form", "linear"),
+        norm_correction=args.get("norm_correction", "none"),
         background_enabled=not bool(args.get("no_background", False)),
         theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
         theta_mlp_hidden=args.get("theta_mlp_hidden", 32),
