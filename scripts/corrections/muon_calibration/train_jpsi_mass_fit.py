@@ -766,10 +766,22 @@ def train_stage2(args, model, train_loader, val_loader, stats,
               f"(lr mlp={args.fit_mlp_lr:g} θ_net={args.fit_theta_mlp_lr:g}); "
               f"θ = ThetaNet(η, φ) [continuous]")
     else:
-        # θ_scale is the advective shift (init 0, signed). θ_smear are the signed
-        # qop-variance coefficients (init 0 → σ²_qop=0, identity).
+        # θ_scale is the advective shift (init 0, signed). θ_smear are the
+        # qop-variance coefficients (init 0 by default; under `softplus` form
+        # `θ=0` corresponds to physical c ≈ softplus(0)·SCALE_C ≈ 0.69·SCALE_C,
+        # close to the softplus saturation knee — use --init-theta-{a,c} to
+        # start at a positive raw θ and keep the parameter well inside the
+        # active region of softplus where the gradient hasn't vanished).
+        a0 = float(getattr(args, "init_theta_a", 0.0))
+        c0 = float(getattr(args, "init_theta_c", 0.0))
         with torch.no_grad():
             model.theta_scale.zero_()
+            if a0 != 0.0 or c0 != 0.0:
+                model.theta_smear[:, 0].fill_(a0)
+                model.theta_smear[:, 1].fill_(c0)
+                print(f"  θ_smear init (raw, all η-bins): a={a0:g}  c={c0:g} "
+                      f"(per-bin mask still applied in the forward pass; the "
+                      f"frozen column is inert regardless of init)")
         if not args.disable_scale:
             groups.append({"params": [model.theta_scale], "lr": args.fit_scale_lr}); tags.append("θ_scale")
         if not args.disable_smearing:
@@ -1582,6 +1594,20 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "--fit-scale-lr: the smear signal is weak (small per-event "
                    "gradient S/N), so an O(1) lr is needed to reach the optimum in "
                    "a reasonable number of steps.")
+    p.add_argument("--init-theta-a", type=float, default=0.0,
+                   help="Initial value for the RAW θ_smear[:, 0] ('a' column), "
+                   "broadcast to all η-bins. Linear form: physical a_init = θ·SMEAR_VAR_"
+                   "SCALE_A. Softplus form: physical a_init = softplus(θ)·SMEAR_VAR_SCALE_A — "
+                   "so the default θ=0 starts at softplus(0)=0.69, only 0.7σ from the "
+                   "negative-tail saturation knee; raise to e.g. 1.0 to keep the "
+                   "parameter well inside softplus's active region (where its gradient "
+                   "is not vanishing). The frozen column per --smear-fit-params is "
+                   "masked to 0 in the forward pass regardless of init.")
+    p.add_argument("--init-theta-c", type=float, default=0.0,
+                   help="Initial value for the RAW θ_smear[:, 1] ('c' column), "
+                   "broadcast to all η-bins. See --init-theta-a for the linear vs "
+                   "softplus interpretation; in 'softplus' mode start at e.g. 1.0–2.0 "
+                   "to avoid edge-bin softplus saturation traps.")
     p.add_argument("--fit-mlp-lr", type=float, default=1e-3,
                    help="Stage-2 Adam lr for the background-fraction MLP.")
     p.add_argument("--fit-theta-mlp-lr", type=float, default=1e-3,
