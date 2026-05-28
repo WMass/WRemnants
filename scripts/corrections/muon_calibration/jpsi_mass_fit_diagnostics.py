@@ -91,6 +91,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         scale_fit_params=args.get("scale_fit_params", "AM"),
         smear_flow_steps=args.get("smear_flow_steps", 1),
         jacobian_form=args.get("jacobian_form", "softlog"),
+        smear_param_form=args.get("smear_param_form", "linear"),
         theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
         theta_mlp_hidden=args.get("theta_mlp_hidden", 32),
         theta_mlp_layers=args.get("theta_mlp_layers", 2),

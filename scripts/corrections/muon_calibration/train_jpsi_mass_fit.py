@@ -383,7 +383,8 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
         "n_scale": n_scale,
         "smear_cols": smear_cols,
         "smear_fit_params": model.smear_fit_params,
-        "param_space": "scale: linear (A,e,M); smear: raw pre-softplus theta_smear",
+        "smear_param_form": getattr(model, "smear_param_form", "linear"),
+        "param_space": "scale: linear (A,e,M); smear: " + getattr(model, "smear_param_form", "linear"),
         "n_events": layout["seen"],
         "sum_weight": layout["sw"],
         "min_eig": min_eig,
@@ -412,18 +413,27 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
             out["sigma_scale_24_3"] = torch.sqrt(
                 torch.clamp(torch.diag(cov_scale), min=0.0)).view(24, 3)
     # PHYSICAL σ on the smear a/c per η-bin. The fit param θ_smear is O(1); the
-    # physical qop-variance coefficient is θ·SMEAR_VAR_SCALE, so σ_phys =
-    # SMEAR_VAR_SCALE·σ_raw (linear scaling). Inactive columns → 0.
+    # physical qop-variance coefficient is `effective(θ)·SMEAR_VAR_SCALE`, where
+    # `effective` is the identity ('linear' form) or `softplus` ('softplus'
+    # form). Delta method: σ_phys = |d effective/dθ|·SMEAR_VAR_SCALE·σ_raw —
+    # constant for linear (Jacobian = 1), sigmoid(θ̂) for softplus. Inactive
+    # columns → 0.
     if smear_cols and cov is not None:
         n_eta, n_comp = model.theta_smear.shape
         cov_smear = cov[n_scale:, n_scale:]
         sig_raw = torch.sqrt(torch.clamp(torch.diag(cov_smear), min=0.0))
         smear_scale = (SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)
+        # Reparam Jacobian per (bin, coeff): identity for 'linear', sigmoid(θ̂)
+        # for 'softplus'. Evaluated at the fitted θ.
+        is_softplus = getattr(model, "smear_param_form", "linear") == "softplus"
+        with torch.no_grad():
+            jac = (torch.sigmoid(model.theta_smear.detach().cpu())
+                   if is_softplus else torch.ones_like(model.theta_smear.detach().cpu()))
         sig_eff = torch.zeros(n_eta, n_comp)
         k = 0
         for b in range(n_eta):
             for c in smear_cols:
-                sig_eff[b, c] = smear_scale[c] * sig_raw[k]
+                sig_eff[b, c] = jac[b, c] * smear_scale[c] * sig_raw[k]
                 k += 1
         out["sigma_smear_eff_24_2"] = sig_eff
     return out
@@ -575,6 +585,7 @@ def _build_model(args, stats, device):
         scale_fit_params=getattr(args, "scale_fit_params", "AM"),
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
         jacobian_form=getattr(args, "jacobian_form", "softlog"),
+        smear_param_form=getattr(args, "smear_param_form", "linear"),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
         theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
@@ -1399,7 +1410,7 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
-              "smear_flow_steps", "jacobian_form",
+              "smear_flow_steps", "jacobian_form", "smear_param_form",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1635,6 +1646,20 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "score flow more finely (more robust/accurate) at a higher nested-"
         "autograd cost. The per-muon qop fold (closure plots) and the injection "
         "are exact convolutions regardless.",
+    )
+    p.add_argument(
+        "--smear-param-form", choices=("linear", "softplus"), default="linear",
+        help="Positivity reparameterisation for θ_smear. 'linear' (default): "
+        "the O(1) θ_smear is the coefficient directly — signed, supports both "
+        "broadening (V>0) and unsmear (V<0). 'softplus': each of (a, c) "
+        "INDIVIDUALLY constrained to ≥ 0 via physical = softplus(θ)·SMEAR_VAR_"
+        "SCALE; the per-η fit mask is applied AFTER softplus so frozen "
+        "params (or 'a'-/'c'-only modes) remain EXACTLY zero in the per-muon "
+        "σ_qop and downstream transformations. Use 'softplus' to defend "
+        "against the negative-c drift (issue #2) by construction, at the cost "
+        "of losing the two-sided fit (the model can no longer represent MC "
+        "that's too broad vs data). The Fisher σ accounts for the sigmoid(θ̂) "
+        "delta-method Jacobian in 'softplus'.",
     )
     p.add_argument(
         "--jacobian-form", choices=("softlog", "exp"), default="softlog",

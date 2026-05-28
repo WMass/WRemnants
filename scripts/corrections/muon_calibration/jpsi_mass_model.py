@@ -467,6 +467,18 @@ class JpsiMassMixtureModel(nn.Module):
         # nested-autograd cost. Frozen p₀ score per step (exact diffusion to
         # first order in V).
         smear_flow_steps: int = 1,
+        # Positivity reparameterisation for θ_smear. 'linear' (default): the
+        # raw θ_smear is the O(1) coefficient directly (physical (a, c) =
+        # θ·SMEAR_VAR_SCALE, signed — supports both broadening V>0 and the
+        # 'unsmear' V<0 region). 'softplus': constrains each of (a, c)
+        # INDIVIDUALLY to ≥ 0 via physical = softplus(θ)·SMEAR_VAR_SCALE; the
+        # per-η mask is applied AFTER softplus so frozen params (or 'a'-/'c'-
+        # only modes) are EXACTLY zero in the per-muon σ_qop and the
+        # transformations. Useful when you want to defend against the
+        # negative-c drift (issue #2) by construction, at the cost of losing
+        # the two-sided fit (the model can no longer represent MC that is too
+        # broad vs data).
+        smear_param_form: str = "linear",
         # Smear-Jacobian formula for the continuity density. 'softlog' (default):
         # autograd-derived G' = dx/dm' of the actual forward map, with a C¹
         # tangent extension below SMEAR_GP_FLOOR so the optimiser is pulled BACK
@@ -493,6 +505,11 @@ class JpsiMassMixtureModel(nn.Module):
             raise ValueError(
                 f"jacobian_form must be 'softlog' or 'exp'; got {jacobian_form!r}")
         self.jacobian_form = str(jacobian_form)
+        if smear_param_form not in ("linear", "softplus"):
+            raise ValueError(
+                f"smear_param_form must be 'linear' or 'softplus'; "
+                f"got {smear_param_form!r}")
+        self.smear_param_form = str(smear_param_form)
         if theta_mode not in ("binned", "mlp"):
             raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
         self.theta_mode = str(theta_mode)
@@ -614,24 +631,38 @@ class JpsiMassMixtureModel(nn.Module):
             aem = self.theta_scale[b_pm] * self.theta_scale.new_tensor(THETA_SCALE_REF)
         return aem * self.scale_param_mask
 
+    def _smear_raw_to_effective(self, raw: torch.Tensor) -> torch.Tensor:
+        """Apply the positivity reparameterisation (if any) and the per-bin
+        fit mask to the raw O(1) ``θ_smear`` tensor (shape ``[..., 2]``).
+        'linear' (default): identity (signed). 'softplus': ``softplus(raw)``
+        so each of (a, c) ≥ 0 INDIVIDUALLY. The mask is applied AFTER the
+        transform so frozen params (or 'a'-/'c'-only modes) are EXACTLY zero
+        regardless of the raw value — keeping the per-muon σ_qop and all
+        downstream transformations evaluated to zero for the inactive term."""
+        if self.smear_param_form == "softplus":
+            raw = F.softplus(raw)
+        return raw * self.smear_param_mask
+
     def _smear_ac_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
-        """Per-muon SIGNED qop-resolution variance coefficients ``[B, 2, 2] =
-        (a, c)`` (σ²_qop = a + c·k², two-sided), masked to the fitted term(s).
-        'binned': ``θ_smear[b]``; 'mlp': the continuous ``ThetaNet(η, φ)``."""
+        """Per-muon EFFECTIVE qop-resolution variance coefficients ``[B, 2, 2]
+        = (a, c)`` (σ²_qop = a + c·k²), with the positivity reparam (if any)
+        applied and masked to the fitted term(s). 'binned': ``θ_smear[b]``;
+        'mlp': the continuous ``ThetaNet(η, φ)``."""
         if self.theta_mode == "mlp":
             ac = self.theta_net(eta_pm, phi_pm)[1]
         else:
             ac = self.theta_smear[b_pm]
-        return ac * self.smear_param_mask
+        return self._smear_raw_to_effective(ac)
 
     def effective_theta_smear(self) -> torch.Tensor:
         """Per-η-bin PHYSICAL smear coefficients (a, c), masked (BINNED mode only
         — used for the diagnostics curve / bootstrap σ). The fit parameter
         ``theta_smear`` is O(1) for the optimizer; the physical qop-variance
-        coefficients (σ²_qop = a + c·k²) are ``theta_smear · SMEAR_VAR_SCALE``.
-        In 'mlp' mode evaluate ``theta_net`` on an η grid (× SMEAR_VAR_SCALE)."""
+        coefficients (σ²_qop = a + c·k²) are ``effective(θ_smear) · SMEAR_VAR_SCALE``,
+        where ``effective`` applies the positivity reparam (linear ↔ identity,
+        softplus ↔ softplus). In 'mlp' mode evaluate ``theta_net`` on an η grid."""
         scale = self.theta_smear.new_tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C])
-        return self.theta_smear * self.smear_param_mask * scale
+        return self._smear_raw_to_effective(self.theta_smear) * scale
 
     def _scale_per_event(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
         """Per-event ``[B, 6] = (A_+, e_+, M_+, A_-, e_-, M_-)``."""
@@ -897,9 +928,9 @@ class JpsiMassMixtureModel(nn.Module):
 
     def _smear_per_event_linear(self, b_pm: torch.Tensor) -> torch.Tensor:
         """Per-event smear *increments* ``[B,4] = (a₊,c₊,a₋,c₋)`` for the
-        continuity tilt. ``theta_smear`` is treated as a plain (signed) variance
-        increment here (init 0), masked to the fitted term(s)."""
-        th = self.theta_smear * self.smear_param_mask  # [n_eta, 2]
+        continuity tilt — the EFFECTIVE (a, c) after the positivity reparam
+        (if any) and masked to the fitted term(s)."""
+        th = self._smear_raw_to_effective(self.theta_smear)  # [n_eta, 2]
         return th[b_pm].reshape(b_pm.shape[0], -1)
 
     def _continuity_g(self, m, mk, eta_pm, phi_pm, q_pm, b_pm, rho, pt_pm):
