@@ -370,6 +370,16 @@ def _fisher_save_dict(H: torch.Tensor, layout: dict, model: JpsiMassMixtureModel
             cov = torch.linalg.pinv(H)
         except Exception:
             cov = None
+    # Same fix as in _empirical_cov_theta_block: any parameter with H_ii = 0
+    # (frozen via mask → bit-zero per-event gradient → bit-zero diagonal) is
+    # not fit, so its variance is 0 by definition. Zero the corresponding
+    # rows/cols in `cov` to remove any inv/pinv-amplified garbage that would
+    # otherwise poison the chi² tolerance and the correlation heatmap.
+    if cov is not None:
+        zero_diag = (torch.diag(H) == 0)
+        if zero_diag.any():
+            cov[zero_diag, :] = 0.0
+            cov[:, zero_diag] = 0.0
 
     n_scale = layout["n_scale"]
     smear_cols = layout["smear_cols"]
@@ -1338,6 +1348,16 @@ def _empirical_cov_theta_block(J: torch.Tensor, n_theta: int, ridge: float) -> t
     (dimensionless ``ridge``), so it is well-behaved across the mixed-unit
     A/e/M/smear/MLP blocks."""
     J = 0.5 * (J + J.T)
+    # Parameters whose per-event score is bit-zero (frozen via the
+    # smear/scale param mask, or just an MLP weight that doesn't feed the
+    # data branch) have J_ii = 0 exactly. They're not fit, so their variance
+    # is 0 by definition — but the inversion can leak large garbage into
+    # those rows/cols: pinv may amplify near-zero singular values via the
+    # joint-cov coupling, and the scale-aware ridge inflates them by 1/d² as
+    # d → its 1e-12·dmax floor, producing ~10²³ artefacts that pollute the
+    # χ² eigenvalue tolerance and the correlation plot. Capture the frozen
+    # mask up front to zero out those rows/cols at the end.
+    zero_diag_mask = (torch.diag(J) == 0)
     if ridge <= 0.0:
         cov = torch.linalg.pinv(J)
     else:
@@ -1349,6 +1369,9 @@ def _empirical_cov_theta_block(J: torch.Tensor, n_theta: int, ridge: float) -> t
         eye = torch.eye(n, dtype=J.dtype, device=J.device)
         cov = torch.linalg.inv(Jt + ridge * eye)                 # PD → plain inv
         cov = cov * dinv.unsqueeze(0) * dinv.unsqueeze(1)        # back to raw units
+    if zero_diag_mask.any():
+        cov[zero_diag_mask, :] = 0.0
+        cov[:, zero_diag_mask] = 0.0
     return cov[:n_theta, :n_theta].contiguous()
 
 
