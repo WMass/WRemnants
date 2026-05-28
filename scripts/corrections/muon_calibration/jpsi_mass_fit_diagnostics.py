@@ -92,6 +92,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         smear_flow_steps=args.get("smear_flow_steps", 1),
         jacobian_form=args.get("jacobian_form", "softlog"),
         smear_param_form=args.get("smear_param_form", "linear"),
+        background_enabled=not bool(args.get("no_background", False)),
         theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
         theta_mlp_hidden=args.get("theta_mlp_hidden", 32),
         theta_mlp_layers=args.get("theta_mlp_layers", 2),
@@ -278,7 +279,16 @@ def evaluate_predictions(
 
             if bool(data_sel.any()):
                 data_idx = data_sel.nonzero(as_tuple=True)[0]
-                f = model.f_data(batch["muon_kin_std"][data_idx])  # [n_data, 3]
+                if getattr(model, "background_enabled", True):
+                    f = model.f_data(batch["muon_kin_std"][data_idx])  # [n_data, 3]
+                else:
+                    # --no-background: data branch is pure signal. The MLP is
+                    # bypassed in data_nll_continuity; mirror that here so the
+                    # mixture plot doesn't show whatever the random-init MLP
+                    # happens to output. f ≡ [0, 0, 1] → no Bernstein bkg.
+                    f = torch.zeros((data_idx.numel(), 3), device=batch["muon_kin_std"].device,
+                                    dtype=batch["muon_kin_std"].dtype)
+                    f[:, 2] = 1.0
                 # Signal density at every bin centre for every data event at the
                 # fitted θ: tilt (continuity) or θ-conditioned flow (legacy).
                 log_p_grid = _sig_grid(data_idx)  # [n_data, n_grid] log-density (1/GeV)

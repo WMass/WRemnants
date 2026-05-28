@@ -479,6 +479,16 @@ class JpsiMassMixtureModel(nn.Module):
         # the two-sided fit (the model can no longer represent MC that is too
         # broad vs data).
         smear_param_form: str = "linear",
+        # Background mixture. True (default): the data branch's per-event NLL
+        # is the full f_data(c)-weighted signal/Bernstein mixture (the model
+        # for real data, which has genuine non-resonant background). False:
+        # the data branch reduces to pure signal (NLL = −log p_signal); the
+        # MLP `f_data` is bypassed entirely and its parameters are excluded
+        # from the optimiser in stage 2. Use for validation closures (truth
+        # f_bkg = 0 by construction) to remove the bkg ↔ smear degeneracy
+        # where the MLP grows f_bkg in forward |η| bins to absorb tail
+        # events the signal model can't broaden into.
+        background_enabled: bool = True,
         # Smear-Jacobian formula for the continuity density. 'softlog' (default):
         # autograd-derived G' = dx/dm' of the actual forward map, with a C¹
         # tangent extension below SMEAR_GP_FLOOR so the optimiser is pulled BACK
@@ -510,6 +520,7 @@ class JpsiMassMixtureModel(nn.Module):
                 f"smear_param_form must be 'linear' or 'softplus'; "
                 f"got {smear_param_form!r}")
         self.smear_param_form = str(smear_param_form)
+        self.background_enabled = bool(background_enabled)
         if theta_mode not in ("binned", "mlp"):
             raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
         self.theta_mode = str(theta_mode)
@@ -1248,9 +1259,17 @@ class JpsiMassMixtureModel(nn.Module):
         pt, eta, phi, q, b = (pt_pm[data_idx], eta_pm[data_idx], phi_pm[data_idx],
                               q_pm[data_idx], b_pm[data_idx])
         log_ps = self._continuity_logp(m, mk, pt, eta, phi, q, b, n_iter=n_iter)
-        f = self.f_data(mk)
-        p0b, p1b = bernstein_d1(m, float(self.m_lo), float(self.m_hi))
-        p_mix = f[:, 0] * p0b + f[:, 1] * p1b + f[:, 2] * log_ps.exp()
-        per = per.index_put((data_idx,), -torch.log(p_mix.clamp_min(eps)),
-                            accumulate=False)
+        if self.background_enabled:
+            f = self.f_data(mk)
+            p0b, p1b = bernstein_d1(m, float(self.m_lo), float(self.m_hi))
+            p_mix = f[:, 0] * p0b + f[:, 1] * p1b + f[:, 2] * log_ps.exp()
+            per_data = -torch.log(p_mix.clamp_min(eps))
+        else:
+            # Background disabled (validation closure mode): the data branch
+            # is pure signal — NLL = -log p_signal directly, no MLP / no
+            # Bernstein. This removes the f_bkg ↔ smear degeneracy where the
+            # MLP would otherwise absorb forward-|η| tails the signal can't
+            # broaden into.
+            per_data = -log_ps
+        per = per.index_put((data_idx,), per_data, accumulate=False)
         return per

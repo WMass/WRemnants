@@ -586,6 +586,7 @@ def _build_model(args, stats, device):
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
         jacobian_form=getattr(args, "jacobian_form", "softlog"),
         smear_param_form=getattr(args, "smear_param_form", "linear"),
+        background_enabled=not getattr(args, "no_background", False),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
         theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
@@ -743,8 +744,19 @@ def train_stage2(args, model, train_loader, val_loader, stats,
     # Freeze the flow; it is the nominal template from stage 1.
     for p in model.flow.parameters():
         p.requires_grad_(False)
-    groups = [{"params": model.mlp.parameters(), "lr": args.fit_mlp_lr}]
-    tags = ["mlp"]
+    # If the background mixture is disabled the data branch is pure signal —
+    # the MLP is bypassed in data_nll_continuity and stays at its random init
+    # with no gradient flow. Freeze its parameters and drop the group from
+    # the optimiser so nothing depends on its (now-irrelevant) values.
+    groups = []
+    tags = []
+    if model.background_enabled:
+        groups.append({"params": model.mlp.parameters(), "lr": args.fit_mlp_lr})
+        tags.append("mlp")
+    else:
+        for p in model.mlp.parameters():
+            p.requires_grad_(False)
+        print("  background DISABLED: f_data ≡ [0, 0, 1] (pure signal); MLP frozen + excluded from optimiser")
     if model.theta_mode == "mlp":
         # Continuous θ(η,φ): float the ThetaNet (zero-init → 0). One group;
         # the output reference scaling differentiates the A,e,M vs a,c magnitudes.
@@ -1037,7 +1049,9 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     rbar = tqdm(range(B), desc="bootstrap", disable=not args.progress, unit="replica")
     for b in rbar:
         model.load_state_dict(nominal_sd)          # warm-start from the nominal fit
-        groups = [{"params": model.mlp.parameters(), "lr": args.fit_mlp_lr}]
+        groups = []
+        if model.background_enabled:
+            groups.append({"params": model.mlp.parameters(), "lr": args.fit_mlp_lr})
         if model.scale_enabled:
             groups.append({"params": [model.theta_scale], "lr": args.fit_scale_lr})
         if model.smearing_enabled:
@@ -1410,7 +1424,7 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
-              "smear_flow_steps", "jacobian_form", "smear_param_form",
+              "smear_flow_steps", "jacobian_form", "smear_param_form", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1838,6 +1852,18 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "(inert, fixed at 0); Fisher info is skipped. With BOTH "
         "--disable-scale and --disable-smearing, only the flow and the MLP "
         "(background normalisation) are trained.",
+    )
+    p.add_argument(
+        "--no-background", action="store_true",
+        help="Disable the data-branch background mixture: the data NLL "
+        "reduces to pure signal (−log p_signal), the f_data MLP is bypassed "
+        "and its parameters are excluded from the stage-2 optimiser. Intended "
+        "for VALIDATION CLOSURES where the truth f_bkg = 0 by construction "
+        "(MC pseudo-data is signal-only) — removes the degeneracy where the "
+        "MLP grows f_bkg in forward |η| bins to absorb tail events the signal "
+        "model can't broaden into (and to absorb injection-induced "
+        "out-of-window pollution that the Bernstein basis extrapolates to). "
+        "Leave OFF for real-data fits, which need the MLP for genuine bkg.",
     )
     p.add_argument(
         "--detect-anomaly", action="store_true",

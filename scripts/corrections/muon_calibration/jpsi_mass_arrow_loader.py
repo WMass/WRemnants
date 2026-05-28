@@ -416,6 +416,21 @@ def _batch_tensors(
     muon_kin_std = _standardise(muon_kin, stats.muon_kin_mean, stats.muon_kin_std)
 
     w = cols["nominal_weight"].astype(np.float32, copy=False)
+    # Enforce the m_ll window on the (possibly injection-perturbed) mass: zero
+    # the weight for events pushed outside [m_lo, m_hi] by the injection so the
+    # fit does not see them. Bernstein-d1 evaluates to NEGATIVE values outside
+    # the window (linear u-extrapolation) and the flow's log p₀ extrapolates
+    # past its training range — without this cut, those events hit the
+    # `log(p_mix.clamp_min(eps))` floor at NLL ≈ +log(1/eps) ≈ 69 per event
+    # AND give the data-branch MLP a strong incentive to grow f_bkg to absorb
+    # the pollution via the Bernstein basis's large positive value just past
+    # the boundary. For REAL data the snapshot already cut to the window so
+    # this is a no-op (in_window all True). For injected MC pseudo-data it
+    # zero-weights ~0.06% of central / ~3% of |η|>1.8 events; both the
+    # weighted numerator AND denominator drop them, so the mean NLL is
+    # computed correctly over the in-window subset.
+    in_window = ((mll >= float(stats.m_lo)) & (mll <= float(stats.m_hi)))
+    w = w * in_window.astype(np.float32)
 
     return {
         "mll": torch.from_numpy(mll),
