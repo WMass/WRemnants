@@ -614,11 +614,10 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
     if sched_kind != "none":
         print(f"  lr schedule: {sched_kind}"
               + (f" (factor={args.lr_reduce_factor:g}, patience={args.lr_reduce_patience}, "
-                 f"min_lr={args.min_lr:g}); each lr reduction resets the early-stop "
-                 f"counter (early-stop deferred while the lr keeps dropping; with "
-                 f"lr-reduce-patience {args.lr_reduce_patience} < patience {args.patience} "
-                 f"the lr typically reaches min_lr first, but early-stop can still fire "
-                 f"at a higher lr if no reduction is pending)"
+                 f"min_lr={args.min_lr:g}); lr reductions tick in parallel with "
+                 f"early-stop — they do NOT reset the early-stop counter, so "
+                 f"`--patience {args.patience}` is the total stalled epochs "
+                 f"allowed since the last improvement regardless of lr drops"
                  if sched_kind == "plateau"
                  else f" (T_max={epochs}, min_lr={args.min_lr:g})"))
 
@@ -692,16 +691,19 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
         torch.save(_ckpt(epoch, best_val, val_nll), last_ckpt)
         if improved:
             torch.save(_ckpt(epoch, best_val, val_nll), best_ckpt)
-        # Step the LR schedule; a reduction in ANY group resets the early-stop
-        # counter, so early-stop is deferred while the lr is still dropping.
-        # With lr_reduce_patience < patience the lr therefore usually reaches
-        # min_lr before early-stop fires — but this is not guaranteed (e.g. if
-        # patience <= lr_reduce_patience, early-stop can fire at a higher lr).
+        # Step the LR schedule. The early-stop counter is NOT reset on lr
+        # reduction — `patience` is the total number of stalled epochs allowed
+        # since the last improvement, regardless of any lr drops that happen
+        # within that span. The plateau schedule still ticks (lr_reduce_patience
+        # → factor) but those reductions just run in parallel with the
+        # early-stop accumulator; they don't grant additional credit. Tested at
+        # `lr = fit_{scale,smear}_lr = 0.1` (well-conditioned, O(1) θ): the
+        # protective effect of the old reset is no longer needed, and the new
+        # semantics save the ~5–10 min/fit otherwise spent traversing the full
+        # lr schedule on already-converged runs. Re-enable manually by raising
+        # `--patience` or with `--no-early-stop` for diagnostic runs.
         if sched is not None:
-            lr_before = [g["lr"] for g in optim.param_groups]
             sched.step(val_nll) if sched_kind == "plateau" else sched.step()
-            if any(g["lr"] < lb - 1e-12 for g, lb in zip(optim.param_groups, lr_before)):
-                no_improve = 0
         if not improved and not args.no_early_stop and no_improve >= args.patience:
             print(f"[{stage_name}] early-stop: no improvement for {no_improve} epochs")
             break
