@@ -231,7 +231,35 @@ SMEAR_VAR_SCALE_C = 2e-5
 # Invertibility floor on the probability-flow smear Jacobian G' = dx/dm'. A valid
 # forward (broadening) transport has G' > 0; the floor catches the fold/over-
 # sharpen region (V·∂²_m log p₀ large) gracefully, mirroring the old (1+s) ≥ 0.05.
+# Used by jacobian_form="softlog" as the seam where the analytic log is replaced
+# by a C¹ linear tangent extension (see _softlog_below_floor). Unused by "exp".
 SMEAR_GP_FLOOR = 0.05
+
+
+def _softlog_below_floor(g: torch.Tensor, floor: float = SMEAR_GP_FLOOR) -> torch.Tensor:
+    """``log(g.clamp_min(floor))`` PLUS a quadratic barrier ``(floor − g)⁺² /
+    (2·floor²)`` for ``g < floor``. Drop-in replacement for the hard
+    ``torch.log(g.clamp_min(floor))`` that:
+
+    - matches it EXACTLY in the physical region (``g ≥ floor`` → barrier = 0),
+    - is BOUNDED from below by ``log(floor)`` for any g (so the density
+      cannot diverge to ±∞ from a degenerate or extreme-negative Jacobian
+      — the linear-tangent variant ran away to ``−∞`` for very negative g,
+      driving NLL ``→ −∞`` — a *reward* for unphysical G' < 0, the opposite
+      of what we want),
+    - is C¹ at the seam (barrier value and slope both zero at ``g = floor``)
+      and grows quadratically past it, so the gradient w.r.t. g is
+      ``−(floor − g)/floor²`` for ``g < floor`` — pulling g BACK toward the
+      physical region, replacing the hard clamp's flat-NLL basin with a
+      gentle restoring force whose strength scales with how far past the
+      floor we've drifted.
+
+    Returns ``log_Gp_effective`` to plug into ``−log p_θ = log_Gp_effective
+    − log p₀(m')``."""
+    log_safe = torch.log(g.clamp_min(floor))
+    deficit = (floor - g).clamp_min(0.0)
+    barrier = deficit * deficit / (2.0 * floor * floor)
+    return log_safe + barrier
 
 # Fixed reference scales for the per-muon SCALE parameters (A, e, M). The
 # physical values are O(1e-4 / 1e-3 / 1e-5); these put the fitted (and injected)
@@ -439,6 +467,15 @@ class JpsiMassMixtureModel(nn.Module):
         # nested-autograd cost. Frozen p₀ score per step (exact diffusion to
         # first order in V).
         smear_flow_steps: int = 1,
+        # Smear-Jacobian formula for the continuity density. 'softlog' (default):
+        # autograd-derived G' = dx/dm' of the actual forward map, with a C¹
+        # tangent extension below SMEAR_GP_FLOOR so the optimiser is pulled BACK
+        # from G' < floor instead of sliding into a flat-NLL basin. 'exp':
+        # frozen-score continuous-flow approximation log G' = log(1+s_adv'(m'))
+        # − V·∂²_m log p₀(m')/2 — always finite, no floor, but approximates a
+        # *different* operator (extra "score constant along the trajectory"
+        # assumption) — see _continuity_logp docstring caveats.
+        jacobian_form: str = "softlog",
         # θ parameterisation. 'binned' (default): per-η-bin (A,e,M,a,c) tables
         # indexed by the muon's η-bin. 'mlp': a small ThetaNet maps each muon's
         # (η, φ) → (A,e,M,a,c) CONTINUOUSLY (trained in stage 2 like the
@@ -452,6 +489,10 @@ class JpsiMassMixtureModel(nn.Module):
         self.scale_enabled = bool(scale_enabled)
         self.qop_floor_frac = float(qop_floor_frac)
         self.smear_flow_steps = max(1, int(smear_flow_steps))
+        if jacobian_form not in ("softlog", "exp"):
+            raise ValueError(
+                f"jacobian_form must be 'softlog' or 'exp'; got {jacobian_form!r}")
+        self.jacobian_form = str(jacobian_form)
         if theta_mode not in ("binned", "mlp"):
             raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
         self.theta_mode = str(theta_mode)
@@ -1001,13 +1042,36 @@ class JpsiMassMixtureModel(nn.Module):
         smear as a score-driven PROBABILITY-FLOW displacement
         ``y ← y − (V/2n)·∂_m log p₀(y)`` (``smear_flow_steps`` Euler steps; the
         deterministic equivalent of a Gaussian qop smear of mass-variance V,
-        broaden V>0 / sharpen V<0). Invert for the source m' by fixed point and
-        divide by the autograd Jacobian ``G' = dx/dm'`` — which carries the local
-        curvature ``∂²_m log p₀`` (vs the old Gaussian-shape global stretch).
-        ``G'`` is floored (SMEAR_GP_FLOOR) for invertibility; the floor only bites
-        where V·∂²_m log p₀ would fold the map. The smear is a pure mass-space
-        transport, so it leaves ρ untouched — only the scale's ρ shift is
-        propagated to the conditioning."""
+        broaden V>0 / sharpen V<0). Invert for the source m' by fixed point.
+
+        Log-Jacobian — two forms (``self.jacobian_form``):
+
+        * ``"softlog"`` (default): use the EXACT autograd Jacobian ``G' =
+          dx/dm'`` of the N-step Euler forward map, fed through
+          ``_softlog_below_floor`` — equal to ``log(G'.clamp_min(floor))`` in
+          the physical region AND adds a C¹ quadratic barrier ``(floor−G')⁺²
+          /(2·floor²)`` past the floor. The barrier value and slope are zero
+          at the seam (so the physical region is unchanged) and grow
+          quadratically past it, pulling G' back toward the physical region
+          — replacing the hard clamp's flat-NLL basin (where the optimiser
+          could drift into G' < 0 when V·∂²_m log p₀ is large at large |η|,
+          with no gradient cost) with a gentle restoring force.
+        * ``"exp"``: skip the autograd Jacobian and use the FROZEN-SCORE
+          continuous-flow approximation ``log G' = log(1+s_adv'(m')) − V·∂²_m
+          log p₀(m')/2`` — always finite, no floor needed. Approximates a
+          DIFFERENT operator: assumes ∂²_m log p₀ is constant along the smear
+          trajectory and is the analytic ``N→∞`` Euler-step limit of that
+          frozen-score flow. Closer to the true Gaussian convolution at
+          moderate V than 1-step Euler, but the assumption breaks near sharp
+          features (the J/ψ peak crest) and the recovered θ may shift vs the
+          'softlog' (different operator → different optimum). It also lacks
+          the floor's natural cap on unphysical-sharpening rewards, so a
+          large negative V is rewarded UNBOUNDEDLY by ``−log G' = +V·∂²/2``
+          — only choose this when the V-too-large breakdown driving #1 is
+          actually the dominant issue.
+
+        The smear is a pure mass-space transport, so it leaves ρ untouched —
+        only the scale's ρ shift is propagated to the conditioning."""
         B = m_obs.shape[0]
         theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
                           if self.scale_enabled
@@ -1041,15 +1105,62 @@ class JpsiMassMixtureModel(nn.Module):
         mp = m_obs.clone()
         for _ in range(n_iter):
             mp = m_obs - (forward(mp) - mp)
-        # change-of-variables Jacobian G' = dx/dm' (autograd in m').
-        if mp.requires_grad:
-            Gp = torch.autograd.grad(forward(mp).sum(), mp, create_graph=True)[0]
-        else:
-            with torch.enable_grad():
-                mpj = mp.detach().requires_grad_(True)
-                Gp = torch.autograd.grad(forward(mpj).sum(), mpj)[0].detach()
+        # change-of-variables log-Jacobian: dispatch on jacobian_form.
+        if self.jacobian_form == "exp":
+            # Frozen-score continuous-flow approximation, no floor needed.
+            log_Gp = self._log_jacobian_exp(mp, mk_src, s_adv_of, eta_pm, phi_pm,
+                                            b_pm, pt_obs, m_obs)
+        else:  # "softlog" (default): autograd Jacobian + tangent extension below floor.
+            if mp.requires_grad:
+                Gp = torch.autograd.grad(forward(mp).sum(), mp, create_graph=True)[0]
+            else:
+                with torch.enable_grad():
+                    mpj = mp.detach().requires_grad_(True)
+                    Gp = torch.autograd.grad(forward(mpj).sum(), mpj)[0].detach()
+            log_Gp = _softlog_below_floor(Gp, SMEAR_GP_FLOOR)
         logp0 = self.log_p_nominal(mp, mk_src)
-        return logp0 - torch.log(Gp.clamp_min(SMEAR_GP_FLOOR))
+        return logp0 - log_Gp
+
+    def _log_jacobian_exp(self, mp, mk_src, s_adv_of, eta_pm, phi_pm, b_pm,
+                          pt_obs, m_obs):
+        """Frozen-score continuous-flow log-Jacobian:
+        ``log G' = log(1 + s_adv'(m')) − V·∂²_m log p₀(m')/2``.
+
+        Both ``s_adv'(m')`` and ``∂²_m log p₀(m')`` are taken via autograd at
+        the SOURCE mass m' (frozen along the smear trajectory). Always finite
+        — no floor — but a different operator approximation than the autograd
+        Jacobian of the N-step Euler forward map (see _continuity_logp
+        docstring). Live grads to θ are preserved when ``mp.requires_grad``."""
+        # ∂s_adv/∂m' (scale-advection Jacobian contribution, =0 if scale disabled).
+        if self.scale_enabled:
+            if mp.requires_grad:
+                s = s_adv_of(mp)
+                s_prime = torch.autograd.grad(
+                    s.sum(), mp, create_graph=True, retain_graph=True)[0]
+            else:
+                with torch.enable_grad():
+                    mpj = mp.detach().requires_grad_(True)
+                    s_prime = torch.autograd.grad(
+                        s_adv_of(mpj).sum(), mpj)[0].detach()
+            log_J_scale = torch.log1p(s_prime)
+        else:
+            log_J_scale = mp.new_zeros(mp.shape)
+        # −V·∂²_m log p₀(m')/2 (smear contribution, =0 if smear disabled).
+        if self.smearing_enabled:
+            V = self._smear_mass_var(eta_pm, phi_pm, b_pm, pt_obs, mp, m_obs)
+            if mp.requires_grad:
+                score = self._flow_score(mp, mk_src)
+                d2 = torch.autograd.grad(
+                    score.sum(), mp, create_graph=True, retain_graph=True)[0]
+            else:
+                with torch.enable_grad():
+                    mpj = mp.detach().requires_grad_(True)
+                    score = self._flow_score(mpj, mk_src)
+                    d2 = torch.autograd.grad(score.sum(), mpj)[0].detach()
+            log_J_smear = -0.5 * V * d2
+        else:
+            log_J_smear = mp.new_zeros(mp.shape)
+        return log_J_scale + log_J_smear
 
     def data_nll_continuity(
         self,

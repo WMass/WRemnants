@@ -574,6 +574,7 @@ def _build_model(args, stats, device):
         qop_floor_frac=args.qop_floor_frac, smear_fit_params=args.smear_fit_params,
         scale_fit_params=getattr(args, "scale_fit_params", "AM"),
         smear_flow_steps=getattr(args, "smear_flow_steps", 1),
+        jacobian_form=getattr(args, "jacobian_form", "softlog"),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
         theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
@@ -1398,7 +1399,7 @@ def _load_full_fit(args, device):
     # Adopt the model-defining settings from the checkpoint.
     _apply_flow_arch_from_ckpt(args, ck_args)
     for k in ("mlp_hidden", "mlp_n_layers", "smear_fit_params", "scale_fit_params",
-              "smear_flow_steps",
+              "smear_flow_steps", "jacobian_form",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
               "inject_A", "inject_e", "inject_M",
@@ -1634,6 +1635,21 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "score flow more finely (more robust/accurate) at a higher nested-"
         "autograd cost. The per-muon qop fold (closure plots) and the injection "
         "are exact convolutions regardless.",
+    )
+    p.add_argument(
+        "--jacobian-form", choices=("softlog", "exp"), default="softlog",
+        help="Smear-Jacobian formula for the continuity density. 'softlog' "
+        "(default): the exact autograd Jacobian G' = dx/dm' of the N-step Euler "
+        "forward map, with a C¹ linear-tangent extension below SMEAR_GP_FLOOR "
+        "(keeps the gradient alive past the floor → the optimiser is pulled BACK "
+        "from G' < 0 instead of drifting into the previously-flat floored basin "
+        "where unphysical θ_smear<0 was rewarded). 'exp': frozen-score "
+        "continuous-flow approximation log G' = log(1+s_adv') − V·∂²log p₀/2 "
+        "(always finite, no floor) — but a DIFFERENT operator approximation "
+        "(assumes ∂²log p₀ constant along the smear trajectory), and rewards "
+        "unphysical sharpening UNBOUNDEDLY by −log G' = +V·∂²/2; prefer "
+        "'softlog' unless you specifically want the closed-form continuous-flow "
+        "Jacobian. See _continuity_logp for the full caveats.",
     )
     p.add_argument(
         "--theta-mlp", action="store_true",
