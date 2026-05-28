@@ -156,6 +156,77 @@ def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4
 
 
 @torch.no_grad()
+def _injected_raw_theta(model, inject_scale_phys, inject_smear_phys):
+    """Convert physical injection values to RAW θ tensors (shape ``[n_eta, 3]``
+    and ``[n_eta, 2]``) that reproduce them through the model's parameterisation.
+    Components that were NOT injected are filled with zero physical, i.e. the
+    truth in the closure is θ=0 for those (not the fitted value).
+
+    * scale: physical (A, e, M) = θ · THETA_SCALE_REF (linear), so the raw θ
+      that gives the injected physical value is ``inject_phys / REF``.
+    * smear:
+        - ``smear_param_form='linear'``: effective(θ) = θ; raw = inject_phys /
+          SMEAR_VAR_SCALE.
+        - ``smear_param_form='softplus'``: effective(θ) = softplus(θ); invert
+          via raw = log(exp(eff) − 1) (= softplus⁻¹). For zero (un-injected)
+          physical, eff is clipped to 1e-10 so the raw value is large-negative
+          (~ −23) with softplus(.) ≈ 0 — effectively the no-smear identity."""
+    n_eta = model.theta_scale.shape[0]
+    if inject_scale_phys is None:
+        inject_scale_phys = np.zeros((n_eta, 3), dtype=np.float64)
+    if inject_smear_phys is None:
+        inject_smear_phys = np.zeros((n_eta, 2), dtype=np.float64)
+    ref = np.asarray(THETA_SCALE_REF, dtype=np.float64)
+    raw_scale = torch.tensor(inject_scale_phys / ref[None, :], dtype=torch.float32)
+    scale = np.asarray([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C], dtype=np.float64)
+    eff = inject_smear_phys / scale[None, :]   # target effective θ_smear
+    if getattr(model, "smear_param_form", "linear") == "softplus":
+        # softplus⁻¹(y) = log(exp(y) − 1) = log(expm1(y)); clip eff at 1e-10 so
+        # zero-injection columns give a large-negative raw value (softplus→0).
+        eff_safe = np.clip(eff, 1e-10, None)
+        raw_smear = torch.tensor(np.log(np.expm1(eff_safe)), dtype=torch.float32)
+    else:
+        raw_smear = torch.tensor(eff, dtype=torch.float32)
+    return raw_scale, raw_smear
+
+
+class _override_theta:
+    """Context manager that temporarily sets the model's θ_scale / θ_smear to
+    the supplied raw values and restores on exit. Used to evaluate the model
+    density at the INJECTED θ values for the validation-closure plots —
+    showing where the fitted curve *should* converge to."""
+
+    def __init__(self, model, raw_scale=None, raw_smear=None):
+        self.model = model
+        self.raw_scale = raw_scale
+        self.raw_smear = raw_smear
+        self._saved_scale = None
+        self._saved_smear = None
+
+    def __enter__(self):
+        if self.raw_scale is not None:
+            self._saved_scale = self.model.theta_scale.detach().clone()
+            with torch.no_grad():
+                self.model.theta_scale.copy_(
+                    self.raw_scale.to(self.model.theta_scale.device,
+                                      self.model.theta_scale.dtype))
+        if self.raw_smear is not None:
+            self._saved_smear = self.model.theta_smear.detach().clone()
+            with torch.no_grad():
+                self.model.theta_smear.copy_(
+                    self.raw_smear.to(self.model.theta_smear.device,
+                                      self.model.theta_smear.dtype))
+        return self
+
+    def __exit__(self, *_):
+        if self._saved_scale is not None:
+            with torch.no_grad():
+                self.model.theta_scale.copy_(self._saved_scale)
+        if self._saved_smear is not None:
+            with torch.no_grad():
+                self.model.theta_smear.copy_(self._saved_smear)
+
+
 def _continuity_mc_fold(model, ptm, etam, phim, qm, bm):
     """Fold MC reco at the fitted θ — the empirical template the model signal
     curve should reproduce. The per-muon PHYSICAL fold: apply the fitted scale
@@ -260,7 +331,22 @@ def evaluate_predictions(
         # closure target the fold should reproduce). Distinct from the nominal
         # whenever a θ/smear injection was replayed into the loader.
         "mll_mc_pseudodata": [],
+        # validation-with-injection only: signal density on the grid evaluated
+        # at the INJECTED θ values (the closure target curve — where the
+        # fitted-θ density should converge to if the fit recovers the truth).
+        "pred_signal_mc_at_inj": [],
     }
+    # Convert the loader's replayed injection (physical) to RAW θ tensors that
+    # produce them through the model — used below to evaluate the model
+    # density at the truth.
+    inject_scale_phys = getattr(loader, "inject_theta_scale", None)
+    inject_smear_phys = getattr(loader, "inject_theta_smear", None)
+    has_inj = inject_scale_phys is not None or inject_smear_phys is not None
+    if has_inj:
+        raw_inj_scale, raw_inj_smear = _injected_raw_theta(
+            model, inject_scale_phys, inject_smear_phys)
+    else:
+        raw_inj_scale = raw_inj_smear = None
 
     total_events = 0
     bar = tqdm(loader, desc="eval", disable=not progress, unit="batch")
@@ -315,6 +401,15 @@ def evaluate_predictions(
                 out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
+                # Closure target: signal density at the INJECTED θ values.
+                # Temporarily override the model's θ, evaluate the tilt density
+                # on the same grid, restore. The fitted curve should converge
+                # to this curve when the closure is good.
+                if has_inj:
+                    with _override_theta(model, raw_inj_scale, raw_inj_smear):
+                        log_p_grid_mc_inj = _sig_grid(mc_idx)
+                    out["pred_signal_mc_at_inj"].append(
+                        log_p_grid_mc_inj.exp().cpu().numpy())
                 # nominal (θ=0): the TRUE un-injected reco mass, recomputed from
                 # the (un-injected) per-muon pt — NOT batch["mll"], which carries
                 # the replayed validation injection. Plus the untilted flow p₀.
@@ -343,7 +438,8 @@ def evaluate_predictions(
         else:
             if k == "f_data":
                 out[k] = np.zeros((0, 3))
-            elif k in ("pred_signal_data", "pred_signal_mc", "pred_nominal_mc"):
+            elif k in ("pred_signal_data", "pred_signal_mc", "pred_nominal_mc",
+                       "pred_signal_mc_at_inj"):
                 out[k] = np.zeros((0, n_grid))
             else:
                 out[k] = np.zeros((0,))
@@ -798,6 +894,15 @@ def plot_mc_closure(
             pseudo_hist, _ = np.histogram(
                 evals["mll_mc_pseudodata"][mc_mask], bins=m_edges,
                 weights=evals["w_mc"][mc_mask])
+        # Flow density evaluated at the INJECTED θ values — the closure
+        # target for the fitted-θ model curve. Available only when the eval
+        # replayed a non-trivial injection.
+        show_inj_curve = (
+            cont and bool(evals.get("injected", False))
+            and evals.get("pred_signal_mc_at_inj", np.zeros((0,))).size > 0)
+        if show_inj_curve:
+            inj_curve = bin_width * (
+                evals["pred_signal_mc_at_inj"][mc_mask] * w).sum(axis=0)
 
         fig, (ax, axr) = plt.subplots(
             2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
@@ -819,6 +924,11 @@ def plot_mc_closure(
             m_centers_np, model_curve, color="C1", ls="--", lw=1.5,
             label=model_label,
         )
+        if show_inj_curve:
+            ax.plot(
+                m_centers_np, inj_curve, color="C3", ls="-.", lw=1.3,
+                label="flow (at INJECTED θ — closure target)", zorder=2,
+            )
 
         # Ratio panel: everything relative to the folded flow (the model), so
         # the folded MC (closure), the nominal MC, AND the nominal flow all
@@ -833,6 +943,10 @@ def plot_mc_closure(
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.step(m_edges[:-1], pseudo_hist / denom, where="post",
                          color="C2", lw=1.3, label="pseudo-data", zorder=2)
+        if show_inj_curve:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                axr.plot(m_centers_np, inj_curve / denom, color="C3", ls="-.",
+                         lw=1.3, label="flow (injected θ)", zorder=2)
         if has_nom:
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.step(m_edges[:-1], nom_hist / denom, where="post",
@@ -856,6 +970,7 @@ def plot_mc_closure(
             float(nom_hist.max()) if has_nom else 0.0,
             float(nom_curve.max()) if has_nom else 0.0,
             float(pseudo_hist.max()) if show_pseudo else 0.0,
+            float(inj_curve.max()) if show_inj_curve else 0.0,
         )
         if ymax > 0:
             ax.set_ylim(0, ymax * 1.35)
