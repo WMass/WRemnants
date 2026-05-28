@@ -1267,7 +1267,15 @@ def compute_empirical_fisher_joint(
             n_iter=n_iter)
         per_d = per[di]
         w_d = batch["w"][di].detach()
-        nd = int(per_d.shape[0])
+        nd_total = int(per_d.shape[0])
+        # Truncate to the remaining max_events budget if it falls mid-batch:
+        # only the first `nd` data events of this batch get score-computed.
+        if max_events > 0 and seen + nd_total > max_events:
+            nd = max(0, max_events - seen)
+        else:
+            nd = nd_total
+        if nd == 0:
+            hit_cap = True; break
         for s0 in range(0, nd, max(1, chunk_events)):
             s1 = min(s0 + chunk_events, nd)
             c = s1 - s0
@@ -1300,7 +1308,8 @@ def compute_empirical_fisher_joint(
             S = S[:, active_idx]                       # [c, n_act]
             wc = w_d[s0:s1]
             J += (S * wc.unsqueeze(1)).t() @ S         # Σ w_i s_i s_iᵀ
-        seen += nd; sw += float(w_d.sum())
+        # Account only the events we actually scored (after the mid-batch cap).
+        seen += nd; sw += float(w_d[:nd].sum())
         bar.set_postfix_str(f"events={seen:,}")
     bar.close()
     if seen == 0:
@@ -1356,8 +1365,17 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     half = 1 if args.validation else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    # If max_events is below one batch, shrink the loader's batch_size so we
+    # neither (a) compute data_nll_continuity over a 65k-event batch only to
+    # use 20k of it, nor (b) loop over more per-event score chunks than the
+    # cap allows. The chunked score loop dominates the cost (O(n_active)×
+    # per-event), so this matters; the inner per-batch truncation below is a
+    # belt-and-braces guard for the case where max_events falls mid-batch.
+    fisher_bs = args.batch_size
+    if args.empirical_fisher_max_events > 0:
+        fisher_bs = min(fisher_bs, max(1, args.empirical_fisher_max_events))
     loader = JpsiMassArrowLoader(
-        shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
+        shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
