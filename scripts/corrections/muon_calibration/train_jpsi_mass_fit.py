@@ -153,6 +153,20 @@ def _make_scheduler(args, optim, epochs):
 
 
 
+def _validation_half(args, which: str) -> "int | None":
+    """Which event half to use in validation mode for the named stage
+    (``which`` ∈ {'flow', 'fit'}). Defaults to the disjoint half split
+    (flow ← 0, fit ← 1) so the fit pseudo-data is statistically independent
+    from the flow's training sample. With ``--no-validation-split`` returns
+    ``None`` for both stages — all events are used for both. Returns
+    ``None`` outside validation mode."""
+    if not getattr(args, "validation", False):
+        return None
+    if getattr(args, "no_validation_split", False):
+        return None
+    return 0 if which == "flow" else 1
+
+
 def _smear_active_cols(model) -> List[int]:
     """Column indices of ``theta_smear`` actually fit (smear_param_mask != 0).
     The non-fit column is zeroed post-softplus → identically zero gradient, so
@@ -892,14 +906,18 @@ def train_loop(args: argparse.Namespace) -> int:
             if inj_sm is not None:
                 parts.append(f"(a,c)=({args.inject_a:g},{args.inject_c:g})")
             tgt = "θ → injected " + " ".join(parts)
+        h_flow, h_fit = _validation_half(args, "flow"), _validation_half(args, "fit")
+        split_desc = ("stage 1 ← ALL events, stage 2 ← ALL events as pseudo-data "
+                      "(no half split per --no-validation-split)" if h_flow is None
+                      else "stage 1 ← half 0, stage 2 ← half 1 as pseudo-data")
         print(f"\n*** MC-closure validation mode: simulation for both stages "
-              f"(stage 1 ← half 0, stage 2 ← half 1 as pseudo-data); target {tgt} ***")
+              f"({split_desc}); target {tgt} ***")
         if inj is not None:
             print("    injecting the θ_scale shift into the stage-2 pseudo-data m_ll")
         if inj_sm is not None:
             print("    injecting the per-muon qop smear into the stage-2 pseudo-data m_ll")
-        s1_train, s1_val = _make_loaders(args, shard_files, stats, half=0)  # flow: NOT injected
-        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=1,
+        s1_train, s1_val = _make_loaders(args, shard_files, stats, half=h_flow)   # flow: NOT injected
+        s2_train, s2_val = _make_loaders(args, shard_files, stats, half=h_fit,
                                          inject_theta=inj, inject_smear=inj_sm)
     else:
         if (_inject_theta_np(args, len(stats.eta_edges) - 1) is not None
@@ -936,7 +954,7 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
               "(binned 24×3 θ layout); use --empirical-fisher over the net weights "
               "or re-run binned for the per-bin covariance.", file=sys.stderr)
         return
-    half = 1 if args.validation else None
+    half = _validation_half(args, "fit")
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
@@ -946,7 +964,8 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
     print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
           f"fixed flow + MLP) on split={args.fisher_split}"
-          + ("  half=1 (MC pseudo-data)" if args.validation else "")
+          + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
+             if args.validation else "")
           + f"  [smear_fit={model.smear_fit_params}]")
     t0 = time.time()
     H, layout = compute_fisher_info_continuity(
@@ -1034,7 +1053,9 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         print("skipping bootstrap: both --disable-scale and --disable-smearing.")
         return
     smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
-    half = 1 if mc_as_data else None
+    # mc_as_data is always == args.validation at the call site, so the helper
+    # gives the right half (or None when --no-validation-split is set).
+    half = _validation_half(args, "fit") if mc_as_data else None
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
     loader = JpsiMassArrowLoader(
@@ -1064,7 +1085,8 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
                   else (args.fit_epochs or args.epochs))
     print(f"\nwarm-start Poisson bootstrap: {B} replicas × ≤{max_epochs} epochs "
           f"on split={args.fisher_split}"
-          + ("  half=1 (MC pseudo-data)" if mc_as_data else "")
+          + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
+             if mc_as_data else "")
           + f"  [smear_fit={model.smear_fit_params}; "
           + ("no early stop" if args.no_early_stop
              else f"patience={patience}, threshold={args.patience_threshold:g}")
@@ -1385,7 +1407,7 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         print("skipping empirical Fisher: not implemented for --theta-mlp (binned "
               "24×3 θ layout).", file=sys.stderr)
         return
-    half = 1 if args.validation else None
+    half = _validation_half(args, "fit")
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
     # If max_events is below one batch, shrink the loader's batch_size so we
@@ -1404,7 +1426,8 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
     print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
           f"split={args.fisher_split}"
-          + ("  half=1 (MC pseudo-data)" if args.validation else "")
+          + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
+             if args.validation else "")
           + f"  [smear_fit={model.smear_fit_params}]"
           + (f"; ≤{args.empirical_fisher_max_events:,} events"
              if args.empirical_fisher_max_events > 0 else ""))
@@ -1487,6 +1510,7 @@ def _load_full_fit(args, device):
               "norm_correction", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
               "disable_scale", "disable_smearing", "validation",
+              "no_validation_split",
               "inject_A", "inject_e", "inject_M",
               "inject_a", "inject_c", "inject_smear_seed"):
         if k in ck_args:
@@ -1598,6 +1622,18 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "split prevents stage 2 from fitting θ against the events stage 1 "
         "trained on; the closure target is θ → 0. Any real data in the inputs "
         "is unused.",
+    )
+    p.add_argument(
+        "--no-validation-split", action="store_true",
+        help="In --validation mode, SKIP the half-split: stage 1 and stage 2 "
+        "(and any --fisher-info / --empirical-fisher / --bootstrap runs) all "
+        "use ALL simulation events instead of disjoint halves. Doubles the "
+        "stats available to each stage at the cost of stage 2 fitting θ on "
+        "the same events stage 1 trained on — the closure-target uncertainty "
+        "from the flow's stat error effectively collapses to zero, so this "
+        "is for closure-machinery testing (recovering an injection) rather "
+        "than for representative real-data uncertainty estimates. Default OFF "
+        "(disjoint-half split, the standard MC-closure setup).",
     )
     # Inject a known θ_scale shift into the validation pseudo-data (closure with
     # a non-zero target): the stage-2 pseudo-data m_ll is advected by this scale,
