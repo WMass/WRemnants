@@ -1719,15 +1719,16 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "density. The forward map T_θ is NOT boundary-preserving on [m_lo, "
         "m_hi]: broadening pushes some probability mass outside the window, so "
         "Z(θ;c) = ∫_window p_θ(x|c) dx < 1 and `log p_θ(x)` carries a -log Z "
-        "bias that pulls the fit toward smaller broadening (measured ~+0.34 "
-        "per event at the truth in forward |η| bins for a c=5e-5 injection). "
+        "bias that pulls the fit toward smaller broadening. "
         "'none' (default): no correction, preserves current behaviour. "
-        "'linear': leading-order boundary expansion, "
-        "1-Z ≈ Σ_boundary p_0(boundary)·(boundary shift outward)_+ — 2 forward "
-        "+ 2 flow evals per event, valid for small V. "
+        "'linear': leading-order boundary expansion (PF-ODE forward map) — 2 "
+        "forward + 2 flow evals per event, valid for small V. "
         "'flow_cdf': EXACT via Z = F_0(T⁻¹(m_hi)) - F_0(T⁻¹(m_lo)), the GF "
-        "flow's CDF (monotonic transform composed with Φ) at the boundary "
-        "preimages — ~2× the per-event work of the bare density.")
+        "flow's CDF at boundary preimages — ~2× the per-event work of the bare "
+        "density. NOTE: when --smear-operator=gh_convolution, BOTH 'linear' and "
+        "'flow_cdf' route to the GH-specific exact formula Z = Σ_i W_i [F_0(m'_"
+        "hi(ξ_i)) - F_0(m'_lo(ξ_i))] (per-GH-node boundary inversion); the "
+        "PF-ODE-based forms above use the wrong operator at the boundary.")
     p.add_argument(
         "--smear-param-form", choices=("linear", "softplus"), default="linear",
         help="Positivity reparameterisation for θ_smear. 'linear' (default): "

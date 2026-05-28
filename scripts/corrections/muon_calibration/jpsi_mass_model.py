@@ -1497,9 +1497,20 @@ class JpsiMassMixtureModel(nn.Module):
           two boundary x-values by fixed-point (n_iter steps, mirroring
           ``_continuity_logp``) and evaluates F_0 via the GF monotonic
           transform + Φ. ~2× the per-event work of the bare density.
+
+        When ``self.smear_operator == "gh_convolution"`` both 'linear' and
+        'flow_cdf' route to the GH-specific exact formula
+        ``Z = Σ_i W_i [F_0(m'_hi(ξ_i)) − F_0(m'_lo(ξ_i))]`` (per-GH-node
+        boundary inversion + flow CDF) — the PF-ODE forward map used by the
+        modes below is the wrong operator for GH, so the simple boundary
+        formulae would give the wrong V-scaling. See
+        ``_norm_correction_log_Z_gh``.
         """
         if self.norm_correction == "none":
             return m_obs.new_zeros(m_obs.shape)
+        if self.smear_operator == "gh_convolution":
+            return self._norm_correction_log_Z_gh(
+                m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm)
 
         B = m_obs.shape[0]
         theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
@@ -1572,6 +1583,82 @@ class JpsiMassMixtureModel(nn.Module):
         # Z = F_hi − F_lo; floor at eps in case bisection lands on the same
         # preimage (e.g., when T's image misses the window entirely).
         Z = (log_F_hi.exp() - log_F_lo.exp()).clamp(min=1e-30)
+        return Z.log()
+
+    def _norm_correction_log_Z_gh(self, m_obs, mk, pt_obs, eta_pm, phi_pm,
+                                  q_pm, b_pm) -> torch.Tensor:
+        """``log Z(θ;c)`` for the ``smear_operator='gh_convolution'`` path.
+
+        The Gaussian-convolution operator is `x = m' + s_adv(m') + √V(m')·ε`,
+        ε ~ N(0,1). Z over the m-window factors per GH node:
+
+            ``Z = Σ_i W_i · [F_0(m'_hi(ξ_i)|c_src,i) − F_0(m'_lo(ξ_i)|c_src,i)]``
+
+        where each m'_{lo,hi}(ξ_i) is the source mass at GH node ξ_i that maps
+        to the corresponding boundary, found by BISECTION on [m_lo, m_hi] (the
+        existing fixed-point at the boundary oscillates at large V for the
+        same reason as in `_norm_correction_log_Z`'s flow_cdf branch; bisection
+        is unconditional given T is monotonic in m'). Per-GH-node CDF
+        evaluation uses the source ρ from `_source_rho_std_gh` for consistency
+        with `_continuity_logp_gh`. Cost: 2·n_gh boundary bisections + 2·n_gh
+        flow CDF evals per event — roughly 2× the GH density itself.
+        """
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
+                          if self.scale_enabled
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
+        xi, logW = _gh_nodes(self.n_gh_nodes, m_obs.device, m_obs.dtype)
+        G = xi.shape[0]
+
+        mo = m_obs.unsqueeze(1)
+        pto = pt_obs.unsqueeze(1)
+        etao = eta_pm.unsqueeze(1)
+        phio = phi_pm.unsqueeze(1)
+        qo = q_pm.unsqueeze(1)
+        bpo = b_pm.unsqueeze(1).expand(B, G, b_pm.shape[-1])
+        tsp = theta_scale_pm.unsqueeze(1)
+        xig = xi.view(1, G)
+
+        def forward_at_eps(me):
+            """T(me; ξ) for each (event, GH node). me [B, G] → [B, G]."""
+            s_adv = self._continuity_response(me, mo, pto, etao, qo, tsp)
+            if self.smearing_enabled:
+                V = self._smear_mass_var(
+                    etao, phio, bpo, pto, me, mo).clamp_min(0.0)
+                return me + s_adv + V.sqrt() * xig
+            return me + s_adv
+
+        n_bisect = 24
+
+        @torch.no_grad()
+        def bisect(target_scalar: float):
+            lo = m_obs.new_full((B, G), float(self.m_lo))
+            hi = m_obs.new_full((B, G), float(self.m_hi))
+            target = m_obs.new_full((B, G), float(target_scalar))
+            for _ in range(n_bisect):
+                mid = 0.5 * (lo + hi)
+                t_mid = forward_at_eps(mid)
+                go_right = t_mid < target
+                lo = torch.where(go_right, mid, lo)
+                hi = torch.where(go_right, hi, mid)
+            return 0.5 * (lo + hi)
+
+        mp_lo = bisect(float(self.m_lo))                   # [B, G]
+        mp_hi = bisect(float(self.m_hi))                   # [B, G]
+
+        # Per-GH-node source ρ (same construction as _continuity_logp_gh).
+        mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
+        if self.scale_enabled or self.smearing_enabled:
+            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
+                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
+        log_F_lo = self._flow_log_cdf(
+            mp_lo.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
+        log_F_hi = self._flow_log_cdf(
+            mp_hi.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
+        # Per-node window mass × GH weights, then sum over nodes.
+        node_window = (log_F_hi.exp() - log_F_lo.exp()).clamp_min(0.0)  # [B, G]
+        W = logW.exp().view(1, G)                                       # [1, G]
+        Z = (W * node_window).sum(dim=1).clamp(min=1e-30)               # [B]
         return Z.log()
 
     def data_nll_continuity(
