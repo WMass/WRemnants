@@ -403,10 +403,14 @@ def evaluate_predictions(
     inject_smear_phys = getattr(loader, "inject_theta_smear", None)
     has_inj = inject_scale_phys is not None or inject_smear_phys is not None
     if has_inj:
-        raw_inj_scale, raw_inj_smear = _injected_raw_theta(
-            model, inject_scale_phys, inject_smear_phys)
-    else:
-        raw_inj_scale = raw_inj_smear = None
+        # Full per-η-bin PHYSICAL injection (0 for non-injected terms — the truth
+        # there is θ=0). Used to SET the model's effective per-muon θ for the
+        # 'flow at injected θ' curve (works for binned AND MLP).
+        n_eta = model.theta_scale.shape[0]
+        inj_scale_full = (np.asarray(inject_scale_phys, dtype=np.float64)
+                          if inject_scale_phys is not None else np.zeros((n_eta, 3)))
+        inj_smear_full = (np.asarray(inject_smear_phys, dtype=np.float64)
+                          if inject_smear_phys is not None else np.zeros((n_eta, 2)))
 
     total_events = 0
     bar = tqdm(loader, desc="eval", disable=not progress, unit="batch")
@@ -467,11 +471,14 @@ def evaluate_predictions(
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
                 # Closure target: signal density at the INJECTED θ values.
-                # Temporarily override the model's θ, evaluate the tilt density
-                # on the same grid, restore. The fitted curve should converge
-                # to this curve when the closure is good.
+                # Temporarily SET the model's effective per-muon θ to the
+                # injection, evaluate the tilt density, restore. Uses
+                # _set_theta_output so it works for the MLP too (the old
+                # _override_theta set only the binned tensors → no-op for
+                # --theta-mlp, leaving this curve meaningless). The fitted curve
+                # should converge to this when the closure is good.
                 if has_inj:
-                    with _override_theta(model, raw_inj_scale, raw_inj_smear):
+                    with _set_theta_output(model, inj_scale_full, inj_smear_full):
                         log_p_grid_mc_inj = _sig_grid(mc_idx)
                     out["pred_signal_mc_at_inj"].append(
                         log_p_grid_mc_inj.exp().cpu().numpy())
@@ -1194,11 +1201,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "diagnostic runs.")
     p.add_argument("--continuity-n-iter", type=int, default=2,
                    help="Fixed-point iterations for the #2 source solve.")
-    p.add_argument("--param-shift", type=float, default=1.0,
+    p.add_argument("--param-shift", type=float, default=3.0,
                    help="Representative shift (in units of each parameter's "
                    "reference scale: THETA_SCALE_REF for A/e/M, SMEAR_VAR_SCALE "
                    "for a/c) used for the parameter-sensitivity overlay curves. "
-                   "Default 1.0 → A±1e-4, e±1e-3, M±1e-5, a±1e-7, c±2e-5.")
+                   "Default 3.0 → A±3e-4, e±3e-3, M±3e-5, a±3e-7, c±6e-5 — large "
+                   "enough that the (otherwise sub-MeV) A/e/M peak shifts are "
+                   "visible. The reference scales already roughly equalise the "
+                   "inclusive m_ll effect across A/e/M (REF ratio ≈ k̄), so a "
+                   "single global factor keeps them comparable.")
     p.add_argument("--no-param-sensitivity", action="store_true",
                    help="Skip the parameter-sensitivity slice plots "
                    "(param_sensitivity_*). They re-iterate the loader and do "
@@ -1206,6 +1217,36 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "slowest diagnostic for the qop smear operator — pair with "
                    "--max-events for a quick look.")
     return p.parse_args(argv)
+
+
+@contextlib.contextmanager
+def _set_theta_output(model, scale_phys=None, smear_phys=None):
+    """Temporarily SET the model's per-muon parameter output to fixed per-η-bin
+    PHYSICAL values (masked to the fitted terms), for BOTH binned and MLP θ —
+    used for the 'flow at injected θ' closure-target curve. Replaces
+    ``_override_theta``, which sets the binned tensors and is a NO-OP under
+    ``--theta-mlp`` (so that overlay was previously meaningless for MLP fits).
+    ``scale_phys`` is [n_eta, 3] = (A, e, M); ``smear_phys`` is [n_eta, 2] =
+    (a, c). The smear is converted to the O(1) coefficient (÷ SMEAR_VAR_SCALE)
+    since ``_smear_ac_pm`` returns O(1) ac. The model's masks are applied so
+    non-fitted terms are exactly 0 (matching the fit's parameterisation)."""
+    dev = model.m_lo.device
+    orig_s, orig_c = model._scale_AeM_pm, model._smear_ac_pm
+    if scale_phys is not None:
+        S = torch.as_tensor(scale_phys, dtype=torch.float32, device=dev)  # [n_eta,3]
+        model._scale_AeM_pm = lambda e, p, b: S[b] * model.scale_param_mask
+    if smear_phys is not None:
+        sc = torch.tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
+                          dtype=torch.float32, device=dev)
+        C = torch.as_tensor(smear_phys, dtype=torch.float32, device=dev) / sc  # O(1)
+        model._smear_ac_pm = lambda e, p, b: C[b] * model.smear_param_mask
+    try:
+        yield
+    finally:
+        if scale_phys is not None:
+            del model.__dict__["_scale_AeM_pm"]
+        if smear_phys is not None:
+            del model.__dict__["_smear_ac_pm"]
 
 
 @contextlib.contextmanager
