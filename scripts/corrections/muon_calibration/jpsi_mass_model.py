@@ -1487,9 +1487,16 @@ class JpsiMassMixtureModel(nn.Module):
             return s_adv, V
 
         def _smear_disp(Vt):
-            """The √V·ε displacement per GH node; vanishes exactly if disabled."""
+            """The √V·ε displacement per GH node; vanishes exactly if disabled.
+
+            The +EPS inside the sqrt keeps the autograd gradient finite as V→0
+            (else d√V/dV = 1/(2√V)→∞ times ∂V/∂θ→0 gives 0·∞ = NaN, which
+            nan_to_num turns into log p=0 → a spurious UNIFORM density at c≈0,
+            which acts as a barrier blocking the fitted smear from reaching 0.
+            EPS=1e-12 → a mass-displacement floor of 1e-6 GeV, negligible vs the
+            physical √V ~ tens of MeV)."""
             if self.smearing_enabled:
-                return Vt.sqrt() * xig
+                return (Vt + 1e-12).sqrt() * xig
             return me_zero  # populated below before use
 
         # Pre-allocate the zero displacement (used only when smearing_enabled=False).
@@ -1931,12 +1938,14 @@ class JpsiMassMixtureModel(nn.Module):
         xig = xi.view(1, G)
 
         def forward_at_eps(me):
-            """T(me; ξ) for each (event, GH node). me [B, G] → [B, G]."""
+            """T(me; ξ) for each (event, GH node). me [B, G] → [B, G]. The +EPS
+            inside the sqrt matches the density's `_smear_disp` so the boundary
+            preimages are consistent with `_continuity_logp_gh`."""
             s_adv = self._continuity_response(me, mo, pto, etao, qo, tsp)
             if self.smearing_enabled:
                 V = self._smear_mass_var(
                     etao, phio, bpo, pto, me, mo).clamp_min(0.0)
-                return me + s_adv + V.sqrt() * xig
+                return me + s_adv + (V + 1e-12).sqrt() * xig
             return me + s_adv
 
         n_bisect = 24
