@@ -641,10 +641,10 @@ class JpsiMassMixtureModel(nn.Module):
         self.scale_enabled = bool(scale_enabled)
         self.qop_floor_frac = float(qop_floor_frac)
         self.smear_flow_steps = max(1, int(smear_flow_steps))
-        if smear_operator not in ("pf_ode", "gh_convolution"):
+        if smear_operator not in ("pf_ode", "gh_convolution", "gh_convolution_qop"):
             raise ValueError(
-                f"smear_operator must be 'pf_ode' or 'gh_convolution'; "
-                f"got {smear_operator!r}")
+                f"smear_operator must be 'pf_ode', 'gh_convolution', or "
+                f"'gh_convolution_qop'; got {smear_operator!r}")
         self.smear_operator = str(smear_operator)
         self.n_gh_nodes = max(2, int(n_gh_nodes))
         if jacobian_form not in ("softlog", "exp"):
@@ -1314,6 +1314,10 @@ class JpsiMassMixtureModel(nn.Module):
             return self._continuity_logp_gh(
                 m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm,
                 n_gh=self.n_gh_nodes, n_iter=n_iter)
+        if self.smear_operator == "gh_convolution_qop":
+            return self._continuity_logp_gh_qop(
+                m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm,
+                n_gh=self.n_gh_nodes, n_iter=n_iter)
         return self._continuity_logp_pf_ode(
             m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm, n_iter=n_iter)
 
@@ -1559,6 +1563,124 @@ class JpsiMassMixtureModel(nn.Module):
         idx = N_MUON_KIN - 1
         return (rho_src - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
 
+    # ------------------------------------------------------------------
+    # Exact per-muon qop-space smear operator (2D Gauss–Hermite)
+    # ------------------------------------------------------------------
+
+    def _gh_qop_forward(self, me, mo, pto, etao, phio, qo, bpo, tsp, eps):
+        """Forward source map ``x = T(m')`` for the qop-space operator at a 2D
+        GH node. ``me`` [B, G²] source mass; ``eps`` [..., 2] the per-muon unit
+        kicks (ξ₊, ξ₋). Scale is the mass-space advection ``s_adv`` (same as the
+        mass-space GH operator); the smear is the EXACT per-muon Gaussian qop
+        kick ``qop_μ → qop_μ + σ_qop,μ·ξ_μ`` recomputed into m_ll via
+        ``apply_smear_pt`` (qop floor included) + ``_event_mll`` — reproducing
+        the per-muon fold that generates the pseudo-data, including the
+        nonlinear (non-Gaussian) qop→m_ll map. ``σ_qop`` is evaluated at the
+        post-scale source pt ``pt_s = pt_obs·(m_scaled/m_obs)`` (same pt∝m
+        convention as ``_continuity_response``). Returns the mapped mass [B, G²]."""
+        s_adv = self._continuity_response(me, mo, pto, etao, qo, tsp)
+        m_scaled = me + s_adv
+        if not self.smearing_enabled:
+            return m_scaled
+        pt_s = pto * (m_scaled / mo).unsqueeze(-1)                       # [B,G²,2]
+        sig = self._qop_var_pm(etao, phio, bpo, pt_s).clamp_min(0.0).sqrt()
+        pt_k = self.apply_smear_pt(pt_s, etao, qo, sig, eps)             # [B,G²,2]
+        return _event_mll(pt_k, etao, phio)                             # [B,G²]
+
+    def _continuity_logp_gh_qop(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
+                                b_pm, n_gh: int = 8, n_iter: int = 2):
+        """``log p_θ(x|c)`` via the EXACT per-muon qop smear, as a 2-D
+        Gauss–Hermite quadrature over the two INDEPENDENT muon kicks (ξ₊, ξ₋):
+
+            ``p_θ(x|c) = E_{ε₊,ε₋}[ p_0(m'(ε₊,ε₋)|c_src) / |G'| ]``
+            ``       ≈ Σ_{i,j} W_i W_j · p_0(m'_{ij}|c_src,ij) / |G'_{ij}|``
+
+        Unlike ``gh_convolution`` (a single Gaussian convolution in MASS space,
+        i.e. the small-kick linearisation), this kicks each muon's qop and
+        recomputes m_ll, so it reproduces the true skewed/heavy-tailed mass
+        smearing at large σ_qop/|qop| (forward |η|) where the mass-space
+        Gaussian under-represents the tails. The two kicks cannot be factorised
+        into independent 1-D integrals — p_0 is a nonlinear function of the
+        combined shift — so this is a genuine 2-D quadrature (n_gh² nodes; the
+        weights and the per-muon Jacobian factorise, only p_0 couples). Cost:
+        ``n_gh²`` per-node p_0 evals + autograd through the source map; each
+        per-muon kick is a single 1-D Gaussian, so a modest ``n_gh`` (≈5–6)
+        suffices. ρ in the conditioning is propagated per node by un-applying
+        the per-muon kick + the scale (``_source_rho_std_gh_qop``)."""
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
+                          if self.scale_enabled
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
+        xi, logW = _gh_nodes(n_gh, m_obs.device, m_obs.dtype)            # [G],[G]
+        G = xi.shape[0]
+        G2 = G * G
+        xi_p = xi.view(G, 1).expand(G, G).reshape(G2)                   # ξ₊
+        xi_m = xi.view(1, G).expand(G, G).reshape(G2)                   # ξ₋
+        logW2 = (logW.view(G, 1) + logW.view(1, G)).reshape(G2)        # [G²]
+        eps = torch.stack([xi_p, xi_m], dim=-1).view(1, G2, 2)         # [1,G²,2]
+
+        mo = m_obs.unsqueeze(1)                                         # [B,1]
+        pto = pt_obs.unsqueeze(1)                                       # [B,1,2]
+        etao = eta_pm.unsqueeze(1)                                      # [B,1,2]
+        phio = phi_pm.unsqueeze(1)                                      # [B,1,2]
+        qo = q_pm.unsqueeze(1)                                          # [B,1,2]
+        bpo = b_pm.unsqueeze(1).expand(B, G2, b_pm.shape[-1])          # [B,G²,2]
+        tsp = theta_scale_pm.unsqueeze(1)                              # [B,1,6]
+
+        def fwd(me):
+            return self._gh_qop_forward(me, mo, pto, etao, phio, qo, bpo, tsp, eps)
+
+        # Fixed-point source solve  m'_{ij} = m_obs − (T(m'_{ij}) − m'_{ij}).
+        mp = mo.expand(B, G2).clone()
+        for _ in range(n_iter):
+            mp = mo - (fwd(mp) - mp)
+        # Source-map Jacobian G' = ∂T/∂m' by autograd at the converged source.
+        if mp.requires_grad:
+            Gp = torch.autograd.grad(fwd(mp).sum(), mp, create_graph=True)[0]
+        else:
+            with torch.enable_grad():
+                mpj = mp.detach().requires_grad_(True)
+                Gp = torch.autograd.grad(fwd(mpj).sum(), mpj)[0].detach()
+        # Frozen-flow density at the per-node source mass; ρ propagated per node.
+        mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
+        if self.scale_enabled or self.smearing_enabled:
+            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
+                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
+        logp0 = self.log_p_nominal(
+            mp.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        log_terms = logW2.view(1, G2) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
+        log_p_theta = torch.logsumexp(log_terms, dim=1)
+        return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
+
+    def _source_rho_std_gh_qop(self, m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps):
+        """Standardised source (nominal) ρ per 2-D GH node ``[B, G²]`` for the
+        ``gh_convolution_qop`` operator. Un-applies the per-muon smear kick
+        (``qop → qop − σ_qop·ξ``, σ at the observed pt) and the deterministic
+        scale (obs → truth), then ρ of the resulting nominal pt. η, φ are
+        transform-invariant. Mirrors ``_source_rho_std_gh`` but with the actual
+        per-muon kicks (not the conditional-mean shift)."""
+        B = m_obs.shape[0]
+        G2 = eps.shape[1]
+        sinth = _sintheta_from_eta(eta_pm)                              # [B,2]
+        qop_obs = q_pm * sinth / pt_obs                                 # [B,2]
+        sig = self._qop_var_pm(eta_pm, phi_pm, b_pm, pt_obs).clamp_min(0.0).sqrt()
+        qop_un = qop_obs.unsqueeze(1) - sig.unsqueeze(1) * eps          # [B,G²,2]
+        pt_un = self._qop_new_to_pt(
+            qop_obs.unsqueeze(1).expand(B, G2, 2), qop_un,
+            q_pm.unsqueeze(1), sinth.unsqueeze(1))                      # [B,G²,2]
+        if self.scale_enabled:
+            AeM = self._scale_AeM_pm(
+                eta_pm.unsqueeze(1), phi_pm.unsqueeze(1), b_pm.unsqueeze(1))  # [B,1,2,3]
+            dqop = self._delta_qop_analytic(
+                AeM, pt_un, eta_pm.unsqueeze(1), q_pm.unsqueeze(1))     # [B,G²,2]
+            pt_nom = self._apply_scale_pt(
+                pt_un, eta_pm.unsqueeze(1), q_pm.unsqueeze(1), dqop, sign=-1.0)
+        else:
+            pt_nom = pt_un
+        rho = (pt_nom[..., 0] - pt_nom[..., 1]) / (pt_nom[..., 0] + pt_nom[..., 1])
+        idx = N_MUON_KIN - 1
+        return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
+
     def _log_jacobian_exp(self, mp, mk_src, s_adv_of, eta_pm, phi_pm, b_pm,
                           pt_obs, m_obs):
         """Frozen-score continuous-flow log-Jacobian:
@@ -1661,6 +1783,9 @@ class JpsiMassMixtureModel(nn.Module):
             return m_obs.new_zeros(m_obs.shape)
         if self.smear_operator == "gh_convolution":
             return self._norm_correction_log_Z_gh(
+                m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+        if self.smear_operator == "gh_convolution_qop":
+            return self._norm_correction_log_Z_gh_qop(
                 m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm, b_pm)
 
         B = m_obs.shape[0]
@@ -1809,6 +1934,69 @@ class JpsiMassMixtureModel(nn.Module):
         # Per-node window mass × GH weights, then sum over nodes.
         node_window = (log_F_hi.exp() - log_F_lo.exp()).clamp_min(0.0)  # [B, G]
         W = logW.exp().view(1, G)                                       # [1, G]
+        Z = (W * node_window).sum(dim=1).clamp(min=1e-30)               # [B]
+        return Z.log()
+
+    def _norm_correction_log_Z_gh_qop(self, m_obs, mk, pt_obs, eta_pm, phi_pm,
+                                       q_pm, b_pm) -> torch.Tensor:
+        """``log Z(θ;c)`` for ``smear_operator='gh_convolution_qop'`` — the 2-D
+        GH analogue of ``_norm_correction_log_Z_gh``:
+
+            ``Z = Σ_{i,j} W_i W_j [F_0(m'_hi(ξ_i,ξ_j)) − F_0(m'_lo(ξ_i,ξ_j))]``
+
+        where each boundary preimage ``m'_{lo,hi}(ξ_i,ξ_j)`` is found by
+        BISECTION on [m_lo, m_hi] of the qop forward map (monotonic in m'), and
+        the per-node source ρ is from ``_source_rho_std_gh_qop`` (consistent
+        with ``_continuity_logp_gh_qop``). Cost: 2·n_gh² boundary bisections +
+        2·n_gh² flow-CDF evals per event."""
+        B = m_obs.shape[0]
+        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
+                          if self.scale_enabled
+                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
+        xi, logW = _gh_nodes(self.n_gh_nodes, m_obs.device, m_obs.dtype)
+        G = xi.shape[0]
+        G2 = G * G
+        xi_p = xi.view(G, 1).expand(G, G).reshape(G2)
+        xi_m = xi.view(1, G).expand(G, G).reshape(G2)
+        logW2 = (logW.view(G, 1) + logW.view(1, G)).reshape(G2)
+        eps = torch.stack([xi_p, xi_m], dim=-1).view(1, G2, 2)
+        mo = m_obs.unsqueeze(1)
+        pto = pt_obs.unsqueeze(1)
+        etao = eta_pm.unsqueeze(1)
+        phio = phi_pm.unsqueeze(1)
+        qo = q_pm.unsqueeze(1)
+        bpo = b_pm.unsqueeze(1).expand(B, G2, b_pm.shape[-1])
+        tsp = theta_scale_pm.unsqueeze(1)
+
+        def fwd(me):
+            return self._gh_qop_forward(me, mo, pto, etao, phio, qo, bpo, tsp, eps)
+
+        n_bisect = 24
+
+        @torch.no_grad()
+        def bisect(target_scalar: float):
+            lo = m_obs.new_full((B, G2), float(self.m_lo))
+            hi = m_obs.new_full((B, G2), float(self.m_hi))
+            target = m_obs.new_full((B, G2), float(target_scalar))
+            for _ in range(n_bisect):
+                mid = 0.5 * (lo + hi)
+                go_right = fwd(mid) < target
+                lo = torch.where(go_right, mid, lo)
+                hi = torch.where(go_right, hi, mid)
+            return 0.5 * (lo + hi)
+
+        mp_lo = bisect(float(self.m_lo))                   # [B, G²]
+        mp_hi = bisect(float(self.m_hi))                   # [B, G²]
+        mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
+        if self.scale_enabled or self.smearing_enabled:
+            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
+                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
+        log_F_lo = self._flow_log_cdf(
+            mp_lo.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        log_F_hi = self._flow_log_cdf(
+            mp_hi.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        node_window = (log_F_hi.exp() - log_F_lo.exp()).clamp_min(0.0)  # [B, G²]
+        W = logW2.exp().view(1, G2)                                     # [1, G²]
         Z = (W * node_window).sum(dim=1).clamp(min=1e-30)               # [B]
         return Z.log()
 

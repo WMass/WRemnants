@@ -1780,17 +1780,24 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "gh_convolution.",
     )
     p.add_argument(
-        "--smear-operator", choices=("pf_ode", "gh_convolution"), default="pf_ode",
+        "--smear-operator",
+        choices=("pf_ode", "gh_convolution", "gh_convolution_qop"), default="pf_ode",
         help="Smear operator for the continuity density. 'pf_ode' (default): "
         "deterministic probability-flow ODE — fast but over-broadens at large "
         "V/σ² (the model density is wider than the actual Gaussian convolution "
         "the pseudo-data uses, biasing the fit to under-recover θ_smear at "
-        "forward |η|). 'gh_convolution': EXACT stochastic Gaussian convolution "
-        "via Gauss-Hermite quadrature (--n-gh-nodes nodes). Same operator as "
-        "the per-muon qop fold that generates pseudo-data, so the closure-target "
-        "curve overlaps the pseudo-data at any V (no operator-level residual). "
-        "Cost: ~n_gh × the bare density. Requires V ≥ 0 (clamps internally; "
-        "pair with --smear-param-form softplus for the cleanest guarantee).",
+        "forward |η|). 'gh_convolution': stochastic Gaussian convolution in MASS "
+        "space via Gauss-Hermite quadrature (--n-gh-nodes nodes) — the small-kick "
+        "linearisation; accurate at small σ_qop/|qop| but under-represents the "
+        "skewed/heavy mass tails at forward |η| + large smearing (so it still "
+        "under-recovers c there). 'gh_convolution_qop': EXACT per-muon qop smear "
+        "as a 2-D GH over the two independent muon kicks — kicks each qop and "
+        "recomputes m_ll, reproducing the true non-Gaussian mass smearing the "
+        "pseudo-data fold uses at ALL V/|η| (incl. the qop floor). Cost: n_gh² "
+        "per-node evals (each muon kick is one 1-D Gaussian, so n_gh≈5–6 is "
+        "enough → 25–36 nodes). Propagates the smear to the conditioning ρ "
+        "per node. Requires V ≥ 0 (clamps internally; pair with "
+        "--smear-param-form softplus for the cleanest guarantee).",
     )
     p.add_argument(
         "--n-gh-nodes", type=int, default=8,
