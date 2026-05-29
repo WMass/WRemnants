@@ -361,6 +361,44 @@ def _event_mll_np(pt_pm, eta_pm, phi_pm):
     return np.sqrt(np.clip(m2, 1e-12, None))
 
 
+def _inject_pt_np(pt_pm, eta_pm, q_pm, b_pm, scale_inj, smear_inj, rng,
+                  qop_floor_frac: float = 0.25):
+    """Apply the injected θ_scale (deterministic δqop) THEN the θ_smear (per-muon
+    Gaussian qop kick) to the per-muon pt, entirely in qop/pt space, with the
+    sign-preserving qop floor at each step — mirroring the model's forward
+    operators (``_delta_qop_analytic`` + ``_apply_scale_pt`` for the scale,
+    ``apply_smear_pt`` for the smear). Returns the injected pt ``[N, 2]``.
+
+    Working in pt space (rather than the old additive m_ll shifts) lets the
+    caller propagate a fully SELF-CONSISTENT pseudo-data event — smeared pt,
+    ``mll = _event_mll(pt)``, and ρ(pt) — so every downstream consumer (both
+    smear operators, the per-muon fold, the diagnostics) sees coherent observed
+    quantities with no rescaling, exactly as for real data."""
+    sinth = 1.0 / np.cosh(eta_pm)                          # [N,2]
+    pt_cur = pt_pm.astype(np.float64, copy=True)
+
+    def _floor_to_pt(qop_new, qop_ref):
+        if qop_floor_frac > 0.0:
+            s = np.sign(qop_ref)
+            qop_new = s * np.maximum(qop_new * s, qop_floor_frac * np.abs(qop_ref))
+        return q_pm * sinth / qop_new
+
+    if scale_inj is not None:
+        k = 1.0 / pt_cur
+        A = scale_inj[b_pm, 0]; e = scale_inj[b_pm, 1]; M = scale_inj[b_pm, 2]
+        dqop = q_pm * sinth * ((A - e * k) * k + q_pm * M)
+        qop_ref = q_pm * sinth / pt_cur
+        pt_cur = _floor_to_pt(qop_ref + dqop, qop_ref)
+    if smear_inj is not None:
+        k2 = (1.0 / pt_cur) ** 2
+        vq = smear_inj[b_pm, 0] + smear_inj[b_pm, 1] * k2   # σ²_qop = a + c·k²
+        sig = np.sqrt(np.clip(vq, 0.0, None))
+        eps = rng.standard_normal(pt_pm.shape)
+        qop_ref = q_pm * sinth / pt_cur
+        pt_cur = _floor_to_pt(qop_ref + sig * eps, qop_ref)
+    return pt_cur.astype(np.float32)
+
+
 def _smear_inject_dmll_np(mll, pt_pm, eta_pm, phi_pm, q_pm, b_pm, smear_inj, rng,
                           qop_floor_frac: float = 0.25):
     """Δm_ll ``[N]`` from injecting a per-muon qop Gaussian smear at the injected
@@ -418,19 +456,25 @@ def _batch_tensors(
     is_data_mask = (cols["is_data"].astype(np.uint8) != 0)
 
     mll = cols["mll"].astype(np.float32)
-    if inject_theta_scale is not None:
-        s = _scale_advection_np(mll, pt_pm, q_pm, b_pm, inject_theta_scale)
-        mll = mll + np.where(is_data_mask, 0.0, s).astype(np.float32)   # MC rows only
-        # Inject the matching ρ shift: recompute ρ from the scale-injected pt so
-        # the (pseudo-)data conditioning is consistent with the mass injection.
-        rho_inj = _scale_inject_rho_np(pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale)
-        muon_kin[:, -1] = np.where(is_data_mask, muon_kin[:, -1], rho_inj)
-    if inject_theta_smear is not None:
-        # Per-muon qop Gaussian smear (same fold path as the validation plots),
-        # MC rows only. ρ is left untouched — the smear is a pure mass operation.
-        dms = _smear_inject_dmll_np(
-            mll, pt_pm, eta_pm, phi_pm, q_pm, b_pm, inject_theta_smear, rng)
-        mll = mll + np.where(is_data_mask, 0.0, dms).astype(np.float32)
+    if inject_theta_scale is not None or inject_theta_smear is not None:
+        # Validation closure: apply the injected scale + smear to the per-muon pt
+        # in qop space (MC rows only) and propagate FULLY CONSISTENT observed
+        # quantities — smeared pt, mll = _event_mll(pt), ρ = ρ(pt) — so the
+        # pseudo-data is coherent exactly like real data and every downstream
+        # consumer (both smear operators, the fold, the diagnostics) uses it
+        # directly with no rescaling. (Previously the smear was injected as an
+        # additive m_ll shift with pt left at its nominal value, leaving mll and
+        # pt_pm inconsistent; the qop operator, which reconstructs the mass from
+        # pt, then saw the nominal mass and missed the injected smear.)
+        mc = ~is_data_mask
+        pt_inj = _inject_pt_np(
+            pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale, inject_theta_smear, rng)
+        mll_inj = _event_mll_np(pt_inj, eta_pm, phi_pm).astype(np.float32)
+        rho_inj = ((pt_inj[:, 0] - pt_inj[:, 1]) /
+                   (pt_inj[:, 0] + pt_inj[:, 1])).astype(np.float32)
+        mll = np.where(mc, mll_inj, mll).astype(np.float32)
+        pt_pm = np.where(mc[:, None], pt_inj, pt_pm).astype(np.float32)
+        muon_kin[:, -1] = np.where(mc, rho_inj, muon_kin[:, -1])
     mll_std = ((mll - stats.mll_mean) / stats.mll_std).astype(np.float32)
 
     y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)

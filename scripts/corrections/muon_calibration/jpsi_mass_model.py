@@ -1694,6 +1694,10 @@ class JpsiMassMixtureModel(nn.Module):
         phio = phi_pm.unsqueeze(1)                                      # [B,1,2]
         qo = q_pm.unsqueeze(1)                                          # [B,1,2]
         bpo = b_pm.unsqueeze(1)                                         # [B,1,2]
+        # The observed config is self-consistent (mll = _event_mll(pt_obs)) —
+        # the loader propagates the smeared pt + recomputed mll + ρ for the
+        # validation pseudo-data, exactly as for real data — so the density is
+        # evaluated at _event_mll(pt_obs) = m_obs directly, no rescaling needed.
 
         # Per-node mass-scale leaf λ (=1) for the d m_t / d m_obs Jacobian:
         # perturbing m_obs scales the observed config along pt∝m (fixed obs ρ).
@@ -2011,6 +2015,9 @@ class JpsiMassMixtureModel(nn.Module):
         phio = phi_pm.unsqueeze(1)
         qo = q_pm.unsqueeze(1)
         bpo = b_pm.unsqueeze(1)
+        # The observed config is self-consistent (mll = _event_mll(pt_obs)), so
+        # _event_mll(pt_obs) = m_obs; scale pt_obs to the window boundaries
+        # directly (pt∝m at fixed observed ρ). No rescaling to m_obs needed.
 
         # Per-node nominal ρ at the event mass (conditioning for the CDF).
         _, rho_std = self._gh_qop_unsmear(pto, etao, phio, qo, bpo, eps)
