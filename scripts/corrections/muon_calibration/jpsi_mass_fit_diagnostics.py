@@ -7,9 +7,11 @@ Inputs:
   --shards     <run>/shards/              per-bucket Arrow files
 
 Outputs (under --output, default ``<checkpoint_dir>/diagnostics/``):
-  1. mll_closure_inclusive.png  + mll_closure_eta{0..3}.png
+  1. mll_closure_{eta,rho,cosalpha}.png  (+ mc_closure_{eta,rho,cosalpha}.png)
      m_ll histograms (data + MC, weighted) with overlaid model curves
-     (signal + Bernstein backgrounds + total mixture) per |η_+| slice.
+     (signal + Bernstein backgrounds + total mixture). One panel figure per
+     slice dimension — columns are the slices: inclusive + |η_+| (eta), and
+     the conditional ρ (pt asymmetry) and cos α (opening angle) tertiles.
   2. theta_scale_vs_eta.png
      A, e, M per η-bin with ±1σ error bars (from --fisher: fisher_info.pt or
      bootstrap_cov.pt).
@@ -384,6 +386,12 @@ def evaluate_predictions(
         "pred_signal_data": [],
         "mll_mc_fold": [], "w_mc": [], "eta_mc": [],
         "pred_signal_mc": [],
+        # Conditional slice variables (besides |η₊|) for the m_ll closure plots:
+        # ρ (pt asymmetry, = muon_kin[-1]) and cos α (3-D opening angle). Both
+        # are functions of the conditioning, computed exactly as in
+        # plot_param_sensitivity, per data + MC event.
+        "rho_data": [], "cosalpha_data": [],
+        "rho_mc": [], "cosalpha_mc": [],
         # continuity only: the nominal (θ=0, unshifted/unsmeared) MC + flow,
         # to overlay the stage-1 closure alongside the folded stage-2 one.
         "mll_mc_nominal": [], "pred_nominal_mc": [],
@@ -446,6 +454,11 @@ def evaluate_predictions(
                 out["mll_data"].append(batch["mll"][data_idx].cpu().numpy())
                 out["w_data"].append(batch["w"][data_idx].cpu().numpy())
                 out["eta_data"].append(batch["eta_pm"][data_idx, 0].cpu().numpy())
+                _rho_d, _cosa_d = _rho_cosalpha_np(
+                    batch["pt_pm"][data_idx], batch["eta_pm"][data_idx],
+                    batch["phi_pm"][data_idx])
+                out["rho_data"].append(_rho_d)
+                out["cosalpha_data"].append(_cosa_d)
                 out["f_data"].append(f.cpu().numpy())
                 out["pred_signal_data"].append(log_p_grid.exp().cpu().numpy())
 
@@ -469,6 +482,13 @@ def evaluate_predictions(
                 out["mll_mc_fold"].append(mll_fold.cpu().numpy())
                 out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
+                # Slice ρ/cos α by the conditioning the model sees (batch pt_pm
+                # = injected pt in validation), matching the data side so a given
+                # bin compares the same physical region. cos α is pt-independent.
+                _rho_m, _cosa_m = _rho_cosalpha_np(
+                    batch["pt_pm"][mc_idx], etam, phim)
+                out["rho_mc"].append(_rho_m)
+                out["cosalpha_mc"].append(_cosa_m)
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
                 # Closure target: signal density at the INJECTED θ values.
                 # Temporarily SET the model's effective per-muon θ to the
@@ -628,6 +648,20 @@ def _chi2_compat_zero(theta: np.ndarray, cov: np.ndarray):
     return chi2, dof, p
 
 
+def _rho_cosalpha_np(pt_pm, eta_pm, phi_pm):
+    """(ρ, cos α) per event as numpy, from the per-muon pt/η/φ — the same
+    conditional quantities used to slice the param-sensitivity plots. ρ is the
+    pt asymmetry (= muon_kin[-1]); cos α is the 3-D opening angle (pt cancels):
+        cos α = (cos Δφ + sinh η₊ sinh η₋) / (cosh η₊ cosh η₋)."""
+    pt = pt_pm.cpu().numpy()
+    e = eta_pm.cpu().numpy()
+    p = phi_pm.cpu().numpy()
+    rho = (pt[:, 0] - pt[:, 1]) / (pt[:, 0] + pt[:, 1])
+    num = np.cos(p[:, 0] - p[:, 1]) + np.sinh(e[:, 0]) * np.sinh(e[:, 1])
+    cosa = num / (np.cosh(e[:, 0]) * np.cosh(e[:, 1]))
+    return rho, cosa
+
+
 def _select_slice(eta_abs: np.ndarray, slice_def):
     """Boolean mask for a |η| slice (lo, hi) or None for inclusive."""
     if slice_def is None:
@@ -636,140 +670,156 @@ def _select_slice(eta_abs: np.ndarray, slice_def):
     return (eta_abs >= lo) & (eta_abs < hi)
 
 
+def _closure_slice_dims(evals, eta_slice_edges):
+    """Slice dimensions shared by the m_ll- and MC-closure PANEL plots. Returns
+    a list of ``(prefix, label, fmt, data_vals, mc_vals, columns)`` where
+    ``columns`` is the per-panel ``[(tag, slice_def), ...]`` of that figure:
+      • ``eta``      — |η₊| with the passed fixed edges, plus a leading
+                       inclusive panel (slice_def=None).
+      • ``rho``      — ρ (pt asymmetry) adaptive tertiles.
+      • ``cosalpha`` — cos α (3-D opening angle) adaptive tertiles.
+    ρ / cos α are the conditional discriminants used by plot_param_sensitivity
+    (ρ → M; cos α → A vs e and a vs c). Each figure is one slice dimension; the
+    panels are its slices."""
+    def _tertiles(d, mc):
+        v = d if (d is not None and d.size) else mc
+        if v is None or v.size == 0:
+            return None
+        v = v[np.isfinite(v)]
+        if v.size == 0:
+            return None
+        e = np.unique(np.percentile(v, [0.0, 100.0 / 3.0, 200.0 / 3.0, 100.0]))
+        return e if e.size >= 2 else None
+
+    abseta_d = np.abs(evals["eta_data"])
+    abseta_m = np.abs(evals["eta_mc"])
+    eta_cols = [("inclusive", None)] + [
+        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
+        for i in range(len(eta_slice_edges) - 1)
+    ]
+    dims = [("eta", "|η₊|", ".1f", abseta_d, abseta_m, eta_cols)]
+    for key, prefix, label, fmt in (
+        ("rho", "rho", "ρ", ".2f"),
+        ("cosalpha", "cosalpha", "cos α", ".3f"),
+    ):
+        dv = evals.get(f"{key}_data", np.zeros((0,)))
+        mv = evals.get(f"{key}_mc", np.zeros((0,)))
+        edges = _tertiles(dv, mv)
+        if edges is None:
+            continue
+        cols = [(f"{prefix}{i}", (edges[i], edges[i + 1]))
+                for i in range(len(edges) - 1)]
+        dims.append((prefix, label, fmt, dv, mv, cols))
+    return dims
+
+
 def plot_mll_closure(
     evals, m_centers_np, eta_slice_edges, m_lo: float, m_hi: float,
     output_dir: str,
 ):
-    """Plot data + forward-folded-MC histograms with overlaid model curves,
-    per |η_+| slice. The model signal curve is the flow density evaluated on
-    a per-event × per-bin grid at the fitted θ_scale + θ_smear conditioning;
-    the green MC curve is the MC forward-folded (scale+smear) at the same
-    fitted nuisances — the two are independent estimates of the signal."""
+    """Plot data + forward-folded-MC histograms with overlaid model curves.
+    One PANEL FIGURE per slice dimension (columns = slices): inclusive + |η_+|
+    (fixed edges), ρ (pt asymmetry) tertiles, and cos α (3-D opening angle)
+    tertiles — the conditional discriminants of plot_param_sensitivity (ρ → M;
+    cos α → A vs e and a vs c). The model signal curve is the flow density
+    evaluated on a per-event × per-bin grid at the fitted θ_scale + θ_smear; the
+    green MC curve is the MC forward-folded (scale+smear) at the same fitted
+    nuisances — independent estimates of the signal."""
     m_edges = np.concatenate([
         [m_centers_np[0] - evals["bin_width"] / 2],
         m_centers_np[:-1] + evals["bin_width"] / 2,
         [m_centers_np[-1] + evals["bin_width"] / 2],
     ])
-    # Validation runs fit θ on simulation as pseudo-data — label the "data"
-    # points accordingly.
+    # Validation runs fit θ on simulation as pseudo-data — label accordingly.
     pseudo = bool(evals.get("mc_as_data", False))
     data_label = "MC (pseudo-data)" if pseudo else "data"
+    cont = bool(evals.get("continuity", False))
 
-    slices = [("inclusive", None)] + [
-        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
-        for i in range(len(eta_slice_edges) - 1)
-    ]
-
-    for tag, slice_def in slices:
-        data_mask = (
-            _select_slice(np.abs(evals["eta_data"]), slice_def)
-            if evals["eta_data"].size else np.zeros((0,), bool)
-        )
-        mc_mask = (
-            _select_slice(np.abs(evals["eta_mc"]), slice_def)
-            if evals["eta_mc"].size else np.zeros((0,), bool)
-        )
-        if data_mask.sum() == 0 and mc_mask.sum() == 0:
-            continue
-
-        fig, (ax, axr) = plt.subplots(
-            2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
-            figsize=(8, 6),
-        )
-
+    def _draw_panel(ax, axr, data_mask, mc_mask):
+        """Draw one slice into (main, ratio) axes; return (ymax, has_curves)."""
         # Data hist.
         if data_mask.any():
             data_hist, _ = np.histogram(
                 evals["mll_data"][data_mask], bins=m_edges,
-                weights=evals["w_data"][data_mask],
-            )
-            ax.errorbar(
-                m_centers_np, data_hist, yerr=np.sqrt(np.abs(data_hist)),
-                fmt="o", color="k", markersize=3, label=data_label, zorder=3,
-            )
+                weights=evals["w_data"][data_mask])
+            ax.errorbar(m_centers_np, data_hist, yerr=np.sqrt(np.abs(data_hist)),
+                        fmt="o", color="k", markersize=3, label=data_label, zorder=3)
         else:
             data_hist = np.zeros(m_centers_np.shape[0])
-
-        # MC histogram forward-folded at the fitted nuisances (scale then
-        # smear), scaled so its integral matches the data's expected signal
-        # weight ``Σ w_data · f_s(y_data)`` within this slice. With that
-        # normalisation the curve sits on the same scale as the data
-        # points + the model signal prediction (and coincides with the
-        # latter by construction — useful as a visual consistency check).
+        # Forward-folded MC, scaled to the data signal weight in the slice.
         if mc_mask.any():
             mc_hist_raw, _ = np.histogram(
                 evals["mll_mc_fold"][mc_mask], bins=m_edges,
-                weights=evals["w_mc"][mc_mask],
-            )
+                weights=evals["w_mc"][mc_mask])
             w_mc_sum = float(evals["w_mc"][mc_mask].sum())
             scale = 0.0
             if data_mask.any() and w_mc_sum > 0:
                 w_d = evals["w_data"][data_mask]
                 f_d = evals["f_data"][data_mask]
-                total_signal_w = float((w_d * f_d[:, 2]).sum())
-                scale = total_signal_w / w_mc_sum
+                scale = float((w_d * f_d[:, 2]).sum()) / w_mc_sum
             mc_hist = mc_hist_raw * scale
-            cont = bool(evals.get("continuity", False))
-            mc_label = (
-                "MC (directly shifted+smeared, scaled to data signal weight)"
-                if cont else
-                "MC (scale+smear folded, scaled to data signal weight)")
-            ax.step(
-                m_edges[:-1], mc_hist, where="post", color="C2", lw=1.2,
-                label=mc_label,
-            )
+            mc_label = ("MC (shifted+smeared, scaled to signal wt)" if cont
+                        else "MC (scale+smear folded, scaled to signal wt)")
+            ax.step(m_edges[:-1], mc_hist, where="post", color="C2", lw=1.2,
+                    label=mc_label)
         else:
             mc_hist = np.zeros(m_centers_np.shape[0])
-
         # Model components — analytic bkg + grid-eval signal (tilt / flow).
         signal, bkg0, bkg1 = _model_pred_histograms(
-            evals, m_edges, m_lo, m_hi, data_mask,
-        )
+            evals, m_edges, m_lo, m_hi, data_mask)
         total = signal + bkg0 + bkg1
-        cont = bool(evals.get("continuity", False))
         sig_label = ("model signal (tilt p₀·e^δ at fitted θ)" if cont
                      else "model signal (flow at fitted scale+smear)")
         if total.sum() > 0:
             ax.plot(m_centers_np, total, color="C0", lw=1.5, label="model total")
             ax.plot(m_centers_np, signal, color="C1", lw=1.0, ls="--",
                     label=sig_label)
-            ax.fill_between(
-                m_centers_np, 0, bkg0 + bkg1, alpha=0.3, color="C3",
-                label="model bkg (Bernstein)",
-            )
-
+            ax.fill_between(m_centers_np, 0, bkg0 + bkg1, alpha=0.3, color="C3",
+                            label="model bkg (Bernstein)")
             with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = data_hist / np.where(total > 0, total, np.nan)
-                ratio_err = np.sqrt(np.abs(data_hist)) / np.where(
-                    total > 0, total, np.nan
-                )
-            axr.errorbar(
-                m_centers_np, ratio, yerr=ratio_err, fmt="o",
-                color="k", markersize=3,
-            )
-            axr.axhline(1.0, color="C0", lw=1)
+                denom = np.where(total > 0, total, np.nan)
+                ratio = data_hist / denom
+                ratio_err = np.sqrt(np.abs(data_hist)) / denom
+            axr.errorbar(m_centers_np, ratio, yerr=ratio_err, fmt="o",
+                         color="k", markersize=3)
+        axr.axhline(1.0, color="C0", lw=1)
+        ymax = max(float((data_hist + np.sqrt(np.abs(data_hist))).max()),
+                   float(mc_hist.max()), float(total.max()))
+        return ymax, total.sum() > 0
 
-        ax.set_ylabel("events / bin (weighted)")
-        ax.set_title(
-            f"m_ll closure{' (MC pseudo-data)' if pseudo else ''} — {tag}"
-            + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]"
-               if slice_def else "")
-        )
-        # Headroom so the (5-entry) legend sits above the curves, not on them.
-        ymax = max(
-            float((data_hist + np.sqrt(np.abs(data_hist))).max()),
-            float(mc_hist.max()),
-            float(total.max()),
-        )
-        if ymax > 0:
-            ax.set_ylim(0, ymax * 1.45)
-        ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
-        axr.set_xlabel("m_ll [GeV]")
-        axr.set_ylabel(f"{'pseudo-data' if pseudo else 'data'} / model")
-        axr.set_ylim(0.6, 1.4)
-
-        fig.tight_layout()
-        for p in _save_fig(fig, output_dir, f"mll_closure_{tag}"):
+    for prefix, label, fmt, dv, mv, cols in _closure_slice_dims(
+            evals, eta_slice_edges):
+        ncol = len(cols)
+        fig, axes = plt.subplots(
+            2, ncol, figsize=(max(6.0, 4.3 * ncol), 6.2), squeeze=False,
+            sharex="col", gridspec_kw={"height_ratios": [3, 1]})
+        leg_ax = None
+        for ci, (tag, slice_def) in enumerate(cols):
+            ax, axr = axes[0, ci], axes[1, ci]
+            data_mask = _select_slice(dv, slice_def) if dv.size else np.zeros((0,), bool)
+            mc_mask = _select_slice(mv, slice_def) if mv.size else np.zeros((0,), bool)
+            if data_mask.sum() == 0 and mc_mask.sum() == 0:
+                ax.set_visible(False); axr.set_visible(False); continue
+            ymax, ok = _draw_panel(ax, axr, data_mask, mc_mask)
+            if ok and leg_ax is None:
+                leg_ax = ax
+            ttl = ("inclusive" if slice_def is None
+                   else f"{label} ∈ [{slice_def[0]:{fmt}}, {slice_def[1]:{fmt}}]")
+            ax.set_title(ttl, fontsize=9)
+            if ymax > 0:
+                ax.set_ylim(0, ymax * 1.25)
+            if ci == 0:
+                ax.set_ylabel("events / bin (weighted)")
+                axr.set_ylabel(f"{'pseudo-data' if pseudo else 'data'} / model")
+            axr.set_xlabel("m_ll [GeV]"); axr.set_ylim(0.6, 1.4)
+        if leg_ax is not None:
+            h, l = leg_ax.get_legend_handles_labels()
+            fig.legend(h, l, loc="upper center", bbox_to_anchor=(0.5, 0.945),
+                       ncol=len(l), fontsize=8, framealpha=0.9)
+        fig.suptitle(f"m_ll closure{' (MC pseudo-data)' if pseudo else ''} "
+                     f"— slices of {label}", y=0.998)
+        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        for p in _save_fig(fig, output_dir, f"mll_closure_{prefix}"):
             print(f"  wrote {p}")
 
 
@@ -926,7 +976,9 @@ def plot_mc_closure(
     evals, m_centers_np, eta_slice_edges, output_dir: str,
 ):
     """MC closure: forward-folded-MC histogram (points) vs flow-density
-    curve (line), both at the fitted scale + smearing.
+    curve (line), both at the fitted scale + smearing. One PANEL FIGURE per
+    slice dimension (columns = slices): inclusive + |η_+| (fixed edges), ρ (pt
+    asymmetry) tertiles, cos α (3-D opening angle) tertiles.
 
     Empirical: histogram of m_fold_e — the MC reco forward-folded through
     scale then smearing at the fitted θ_scale / θ_smear — weighted by w_mc.
@@ -944,65 +996,38 @@ def plot_mc_closure(
         m_centers_np[:-1] + bin_width / 2,
         [m_centers_np[-1] + bin_width / 2],
     ])
+    cont = bool(evals.get("continuity", False))
+    injected = bool(evals.get("injected", False))
 
-    slices = [("inclusive", None)] + [
-        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
-        for i in range(len(eta_slice_edges) - 1)
-    ]
-
-    for tag, slice_def in slices:
-        mc_mask = (
-            _select_slice(np.abs(evals["eta_mc"]), slice_def)
-            if evals["eta_mc"].size else np.zeros((0,), bool)
-        )
-        if mc_mask.sum() == 0:
-            continue
-
+    def _draw_panel(ax, axr, mc_mask):
+        """Draw one MC-closure slice into (main, ratio) axes; return ymax."""
         mc_hist, _ = np.histogram(
             evals["mll_mc_fold"][mc_mask], bins=m_edges,
-            weights=evals["w_mc"][mc_mask],
-        )
-        # Model curve: Δm · Σ_mc w_e · p_signal(m_bin | c_e, fitted θ).
-        w = evals["w_mc"][mc_mask][:, None]  # [n_mc, 1]
-        pred = evals["pred_signal_mc"][mc_mask]  # [n_mc, n_grid]
-        model_curve = bin_width * (pred * w).sum(axis=0)
-        cont = bool(evals.get("continuity", False))
+            weights=evals["w_mc"][mc_mask])
+        w = evals["w_mc"][mc_mask][:, None]
+        model_curve = bin_width * (evals["pred_signal_mc"][mc_mask] * w).sum(axis=0)
         mc_label = ("MC (shifted+smeared, fitted θ)" if cont
                     else "MC (scale+smear folded)")
         model_label = ("flow (folded, tilt at fitted θ)" if cont
                        else "flow (at fitted scale+smear)")
-        # Nominal (θ=0, unshifted/unsmeared) MC + flow, when available.
         has_nom = cont and evals.get("mll_mc_nominal", np.zeros((0,))).size > 0
         if has_nom:
             nom_hist, _ = np.histogram(
                 evals["mll_mc_nominal"][mc_mask], bins=m_edges,
                 weights=evals["w_mc"][mc_mask])
             nom_curve = bin_width * (evals["pred_nominal_mc"][mc_mask] * w).sum(axis=0)
-        # Injected pseudo-data (the closure target) — only when an injection was
-        # replayed AND it is genuinely distinct from the nominal. This is the
-        # m_ll the fold should reproduce; the gap to the nominal is the injected
-        # shift/smear, the gap to the fold is the closure residual.
-        show_pseudo = (
-            cont and bool(evals.get("injected", False))
-            and evals.get("mll_mc_pseudodata", np.zeros((0,))).size > 0)
+        show_pseudo = (cont and injected
+                       and evals.get("mll_mc_pseudodata", np.zeros((0,))).size > 0)
         if show_pseudo:
             pseudo_hist, _ = np.histogram(
                 evals["mll_mc_pseudodata"][mc_mask], bins=m_edges,
                 weights=evals["w_mc"][mc_mask])
-        # Flow density evaluated at the INJECTED θ values — the closure
-        # target for the fitted-θ model curve. Available only when the eval
-        # replayed a non-trivial injection.
-        show_inj_curve = (
-            cont and bool(evals.get("injected", False))
-            and evals.get("pred_signal_mc_at_inj", np.zeros((0,))).size > 0)
+        show_inj_curve = (cont and injected
+                          and evals.get("pred_signal_mc_at_inj", np.zeros((0,))).size > 0)
         if show_inj_curve:
             inj_curve = bin_width * (
                 evals["pred_signal_mc_at_inj"][mc_mask] * w).sum(axis=0)
 
-        fig, (ax, axr) = plt.subplots(
-            2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1]},
-            figsize=(8, 6),
-        )
         if has_nom:
             ax.step(m_edges[:-1], nom_hist, where="post", color="0.6", lw=1.0,
                     label="MC (nominal, θ=0)", zorder=2)
@@ -1010,71 +1035,76 @@ def plot_mc_closure(
                     label="flow (nominal p₀, θ=0)", zorder=2)
         if show_pseudo:
             ax.step(m_edges[:-1], pseudo_hist, where="post", color="C2", lw=1.3,
-                    label="pseudo-data (injected θ — closure target)", zorder=2)
-        ax.errorbar(
-            m_centers_np, mc_hist, yerr=np.sqrt(np.abs(mc_hist)),
-            fmt="o", color="k", markersize=3, label=mc_label, zorder=3,
-        )
-        ax.plot(
-            m_centers_np, model_curve, color="C1", ls="--", lw=1.5,
-            label=model_label,
-        )
+                    label="pseudo-data (injected θ)", zorder=2)
+        ax.errorbar(m_centers_np, mc_hist, yerr=np.sqrt(np.abs(mc_hist)),
+                    fmt="o", color="k", markersize=3, label=mc_label, zorder=3)
+        ax.plot(m_centers_np, model_curve, color="C1", ls="--", lw=1.5,
+                label=model_label)
         if show_inj_curve:
-            ax.plot(
-                m_centers_np, inj_curve, color="C3", ls="-.", lw=1.3,
-                label="flow (at INJECTED θ — closure target)", zorder=2,
-            )
+            ax.plot(m_centers_np, inj_curve, color="C3", ls="-.", lw=1.3,
+                    label="flow (at INJECTED θ)", zorder=2)
 
-        # Ratio panel: everything relative to the folded flow (the model), so
-        # the folded MC (closure), the nominal MC, AND the nominal flow all
-        # appear — the folded flow is the unit reference (axhline at 1).
+        # Ratio panel: everything relative to the folded flow (the model).
         denom = np.where(model_curve > 0, model_curve, np.nan)
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = mc_hist / denom
             ratio_err = np.sqrt(np.abs(mc_hist)) / denom
         axr.errorbar(m_centers_np, ratio, yerr=ratio_err, fmt="o",
-                     color="k", markersize=3, label="MC (folded)", zorder=3)
+                     color="k", markersize=3, zorder=3)
         if show_pseudo:
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.step(m_edges[:-1], pseudo_hist / denom, where="post",
-                         color="C2", lw=1.3, label="pseudo-data", zorder=2)
+                         color="C2", lw=1.3, zorder=2)
         if show_inj_curve:
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.plot(m_centers_np, inj_curve / denom, color="C3", ls="-.",
-                         lw=1.3, label="flow (injected θ)", zorder=2)
+                         lw=1.3, zorder=2)
         if has_nom:
             with np.errstate(divide="ignore", invalid="ignore"):
                 axr.step(m_edges[:-1], nom_hist / denom, where="post",
-                         color="0.6", lw=1.0, label="MC (nominal)", zorder=2)
+                         color="0.6", lw=1.0, zorder=2)
                 axr.plot(m_centers_np, nom_curve / denom, color="C0", ls=":",
-                         lw=1.3, label="flow (nominal)", zorder=2)
-            axr.legend(loc="upper right", fontsize=6, ncol=3)
+                         lw=1.3, zorder=2)
         axr.axhline(1.0, color="C1", lw=1)   # folded flow (model) = reference
         axr.set_ylim(0.6, 1.4)
+        return max(float((mc_hist + np.sqrt(np.abs(mc_hist))).max()),
+                   float(model_curve.max()),
+                   float(nom_hist.max()) if has_nom else 0.0,
+                   float(nom_curve.max()) if has_nom else 0.0,
+                   float(pseudo_hist.max()) if show_pseudo else 0.0,
+                   float(inj_curve.max()) if show_inj_curve else 0.0)
 
-        ax.set_ylabel("events / bin (weighted)")
-        ax.set_title(
-            f"MC closure — {tag}"
-            + (f"  |η₊| ∈ [{slice_def[0]:.1f}, {slice_def[1]:.1f}]"
-               if slice_def else "")
-        )
-        # Headroom so the legend sits above the curves, not on them.
-        ymax = max(
-            float((mc_hist + np.sqrt(np.abs(mc_hist))).max()),
-            float(model_curve.max()),
-            float(nom_hist.max()) if has_nom else 0.0,
-            float(nom_curve.max()) if has_nom else 0.0,
-            float(pseudo_hist.max()) if show_pseudo else 0.0,
-            float(inj_curve.max()) if show_inj_curve else 0.0,
-        )
-        if ymax > 0:
-            ax.set_ylim(0, ymax * 1.35)
-        ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
-        axr.set_xlabel("m_ll [GeV]")
-        axr.set_ylabel("ratio to folded flow")
-
-        fig.tight_layout()
-        for p in _save_fig(fig, output_dir, f"mc_closure_{tag}"):
+    for prefix, label, fmt, _dv, mv, cols in _closure_slice_dims(
+            evals, eta_slice_edges):
+        ncol = len(cols)
+        fig, axes = plt.subplots(
+            2, ncol, figsize=(max(6.0, 4.3 * ncol), 6.2), squeeze=False,
+            sharex="col", gridspec_kw={"height_ratios": [3, 1]})
+        leg_ax = None
+        for ci, (tag, slice_def) in enumerate(cols):
+            ax, axr = axes[0, ci], axes[1, ci]
+            mc_mask = _select_slice(mv, slice_def) if mv.size else np.zeros((0,), bool)
+            if mc_mask.sum() == 0:
+                ax.set_visible(False); axr.set_visible(False); continue
+            ymax = _draw_panel(ax, axr, mc_mask)
+            if leg_ax is None:
+                leg_ax = ax
+            ttl = ("inclusive" if slice_def is None
+                   else f"{label} ∈ [{slice_def[0]:{fmt}}, {slice_def[1]:{fmt}}]")
+            ax.set_title(ttl, fontsize=9)
+            if ymax > 0:
+                ax.set_ylim(0, ymax * 1.25)
+            if ci == 0:
+                ax.set_ylabel("events / bin (weighted)")
+                axr.set_ylabel("ratio to folded flow")
+            axr.set_xlabel("m_ll [GeV]")
+        if leg_ax is not None:
+            h, l = leg_ax.get_legend_handles_labels()
+            fig.legend(h, l, loc="upper center", bbox_to_anchor=(0.5, 0.945),
+                       ncol=min(len(l), 4), fontsize=8, framealpha=0.9)
+        fig.suptitle(f"MC closure — slices of {label}", y=0.998)
+        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        for p in _save_fig(fig, output_dir, f"mc_closure_{prefix}"):
             print(f"  wrote {p}")
 
 
