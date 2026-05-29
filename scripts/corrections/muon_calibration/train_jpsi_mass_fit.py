@@ -56,6 +56,7 @@ def _stats_to_dict(s: JpsiMassPreprocStats) -> dict:
         "eta_edges": s.eta_edges.tolist(),
         "m_lo": float(s.m_lo),
         "m_hi": float(s.m_hi),
+        "k_moments": (None if s.k_moments is None else s.k_moments.tolist()),
     }
 
 
@@ -70,6 +71,8 @@ def _stats_from_dict(d: dict) -> JpsiMassPreprocStats:
         eta_edges=np.asarray(d["eta_edges"], dtype=np.float64),
         m_lo=float(d["m_lo"]),
         m_hi=float(d["m_hi"]),
+        k_moments=(None if d.get("k_moments") is None
+                   else np.asarray(d["k_moments"], dtype=np.float64)),
     )
 
 
@@ -617,6 +620,9 @@ def _build_model(args, stats, device):
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
         theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
+        theta_whiten=getattr(args, "theta_whiten", False),
+        theta_whiten_max_rho=getattr(args, "theta_whiten_max_rho", 0.99),
+        k_moments=stats.k_moments,
     ).to(device)
 
 
@@ -1509,6 +1515,7 @@ def _load_full_fit(args, device):
               "jacobian_form", "smear_param_form",
               "norm_correction", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
+              "theta_whiten", "theta_whiten_max_rho",
               "disable_scale", "disable_smearing", "validation",
               "no_validation_split",
               "inject_A", "inject_e", "inject_M",
@@ -1848,6 +1855,29 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="(--theta-mlp) Hidden width of the θ ThetaNet.")
     p.add_argument("--theta-mlp-layers", type=int, default=2,
                    help="(--theta-mlp) Number of hidden layers of the θ ThetaNet.")
+    p.add_argument(
+        "--theta-whiten", action="store_true",
+        help="Decorrelate the degenerate (A,e) and (a,c) parameter pairs with a "
+        "fixed gradient-whitening preconditioner built from the per-η-bin "
+        "curvature moments (⟨k⟩, ⟨k²⟩, ⟨k⁴⟩, k=1/pt). The (A,e) scale response "
+        "(1,−k) and (a,c) variance response (1,k²) are near-collinear over the "
+        "narrow J/ψ pt range, giving a tilted loss valley that Adam (a diagonal "
+        "preconditioner) cannot navigate — forcing one term of each pair to be "
+        "dropped. This rotates the gradient of each pair into a unit-conditioned "
+        "basis so BOTH terms can be fit jointly. Backward-only: the forward map, "
+        "likelihood, and observed Fisher are unchanged (it is inert during "
+        "eval/Fisher/diagnostics). Only acts where both members of a pair are "
+        "fit — pair it with --scale-fit-params AeM and/or --smear-fit-params both. "
+        "Works in both binned (per-η-bin rotation) and --theta-mlp (single global "
+        "rotation, no η encoding) modes. Requires stats with k_moments (recomputed "
+        "automatically; older stats.json disable it with a warning).",
+    )
+    p.add_argument(
+        "--theta-whiten-max-rho", type=float, default=0.99,
+        help="(--theta-whiten) Cap on the |correlation| used to build each "
+        "whitening matrix (bounds how hard the near-degenerate direction is "
+        "amplified — cond(C⁻¹)=(1+ρ)/(1−ρ)). Default 0.99.",
+    )
     # θ_scale sampling widths, split per component (A, e, M) since they live
     # in different physical units. Each is the σ of the Gaussian added to that
     # component (additive, physical units) — the fixed width with

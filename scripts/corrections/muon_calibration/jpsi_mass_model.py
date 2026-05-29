@@ -33,6 +33,7 @@ import contextlib
 import math
 import os
 import sys
+import warnings
 
 import torch
 import torch.nn as nn
@@ -290,6 +291,61 @@ def _softlog_below_floor(g: torch.Tensor, floor: float = SMEAR_GP_FLOOR) -> torc
 # θ_scale at O(1) so the standard scale LR works and all three components share a
 # well-conditioned step (physical A,e,M = θ_scale · THETA_SCALE_REF).
 THETA_SCALE_REF = (1e-4, 1e-3, 1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Degeneracy-whitening preconditioner
+# ---------------------------------------------------------------------------
+# (A, e) and (a, c) are each strongly degenerate over the narrow J/ψ pt range:
+# the scale response basis (1, −k) for (A, e) and the smear-variance basis
+# (1, k²) for (a, c) are nearly collinear, so the loss has a long tilted valley
+# that Adam — a purely DIAGONAL preconditioner — cannot navigate. We rotate the
+# gradient of each pair into a decorrelated basis with a fixed matrix L built
+# from the per-η-bin curvature moments (⟨k⟩, ⟨k²⟩, ⟨k⁴⟩).
+#
+# The rotation is applied as a BACKWARD-ONLY transform (``_WhitenGradFn``):
+# the forward pass is the identity, so the forward map, the softplus positivity
+# reparam, the likelihood value, and the observed Fisher are ALL unchanged — only
+# the optimizer's step direction is preconditioned. It is gated on ``self.training``
+# so it is fully inert (identity backward too) during Fisher / diagnostics / eval,
+# leaving the covariance in the physical θ basis exact. Adam's subsequent diagonal
+# rescaling acts on the already-decorrelated axes and cannot reintroduce the
+# cross-correlation, so Adam is kept for all parameters.
+
+
+class _WhitenGradFn(torch.autograd.Function):
+    """Identity forward; in backward left-multiplies the gradient w.r.t. the
+    last (size-2) axis by a fixed lower-triangular whitening matrix ``L`` (the
+    same gradient a forward reparam ``p = L·θ'`` would produce, but without
+    touching the forward value). ``L`` is either ``[2, 2]`` (global, MLP mode)
+    or batched ``[..., 2, 2]`` (per-η-bin, binned mode)."""
+
+    @staticmethod
+    def forward(ctx, x, L):
+        ctx.save_for_backward(L)
+        return x
+
+    @staticmethod
+    def backward(ctx, g):
+        (L,) = ctx.saved_tensors
+        if L.dim() == 2:
+            gx = torch.einsum("...i,ij->...j", g, L)
+        else:
+            gx = torch.einsum("...i,...ij->...j", g, L)
+        return gx, None
+
+
+def _whitening_L(rho: float, max_rho: float = 0.99) -> torch.Tensor:
+    """Lower-triangular ``L`` with ``L Lᵀ = C⁻¹`` for the 2×2 correlation
+    ``C = [[1, ρ],[ρ, 1]]`` (ρ clamped to ±``max_rho`` to bound the whitening
+    of the near-degenerate direction). Satisfies ``Lᵀ C L = I``, so a parameter
+    pair whose loss curvature has correlation ρ becomes unit-conditioned in the
+    rotated coordinates. Returns ``[2, 2]`` float32."""
+    r = float(max(-max_rho, min(max_rho, rho)))
+    C = torch.tensor([[1.0, r], [r, 1.0]], dtype=torch.float64)
+    Cinv = torch.linalg.inv(C)
+    L = torch.linalg.cholesky(Cinv)
+    return L.to(torch.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -565,6 +621,20 @@ class JpsiMassMixtureModel(nn.Module):
         theta_mode: str = "binned",
         theta_mlp_hidden: int = 32,
         theta_mlp_layers: int = 2,
+        # Degeneracy-whitening preconditioner (see _WhitenGradFn). When True,
+        # the gradient of the (A, e) and (a, c) pairs is rotated into a
+        # decorrelated basis built from the per-η-bin curvature moments, so the
+        # near-collinear pairs can be fit JOINTLY without the tilted-valley
+        # stalling that forces dropping a degenerate term. Backward-only: the
+        # forward map / likelihood / Fisher are unchanged. Only acts when BOTH
+        # members of a pair are fit (scale_fit_params ⊇ {A,e} / smear_fit_params
+        # == 'both'); otherwise there is no degeneracy to whiten and it is inert.
+        theta_whiten: bool = False,
+        theta_whiten_max_rho: float = 0.99,
+        # Per-η-bin curvature moment SUMS [n_eta, 4] = (N, Σk, Σk², Σk⁴) from
+        # JpsiMassPreprocStats.k_moments. Required to build the whitening; if
+        # None while theta_whiten=True, whitening is disabled with a warning.
+        k_moments=None,
     ):
         super().__init__()
         self.smearing_enabled = bool(smearing_enabled)
@@ -665,6 +735,10 @@ class JpsiMassMixtureModel(nn.Module):
             if self.theta_mode == "mlp" else None
         )
 
+        # Degeneracy-whitening preconditioner (backward-only; see _WhitenGradFn).
+        self._build_whitening(
+            bool(theta_whiten), float(theta_whiten_max_rho), k_moments, n_eta_bins)
+
         # Buffers — Bernstein window, density-rescale, standardisation stats.
         self.register_buffer("m_lo", torch.tensor(float(m_lo)))
         self.register_buffer("m_hi", torch.tensor(float(m_hi)))
@@ -702,6 +776,60 @@ class JpsiMassMixtureModel(nn.Module):
     # Per-event helpers
     # ------------------------------------------------------------------
 
+    def _build_whitening(self, enabled, max_rho, k_moments, n_eta) -> None:
+        """Build the (A,e) and (a,c) gradient-whitening matrices from the per-η-bin
+        curvature moments ``k_moments`` [n_eta, 4] = (N, Σk, Σk², Σk⁴). Registers
+        per-bin ``[n_eta, 2, 2]`` and global ``[2, 2]`` buffers for each pair and
+        sets the per-pair active flags. The buffers are identity (inert) when
+        whitening is disabled, when the pair is not fully fit (no degeneracy to
+        break), or when moments are unavailable (older stats.json)."""
+        cm = self.scale_param_mask
+        sm = self.smear_param_mask
+        scale_pair_fit = bool(cm[0] > 0 and cm[1] > 0)   # both A and e fit
+        smear_pair_fit = bool(sm[0] > 0 and sm[1] > 0)   # both a and c fit
+        self.theta_whiten = bool(enabled)
+        self.theta_whiten_max_rho = float(max_rho)
+
+        eye = torch.eye(2, dtype=torch.float32)
+        sW_b = eye.expand(n_eta, 2, 2).clone()
+        sW_g = eye.clone()
+        cW_b = eye.expand(n_eta, 2, 2).clone()
+        cW_g = eye.clone()
+
+        have_moments = bool(enabled and k_moments is not None)
+        if enabled and k_moments is None:
+            warnings.warn(
+                "theta_whiten=True but k_moments is None (older stats.json); "
+                "degeneracy whitening DISABLED.", RuntimeWarning)
+        if have_moments:
+            km = torch.as_tensor(k_moments, dtype=torch.float64).reshape(-1, 4)
+            N = km[:, 0].clamp_min(1.0)
+            k1, k2, k4 = km[:, 1] / N, km[:, 2] / N, km[:, 3] / N
+            Ntot = km[:, 0].sum().clamp_min(1.0)
+            g1 = km[:, 1].sum() / Ntot
+            g2 = km[:, 2].sum() / Ntot
+            g4 = km[:, 3].sum() / Ntot
+            # ρ_scale = −⟨k⟩/√⟨k²⟩  (A,e response basis (1, −k));
+            # ρ_smear = +⟨k²⟩/√⟨k⁴⟩ (a,c variance-response basis (1, k²)).
+            def _rs(m1, m2):
+                return float(-m1 / torch.sqrt(m2.clamp_min(1e-30)))
+
+            def _rc(m2, m4):
+                return float(m2 / torch.sqrt(m4.clamp_min(1e-30)))
+
+            for b in range(n_eta):
+                sW_b[b] = _whitening_L(_rs(k1[b], k2[b]), max_rho)
+                cW_b[b] = _whitening_L(_rc(k2[b], k4[b]), max_rho)
+            sW_g = _whitening_L(_rs(g1, g2), max_rho)
+            cW_g = _whitening_L(_rc(g2, g4), max_rho)
+
+        self.register_buffer("_scale_W_binned", sW_b, persistent=False)
+        self.register_buffer("_scale_W_global", sW_g, persistent=False)
+        self.register_buffer("_smear_W_binned", cW_b, persistent=False)
+        self.register_buffer("_smear_W_global", cW_g, persistent=False)
+        self._whiten_scale_active = bool(have_moments and scale_pair_fit)
+        self._whiten_smear_active = bool(have_moments and smear_pair_fit)
+
     def _scale_AeM_pm(self, eta_pm, phi_pm, b_pm) -> torch.Tensor:
         """Per-muon PHYSICAL scale params ``[B, 2, 3] = (A, e, M)``, masked to the
         fitted terms (scale_param_mask, default A,M only — drops the A/e-
@@ -711,6 +839,12 @@ class JpsiMassMixtureModel(nn.Module):
             aem = self.theta_net(eta_pm, phi_pm)[0]
         else:
             aem = self.theta_scale[b_pm] * self.theta_scale.new_tensor(THETA_SCALE_REF)
+        # Whiten the (A, e) gradient (backward-only; identity in eval/forward).
+        if self.training and self._whiten_scale_active:
+            L = (self._scale_W_global if self.theta_mode == "mlp"
+                 else self._scale_W_binned[b_pm])
+            ae = _WhitenGradFn.apply(aem[..., :2], L)
+            aem = torch.cat([ae, aem[..., 2:]], dim=-1)
         return aem * self.scale_param_mask
 
     def _smear_raw_to_effective(self, raw: torch.Tensor) -> torch.Tensor:
@@ -734,7 +868,15 @@ class JpsiMassMixtureModel(nn.Module):
             ac = self.theta_net(eta_pm, phi_pm)[1]
         else:
             ac = self.theta_smear[b_pm]
-        return self._smear_raw_to_effective(ac)
+        ac = self._smear_raw_to_effective(ac)
+        # Whiten the (a, c) gradient (backward-only; identity in eval/forward).
+        # Applied AFTER softplus — the forward pass is the identity so positivity
+        # is untouched; only the gradient is rotated.
+        if self.training and self._whiten_smear_active:
+            L = (self._smear_W_global if self.theta_mode == "mlp"
+                 else self._smear_W_binned[b_pm])
+            ac = _WhitenGradFn.apply(ac, L)
+        return ac
 
     def effective_theta_smear(self) -> torch.Tensor:
         """Per-η-bin PHYSICAL smear coefficients (a, c), masked (BINNED mode only

@@ -72,6 +72,11 @@ class JpsiMassPreprocStats:
     # Window kept for downstream consumers (loader doesn't filter again).
     m_lo: float
     m_hi: float
+    # Per-η-bin curvature (k = 1/pt) moment SUMS over muons, used by the model
+    # to build the degeneracy-whitening preconditioner (A↔e via ⟨k⟩, a↔c via
+    # ⟨k²⟩,⟨k⁴⟩). Shape [n_eta, 4] = (N, Σk, Σk², Σk⁴). None for stats loaded
+    # from an older stats.json (whitening then falls back to disabled).
+    k_moments: np.ndarray | None = None
 
     @property
     def mll_log_scale(self) -> float:
@@ -228,6 +233,10 @@ def compute_jpsi_mass_stats(
     k_sum = np.zeros(n_k, dtype=np.float64)
     k_sq = np.zeros(n_k, dtype=np.float64)
     n_rows = 0
+    # Per-η-bin curvature moments (k = 1/pt), accumulated over BOTH muons of
+    # every event (each assigned to its own η bin). Columns: (N, Σk, Σk², Σk⁴).
+    n_eta = len(eta_edges) - 1
+    kmom = np.zeros((n_eta, 4), dtype=np.float64)
 
     for path in shard_files:
         with pa.OSFile(path, "rb") as src:
@@ -244,6 +253,17 @@ def compute_jpsi_mass_stats(
                 k_sum += muon_kin.sum(axis=0)
                 k_sq += (muon_kin.astype(np.float64) ** 2).sum(axis=0)
                 n_rows += int(len(m))
+                # Curvature moments per η-bin, stacking + and − muons.
+                k_pm = 1.0 / np.concatenate([
+                    cols["pt_plus"].astype(np.float64, copy=False),
+                    cols["pt_minus"].astype(np.float64, copy=False)])
+                eta_pm = np.concatenate([cols["eta_plus"], cols["eta_minus"]])
+                b_pm = _bucketize_eta(eta_pm, eta_edges)
+                k2 = k_pm * k_pm
+                np.add.at(kmom[:, 0], b_pm, 1.0)
+                np.add.at(kmom[:, 1], b_pm, k_pm)
+                np.add.at(kmom[:, 2], b_pm, k2)
+                np.add.at(kmom[:, 3], b_pm, k2 * k2)
 
     if n_rows == 0:
         raise RuntimeError(f"no rows found across shards {list(shard_files)!r}")
@@ -280,6 +300,7 @@ def compute_jpsi_mass_stats(
         eta_edges=np.asarray(eta_edges, dtype=np.float64),
         m_lo=float(m_lo),
         m_hi=float(m_hi),
+        k_moments=kmom,
     )
 
 
