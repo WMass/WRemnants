@@ -192,6 +192,63 @@ def _injected_raw_theta(model, inject_scale_phys, inject_smear_phys):
     return raw_scale, raw_smear
 
 
+def _degeneracy_eigbasis(k_moments):
+    """Global (A,e) and (a,c) degeneracy eigenbases from the curvature moments.
+
+    Built from the O(1)-space Gauss–Newton Fisher of each fitted pair, with the
+    response weighted by the SAME reference scales the parameters carry (so the
+    eigenvectors live in the O(1) θ coordinates the fit moves in):
+
+      scale (θ_A, θ_e): response (REF_A·1, REF_e·k)  → M_s
+      smear (θ_a, θ_c): response (SCALE_A·1, SCALE_C·k²) → M_c
+
+    using the global moments ⟨k⟩,⟨k²⟩,⟨k⁴⟩. (Using the bare correlation
+    [[1,ρ],[ρ,1]] instead — a unit-diagonal approximation — slightly rotates
+    the eigenvectors and can spuriously put a (θ_A=θ_e) injection at stiff=0;
+    the REF-weighted diagonal is the correct measured/degenerate split.) The
+    eigenvector with the LARGE eigenvalue is the STIFF (well-measured)
+    combination, the small one is the SLOPPY (degenerate) one.
+
+    ``k_moments``: [n_eta, 4] sums (N, Σk, Σk², Σk⁴). Returns
+    ``(E_scale, λ_scale, E_smear, λ_smear)`` with each ``E[:, 0]`` = stiff,
+    ``E[:, 1]`` = sloppy and λ NORMALISED so the sloppy eigenvalue = 1 (so
+    λ_stiff is the stiff/sloppy information ratio); or None if unavailable."""
+    if k_moments is None:
+        return None
+    km = np.asarray(k_moments, dtype=np.float64).reshape(-1, 4)
+    Ntot = max(float(km[:, 0].sum()), 1.0)
+    k1, k2, k4 = km[:, 1].sum() / Ntot, km[:, 2].sum() / Ntot, km[:, 3].sum() / Ntot
+    rA, re_, _ = THETA_SCALE_REF
+    sA, sC = SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C
+    M_s = np.array([[rA * rA,        -rA * re_ * k1],
+                    [-rA * re_ * k1,  re_ * re_ * k2]], dtype=np.float64)
+    M_c = np.array([[sA * sA,         sA * sC * k2],
+                    [sA * sC * k2,    sC * sC * k4]], dtype=np.float64)
+
+    def _eb(M):
+        lam, E = np.linalg.eigh(M)        # ascending
+        E, lam = E[:, ::-1], lam[::-1]    # → (stiff, sloppy)
+        lam = lam / max(lam[1], 1e-300)   # normalise: sloppy = 1
+        for j in range(2):                # sign: dominant component positive
+            if E[np.argmax(np.abs(E[:, j])), j] < 0:
+                E[:, j] = -E[:, j]
+        return E, lam
+
+    Es, ls = _eb(M_s)
+    Ec, lc = _eb(M_c)
+    return Es, ls, Ec, lc
+
+
+def _project_whitened(phys, ref, E):
+    """Physical (A,e)/(a,c) → O(1) (÷ref) → project onto eigenvectors E.
+
+    ``phys`` last axis is size 2 (any leading shape); ``ref`` is the (2,) O(1)
+    reference scale; ``E`` is [2, 2] with columns (stiff, sloppy). Returns the
+    same shape with the last axis = (stiff, sloppy) dimensionless coordinates."""
+    o1 = np.asarray(phys, dtype=np.float64) / np.asarray(ref, dtype=np.float64)
+    return o1 @ E
+
+
 class _override_theta:
     """Context manager that temporarily sets the model's θ_scale / θ_smear to
     the supplied raw values and restores on exit. Used to evaluate the model
@@ -1288,6 +1345,7 @@ def main() -> int:
     mlp_scale_grid = mlp_smear_grid = None
     mlp_scale_band = mlp_smear_band = None
     mlp_scale_slices = mlp_smear_slices = None
+    mlp_scale_avg_samples = mlp_smear_avg_samples = None
     mlp_slice_labels = None
     if model.theta_mode == "mlp":
         # Sample the ThetaNet on a 2D (η-centre, φ) grid: 16 points uniformly
@@ -1338,6 +1396,11 @@ def main() -> int:
         mlp_smear_band = ac_avg.std(dim=1).cpu().numpy()                # [n_eta, 2]
         mlp_scale_slices = AeM_slc.cpu().numpy()                        # [n_eta, 4, 3]
         mlp_smear_slices = ac_slc.cpu().numpy()                         # [n_eta, 4, 2]
+        # Raw φ-samples (physical) kept for the whitened-basis band/slices —
+        # the φ-std must be computed AFTER projecting onto the eigenbasis (a
+        # linear combination's spread ≠ the combination of per-component stds).
+        mlp_scale_avg_samples = AeM_avg.cpu().numpy()                   # [n_eta, n_phi, 3]
+        mlp_smear_avg_samples = ac_avg.cpu().numpy()                    # [n_eta, n_phi, 2]
         sigma_scale = sigma_smear = None
     if model.scale_enabled:
         # binned θ_scale is the O(1) fit param → ×THETA_SCALE_REF for physical
@@ -1382,6 +1445,65 @@ def main() -> int:
         )
     else:
         print("  --disable-smearing: skipping theta_smear_vs_eta")
+
+    # Plots 3b/3c: closure in the DEGENERACY-WHITENED basis. (A,e) and (a,c)
+    # are each near-degenerate over the J/ψ pt range, so the m_ll likelihood
+    # constrains only the STIFF combination; the orthogonal SLOPPY combination
+    # drifts. Projecting the fitted + injected θ onto the (stiff, sloppy)
+    # eigenvectors separates "what J/ψ can measure" (stiff — should close) from
+    # "what it cannot" (sloppy — large spread, may not close), which is exactly
+    # the right way to read the closure when fitting both members of a pair.
+    eigb = _degeneracy_eigbasis(getattr(stats, "k_moments", None))
+    if eigb is None:
+        print("  no k_moments in stats → skipping whitened-basis closure plots")
+    else:
+        E_s, l_s, E_c, l_c = eigb
+        print("  degeneracy eigenbasis (global, O(1) θ coords; info ratio stiff/sloppy):")
+        print("    scale (θ_A,θ_e): stiff×%.0f vec=[%+.3f,%+.3f]  sloppy vec=[%+.3f,%+.3f]"
+              % (l_s[0], E_s[0, 0], E_s[1, 0], E_s[0, 1], E_s[1, 1]))
+        print("    smear (θ_a,θ_c): stiff×%.0f vec=[%+.3f,%+.3f]  sloppy vec=[%+.3f,%+.3f]"
+              % (l_c[0], E_c[0, 0], E_c[1, 0], E_c[0, 1], E_c[1, 1]))
+
+        def _whitened_plot(phys_grid, phys_samples, phys_slices, ref_phys,
+                           inj_phys, refE, lam, name, unit_pair):
+            """Project a 2-component (A,e)/(a,c) set onto the eigenbasis and plot
+            stiff/sloppy closure. ``phys_grid`` [n_eta,2]; ``phys_samples``
+            [n_eta,n_phi,2] or None (→ band); ``phys_slices`` [n_eta,n_s,2] or
+            None; ``inj_phys`` [n_eta,2] or None."""
+            grid_w = _project_whitened(phys_grid, ref_phys, refE)        # [n_eta,2]
+            band_w = None
+            if phys_samples is not None:
+                samp_w = _project_whitened(phys_samples, ref_phys, refE)  # [n_eta,n_phi,2]
+                grid_w = samp_w.mean(axis=1)
+                band_w = samp_w.std(axis=1)
+            slices_w = (None if phys_slices is None
+                        else _project_whitened(phys_slices, ref_phys, refE))
+            ref_w = None if inj_phys is None else _project_whitened(inj_phys, ref_phys, refE)
+            names = [f"STIFF (measured, info×{lam[0]:.0f})",
+                     f"SLOPPY (degenerate, info×1)"]
+            plot_theta_vs_eta(
+                grid_w, None, names, name, stats.eta_edges, out_dir, edm=edm,
+                ref=ref_w, band=band_w, slices=slices_w,
+                slice_labels=mlp_slice_labels)
+
+        scale_pair_fit = ("A" in model.scale_fit_params and "e" in model.scale_fit_params)
+        if model.scale_enabled and scale_pair_fit:
+            sg = (mlp_scale_grid[:, :2] if mlp_scale_grid is not None
+                  else (ckpt.get("theta_scale", model.theta_scale.detach()).cpu().numpy()
+                        * np.asarray(THETA_SCALE_REF))[:, :2])
+            ss = None if mlp_scale_avg_samples is None else mlp_scale_avg_samples[:, :, :2]
+            sl = None if mlp_scale_slices is None else mlp_scale_slices[:, :, :2]
+            ij = None if inject_np is None else inject_np[:, :2]
+            _whitened_plot(sg, ss, sl, THETA_SCALE_REF[:2], ij, E_s, l_s,
+                           "theta_scale_whitened_vs_eta", ("A", "e"))
+        if model.smearing_enabled and model.smear_fit_params == "both":
+            cg = (mlp_smear_grid if mlp_smear_grid is not None
+                  else model.effective_theta_smear().detach().cpu().numpy())
+            cs = mlp_smear_avg_samples
+            csl = mlp_smear_slices
+            ij = inject_smear_np
+            _whitened_plot(cg, cs, csl, [SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
+                           ij, E_c, l_c, "theta_smear_whitened_vs_eta", ("a", "c"))
 
     # Plot 5: pulls.
     print("plotting per-bin pulls...")
