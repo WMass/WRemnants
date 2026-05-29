@@ -1589,50 +1589,91 @@ class JpsiMassMixtureModel(nn.Module):
             fn(m_flat[i:i + _FLOW_EVAL_CHUNK], mk_flat[i:i + _FLOW_EVAL_CHUNK])
             for i in range(0, n, _FLOW_EVAL_CHUNK)])
 
-    def _gh_qop_forward(self, me, mo, pto, etao, phio, qo, bpo, tsp, eps):
-        """Forward source map ``x = T(m')`` for the qop-space operator at a 2D
-        GH node. ``me`` [B, G²] source mass; ``eps`` [..., 2] the per-muon unit
-        kicks (ξ₊, ξ₋). Scale is the mass-space advection ``s_adv`` (same as the
-        mass-space GH operator); the smear is the EXACT per-muon Gaussian qop
-        kick ``qop_μ → qop_μ + σ_qop,μ·ξ_μ`` recomputed into m_ll via
-        ``apply_smear_pt`` (qop floor included) + ``_event_mll`` — reproducing
-        the per-muon fold that generates the pseudo-data, including the
-        nonlinear (non-Gaussian) qop→m_ll map. ``σ_qop`` is evaluated at the
-        post-scale source pt ``pt_s = pt_obs·(m_scaled/m_obs)`` (same pt∝m
-        convention as ``_continuity_response``). Returns the mapped mass [B, G²]."""
-        s_adv = self._continuity_response(me, mo, pto, etao, qo, tsp)
-        m_scaled = me + s_adv
-        if not self.smearing_enabled:
-            return m_scaled
-        pt_s = pto * (m_scaled / mo).unsqueeze(-1)                       # [B,G²,2]
-        sig = self._qop_var_pm(etao, phio, bpo, pt_s).clamp_min(0.0).sqrt()
-        pt_k = self.apply_smear_pt(pt_s, etao, qo, sig, eps)             # [B,G²,2]
-        return _event_mll(pt_k, etao, phio)                             # [B,G²]
+    def _gh_qop_unsmear(self, pt_cfg, etao, phio, qo, bpo, eps):
+        """Un-kick an OBSERVED per-muon pt config to the nominal (truth) mass +
+        ρ, per 2-D GH node — the genuine INVERSE of the per-muon Gaussian-qop
+        fold. For each node (ξ₊, ξ₋):
+
+            qop_obs,μ = q sinθ / pt_cfg,μ
+            qop_nom,μ = qop_obs,μ − σ_qop,μ·ξ_μ            (un-smear; σ at pt_cfg)
+            pt_nom    = q sinθ / qop_nom        (sign/floor-safe)
+            pt_truth  = inverse-scale(pt_nom)              (un-apply the scale)
+            m_t = m_ll(pt_truth),  ρ_t = ρ(pt_truth)
+
+        ``pt_cfg`` [B, ·, 2] is the observed config (possibly scaled along the
+        mass direction); ``eps`` [·, G², 2] the kicks. Returns ``(m_t [B, G²],
+        ρ_t_std [B, G²])``.
+
+        This is the correct inverse: it un-kicks the ACTUAL observed config —
+        giving the nominal config with its OWN nominal ρ and mass — rather than
+        scaling a trial source mass and re-kicking it. The latter (the old
+        formulation) carried the OBSERVED ρ through the intermediate config and
+        grossly over-broadened the density."""
+        sinth = _sintheta_from_eta(etao)                          # [B,·,2]
+        qop_obs = qo * sinth / pt_cfg                             # [B,G²,2] (bcast)
+        if self.smearing_enabled:
+            # σ_qop = √(σ²_qop). The fold that generates the pseudo-data draws
+            # the kick with σ_qop evaluated at the NOMINAL (pre-smear) pt, so
+            # the exact inverse must un-kick with σ at the nominal pt too — NOT
+            # at the observed pt. Forward |η| the smear is large (σ_qop/|qop|
+            # ~ few %) and σ_qop ∝ 1/pt, so σ(observed) systematically differs
+            # from σ(nominal) across the broadened sample; using σ(observed)
+            # over-estimates the kick and over-broadens the density. Refine σ
+            # to the nominal pt by a short fixed-point iteration.
+            # (+EPS inside the sqrt keeps the autograd gradient finite as σ²→0,
+            # else d√v/dv→∞ times ∂v/∂λ→0 gives 0·∞ = NaN → a spurious uniform
+            # density at c≈0; EPS=1e-14 → σ floor 1e-7, negligible vs ~1e-3.)
+            def _sig_at(pt):
+                return (self._qop_var_pm(etao, phio, bpo, pt).clamp_min(0.0)
+                        + 1e-14).sqrt()
+            sig = _sig_at(pt_cfg)
+            for _ in range(2):
+                qop_nom = qop_obs - sig * eps
+                pt_nom_est = self._qop_new_to_pt(qop_obs, qop_nom, qo, sinth)
+                sig = _sig_at(pt_nom_est)
+            qop_nom = qop_obs - sig * eps
+        else:
+            qop_nom = qop_obs
+        pt_nom = self._qop_new_to_pt(qop_obs, qop_nom, qo, sinth)  # [B,G²,2]
+        if self.scale_enabled:
+            AeM = self._scale_AeM_pm(etao, phio, bpo)             # scale params
+            dqop = self._delta_qop_analytic(AeM, pt_nom, etao, qo)
+            pt_truth = self._apply_scale_pt(pt_nom, etao, qo, dqop, sign=-1.0)
+        else:
+            pt_truth = pt_nom
+        m_t = _event_mll(pt_truth, etao, phio)                   # [B,G²]
+        rho = (pt_truth[..., 0] - pt_truth[..., 1]) / (
+            pt_truth[..., 0] + pt_truth[..., 1])
+        idx = N_MUON_KIN - 1
+        rho_std = (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
+        return m_t, rho_std
 
     def _continuity_logp_gh_qop(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
                                 b_pm, n_gh: int = 8, n_iter: int = 2):
         """``log p_θ(x|c)`` via the EXACT per-muon qop smear, as a 2-D
-        Gauss–Hermite quadrature over the two INDEPENDENT muon kicks (ξ₊, ξ₋):
+        Gauss–Hermite quadrature over the two INDEPENDENT muon kicks (ξ₊, ξ₋),
+        implemented as a DIRECT un-kick of the observed config:
 
-            ``p_θ(x|c) = E_{ε₊,ε₋}[ p_0(m'(ε₊,ε₋)|c_src) / |G'| ]``
-            ``       ≈ Σ_{i,j} W_i W_j · p_0(m'_{ij}|c_src,ij) / |G'_{ij}|``
+            ``p_θ(x|c) = E_{ε₊,ε₋}[ p_0(m_t(ε₊,ε₋) | ρ_t) · |∂m_t/∂x| ]``
+            ``       ≈ Σ_{i,j} W_i W_j · p_0(m_t,ij | ρ_t,ij) · |∂m_t/∂x|_{ij}``
+
+        For each node, the observed per-muon config (the event's pt, scaled
+        along the mass direction by a leaf ``λ``) is un-kicked
+        (``qop_nom = qop_obs − σ·ξ``) and un-scaled to the nominal config →
+        nominal mass ``m_t`` and ρ. ``p_0`` is the frozen flow at that nominal
+        mass conditioned on the per-node nominal ρ; the change-of-variables
+        Jacobian ``|∂m_t/∂x|`` is taken by autograd through ``λ``. This is the
+        genuine inverse of the per-muon fold that generates the pseudo-data
+        (the GH nodes live in the 2-D qop±-kick space), reproducing its full
+        non-Gaussian shape — mean-shift and skew, not just the variance.
 
         Unlike ``gh_convolution`` (a single Gaussian convolution in MASS space,
-        i.e. the small-kick linearisation), this kicks each muon's qop and
-        recomputes m_ll, so it reproduces the true skewed/heavy-tailed mass
-        smearing at large σ_qop/|qop| (forward |η|) where the mass-space
-        Gaussian under-represents the tails. The two kicks cannot be factorised
-        into independent 1-D integrals — p_0 is a nonlinear function of the
-        combined shift — so this is a genuine 2-D quadrature (n_gh² nodes; the
-        weights and the per-muon Jacobian factorise, only p_0 couples). Cost:
-        ``n_gh²`` per-node p_0 evals + autograd through the source map; each
-        per-muon kick is a single 1-D Gaussian, so a modest ``n_gh`` (≈5–6)
-        suffices. ρ in the conditioning is propagated per node by un-applying
-        the per-muon kick + the scale (``_source_rho_std_gh_qop``)."""
+        the small-kick linearisation), the kicks can't be factorised into two
+        1-D integrals (``p_0`` is nonlinear in the combined config), so this is
+        a genuine n_gh² quadrature. Each per-muon kick is a single 1-D Gaussian,
+        so a modest ``n_gh`` (≈4–6) suffices. (``n_iter`` is unused — no
+        fixed-point solve is needed for the un-kick.)"""
         B = m_obs.shape[0]
-        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
-                          if self.scale_enabled
-                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
         xi, logW = _gh_nodes(n_gh, m_obs.device, m_obs.dtype)            # [G],[G]
         G = xi.shape[0]
         G2 = G * G
@@ -1641,67 +1682,39 @@ class JpsiMassMixtureModel(nn.Module):
         logW2 = (logW.view(G, 1) + logW.view(1, G)).reshape(G2)        # [G²]
         eps = torch.stack([xi_p, xi_m], dim=-1).view(1, G2, 2)         # [1,G²,2]
 
-        mo = m_obs.unsqueeze(1)                                         # [B,1]
         pto = pt_obs.unsqueeze(1)                                       # [B,1,2]
         etao = eta_pm.unsqueeze(1)                                      # [B,1,2]
         phio = phi_pm.unsqueeze(1)                                      # [B,1,2]
         qo = q_pm.unsqueeze(1)                                          # [B,1,2]
-        bpo = b_pm.unsqueeze(1).expand(B, G2, b_pm.shape[-1])          # [B,G²,2]
-        tsp = theta_scale_pm.unsqueeze(1)                              # [B,1,6]
+        bpo = b_pm.unsqueeze(1)                                         # [B,1,2]
 
-        def fwd(me):
-            return self._gh_qop_forward(me, mo, pto, etao, phio, qo, bpo, tsp, eps)
-
-        # Fixed-point source solve  m'_{ij} = m_obs − (T(m'_{ij}) − m'_{ij}).
-        mp = mo.expand(B, G2).clone()
-        for _ in range(n_iter):
-            mp = mo - (fwd(mp) - mp)
-        # Source-map Jacobian G' = ∂T/∂m' by autograd at the converged source.
-        if mp.requires_grad:
-            Gp = torch.autograd.grad(fwd(mp).sum(), mp, create_graph=True)[0]
-        else:
-            with torch.enable_grad():
-                mpj = mp.detach().requires_grad_(True)
-                Gp = torch.autograd.grad(fwd(mpj).sum(), mpj)[0].detach()
-        # Frozen-flow density at the per-node source mass; ρ propagated per node.
+        # Per-node mass-scale leaf λ (=1) for the d m_t / d m_obs Jacobian:
+        # perturbing m_obs scales the observed config along pt∝m (fixed obs ρ).
+        train_grad = torch.is_grad_enabled()
+        with torch.enable_grad():
+            lam = torch.ones(B, G2, device=m_obs.device, dtype=m_obs.dtype,
+                             requires_grad=True)
+            pt_cfg = pto * lam.unsqueeze(-1)                            # [B,G²,2]
+            mo_lam = _event_mll(pt_cfg, etao, phio)                    # [B,G²]
+            m_t, rho_std = self._gh_qop_unsmear(pt_cfg, etao, phio, qo, bpo, eps)
+            g_mt = torch.autograd.grad(
+                m_t.sum(), lam, create_graph=train_grad, retain_graph=True)[0]
+            g_mo = torch.autograd.grad(
+                mo_lam.sum(), lam, create_graph=train_grad, retain_graph=True)[0]
+        if not train_grad:
+            m_t, rho_std = m_t.detach(), rho_std.detach()
+            g_mt, g_mo = g_mt.detach(), g_mo.detach()
+        # |∂m_t/∂x| = |∂m_t/∂λ| / |∂m_obs/∂λ|.
+        logJ = (torch.log(g_mt.abs().clamp_min(1e-12))
+                - torch.log(g_mo.abs().clamp_min(1e-12)))
         mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
-                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
+            mk_g[..., N_MUON_KIN - 1] = rho_std
         logp0 = self._flow_eval_chunked(
-            self.log_p_nominal, mp.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
-        log_terms = logW2.view(1, G2) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
+            self.log_p_nominal, m_t.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        log_terms = logW2.view(1, G2) + logp0 + logJ
         log_p_theta = torch.logsumexp(log_terms, dim=1)
         return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
-
-    def _source_rho_std_gh_qop(self, m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps):
-        """Standardised source (nominal) ρ per 2-D GH node ``[B, G²]`` for the
-        ``gh_convolution_qop`` operator. Un-applies the per-muon smear kick
-        (``qop → qop − σ_qop·ξ``, σ at the observed pt) and the deterministic
-        scale (obs → truth), then ρ of the resulting nominal pt. η, φ are
-        transform-invariant. Mirrors ``_source_rho_std_gh`` but with the actual
-        per-muon kicks (not the conditional-mean shift)."""
-        B = m_obs.shape[0]
-        G2 = eps.shape[1]
-        sinth = _sintheta_from_eta(eta_pm)                              # [B,2]
-        qop_obs = q_pm * sinth / pt_obs                                 # [B,2]
-        sig = self._qop_var_pm(eta_pm, phi_pm, b_pm, pt_obs).clamp_min(0.0).sqrt()
-        qop_un = qop_obs.unsqueeze(1) - sig.unsqueeze(1) * eps          # [B,G²,2]
-        pt_un = self._qop_new_to_pt(
-            qop_obs.unsqueeze(1).expand(B, G2, 2), qop_un,
-            q_pm.unsqueeze(1), sinth.unsqueeze(1))                      # [B,G²,2]
-        if self.scale_enabled:
-            AeM = self._scale_AeM_pm(
-                eta_pm.unsqueeze(1), phi_pm.unsqueeze(1), b_pm.unsqueeze(1))  # [B,1,2,3]
-            dqop = self._delta_qop_analytic(
-                AeM, pt_un, eta_pm.unsqueeze(1), q_pm.unsqueeze(1))     # [B,G²,2]
-            pt_nom = self._apply_scale_pt(
-                pt_un, eta_pm.unsqueeze(1), q_pm.unsqueeze(1), dqop, sign=-1.0)
-        else:
-            pt_nom = pt_un
-        rho = (pt_nom[..., 0] - pt_nom[..., 1]) / (pt_nom[..., 0] + pt_nom[..., 1])
-        idx = N_MUON_KIN - 1
-        return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
 
     def _log_jacobian_exp(self, mp, mk_src, s_adv_of, eta_pm, phi_pm, b_pm,
                           pt_obs, m_obs):
@@ -1961,20 +1974,21 @@ class JpsiMassMixtureModel(nn.Module):
 
     def _norm_correction_log_Z_gh_qop(self, m_obs, mk, pt_obs, eta_pm, phi_pm,
                                        q_pm, b_pm) -> torch.Tensor:
-        """``log Z(θ;c)`` for ``smear_operator='gh_convolution_qop'`` — the 2-D
-        GH analogue of ``_norm_correction_log_Z_gh``:
+        """``log Z(θ;c)`` for ``smear_operator='gh_convolution_qop'``, in the
+        DIRECT un-kick formulation (matching ``_continuity_logp_gh_qop``).
 
-            ``Z = Σ_{i,j} W_i W_j [F_0(m'_hi(ξ_i,ξ_j)) − F_0(m'_lo(ξ_i,ξ_j))]``
+        Swapping the window integral and the GH expectation and substituting
+        ``u = m_t(x,ξ)`` (the un-kick map):
 
-        where each boundary preimage ``m'_{lo,hi}(ξ_i,ξ_j)`` is found by
-        BISECTION on [m_lo, m_hi] of the qop forward map (monotonic in m'), and
-        the per-node source ρ is from ``_source_rho_std_gh_qop`` (consistent
-        with ``_continuity_logp_gh_qop``). Cost: 2·n_gh² boundary bisections +
-        2·n_gh² flow-CDF evals per event."""
+            ``Z = Σ_{i,j} W_i W_j [F_0(m_t,hi(ξ) | ρ_t) − F_0(m_t,lo(ξ) | ρ_t)]``
+
+        where ``m_t,lo/hi(ξ)`` are the nominal masses obtained by un-kicking the
+        observed config SCALED to the window boundaries m_lo / m_hi (the event's
+        pt scaled by m_lo/m_obs and m_hi/m_obs), and ``ρ_t`` is the per-node
+        nominal ρ at the event mass — the same un-kick used by the density, so
+        no bisection or fixed point is needed. Cost: 3·n_gh² un-kicks (event +
+        two boundaries) + 2·n_gh² flow-CDF evals per event."""
         B = m_obs.shape[0]
-        theta_scale_pm = (self._scale_per_event(eta_pm, phi_pm, b_pm)
-                          if self.scale_enabled
-                          else m_obs.new_zeros((B, N_THETA_SCALE_PM)))
         xi, logW = _gh_nodes(self.n_gh_nodes, m_obs.device, m_obs.dtype)
         G = xi.shape[0]
         G2 = G * G
@@ -1982,43 +1996,29 @@ class JpsiMassMixtureModel(nn.Module):
         xi_m = xi.view(1, G).expand(G, G).reshape(G2)
         logW2 = (logW.view(G, 1) + logW.view(1, G)).reshape(G2)
         eps = torch.stack([xi_p, xi_m], dim=-1).view(1, G2, 2)
-        mo = m_obs.unsqueeze(1)
-        pto = pt_obs.unsqueeze(1)
+        mo = m_obs.unsqueeze(1)                                         # [B,1]
+        pto = pt_obs.unsqueeze(1)                                       # [B,1,2]
         etao = eta_pm.unsqueeze(1)
         phio = phi_pm.unsqueeze(1)
         qo = q_pm.unsqueeze(1)
-        bpo = b_pm.unsqueeze(1).expand(B, G2, b_pm.shape[-1])
-        tsp = theta_scale_pm.unsqueeze(1)
+        bpo = b_pm.unsqueeze(1)
 
-        def fwd(me):
-            return self._gh_qop_forward(me, mo, pto, etao, phio, qo, bpo, tsp, eps)
-
-        n_bisect = 24
-
-        @torch.no_grad()
-        def bisect(target_scalar: float):
-            lo = m_obs.new_full((B, G2), float(self.m_lo))
-            hi = m_obs.new_full((B, G2), float(self.m_hi))
-            target = m_obs.new_full((B, G2), float(target_scalar))
-            for _ in range(n_bisect):
-                mid = 0.5 * (lo + hi)
-                go_right = fwd(mid) < target
-                lo = torch.where(go_right, mid, lo)
-                hi = torch.where(go_right, hi, mid)
-            return 0.5 * (lo + hi)
-
-        mp_lo = bisect(float(self.m_lo))                   # [B, G²]
-        mp_hi = bisect(float(self.m_hi))                   # [B, G²]
+        # Per-node nominal ρ at the event mass (conditioning for the CDF).
+        _, rho_std = self._gh_qop_unsmear(pto, etao, phio, qo, bpo, eps)
+        # Nominal masses at the two window boundaries (observed config scaled to
+        # m_lo / m_hi along pt∝m, then un-kicked).
+        m_t_lo, _ = self._gh_qop_unsmear(
+            pto * (float(self.m_lo) / mo).unsqueeze(-1), etao, phio, qo, bpo, eps)
+        m_t_hi, _ = self._gh_qop_unsmear(
+            pto * (float(self.m_hi) / mo).unsqueeze(-1), etao, phio, qo, bpo, eps)
         mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
-                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
+            mk_g[..., N_MUON_KIN - 1] = rho_std
+        mkf = mk_g.reshape(B * G2, -1)
         log_F_lo = self._flow_eval_chunked(
-            self._flow_log_cdf, mp_lo.reshape(-1),
-            mk_g.reshape(B * G2, -1)).reshape(B, G2)
+            self._flow_log_cdf, m_t_lo.reshape(-1), mkf).reshape(B, G2)
         log_F_hi = self._flow_eval_chunked(
-            self._flow_log_cdf, mp_hi.reshape(-1),
-            mk_g.reshape(B * G2, -1)).reshape(B, G2)
+            self._flow_log_cdf, m_t_hi.reshape(-1), mkf).reshape(B, G2)
         node_window = (log_F_hi.exp() - log_F_lo.exp()).clamp_min(0.0)  # [B, G²]
         W = logW2.exp().view(1, G2)                                     # [1, G²]
         Z = (W * node_window).sum(dim=1).clamp(min=1e-30)               # [B]
