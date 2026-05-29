@@ -843,7 +843,16 @@ class JpsiMassMixtureModel(nn.Module):
         if self.training and self._whiten_scale_active:
             L = (self._scale_W_global if self.theta_mode == "mlp"
                  else self._scale_W_binned[b_pm])
-            ae = _WhitenGradFn.apply(aem[..., :2], L)
+            # Whiten in the O(1) θ space — where THETA_SCALE_REF calibrates the
+            # curvature diagonal to ≈unit, which is the only space the
+            # unit-diagonal L = chol(C⁻¹) is valid in. In PHYSICAL (A,e) space
+            # the A/e diagonal ratio is ⟨(∂m/∂A)²⟩/⟨(∂m/∂e)²⟩ = 1/⟨k²⟩ ≈ 140,
+            # and a unit-diagonal whitening there grossly mis-scales the step
+            # (→ non-finite loss at large lr). Divide out REF, whiten, multiply
+            # back: the forward is the identity, only the O(1)-space gradient is
+            # rotated. (The smear (a,c) is already whitened in its O(1) space.)
+            ref_ae = aem.new_tensor(THETA_SCALE_REF[:2])
+            ae = _WhitenGradFn.apply(aem[..., :2] / ref_ae, L) * ref_ae
             aem = torch.cat([ae, aem[..., 2:]], dim=-1)
         return aem * self.scale_param_mask
 
