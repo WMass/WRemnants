@@ -1417,25 +1417,53 @@ def plot_param_sensitivity(model, loader, stats, m_centers, out_dir, *,
 
     for v, (fn, edges, xlabel) in slice_specs.items():
         ns = len(edges) - 1
-        fig, axes = plt.subplots(1, ns, figsize=(4.8 * ns, 4.0))
-        if ns == 1:
-            axes = [axes]
+        # Two rows per slice: density (top) + ratio-to-fit (bottom). The ratio
+        # panel makes the (small) shift sensitivity and the data/fit closure
+        # legible in fractional terms — shift/fit isolates each parameter's
+        # effect and data/fit shows the residual mis-closure.
+        fig, axes = plt.subplots(
+            2, ns, figsize=(4.8 * ns, 4.6), squeeze=False, sharex="col",
+            gridspec_kw={"height_ratios": [3, 1]})
         for si in range(ns):
-            ax, a = axes[si], acc[v][si]
+            ax, axr, a = axes[0, si], axes[1, si], acc[v][si]
             if a["w"] <= 0:
-                ax.set_visible(False); continue
+                ax.set_visible(False); axr.set_visible(False); continue
+            fit_cnt = a["fit"] * dmb                  # model expected counts
             ax.step(mc, a["data"], where="mid", color="k", lw=1.2,
                     label="pseudo-data" if mc_as_data else "data")
-            ax.plot(mc, a["fit"] * dmb, color="0.3", lw=2.0, label="model (fit)")
+            ax.plot(mc, fit_cnt, color="0.3", lw=2.0, label="model (fit)")
             for i, (nm, col, sgn, _, _) in enumerate(shifts):
                 ax.plot(mc, a["sh"][i] * dmb, color=col, lw=1.0,
                         ls="--" if sgn == "+" else ":", alpha=0.85,
                         label=f"{nm}{sgn}Δ")
             hi = "∞" if edges[si + 1] > 1e8 else f"{edges[si + 1]:.2f}"
             ax.set_title(f"{xlabel} ∈ [{edges[si]:.2f}, {hi})", fontsize=9)
-            ax.set_xlabel("m_ll [GeV]"); ax.grid(alpha=0.3)
+            ax.grid(alpha=0.3)
             if si == 0:
                 ax.legend(fontsize=6, ncol=2)
+                axr.set_ylabel("ratio / fit", fontsize=8)
+            # --- ratio panel: everything ÷ the fitted model ---
+            fok = fit_cnt > 0
+            r_data = np.divide(a["data"], fit_cnt,
+                               out=np.full_like(fit_cnt, np.nan), where=fok)
+            axr.axhline(1.0, color="0.3", lw=1.2)
+            axr.step(mc, r_data, where="mid", color="k", lw=1.0)
+            r_all = [r_data]
+            for i, (nm, col, sgn, _, _) in enumerate(shifts):
+                r_sh = np.divide(a["sh"][i], a["fit"],
+                                 out=np.full_like(a["fit"], np.nan), where=fok)
+                axr.plot(mc, r_sh, color=col, lw=1.0,
+                         ls="--" if sgn == "+" else ":", alpha=0.85)
+                r_all.append(r_sh)
+            # Robust y-range over the data-supported region (ignore empty tails).
+            sup = a["data"] > 0.02 * (a["data"].max() if a["data"].max() > 0 else 1.0)
+            rr = np.concatenate([r[sup] for r in r_all]) if sup.any() else np.array([])
+            rr = rr[np.isfinite(rr)]
+            if rr.size:
+                lo, hi_r = np.percentile(rr, [1, 99])
+                pad = 0.1 * max(hi_r - lo, 1e-3)
+                axr.set_ylim(max(0.0, lo - pad), hi_r + pad)
+            axr.set_xlabel("m_ll [GeV]"); axr.grid(alpha=0.3)
         fig.suptitle(f"parameter sensitivity — slices of {xlabel} "
                      f"(Δ = {shift_scale:g}× ref scale)")
         fig.tight_layout()
