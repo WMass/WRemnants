@@ -1681,7 +1681,12 @@ class JpsiMassMixtureModel(nn.Module):
         so a modest ``n_gh`` (≈4–6) suffices. (``n_iter`` is unused — no
         fixed-point solve is needed for the un-kick.)"""
         B = m_obs.shape[0]
-        xi, logW = _gh_nodes(n_gh, m_obs.device, m_obs.dtype)            # [G],[G]
+        # --disable-smearing: no kick to integrate, so collapse the n_gh² GH
+        # quadrature to a single node (ξ=0, W=1). _gh_qop_unsmear then does pure
+        # scale un-application and the G²=1 logsumexp reduces to log p — the
+        # right scale-only fallback (and avoids the n_gh²× redundant flow evals).
+        ng = n_gh if self.smearing_enabled else 1
+        xi, logW = _gh_nodes(ng, m_obs.device, m_obs.dtype)            # [G],[G]
         G = xi.shape[0]
         G2 = G * G
         xi_p = xi.view(G, 1).expand(G, G).reshape(G2)                   # ξ₊
@@ -2002,7 +2007,10 @@ class JpsiMassMixtureModel(nn.Module):
         no bisection or fixed point is needed. Cost: 3·n_gh² un-kicks (event +
         two boundaries) + 2·n_gh² flow-CDF evals per event."""
         B = m_obs.shape[0]
-        xi, logW = _gh_nodes(self.n_gh_nodes, m_obs.device, m_obs.dtype)
+        # --disable-smearing: single GH node (see _continuity_logp_gh_qop) so the
+        # norm correction does pure scale and shapes stay [B, G²=1]-consistent.
+        ng = self.n_gh_nodes if self.smearing_enabled else 1
+        xi, logW = _gh_nodes(ng, m_obs.device, m_obs.dtype)
         G = xi.shape[0]
         G2 = G * G
         xi_p = xi.view(G, 1).expand(G, G).reshape(G2)
