@@ -1801,10 +1801,14 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--n-gh-nodes", type=int, default=8,
-        help="Number of Gauss-Hermite quadrature nodes for the gh_convolution "
-        "operator (ignored for pf_ode). 8 is usually plenty (truncation error "
-        "is exponential in n_gh for smooth p_0); bump to 12–16 for very large "
-        "smears where the per-node sources span the m-window.",
+        help="Number of Gauss-Hermite quadrature nodes PER smearing dimension "
+        "(ignored for pf_ode). For 'gh_convolution' (1-D, mass space) 8 is "
+        "plenty (truncation error is exponential in n_gh for smooth p_0). For "
+        "'gh_convolution_qop' the cost is n_gh² (a 2-D grid over the two muon "
+        "kicks) — each kick is a single 1-D Gaussian, so 4–5 (16–25 nodes) is "
+        "usually enough; large n_gh here (8 → 64 nodes) multiplies the flow-eval "
+        "rows and memory accordingly (flow evals are auto-chunked to bound the "
+        "single-allocation size, but total memory still scales with n_gh²).",
     )
     p.add_argument(
         "--norm-correction", choices=("none", "linear", "flow_cdf"), default="none",

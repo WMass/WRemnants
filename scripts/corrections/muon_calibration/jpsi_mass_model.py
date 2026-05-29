@@ -241,6 +241,14 @@ SMEAR_GP_FLOOR = 0.05
 # (smear_operator="gh_convolution"). Cached per (n, device, dtype).
 _GH_CACHE: dict = {}
 
+# Max rows per flow evaluation. The qop operator flattens B·n_gh² rows into a
+# single flow call (8× the mass-space operator's B·n_gh at n_gh=8), big enough
+# that the CUDA allocator can fail on one matmul (NVML_SUCCESS assert) at large
+# batch. Flow evals on more than this many rows are split into chunks (the flow
+# is per-row independent, so this is exact). ~5·10⁵ matches the mass-space
+# operator's working size, which runs fine.
+_FLOW_EVAL_CHUNK = 1 << 19  # 524288
+
 
 def _gh_nodes(n: int, device, dtype):
     """Gauss–Hermite nodes/log-weights for ``E_{ε~N(0,1)}[f] ≈ Σ_i W_i f(ξ_i)``.
@@ -1567,6 +1575,20 @@ class JpsiMassMixtureModel(nn.Module):
     # Exact per-muon qop-space smear operator (2D Gauss–Hermite)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _flow_eval_chunked(fn, m_flat, mk_flat):
+        """Apply a per-row flow eval ``fn(m, mk)`` over the (flattened) first
+        dim in chunks of ``_FLOW_EVAL_CHUNK`` rows and concatenate. The flow is
+        row-independent so this is EXACT; it just caps the single-call
+        allocation (the qop operator's B·n_gh² rows can otherwise trip the CUDA
+        allocator on one matmul). Gradients flow normally through the chunks."""
+        n = m_flat.shape[0]
+        if n <= _FLOW_EVAL_CHUNK:
+            return fn(m_flat, mk_flat)
+        return torch.cat([
+            fn(m_flat[i:i + _FLOW_EVAL_CHUNK], mk_flat[i:i + _FLOW_EVAL_CHUNK])
+            for i in range(0, n, _FLOW_EVAL_CHUNK)])
+
     def _gh_qop_forward(self, me, mo, pto, etao, phio, qo, bpo, tsp, eps):
         """Forward source map ``x = T(m')`` for the qop-space operator at a 2D
         GH node. ``me`` [B, G²] source mass; ``eps`` [..., 2] the per-muon unit
@@ -1646,8 +1668,8 @@ class JpsiMassMixtureModel(nn.Module):
         if self.scale_enabled or self.smearing_enabled:
             mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
                 m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
-        logp0 = self.log_p_nominal(
-            mp.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        logp0 = self._flow_eval_chunked(
+            self.log_p_nominal, mp.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
         log_terms = logW2.view(1, G2) + logp0 - torch.log(Gp.abs().clamp_min(1e-6))
         log_p_theta = torch.logsumexp(log_terms, dim=1)
         return torch.nan_to_num(log_p_theta.clamp(max=50.0), nan=0.0)
@@ -1991,10 +2013,12 @@ class JpsiMassMixtureModel(nn.Module):
         if self.scale_enabled or self.smearing_enabled:
             mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh_qop(
                 m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, eps)
-        log_F_lo = self._flow_log_cdf(
-            mp_lo.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
-        log_F_hi = self._flow_log_cdf(
-            mp_hi.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        log_F_lo = self._flow_eval_chunked(
+            self._flow_log_cdf, mp_lo.reshape(-1),
+            mk_g.reshape(B * G2, -1)).reshape(B, G2)
+        log_F_hi = self._flow_eval_chunked(
+            self._flow_log_cdf, mp_hi.reshape(-1),
+            mk_g.reshape(B * G2, -1)).reshape(B, G2)
         node_window = (log_F_hi.exp() - log_F_lo.exp()).clamp_min(0.0)  # [B, G²]
         W = logW2.exp().view(1, G2)                                     # [1, G²]
         Z = (W * node_window).sum(dim=1).clamp(min=1e-30)               # [B]
