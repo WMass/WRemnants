@@ -447,8 +447,13 @@ def evaluate_predictions(
             if bool(mc_sel.any()):
                 mc_idx = mc_sel.nonzero(as_tuple=True)[0]
                 # Directly shift+smear the MC at the *fitted* θ — the empirical
-                # template the model signal curve should reproduce.
-                ptm = batch["pt_pm"][mc_idx]
+                # template the model signal curve should reproduce. Use the
+                # NOMINAL (pre-injection) pt: in validation the loader replaces
+                # pt_pm with the injected/smeared pt (so mll = _event_mll(pt_pm)
+                # is consistent), so folding pt_pm again would DOUBLE the
+                # injection. pt_pm_nominal is the un-injected pt (== pt_pm when
+                # no injection / older loaders without the field).
+                ptm = batch.get("pt_pm_nominal", batch["pt_pm"])[mc_idx]
                 etam = batch["eta_pm"][mc_idx]
                 phim = batch["phi_pm"][mc_idx]
                 qm = batch["q_pm"][mc_idx]

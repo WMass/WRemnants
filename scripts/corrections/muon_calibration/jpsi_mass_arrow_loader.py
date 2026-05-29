@@ -452,6 +452,10 @@ def _batch_tensors(
     eta_pm = np.stack([cols["eta_plus"], cols["eta_minus"]], axis=1).astype(np.float32)
     phi_pm = np.stack([cols["phi_plus"], cols["phi_minus"]], axis=1).astype(np.float32)
     q_pm = np.stack([cols["q_plus"], cols["q_minus"]], axis=1).astype(np.float32)
+    # The NOMINAL (pre-injection) per-muon pt — kept so the diagnostics can fold
+    # the un-injected MC at the fitted θ and recompute the true nominal m_ll.
+    # Without injection it is identical to pt_pm.
+    pt_pm_nominal = pt_pm.copy()
 
     is_data_mask = (cols["is_data"].astype(np.uint8) != 0)
 
@@ -506,6 +510,7 @@ def _batch_tensors(
         "is_data_mask": torch.from_numpy(is_data_mask),
         "w": torch.from_numpy(w),
         "pt_pm": torch.from_numpy(pt_pm),
+        "pt_pm_nominal": torch.from_numpy(pt_pm_nominal),
         "eta_pm": torch.from_numpy(eta_pm),
         "phi_pm": torch.from_numpy(phi_pm),
         "q_pm": torch.from_numpy(q_pm),
