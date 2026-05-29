@@ -29,6 +29,7 @@ The ±1σ bands and the matrix plot require a covariance file via --fisher
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 from typing import List
@@ -1193,7 +1194,214 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "diagnostic runs.")
     p.add_argument("--continuity-n-iter", type=int, default=2,
                    help="Fixed-point iterations for the #2 source solve.")
+    p.add_argument("--param-shift", type=float, default=1.0,
+                   help="Representative shift (in units of each parameter's "
+                   "reference scale: THETA_SCALE_REF for A/e/M, SMEAR_VAR_SCALE "
+                   "for a/c) used for the parameter-sensitivity overlay curves. "
+                   "Default 1.0 → A±1e-4, e±1e-3, M±1e-5, a±1e-7, c±2e-5.")
+    p.add_argument("--no-param-sensitivity", action="store_true",
+                   help="Skip the parameter-sensitivity slice plots "
+                   "(param_sensitivity_*). They re-iterate the loader and do "
+                   "~2·n_fitted extra grid evaluations per event, which is the "
+                   "slowest diagnostic for the qop smear operator — pair with "
+                   "--max-events for a quick look.")
     return p.parse_args(argv)
+
+
+@contextlib.contextmanager
+def _shift_theta_output(model, dscale=None, dsmear=None):
+    """Temporarily ADD a physical (A,e,M)/(a,c) shift to the model's per-muon
+    parameter output. Works for BOTH binned and MLP θ because it wraps the
+    output methods (``_scale_AeM_pm`` / ``_smear_ac_pm``), shifting the effective
+    θ however it is produced — unlike ``_override_theta``, which only sets the
+    binned tensors and is a no-op under ``--theta-mlp``. ``dscale`` is a physical
+    [A, e, M] shift; ``dsmear`` a physical [a, c] shift (converted to the O(1)
+    coefficient via SMEAR_VAR_SCALE before being added to the O(1) ac output)."""
+    dev = model.m_lo.device
+    set_s, set_c = dscale is not None, dsmear is not None
+    orig_s, orig_c = model._scale_AeM_pm, model._smear_ac_pm
+    if set_s:
+        ds = torch.as_tensor(dscale, dtype=torch.float32, device=dev)
+        model._scale_AeM_pm = lambda e, p, b: orig_s(e, p, b) + ds
+    if set_c:
+        sc = torch.tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
+                          dtype=torch.float32, device=dev)
+        dc = torch.as_tensor(dsmear, dtype=torch.float32, device=dev) / sc
+        model._smear_ac_pm = lambda e, p, b: orig_c(e, p, b) + dc
+    try:
+        yield
+    finally:
+        if set_s:
+            del model.__dict__["_scale_AeM_pm"]
+        if set_c:
+            del model.__dict__["_smear_ac_pm"]
+
+
+@torch.no_grad()
+def plot_param_sensitivity(model, loader, stats, m_centers, out_dir, *,
+                           shift_scale=1.0, max_events=0, chunk_events=2048,
+                           n_iter=2, device="cpu", mc_as_data=False, progress=True):
+    """Per-slice m_ll closure with overlays of the model signal density at ±a
+    representative shift of each FITTED parameter — to expose parameter
+    sensitivities and degeneracies. The data (pseudo-data in validation) is
+    histogrammed per slice; the model density at the fitted θ and at θ_fit ± Δ
+    (one parameter at a time) are slice-weighted-averaged and overlaid.
+
+    Slice variables are CONDITIONAL quantities (or functions of them) — the flow
+    conditions on muon_kin = (η_±, φ_±, ρ), so slicing in those keeps the
+    conditioning fixed within a slice and the closure cleanly isolates the model
+    behaviour. (Slicing in a NON-conditional variable such as pt_avg — the
+    absolute pt scale, which the leak-free conditioning deliberately omits —
+    would conflate the flow's pt-marginalisation with the θ-effects.) The
+    discriminating slices:
+      |η|max — reference (the existing closure axis), from η_±;
+      ρ = (pt₊−pt₋)/(pt₊+pt₋) — charge-odd → isolates M (mass effect ∝ pt₊−pt₋);
+      cos α = (cosΔφ + sinhη₊ sinhη₋)/(coshη₊ coshη₋) — the 3-D opening angle.
+              The pt CANCELS, so it is a pure function of (η_±, Δφ) ⊂ muon_kin;
+              and at fixed m, m² = 2p₊p₋(1−cosα) ⇒ α fixes p₊p₋, i.e. the pt
+              scale (k̄) — so it separates A vs e (peak shift ∝ A−e·k̄) and
+              a vs c (mass-variance ∝ a·pt²+c) using ONLY conditional info.
+
+    Slice edges are adaptive (tertiles) per variable. The shift Δ per parameter
+    is ``shift_scale`` × its reference scale (THETA_SCALE_REF for A/e/M,
+    SMEAR_VAR_SCALE for a/c)."""
+    G = m_centers.shape[0]
+    mdev = m_centers.to(device)
+    mc = m_centers.cpu().numpy()
+    dmb = float(m_centers[1] - m_centers[0])
+    m_edges = np.concatenate([[mc[0] - dmb / 2], mc[:-1] + dmb / 2, [mc[-1] + dmb / 2]])
+
+    # ± representative shift per FITTED parameter.
+    ref_s = THETA_SCALE_REF
+    ref_c = (SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C)
+    pal = {"A": "C0", "e": "C1", "M": "C2", "a": "C5", "c": "C6"}
+    shifts = []  # (label, color, '+'/'-', dscale|None, dsmear|None)
+    for j, nm in enumerate("AeM"):
+        if model.scale_enabled and nm in model.scale_fit_params:
+            for s in (1, -1):
+                d = [0.0, 0.0, 0.0]; d[j] = s * shift_scale * ref_s[j]
+                shifts.append((nm, pal[nm], "+" if s > 0 else "-", d, None))
+    for j, nm in enumerate("ac"):
+        if model.smearing_enabled and model.smear_fit_params in ("both", nm):
+            for s in (1, -1):
+                d = [0.0, 0.0]; d[j] = s * shift_scale * ref_c[j]
+                shifts.append((nm, pal[nm], "+" if s > 0 else "-", None, d))
+    if not shifts:
+        print("  no fitted parameters → skipping param-sensitivity plots")
+        return
+
+    def _cos_alpha(b):
+        e, p = b["eta_pm"], b["phi_pm"]
+        num = torch.cos(p[:, 0] - p[:, 1]) + torch.sinh(e[:, 0]) * torch.sinh(e[:, 1])
+        return num / (torch.cosh(e[:, 0]) * torch.cosh(e[:, 1]))
+
+    # All slice variables are conditional (or functions of muon_kin).
+    slice_vars = {
+        "abseta": (lambda b: b["eta_pm"].abs().max(1).values, "|η|max"),
+        "rho": (lambda b: (b["pt_pm"][:, 0] - b["pt_pm"][:, 1])
+                / (b["pt_pm"][:, 0] + b["pt_pm"][:, 1]), "ρ"),
+        "cosalpha": (_cos_alpha, "cos α (opening angle)"),
+    }
+
+    def _select(b):
+        s = (~b["is_data_mask"]) if mc_as_data else b["is_data_mask"]
+        return s.nonzero(as_tuple=True)[0]
+
+    # Pre-pass: collect the slice-variable values to set adaptive (tertile) edges
+    # — cheap (no flow evals), and robust to each variable's unknown range.
+    vals = {v: [] for v in slice_vars}
+    seen = 0
+    for batch in loader:
+        if max_events > 0 and seen >= max_events:
+            break
+        batch = _move_batch(batch, device)
+        idx = _select(batch)
+        if idx.numel() == 0:
+            continue
+        seen += int(idx.numel())
+        for v, (fn, _) in slice_vars.items():
+            vals[v].append(fn(batch)[idx].cpu().numpy())
+    if seen == 0:
+        print("  no events selected → skipping param-sensitivity plots")
+        return
+    edges = {}
+    for v in slice_vars:
+        a = np.concatenate(vals[v])
+        e = np.quantile(a, [0.0, 1.0 / 3, 2.0 / 3, 1.0])
+        e[0] -= 1e-6; e[-1] += 1e-6   # include the extremes
+        edges[v] = e
+    del vals
+
+    slice_specs = {v: (slice_vars[v][0], edges[v], slice_vars[v][1])
+                   for v in slice_vars}
+    acc = {v: [{"data": np.zeros(G), "fit": np.zeros(G), "w": 0.0,
+                "sh": {i: np.zeros(G) for i in range(len(shifts))}}
+               for _ in range(len(edges[v]) - 1)]
+           for v in slice_vars}
+
+    seen = 0
+    bar = tqdm(loader, desc="param-sens", disable=not progress, unit="batch")
+    for batch in bar:
+        if max_events > 0 and seen >= max_events:
+            break
+        batch = _move_batch(batch, device)
+        sel = (~batch["is_data_mask"]) if mc_as_data else batch["is_data_mask"]
+        idx = sel.nonzero(as_tuple=True)[0]
+        if idx.numel() == 0:
+            continue
+        seen += int(idx.numel())
+        mll = batch["mll"][idx].cpu().numpy()
+        w = batch["w"][idx].cpu().numpy()
+        p_fit = torch.exp(_tilt_density_on_grid(
+            model, batch, idx, mdev, chunk_events=chunk_events, n_iter=n_iter)).cpu().numpy()
+        p_sh = []
+        for _, _, _, ds, dc in shifts:
+            with _shift_theta_output(model, ds, dc):
+                p_sh.append(torch.exp(_tilt_density_on_grid(
+                    model, batch, idx, mdev, chunk_events=chunk_events,
+                    n_iter=n_iter)).cpu().numpy())
+        for v, (fn, edges, _) in slice_specs.items():
+            val = fn(batch)[idx].cpu().numpy()
+            for si in range(len(edges) - 1):
+                sm = (val >= edges[si]) & (val < edges[si + 1])
+                if not sm.any():
+                    continue
+                a = acc[v][si]
+                a["data"] += np.histogram(mll[sm], bins=m_edges, weights=w[sm])[0]
+                a["fit"] += (p_fit[sm] * w[sm, None]).sum(0)
+                a["w"] += float(w[sm].sum())
+                for i in range(len(shifts)):
+                    a["sh"][i] += (p_sh[i][sm] * w[sm, None]).sum(0)
+    bar.close()
+
+    for v, (fn, edges, xlabel) in slice_specs.items():
+        ns = len(edges) - 1
+        fig, axes = plt.subplots(1, ns, figsize=(4.8 * ns, 4.0))
+        if ns == 1:
+            axes = [axes]
+        for si in range(ns):
+            ax, a = axes[si], acc[v][si]
+            if a["w"] <= 0:
+                ax.set_visible(False); continue
+            ax.step(mc, a["data"], where="mid", color="k", lw=1.2,
+                    label="pseudo-data" if mc_as_data else "data")
+            ax.plot(mc, a["fit"] * dmb, color="0.3", lw=2.0, label="model (fit)")
+            for i, (nm, col, sgn, _, _) in enumerate(shifts):
+                ax.plot(mc, a["sh"][i] * dmb, color=col, lw=1.0,
+                        ls="--" if sgn == "+" else ":", alpha=0.85,
+                        label=f"{nm}{sgn}Δ")
+            hi = "∞" if edges[si + 1] > 1e8 else f"{edges[si + 1]:.2f}"
+            ax.set_title(f"{xlabel} ∈ [{edges[si]:.2f}, {hi})", fontsize=9)
+            ax.set_xlabel("m_ll [GeV]"); ax.grid(alpha=0.3)
+            if si == 0:
+                ax.legend(fontsize=6, ncol=2)
+        fig.suptitle(f"parameter sensitivity — slices of {xlabel} "
+                     f"(Δ = {shift_scale:g}× ref scale)")
+        fig.tight_layout()
+        for ext in ("png", "pdf"):
+            fig.savefig(os.path.join(out_dir, f"param_sensitivity_{v}.{ext}"), dpi=110)
+        plt.close(fig)
+        print(f"  wrote param_sensitivity_{v} ({ns} slices)")
 
 
 def main() -> int:
@@ -1521,6 +1729,18 @@ def main() -> int:
     # the fitted scale + smearing). Re-uses pred_signal_mc — no second pass.
     print("plotting MC closure...")
     plot_mc_closure(evals, m_centers_np, eta_slice_edges, out_dir)
+
+    # Plot 7: parameter-sensitivity slices — model density at ±shifts of each
+    # fitted param, in slices of |η| / ρ / pt_avg chosen to break degeneracies.
+    # Re-iterates the loader (own pass; extra grid evals per shift).
+    if not bool(getattr(args, "no_param_sensitivity", False)):
+        print("plotting parameter-sensitivity slices...")
+        plot_param_sensitivity(
+            model, loader, stats, m_centers, out_dir,
+            shift_scale=args.param_shift, max_events=args.max_events,
+            chunk_events=args.grid_chunk_events, n_iter=args.continuity_n_iter,
+            device=device, mc_as_data=mc_as_data,
+            progress=getattr(args, "progress", True))
 
     print(f"\nall diagnostics written under {out_dir}")
     return 0
