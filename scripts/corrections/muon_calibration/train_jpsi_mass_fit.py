@@ -317,7 +317,7 @@ def compute_fisher_info_continuity(
             continue
         per = model.data_nll_continuity(
             batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            batch["q_pm"], batch["b_pm"], batch["cond_std"], data_mask,
             n_iter=n_iter)
         w = batch["w"] * data_mask.to(batch["w"].dtype)
         nll = (w * per).sum()
@@ -528,12 +528,14 @@ def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None,
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=True, half=half, inject_theta_scale=inject_theta,
-        inject_theta_smear=inject_smear, inject_seed=seed)
+        inject_theta_smear=inject_smear, inject_seed=seed,
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inject_theta,
-        inject_theta_smear=inject_smear, inject_seed=seed)
+        inject_theta_smear=inject_smear, inject_seed=seed,
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     return train_loader, val_loader
 
 
@@ -565,13 +567,16 @@ def _inject_smear_np(args, n_eta):
     return t
 
 
-# Args that fix the flow's parameter shapes — these must match the saved flow
-# when reloading it for --stage fit (the model is rebuilt from args before the
-# flow weights are loaded). The MLP size and θ-smear fit choice are NOT here:
-# only the flow is loaded from the checkpoint, so those stay free stage-2 knobs.
+# Args that fix the flow's parameter shapes OR conditioning semantics — these
+# must match the saved flow when reloading it for --stage fit (the model is
+# rebuilt from args before the flow weights are loaded). The MLP size and
+# θ-smear fit choice are NOT here: only the flow is loaded from the checkpoint,
+# so those stay free stage-2 knobs. cond_basis is included because a flow
+# trained on one basis is meaningless under the other (same shape, different
+# meaning), so stage-2 must inherit the flow's basis.
 _FLOW_ARCH_KEYS = (
     "flow_arch", "flow_n_transforms", "flow_hidden", "flow_n_hidden",
-    "gf_components", "nsf_bins",
+    "gf_components", "nsf_bins", "cond_basis",
 )
 
 
@@ -618,6 +623,7 @@ def _build_model(args, stats, device):
         norm_correction=getattr(args, "norm_correction", "none"),
         background_enabled=not getattr(args, "no_background", False),
         theta_mode=("mlp" if getattr(args, "theta_mlp", False) else "binned"),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
         theta_mlp_hidden=getattr(args, "theta_mlp_hidden", 32),
         theta_mlp_layers=getattr(args, "theta_mlp_layers", 2),
         theta_whiten=getattr(args, "theta_whiten", False),
@@ -756,7 +762,7 @@ def train_stage1(args, model, train_loader, val_loader, stats) -> float:
         idx = (~batch["is_data_mask"]).nonzero(as_tuple=True)[0]
         if idx.numel() == 0:
             return torch.zeros((), device=batch["mll"].device), 0.0
-        logp = model.log_p_nominal(batch["mll"][idx], batch["muon_kin_std"][idx])
+        logp = model.log_p_nominal(batch["mll"][idx], batch["cond_std"][idx])
         w = batch["w"][idx]
         sw = float(w.sum().clamp_min(1e-30))
         return -(w * logp).sum() / sw, sw
@@ -833,7 +839,7 @@ def train_stage2(args, model, train_loader, val_loader, stats,
         data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
         per = model.data_nll_continuity(
             batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            batch["q_pm"], batch["b_pm"], batch["cond_std"], data_mask,
             n_iter=args.continuity_n_iter)
         w = batch["w"] * data_mask.to(batch["w"].dtype)
         sw = float(w.sum().clamp_min(1e-30))
@@ -967,7 +973,8 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
-        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
           f"fixed flow + MLP) on split={args.fisher_split}"
           + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
@@ -1068,7 +1075,8 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
-        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     nominal_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
     # Freeze the flow; float the MLP + active θ (the MLP must re-fit per replica
@@ -1138,7 +1146,7 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
                     continue
                 per = model.data_nll_continuity(
                     batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-                    batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+                    batch["q_pm"], batch["b_pm"], batch["cond_std"], data_mask,
                     n_iter=args.continuity_n_iter)
                 loss = (w * per).sum() / sw
                 if not torch.isfinite(loss):
@@ -1301,7 +1309,7 @@ def compute_empirical_fisher_joint(
             continue
         per = model.data_nll_continuity(
             batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            batch["q_pm"], batch["b_pm"], batch["cond_std"], data_mask,
             n_iter=n_iter)
         per_d = per[di]
         w_d = batch["w"][di].detach()
@@ -1458,7 +1466,7 @@ def compute_empirical_fisher_net(
             continue
         per = model.data_nll_continuity(
             batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
-            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            batch["q_pm"], batch["b_pm"], batch["cond_std"], data_mask,
             n_iter=n_iter)
         per_d = per[di]
         w_d = batch["w"][di].detach()
@@ -1576,7 +1584,8 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
         shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
-        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     ridge = float(args.empirical_fisher_ridge)
     print(f"\ncomputing θ-NET-weight empirical Fisher (per-event scores → ridge="
           f"{ridge:g} inverse → output Jacobian) on split={args.fisher_split}"
@@ -1658,7 +1667,8 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
-        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"))
     print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
           f"split={args.fisher_split}"
           + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
@@ -1744,6 +1754,7 @@ def _load_full_fit(args, device):
               "jacobian_form", "smear_param_form",
               "norm_correction", "no_background",
               "qop_floor_frac", "theta_mlp", "theta_mlp_hidden", "theta_mlp_layers",
+              "cond_basis",
               "theta_whiten", "theta_whiten_max_rho",
               "disable_scale", "disable_smearing", "validation",
               "no_validation_split",
@@ -2091,6 +2102,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         "the background MLP). Note: the observed/empirical Fisher and bootstrap "
         "uncertainties are binned-θ-only and are skipped in this mode.",
     )
+    p.add_argument(
+        "--cond-basis", choices=["muon_kin", "event_level"], default="muon_kin",
+        help="Flow + background-MLP conditioning basis. 'muon_kin' (default): "
+        "the leak-free per-muon (η±, cosφ±, sinφ±, ρ). 'event_level': the "
+        "dilepton vars (yll, ln ptll, cosPhill, sinPhill, cosθ*, sinφ*, cosφ*) — "
+        "all pt-dependent, so the qop scale/smear propagates to the whole "
+        "conditioning (and the background MLP then sees ln ptll). event_level "
+        "with smearing requires --smear-operator gh_convolution_qop; the basis "
+        "must be the SAME for stage 1 and stage 2.")
     p.add_argument("--theta-mlp-hidden", type=int, default=32,
                    help="(--theta-mlp) Hidden width of the θ ThetaNet.")
     p.add_argument("--theta-mlp-layers", type=int, default=2,

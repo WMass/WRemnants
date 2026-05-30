@@ -100,6 +100,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: str):
         norm_correction=args.get("norm_correction", "none"),
         background_enabled=not bool(args.get("no_background", False)),
         theta_mode=("mlp" if args.get("theta_mlp", False) else "binned"),
+        cond_basis=args.get("cond_basis", "muon_kin"),
         theta_mlp_hidden=args.get("theta_mlp_hidden", 32),
         theta_mlp_layers=args.get("theta_mlp_layers", 2),
     ).to(device)
@@ -127,7 +128,10 @@ def _tilt_density_on_grid(
     G = m_centers_dev.shape[0]
     eta = batch["eta_pm"][idx]; q = batch["q_pm"][idx]; b = batch["b_pm"][idx]
     phi = batch["phi_pm"][idx]
-    mk = batch["muon_kin_std"][idx]; pt = batch["pt_pm"][idx]
+    # For event_level the operator recomputes the conditioning from the
+    # grid-scaled pt_g (so ln ptll tracks the grid mass); the passed mk is used
+    # only for muon_kin's pt-invariant η/φ.
+    mk = batch["cond_std"][idx]; pt = batch["pt_pm"][idx]
     m_obs = batch["mll"][idx]
     out = torch.empty((n, G), device=m_centers_dev.device, dtype=mk.dtype)
     for start in range(0, n, max(1, chunk_events)):
@@ -148,15 +152,34 @@ def _tilt_density_on_grid(
 def _nominal_density_on_grid(model, batch, idx, m_centers_dev, *, chunk_events=4096):
     """``[len(idx), n_grid]`` log p₀(m_grid | c) — the *nominal* (θ=0) flow
     density, i.e. the stage-1 template with no scale/smear correction. Point
-    evaluations of the frozen flow at the grid masses."""
+    evaluations of the frozen flow at the grid masses.
+
+    For ``event_level`` the conditioning is pt-dependent, so it is recomputed
+    per grid column from the grid-scaled pt (pt∝m) — matching how the tilt curve
+    sweeps the conditioning, so the nominal/tilt overlay is consistent. For
+    ``muon_kin`` the conditioning is invariant under the common pt scaling, so it
+    is held fixed (the legacy fast path)."""
     n = idx.shape[0]; G = m_centers_dev.shape[0]
-    mk = batch["muon_kin_std"][idx]
+    mk = batch["cond_std"][idx]
     out = torch.empty((n, G), device=m_centers_dev.device, dtype=mk.dtype)
+    event_level = getattr(model, "cond_basis", "muon_kin") == "event_level"
+    if event_level:
+        pt = batch["pt_pm"][idx]; eta = batch["eta_pm"][idx]
+        phi = batch["phi_pm"][idx]; q = batch["q_pm"][idx]
+        m_obs = batch["mll"][idx]
     for start in range(0, n, max(1, chunk_events)):
         end = min(start + chunk_events, n); sub = end - start
-        mg = m_centers_dev.view(1, G).expand(sub, G).reshape(-1)
-        mke = mk[start:end].unsqueeze(1).expand(sub, G, mk.shape[-1]).reshape(sub * G, -1)
-        out[start:end] = model.log_p_nominal(mg, mke).reshape(sub, G)
+        mg = m_centers_dev.view(1, G).expand(sub, G)                # [sub,G]
+        if event_level:
+            scale = (mg / m_obs[start:end].view(sub, 1)).unsqueeze(-1)
+            rep = lambda x: x[start:end].unsqueeze(1).expand(
+                sub, G, *x.shape[1:]).reshape(sub * G, *x.shape[1:])
+            pt_g = (pt[start:end].unsqueeze(1) * scale).reshape(sub * G, 2)
+            mke = model._cond_from_muons(pt_g, rep(eta), rep(phi), rep(q))
+        else:
+            mke = mk[start:end].unsqueeze(1).expand(
+                sub, G, mk.shape[-1]).reshape(sub * G, -1)
+        out[start:end] = model.log_p_nominal(mg.reshape(-1), mke).reshape(sub, G)
     return out
 
 
@@ -439,14 +462,14 @@ def evaluate_predictions(
             if bool(data_sel.any()):
                 data_idx = data_sel.nonzero(as_tuple=True)[0]
                 if getattr(model, "background_enabled", True):
-                    f = model.f_data(batch["muon_kin_std"][data_idx])  # [n_data, 3]
+                    f = model.f_data(batch["cond_std"][data_idx])  # [n_data, 3]
                 else:
                     # --no-background: data branch is pure signal. The MLP is
                     # bypassed in data_nll_continuity; mirror that here so the
                     # mixture plot doesn't show whatever the random-init MLP
                     # happens to output. f ≡ [0, 0, 1] → no Bernstein bkg.
-                    f = torch.zeros((data_idx.numel(), 3), device=batch["muon_kin_std"].device,
-                                    dtype=batch["muon_kin_std"].dtype)
+                    f = torch.zeros((data_idx.numel(), 3), device=batch["cond_std"].device,
+                                    dtype=batch["cond_std"].dtype)
                     f[:, 2] = 1.0
                 # Signal density at every bin centre for every data event at the
                 # fitted θ: tilt (continuity) or θ-conditioned flow (legacy).
@@ -1577,6 +1600,7 @@ def main() -> int:
         inject_theta_scale=inject_np,
         inject_theta_smear=inject_smear_np,
         inject_seed=int(train_args.get("inject_smear_seed", 12345)),
+        cond_basis=train_args.get("cond_basis", "muon_kin"),
     )
 
     # m_ll grid.

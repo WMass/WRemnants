@@ -208,10 +208,12 @@ N_THETA_SMEAR_PM = 2 * N_THETA_SMEAR   # 4 — flat per-event smear vector
 # the pt *scale* ↔ m_ll free — so the flow's target is not determined by its
 # conditioning. The SIGNAL FLOW conditions on (muon_kin, θ_scale_pm,
 # θ_smear_pm); the background-fraction MLP conditions on muon_kin alone (same
-# kinematics, no nuisances). ``y_event`` (dilepton-level vars) is no longer
-# used by either head (it carries pt_ll, which would re-pin m_ll); the loader
-# still emits it but the model ignores it.
-N_Y_EVENT = 7    # legacy; emitted by the loader but unused by the model
+# kinematics, no nuisances). ``y_event`` (dilepton-level vars) is the OPTIONAL
+# alternative basis selected by ``cond_basis='event_level'`` (--cond-basis):
+# (yll, ln ptll, cosPhill, sinPhill, cosθ*, sinφ*, cosφ*). Unlike muon_kin it is
+# pt-dependent, so the qop scale/smear must propagate to the whole vector (see
+# _cond_from_muons). Default stays the leak-free muon_kin.
+N_Y_EVENT = 7    # event-level basis dim (== N_MUON_KIN, so no flow-shape change)
 N_MUON_KIN = 7
 N_FLOW_COND = N_MUON_KIN + N_THETA_SCALE_PM + N_THETA_SMEAR_PM  # 17
 
@@ -403,6 +405,73 @@ def _event_mll(
     Pz = pz.sum(-1)
     m2 = Etot * Etot - (Px * Px + Py * Py + Pz * Pz)
     return torch.sqrt(m2.clamp_min(1e-12))
+
+
+def _event_cond_raw(
+    pt_pm: torch.Tensor, eta_pm: torch.Tensor, phi_pm: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Event-level conditioning ``(yll, ln ptll, cosPhill, sinPhill, cosθ*,
+    sinφ*, cosφ*)`` from the two muon momenta — a differentiable torch port of
+    the ROOT snapshot's dilepton + Collins–Soper computation
+    (wremnants/production/include/csVariables.hpp ``csSineCosThetaPhi``).
+
+    Inputs ``[..., 2]`` per (+, −); ``eta_pm``/``phi_pm`` broadcast against
+    ``pt_pm`` (so a per-GH-node ``pt`` [.,G²,2] works with [.,1,2] η/φ). Output
+    ``[..., 7]`` in the order of the loader's ``_Y_EVENT_FEATURES``. The μ+ is the
+    antilepton (index 0), the μ− the lepton (index 1) — matching the snapshot."""
+    cphi = torch.cos(phi_pm)
+    sphi = torch.sin(phi_pm)
+    px = pt_pm * cphi
+    py = pt_pm * sphi
+    pz = pt_pm * torch.sinh(eta_pm)
+    E = torch.sqrt(px * px + py * py + pz * pz + MUON_MASS_GEV * MUON_MASS_GEV)
+    Px, Py, Pz, Etot = px.sum(-1), py.sum(-1), pz.sum(-1), E.sum(-1)
+    ptll = torch.sqrt((Px * Px + Py * Py).clamp_min(eps * eps))
+    yll = 0.5 * torch.log(((Etot + Pz) / (Etot - Pz)).clamp_min(eps))
+    cosPhill = Px / ptll
+    sinPhill = Py / ptll
+    # Boost everything into the dilepton rest frame: velocity b = −P/Etot
+    # (ROOT BoostToCM), γ = 1/√(1−b²).
+    bx, by, bz = -Px / Etot, -Py / Etot, -Pz / Etot
+    b2 = (bx * bx + by * by + bz * bz).clamp(max=1.0 - 1e-9)
+    gamma = torch.rsqrt(1.0 - b2)
+    b2s = b2.clamp_min(1e-30)
+
+    def _boost_unit(qx, qy, qz, qE):
+        bdotp = bx * qx + by * qy + bz * qz
+        fac = (gamma - 1.0) * bdotp / b2s + gamma * qE
+        rx, ry, rz = qx + fac * bx, qy + fac * by, qz + fac * bz
+        r = torch.sqrt((rx * rx + ry * ry + rz * rz).clamp_min(eps * eps))
+        return rx / r, ry / r, rz / r
+
+    # Proton beams: E=6500, m_p=0.938; beam ±z sign tracks the dilepton z
+    # (copysign(1, Pz): +1 at Pz==0). lepton = μ− (index 1).
+    zsign = torch.where(Pz >= 0, torch.ones_like(Pz), -torch.ones_like(Pz))
+    pbeam = math.sqrt(6500.0 * 6500.0 - 0.93827208816 * 0.93827208816)
+    zero = torch.zeros_like(Pz)
+    p1x, p1y, p1z = _boost_unit(zero, zero, zsign * pbeam, 6500.0)
+    p2x, p2y, p2z = _boost_unit(zero, zero, -zsign * pbeam, 6500.0)
+    lx, ly, lz = _boost_unit(px[..., 1], py[..., 1], pz[..., 1], E[..., 1])
+
+    def _unit(ax, ay, az):
+        n = torch.sqrt((ax * ax + ay * ay + az * az).clamp_min(eps * eps))
+        return ax / n, ay / n, az / n
+
+    def _cross(ax, ay, az, bx_, by_, bz_):
+        return (ay * bz_ - az * by_, az * bx_ - ax * bz_, ax * by_ - ay * bx_)
+
+    fx, fy, fz = _unit(p1x - p2x, p1y - p2y, p1z - p2z)             # csFrame
+    yx, yy, yz = _unit(*_cross(p1x, p1y, p1z, -p2x, -p2y, -p2z))    # csYaxis
+    xx, xy, xz = _unit(*_cross(yx, yy, yz, fx, fy, fz))            # csXaxis
+    costheta = fx * lx + fy * ly + fz * lz
+    crx, cry, crz = _cross(fx, fy, fz, lx, ly, lz)
+    sintheta = torch.sqrt((crx * crx + cry * cry + crz * crz).clamp_min(eps * eps))
+    sinphi = (yx * lx + yy * ly + yz * lz) / sintheta
+    cosphi = (xx * lx + xy * ly + xz * lz) / sintheta
+    return torch.stack(
+        [yll, torch.log(ptll), cosPhill, sinPhill, costheta, sinphi, cosphi],
+        dim=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +698,13 @@ class JpsiMassMixtureModel(nn.Module):
         theta_mode: str = "binned",
         theta_mlp_hidden: int = 32,
         theta_mlp_layers: int = 2,
+        # Flow + background-MLP conditioning basis. 'muon_kin' (default): the
+        # leak-free per-muon (η±, cosφ±, sinφ±, ρ). 'event_level': the dilepton
+        # vars (yll, ln ptll, cosPhill, sinPhill, cosθ*, sinφ*, cosφ*) — all
+        # pt-dependent, so the qop scale/smear propagates to the WHOLE
+        # conditioning (see _cond_from_muons). Both are 7-dim (no flow-shape
+        # change); the basis must match between stage-1 and stage-2.
+        cond_basis: str = "muon_kin",
         # Degeneracy-whitening preconditioner (see _WhitenGradFn). When True,
         # the gradient of the (A, e) and (a, c) pairs is rotated into a
         # decorrelated basis built from the per-η-bin curvature moments, so the
@@ -673,6 +749,22 @@ class JpsiMassMixtureModel(nn.Module):
         if theta_mode not in ("binned", "mlp"):
             raise ValueError(f"theta_mode must be 'binned' or 'mlp', got {theta_mode!r}")
         self.theta_mode = str(theta_mode)
+        if cond_basis not in ("muon_kin", "event_level"):
+            raise ValueError(
+                f"cond_basis must be 'muon_kin' or 'event_level'; got {cond_basis!r}")
+        self.cond_basis = str(cond_basis)
+        # event_level propagates the per-muon qop kick to ALL conditioning vars,
+        # which requires reconstructing per-muon pt per smear node — only the
+        # qop operator does that. The mass-space operators transport smear in
+        # mass space (no per-muon smeared pt), so they cannot carry the smear
+        # into the (pt-dependent) event vars; require the qop operator there.
+        if (self.cond_basis == "event_level" and self.smearing_enabled
+                and self.smear_operator != "gh_convolution_qop"):
+            raise ValueError(
+                "cond_basis='event_level' with smearing enabled requires "
+                "--smear-operator gh_convolution_qop (the mass-space operators "
+                "cannot propagate the smear to the event-level conditioning); "
+                "use gh_convolution_qop, or --disable-smearing for scale-only.")
         self.flow_arch = str(flow_arch)
 
         # Per-bin smear fit mask: which of (a, c) float. The frozen column gets
@@ -1089,6 +1181,45 @@ class JpsiMassMixtureModel(nn.Module):
         return self.mlp(muon_kin_std)
 
     # ------------------------------------------------------------------
+    # Conditioning basis
+    # ------------------------------------------------------------------
+
+    def _cond_from_muons(self, pt_pm, eta_pm, phi_pm, q_pm) -> torch.Tensor:
+        """STANDARDISED flow/MLP conditioning recomputed from per-muon momenta,
+        for ``self.cond_basis``. Used wherever the qop scale/smear changes pt and
+        the conditioning must follow (operator un-kick nodes, pseudo-data).
+
+        - ``muon_kin``: ``(η±, cosφ±, sinφ±, ρ)`` — only ρ depends on pt; η/φ are
+          pt-invariant, so recomputing the full vector reproduces the ρ-only
+          update (kept as a fast path in ``_node_cond``).
+        - ``event_level``: the dilepton vars via ``_event_cond_raw`` (all
+          pt-dependent). ``q_pm`` is unused (μ± identified by index)."""
+        if self.cond_basis == "event_level":
+            raw = _event_cond_raw(pt_pm, eta_pm, phi_pm)
+            return (raw - self.y_event_mean) / self.y_event_std
+        cphi = torch.cos(phi_pm)
+        sphi = torch.sin(phi_pm)
+        rho = ((pt_pm[..., 0] - pt_pm[..., 1])
+               / (pt_pm[..., 0] + pt_pm[..., 1]))
+        raw = torch.stack(
+            [eta_pm[..., 0], eta_pm[..., 1], cphi[..., 0], sphi[..., 0],
+             cphi[..., 1], sphi[..., 1], rho], dim=-1)
+        return (raw - self.muon_kin_mean) / self.muon_kin_std
+
+    def _node_cond(self, mk_g, pt_truth, eta_pm, phi_pm, q_pm) -> torch.Tensor:
+        """Per-node conditioning from un-kicked ``pt_truth``. For ``muon_kin``,
+        patch only ρ into the (already-expanded, observed) ``mk_g`` — η/φ are
+        pt-invariant, so this is bit-for-bit the legacy behaviour. For
+        ``event_level``, recompute the whole vector from the un-kicked momenta."""
+        if self.cond_basis == "event_level":
+            return self._cond_from_muons(pt_truth, eta_pm, phi_pm, q_pm)
+        rho = ((pt_truth[..., 0] - pt_truth[..., 1])
+               / (pt_truth[..., 0] + pt_truth[..., 1]))
+        idx = N_MUON_KIN - 1
+        mk_g[..., idx] = (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
+        return mk_g
+
+    # ------------------------------------------------------------------
     # Stage-2 continuity-equation data fit (frozen flow + analytic v, κ)
     #
     #   log p_s(m|c,θ) = log p₀(m|c) + δ(m,c;θ)        [+ O(θ²) renorm]
@@ -1294,15 +1425,20 @@ class JpsiMassMixtureModel(nn.Module):
             lp = self.log_p_nominal(ml, mk)
             return torch.autograd.grad(lp.sum(), ml, create_graph=True)[0].detach()
 
+    def _scale_unapply_pt(self, pt_obs, eta_pm, phi_pm, q_pm, b_pm):
+        """Un-apply the scale correction (observed → truth pt); identity if scale
+        is disabled. Shared by the mass-space operators' source-conditioning."""
+        if not self.scale_enabled:
+            return pt_obs
+        AeM_pm = self._scale_AeM_pm(eta_pm, phi_pm, b_pm)
+        dqop_s = self._delta_qop_analytic(AeM_pm, pt_obs, eta_pm, q_pm)
+        return self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
+
     def _scale_source_rho_std(self, pt_obs, eta_pm, phi_pm, q_pm, b_pm):
         """Standardised SOURCE ρ from un-applying the scale only (no smear) —
         the smear is a pure mass-space transport, so it leaves ρ untouched.
         Returns ``[B]``."""
-        pt1 = pt_obs
-        if self.scale_enabled:
-            AeM_pm = self._scale_AeM_pm(eta_pm, phi_pm, b_pm)
-            dqop_s = self._delta_qop_analytic(AeM_pm, pt_obs, eta_pm, q_pm)
-            pt1 = self._apply_scale_pt(pt_obs, eta_pm, q_pm, dqop_s, sign=-1.0)
+        pt1 = self._scale_unapply_pt(pt_obs, eta_pm, phi_pm, q_pm, b_pm)
         rho = (pt1[:, 0] - pt1[:, 1]) / (pt1[:, 0] + pt1[:, 1])
         idx = N_MUON_KIN - 1
         return (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
@@ -1374,9 +1510,13 @@ class JpsiMassMixtureModel(nn.Module):
 
         mk_src = mk
         if self.scale_enabled:
-            mk_src = mk.clone()
-            mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
-                pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+            if self.cond_basis == "event_level":
+                pt1 = self._scale_unapply_pt(pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+                mk_src = self._cond_from_muons(pt1, eta_pm, phi_pm, q_pm)
+            else:
+                mk_src = mk.clone()
+                mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
+                    pt_obs, eta_pm, phi_pm, q_pm, b_pm)
 
         def s_adv_of(me):
             return self._continuity_response(
@@ -1528,8 +1668,15 @@ class JpsiMassMixtureModel(nn.Module):
         # conditional-mean δqop un-applied per ε); η/φ are transform-invariant.
         mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
-                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
+            if self.cond_basis == "event_level":
+                # smear is guarded to the qop operator, so this is scale-only:
+                # the full event-level conditioning from the un-scaled pt.
+                pt1 = self._scale_unapply_pt(pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+                cond1 = self._cond_from_muons(pt1, eta_pm, phi_pm, q_pm)
+                mk_g = cond1.unsqueeze(1).expand(B, G, cond1.shape[-1]).contiguous()
+            else:
+                mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
+                    m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
         logp0 = self.log_p_nominal(
             mp.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
 
@@ -1609,7 +1756,8 @@ class JpsiMassMixtureModel(nn.Module):
 
         ``pt_cfg`` [B, ·, 2] is the observed config (possibly scaled along the
         mass direction); ``eps`` [·, G², 2] the kicks. Returns ``(m_t [B, G²],
-        ρ_t_std [B, G²])``.
+        pt_truth [B, G², 2])`` — the un-kicked nominal mass + per-muon momenta
+        (the caller derives the conditioning via ``_node_cond``).
 
         This is the correct inverse: it un-kicks the ACTUAL observed config —
         giving the nominal config with its OWN nominal ρ and mass — rather than
@@ -1649,11 +1797,10 @@ class JpsiMassMixtureModel(nn.Module):
         else:
             pt_truth = pt_nom
         m_t = _event_mll(pt_truth, etao, phio)                   # [B,G²]
-        rho = (pt_truth[..., 0] - pt_truth[..., 1]) / (
-            pt_truth[..., 0] + pt_truth[..., 1])
-        idx = N_MUON_KIN - 1
-        rho_std = (rho - self.muon_kin_mean[idx]) / self.muon_kin_std[idx]
-        return m_t, rho_std
+        # Return the un-kicked nominal momenta; the caller builds the per-node
+        # conditioning from them via _node_cond (ρ-only for muon_kin, the full
+        # event-level vector for event_level).
+        return m_t, pt_truth
 
     def _continuity_logp_gh_qop(self, m_obs, mk, pt_obs, eta_pm, phi_pm, q_pm,
                                 b_pm, n_gh: int = 8, n_iter: int = 2):
@@ -1712,20 +1859,20 @@ class JpsiMassMixtureModel(nn.Module):
                              requires_grad=True)
             pt_cfg = pto * lam.unsqueeze(-1)                            # [B,G²,2]
             mo_lam = _event_mll(pt_cfg, etao, phio)                    # [B,G²]
-            m_t, rho_std = self._gh_qop_unsmear(pt_cfg, etao, phio, qo, bpo, eps)
+            m_t, pt_truth = self._gh_qop_unsmear(pt_cfg, etao, phio, qo, bpo, eps)
             g_mt = torch.autograd.grad(
                 m_t.sum(), lam, create_graph=train_grad, retain_graph=True)[0]
             g_mo = torch.autograd.grad(
                 mo_lam.sum(), lam, create_graph=train_grad, retain_graph=True)[0]
         if not train_grad:
-            m_t, rho_std = m_t.detach(), rho_std.detach()
+            m_t, pt_truth = m_t.detach(), pt_truth.detach()
             g_mt, g_mo = g_mt.detach(), g_mo.detach()
         # |∂m_t/∂x| = |∂m_t/∂λ| / |∂m_obs/∂λ|.
         logJ = (torch.log(g_mt.abs().clamp_min(1e-12))
                 - torch.log(g_mo.abs().clamp_min(1e-12)))
         mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = rho_std
+            mk_g = self._node_cond(mk_g, pt_truth, etao, phio, qo)
         logp0 = self._flow_eval_chunked(
             self.log_p_nominal, m_t.reshape(-1), mk_g.reshape(B * G2, -1)).reshape(B, G2)
         log_terms = logW2.view(1, G2) + logp0 + logJ
@@ -1847,9 +1994,13 @@ class JpsiMassMixtureModel(nn.Module):
 
         mk_src = mk
         if self.scale_enabled:
-            mk_src = mk.clone()
-            mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
-                pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+            if self.cond_basis == "event_level":
+                pt1 = self._scale_unapply_pt(pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+                mk_src = self._cond_from_muons(pt1, eta_pm, phi_pm, q_pm)
+            else:
+                mk_src = mk.clone()
+                mk_src[..., N_MUON_KIN - 1] = self._scale_source_rho_std(
+                    pt_obs, eta_pm, phi_pm, q_pm, b_pm)
 
         def s_adv_of(me):
             return self._continuity_response(
@@ -1978,8 +2129,15 @@ class JpsiMassMixtureModel(nn.Module):
         # Per-GH-node source ρ (same construction as _continuity_logp_gh).
         mk_g = mk.unsqueeze(1).expand(B, G, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
-                m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
+            if self.cond_basis == "event_level":
+                # smear is guarded to the qop operator, so this is scale-only:
+                # the full event-level conditioning from the un-scaled pt.
+                pt1 = self._scale_unapply_pt(pt_obs, eta_pm, phi_pm, q_pm, b_pm)
+                cond1 = self._cond_from_muons(pt1, eta_pm, phi_pm, q_pm)
+                mk_g = cond1.unsqueeze(1).expand(B, G, cond1.shape[-1]).contiguous()
+            else:
+                mk_g[..., N_MUON_KIN - 1] = self._source_rho_std_gh(
+                    m_obs, pt_obs, eta_pm, phi_pm, q_pm, b_pm, xi)
         log_F_lo = self._flow_log_cdf(
             mp_lo.reshape(-1), mk_g.reshape(B * G, -1)).reshape(B, G)
         log_F_hi = self._flow_log_cdf(
@@ -2027,8 +2185,10 @@ class JpsiMassMixtureModel(nn.Module):
         # _event_mll(pt_obs) = m_obs; scale pt_obs to the window boundaries
         # directly (pt∝m at fixed observed ρ). No rescaling to m_obs needed.
 
-        # Per-node nominal ρ at the event mass (conditioning for the CDF).
-        _, rho_std = self._gh_qop_unsmear(pto, etao, phio, qo, bpo, eps)
+        # Per-node nominal conditioning at the event mass (for the CDF). The
+        # window integral is over the mass at FIXED event conditioning, so the
+        # event-mass un-kicked config gives the right ρ / event-level vector.
+        _, pt_truth_evt = self._gh_qop_unsmear(pto, etao, phio, qo, bpo, eps)
         # Nominal masses at the two window boundaries (observed config scaled to
         # m_lo / m_hi along pt∝m, then un-kicked).
         m_t_lo, _ = self._gh_qop_unsmear(
@@ -2037,7 +2197,7 @@ class JpsiMassMixtureModel(nn.Module):
             pto * (float(self.m_hi) / mo).unsqueeze(-1), etao, phio, qo, bpo, eps)
         mk_g = mk.unsqueeze(1).expand(B, G2, mk.shape[-1]).clone()
         if self.scale_enabled or self.smearing_enabled:
-            mk_g[..., N_MUON_KIN - 1] = rho_std
+            mk_g = self._node_cond(mk_g, pt_truth_evt, etao, phio, qo)
         mkf = mk_g.reshape(B * G2, -1)
         log_F_lo = self._flow_eval_chunked(
             self._flow_log_cdf, m_t_lo.reshape(-1), mkf).reshape(B, G2)

@@ -361,6 +361,60 @@ def _event_mll_np(pt_pm, eta_pm, phi_pm):
     return np.sqrt(np.clip(m2, 1e-12, None))
 
 
+def _event_cond_raw_np(pt_pm, eta_pm, phi_pm, eps=1e-6):
+    """Event-level conditioning ``[N,7]`` = (yll, ln ptll, cosPhill, sinPhill,
+    cosθ*, sinφ*, cosφ*) — float64 numpy twin of ``jpsi_mass_model._event_cond_raw``
+    (the ROOT snapshot's dilepton + Collins–Soper computation). Inputs ``[N,2]``;
+    μ+ is index 0 (antilepton), μ− index 1 (lepton). Returns float32."""
+    pt = pt_pm.astype(np.float64, copy=False)
+    eta = eta_pm.astype(np.float64, copy=False)
+    phi = phi_pm.astype(np.float64, copy=False)
+    px = pt * np.cos(phi); py = pt * np.sin(phi); pz = pt * np.sinh(eta)
+    E = np.sqrt(px * px + py * py + pz * pz + _MUON_MASS_GEV * _MUON_MASS_GEV)
+    Px = px.sum(1); Py = py.sum(1); Pz = pz.sum(1); Etot = E.sum(1)
+    ptll = np.sqrt(np.clip(Px * Px + Py * Py, eps * eps, None))
+    yll = 0.5 * np.log(np.clip((Etot + Pz) / (Etot - Pz), eps, None))
+    cosPhill = Px / ptll; sinPhill = Py / ptll
+    bx, by, bz = -Px / Etot, -Py / Etot, -Pz / Etot
+    b2 = np.clip(bx * bx + by * by + bz * bz, None, 1.0 - 1e-9)
+    gamma = 1.0 / np.sqrt(1.0 - b2)
+    b2s = np.clip(b2, 1e-30, None)
+
+    def _boost_unit(qx, qy, qz, qE):
+        bdotp = bx * qx + by * qy + bz * qz
+        fac = (gamma - 1.0) * bdotp / b2s + gamma * qE
+        rx, ry, rz = qx + fac * bx, qy + fac * by, qz + fac * bz
+        r = np.sqrt(np.clip(rx * rx + ry * ry + rz * rz, eps * eps, None))
+        return rx / r, ry / r, rz / r
+
+    zsign = np.where(Pz >= 0, 1.0, -1.0)
+    pbeam = np.sqrt(6500.0 * 6500.0 - 0.93827208816 * 0.93827208816)
+    zero = np.zeros_like(Pz)
+    p1 = _boost_unit(zero, zero, zsign * pbeam, 6500.0)
+    p2 = _boost_unit(zero, zero, -zsign * pbeam, 6500.0)
+    lu = _boost_unit(px[:, 1], py[:, 1], pz[:, 1], E[:, 1])
+
+    def _unit(v):
+        n = np.sqrt(np.clip(v[0] * v[0] + v[1] * v[1] + v[2] * v[2], eps * eps, None))
+        return v[0] / n, v[1] / n, v[2] / n
+
+    def _cross(a, b):
+        return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0])
+
+    f = _unit((p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]))
+    yax = _unit(_cross(p1, (-p2[0], -p2[1], -p2[2])))
+    xax = _unit(_cross(yax, f))
+    costheta = f[0] * lu[0] + f[1] * lu[1] + f[2] * lu[2]
+    cr = _cross(f, lu)
+    sintheta = np.sqrt(np.clip(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2],
+                               eps * eps, None))
+    sinphi = (yax[0] * lu[0] + yax[1] * lu[1] + yax[2] * lu[2]) / sintheta
+    cosphi = (xax[0] * lu[0] + xax[1] * lu[1] + xax[2] * lu[2]) / sintheta
+    return np.stack([yll, np.log(ptll), cosPhill, sinPhill, costheta,
+                     sinphi, cosphi], axis=1).astype(np.float32)
+
+
 def _inject_pt_np(pt_pm, eta_pm, q_pm, b_pm, scale_inj, smear_inj, rng,
                   qop_floor_frac: float = 0.25):
     """Apply the injected θ_scale (deterministic δqop) THEN the θ_smear (per-muon
@@ -430,6 +484,7 @@ def _batch_tensors(
     inject_theta_scale: "np.ndarray | None" = None,
     inject_theta_smear: "np.ndarray | None" = None,
     rng: "np.random.Generator | None" = None,
+    cond_basis: str = "muon_kin",
 ) -> dict[str, torch.Tensor]:
     """Build the tensor batch from one Arrow record batch's columns.
 
@@ -483,6 +538,16 @@ def _batch_tensors(
 
     y_event_std = _standardise(y_event, stats.y_event_mean, stats.y_event_std)
     muon_kin_std = _standardise(muon_kin, stats.muon_kin_mean, stats.muon_kin_std)
+    # The active flow/MLP conditioning. For event_level, recompute the dilepton
+    # vars from the (post-injection) per-muon pt so the conditioning is derived
+    # from the same momenta the model sees — self-consistent for injected
+    # pseudo-data (all 7 components are pt-dependent) and matching the operator's
+    # _cond_from_muons recompute. muon_kin's ρ was already patched above.
+    if cond_basis == "event_level":
+        cond_raw = _event_cond_raw_np(pt_pm, eta_pm, phi_pm)
+        cond_std = _standardise(cond_raw, stats.y_event_mean, stats.y_event_std)
+    else:
+        cond_std = muon_kin_std
 
     w = cols["nominal_weight"].astype(np.float32, copy=False)
     # Enforce the m_ll window on the (possibly injection-perturbed) mass: zero
@@ -506,6 +571,7 @@ def _batch_tensors(
         "mll_std": torch.from_numpy(mll_std),
         "y_event_std": torch.from_numpy(y_event_std),
         "muon_kin_std": torch.from_numpy(muon_kin_std),
+        "cond_std": torch.from_numpy(cond_std),
         "b_pm": torch.from_numpy(b_pm),
         "is_data_mask": torch.from_numpy(is_data_mask),
         "w": torch.from_numpy(w),
@@ -556,6 +622,7 @@ class JpsiMassArrowLoader(IterableDataset):
         inject_theta_scale: "np.ndarray | None" = None,
         inject_theta_smear: "np.ndarray | None" = None,
         inject_seed: int = 12345,
+        cond_basis: str = "muon_kin",
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
@@ -590,6 +657,10 @@ class JpsiMassArrowLoader(IterableDataset):
             np.asarray(inject_theta_smear, dtype=np.float64)
             if inject_theta_smear is not None else None)
         self.inject_seed = int(inject_seed)
+        if cond_basis not in ("muon_kin", "event_level"):
+            raise ValueError(
+                f"cond_basis must be 'muon_kin' or 'event_level'; got {cond_basis!r}")
+        self.cond_basis = str(cond_basis)
 
     # -- helpers --------------------------------------------------------
 
@@ -660,14 +731,14 @@ class JpsiMassArrowLoader(IterableDataset):
                         accum_n -= self.batch_size
                         yield _batch_tensors(
                             emit, self.stats, self.inject_theta_scale,
-                            self.inject_theta_smear, rng)
+                            self.inject_theta_smear, rng, self.cond_basis)
 
         # Final partial batch.
         if accum_n > 0 and not self.drop_last:
             cols = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
             yield _batch_tensors(
                 cols, self.stats, self.inject_theta_scale,
-                self.inject_theta_smear, rng)
+                self.inject_theta_smear, rng, self.cond_basis)
 
 
 # ---------------------------------------------------------------------------
