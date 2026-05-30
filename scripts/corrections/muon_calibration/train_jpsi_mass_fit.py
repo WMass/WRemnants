@@ -1403,6 +1403,233 @@ def _empirical_cov_theta_block(J: torch.Tensor, n_theta: int, ridge: float) -> t
     return cov[:n_theta, :n_theta].contiguous()
 
 
+def compute_empirical_fisher_net(
+    model: JpsiMassMixtureModel,
+    loader: JpsiMassArrowLoader,
+    device: str,
+    *,
+    mc_as_data: bool = False,
+    n_iter: int = 2,
+    chunk_events: int = 64,
+    max_events: int = 0,
+    progress: bool = True,
+    vectorized: bool = True,
+):
+    """Empirical Fisher ``J = Σ_i w_i s_i s_iᵀ`` over the θ-NET weights (+ the
+    background MLP, for marginalisation) from per-event data-branch scores, for
+    ``--theta-mlp``. There the per-η (A,e,M)/(a,c) come from ``theta_net``, so
+    the statistical uncertainty lives in its weights; the theta_net block of
+    ``(J + ridge)⁻¹`` is the weight covariance, which the caller propagates to
+    the per-η outputs via the net's output Jacobian. θ_net params are ordered
+    FIRST so that block is ``cov[:n_net, :n_net]``. Returns ``(J cpu, layout)``.
+    """
+    model.eval()
+    for p in model.flow.parameters():
+        p.requires_grad_(False)
+    # theta_scale / theta_smear are inert in mlp mode — freeze them.
+    model.theta_scale.requires_grad_(False)
+    model.theta_smear.requires_grad_(False)
+    net_params = list(model.theta_net.parameters())
+    for p in net_params:
+        p.requires_grad_(True)
+    bg_params = []
+    if getattr(model, "background_enabled", True):
+        bg_params = list(model.mlp.parameters())
+        for p in bg_params:
+            p.requires_grad_(True)
+    params = net_params + bg_params
+    n_net = int(sum(p.numel() for p in net_params))
+    n_bg = int(sum(p.numel() for p in bg_params))
+    if n_net == 0:
+        raise RuntimeError("empirical Fisher (mlp): theta_net has no parameters.")
+
+    n_act = n_net + n_bg
+    J = torch.zeros((n_act, n_act), device=device, dtype=torch.float32)
+    sw = 0.0; seen = 0; hit_cap = False
+    use_batched = bool(vectorized)
+    bar = tqdm(loader, desc="emp-fisher(net)", disable=not progress, unit="batch")
+    for batch in bar:
+        if max_events > 0 and seen >= max_events:
+            hit_cap = True; break
+        batch = _move_batch(batch, device)
+        data_mask = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
+        di = data_mask.nonzero(as_tuple=True)[0]
+        if di.numel() == 0:
+            continue
+        per = model.data_nll_continuity(
+            batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
+            batch["q_pm"], batch["b_pm"], batch["muon_kin_std"], data_mask,
+            n_iter=n_iter)
+        per_d = per[di]
+        w_d = batch["w"][di].detach()
+        nd_total = int(per_d.shape[0])
+        nd = (max(0, max_events - seen)
+              if max_events > 0 and seen + nd_total > max_events else nd_total)
+        if nd == 0:
+            hit_cap = True; break
+        for s0 in range(0, nd, max(1, chunk_events)):
+            s1 = min(s0 + chunk_events, nd)
+            c = s1 - s0
+            S = None
+            if use_batched:
+                try:
+                    eye = torch.zeros((c, nd), device=device, dtype=per_d.dtype)
+                    eye[torch.arange(c, device=device),
+                        torch.arange(s0, s1, device=device)] = 1.0
+                    g = torch.autograd.grad(
+                        per_d, params, grad_outputs=eye, is_grads_batched=True,
+                        retain_graph=True, allow_unused=True)
+                    S = torch.cat([
+                        (gi if gi is not None else torch.zeros((c,) + p.shape,
+                         device=device, dtype=per_d.dtype)).reshape(c, -1)
+                        for gi, p in zip(g, params)], dim=1)
+                except (RuntimeError, NotImplementedError) as e:
+                    use_batched = False
+                    bar.write(f"  note: vectorised per-event score unavailable "
+                              f"({type(e).__name__}); using the per-event loop")
+            if S is None:
+                rows = []
+                for j in range(s0, s1):
+                    gj = torch.autograd.grad(per_d[j], params, retain_graph=True,
+                                             allow_unused=True)
+                    rows.append(torch.cat([
+                        (x if x is not None else torch.zeros_like(p)).reshape(-1)
+                        for x, p in zip(gj, params)]))
+                S = torch.stack(rows)
+            wc = w_d[s0:s1]
+            J += (S * wc.unsqueeze(1)).t() @ S
+        seen += nd; sw += float(w_d[:nd].sum())
+        bar.set_postfix_str(f"events={seen:,}")
+    bar.close()
+    if seen == 0:
+        raise RuntimeError("empirical Fisher (mlp): zero data-branch events seen.")
+    J = 0.5 * (J + J.T)
+    layout = {"n_net": n_net, "n_bg": n_bg, "sw": sw, "seen": seen,
+              "hit_cap": hit_cap}
+    return J.detach().cpu(), layout
+
+
+def _propagate_net_cov_to_outputs(model, cov_w, eta_edges, *, n_phi_avg=16,
+                                  device="cpu"):
+    """Propagate the θ-net weight covariance ``cov_w`` [n_net, n_net] to the
+    per-η (A,e,M) and effective (a,c) output covariances via the Jacobian
+    ``G = ∂o/∂w`` of the φ-AVERAGED outputs (the closure plot's central value),
+    delta-method ``C_o = G cov_w Gᵀ``. Returns
+    ``(cov_scale_24_3_24_3, sigma_scale_24_3, sigma_smear_eff_24_2)`` (physical
+    units), matching the binned Fisher keys consumed by the diagnostics."""
+    net_params = list(model.theta_net.parameters())
+    cov_w = cov_w.to(torch.float64)
+    centers = 0.5 * (np.asarray(eta_edges[:-1]) + np.asarray(eta_edges[1:]))
+    n_eta = int(centers.shape[0])
+    centers_t = torch.as_tensor(centers, dtype=torch.float32, device=device)
+    # φ-average grid (uniform on the circle → exact mean), both muons share (η,φ);
+    # muon-0 output is the plotted one (per-muon net, symmetry implicit).
+    phi_avg = torch.linspace(0.0, 2 * np.pi * (1.0 - 1.0 / n_phi_avg), n_phi_avg,
+                             dtype=torch.float32, device=device)
+    eta_grid = centers_t[:, None, None].expand(n_eta, n_phi_avg, 2).reshape(-1, 2)
+    phi_grid = phi_avg[None, :, None].expand(n_eta, n_phi_avg, 2).reshape(-1, 2)
+    smear_scale = torch.tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
+                               dtype=torch.float32, device=device)
+    AeM_g, ac_g = model.theta_net(eta_grid, phi_grid)            # physical A,e,M; O(1) a,c
+    AeM = AeM_g[:, 0, :].view(n_eta, n_phi_avg, 3).mean(dim=1)   # [n_eta,3] φ-mean
+    ac_eff = model._smear_raw_to_effective(ac_g[:, 0, :])        # softplus·mask
+    ac_phys = (ac_eff * smear_scale).view(n_eta, n_phi_avg, 2).mean(dim=1)  # [n_eta,2]
+    o_scale = AeM.reshape(-1)                                    # [n_eta*3]
+    o_smear = ac_phys.reshape(-1)                                # [n_eta*2]
+
+    def _jac(o_flat):
+        rows = []
+        for k in range(int(o_flat.numel())):
+            g = torch.autograd.grad(o_flat[k], net_params, retain_graph=True,
+                                    allow_unused=True)
+            rows.append(torch.cat([
+                (gi if gi is not None else torch.zeros_like(p)).reshape(-1)
+                for gi, p in zip(g, net_params)]).to(torch.float64))
+        return torch.stack(rows)                                # [n_out, n_net]
+
+    G_s = _jac(o_scale)
+    G_c = _jac(o_smear)
+    cov_scale = (G_s @ cov_w @ G_s.t())                         # [n_eta*3, n_eta*3]
+    cov_smear = (G_c @ cov_w @ G_c.t())                         # [n_eta*2, n_eta*2]
+    sigma_scale = torch.sqrt(torch.clamp(torch.diag(cov_scale), min=0.0)
+                             ).view(n_eta, 3).float()
+    sigma_smear = torch.sqrt(torch.clamp(torch.diag(cov_smear), min=0.0)
+                             ).view(n_eta, 2).float()
+    return (cov_scale.view(n_eta, 3, n_eta, 3).float(), sigma_scale, sigma_smear)
+
+
+def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
+    """``--theta-mlp`` empirical Fisher: weight-space Fisher over θ_net (+ bkg
+    MLP), ridge-inverted, propagated through the net's output Jacobian to the
+    per-η (A,e,M)/(a,c) → ``<output>/empirical_fisher.pt`` with the diagnostics
+    σ-band keys (covariance_24_3_24_3, sigma_smear_eff_24_2, theta_mode=mlp)."""
+    half = _validation_half(args, "fit")
+    inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    fisher_bs = args.batch_size
+    if args.empirical_fisher_max_events > 0:
+        fisher_bs = min(fisher_bs, max(1, args.empirical_fisher_max_events))
+    loader = JpsiMassArrowLoader(
+        shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
+        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        drop_last=False, half=half, inject_theta_scale=inj,
+        inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed))
+    ridge = float(args.empirical_fisher_ridge)
+    print(f"\ncomputing θ-NET-weight empirical Fisher (per-event scores → ridge="
+          f"{ridge:g} inverse → output Jacobian) on split={args.fisher_split}"
+          + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
+             if args.validation else "")
+          + (f"; ≤{args.empirical_fisher_max_events:,} events"
+             if args.empirical_fisher_max_events > 0 else ""))
+    t0 = time.time()
+    J, layout = compute_empirical_fisher_net(
+        model, loader, device, mc_as_data=args.validation,
+        n_iter=args.continuity_n_iter, chunk_events=args.empirical_fisher_chunk,
+        max_events=args.empirical_fisher_max_events,
+        progress=args.progress, vectorized=args.fisher_vectorized)
+    # Scale J to full statistics if the event budget capped it (J ∝ Σw).
+    if layout["hit_cap"] and layout["sw"] > 0:
+        sw_total = 0.0
+        for batch in loader:
+            dm = (~batch["is_data_mask"] if args.validation else batch["is_data_mask"])
+            sw_total += float((batch["w"] * dm.to(batch["w"].dtype)).sum())
+        if sw_total > layout["sw"]:
+            sc = sw_total / layout["sw"]
+            J = J * sc
+            print(f"  scaled J by Σw_total/Σw_seen = {sc:.2f} "
+                  f"(subsampled {layout['seen']:,} events)")
+            layout["sw"] = sw_total
+    n_net = layout["n_net"]
+    rank = int(torch.linalg.matrix_rank(J).item())
+    # θ_net block of the ridge-regularised inverse = the weight covariance.
+    cov_w = _empirical_cov_theta_block(J, n_net, ridge)          # [n_net, n_net]
+    cov_scale_24_3, sigma_scale_24_3, sigma_smear_eff = _propagate_net_cov_to_outputs(
+        model, cov_w, stats.eta_edges, device=device)
+    out = {
+        "method": (f"theta-net empirical Fisher (ridge={ridge:g}) propagated to "
+                   f"per-η outputs via the net Jacobian"),
+        "ridge": ridge, "theta_mode": "mlp",
+        "covariance_24_3_24_3": cov_scale_24_3,
+        "sigma_scale_24_3": sigma_scale_24_3,
+        "sigma_smear_eff_24_2": sigma_smear_eff,
+        "smear_fit_params": model.smear_fit_params,
+        "n_events": layout["seen"], "sum_weight": layout["sw"],
+        "n_net": n_net, "n_bg": layout["n_bg"],
+        "joint_dim": n_net + layout["n_bg"], "joint_rank": rank,
+        "param_space": "theta_net weights → physical (A,e,M) and effective (a,c)",
+    }
+    path = os.path.join(args.output, "empirical_fisher.pt")
+    torch.save(out, path)
+    print(f"  wrote {path}: θ_net-weight {n_net}×{n_net} (+bkg {layout['n_bg']}), "
+          f"joint rank {rank}/{n_net + layout['n_bg']} via ridge={ridge:g}, "
+          f"propagated to per-η σ ({layout['seen']:,} events, "
+          f"Σw={layout['sw']:.2e}) in {time.time()-t0:.1f}s")
+    ss = sigma_scale_24_3
+    print(f"  propagated σ(A,e,M) median over bins = "
+          f"({float(ss[:,0].median()):.2e}, {float(ss[:,1].median()):.2e}, "
+          f"{float(ss[:,2].median()):.2e})")
+
+
 def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     """Joint (θ,φ) empirical Fisher → ``<output>/empirical_fisher.pt`` (PSD,
     background-included θ covariance via pinv; diagnostics-compatible)."""
@@ -1410,8 +1637,7 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         print("skipping empirical Fisher: both --disable-scale and --disable-smearing.")
         return
     if model.theta_mode == "mlp":
-        print("skipping empirical Fisher: not implemented for --theta-mlp (binned "
-              "24×3 θ layout).", file=sys.stderr)
+        _run_empirical_fisher_mlp(args, model, shard_files, stats, device)
         return
     half = _validation_half(args, "fit")
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None

@@ -1617,8 +1617,10 @@ def main() -> int:
     sigma_smear = None
     cov_scale_flat = None   # 72×72 θ_scale covariance block (for the χ² test)
     edm = None
+    mlp_fisher = False   # the file carries θ-net-weight Fisher propagated to per-η σ
     if args.fisher and os.path.exists(args.fisher):
         f = torch.load(args.fisher, weights_only=False)
+        mlp_fisher = (f.get("theta_mode") == "mlp")
         if f.get("n_negative_eig", 0) not in (0, None):
             print(f"  warning: fisher_info.pt has {f['n_negative_eig']} "
                   f"non-positive eigenvalue(s) (min={f.get('min_eig', float('nan')):.2e}) "
@@ -1652,8 +1654,11 @@ def main() -> int:
     # Plots 2, 3: θ vs η — only for the *enabled* nuisances (a disabled one
     # is an inert, fixed parameter; plotting it would be misleading).
     print("plotting θ vs η...")
-    # 'mlp' θ: sample the continuous ThetaNet at the η-bin centres (φ=0 slice)
-    # so the same per-bin plot shows the learned function; no ±σ (no Fisher).
+    # 'mlp' θ: sample the continuous ThetaNet at the η-bin centres (φ-mean + a
+    # φ-spread band) so the per-bin plot shows the learned function. The
+    # statistical ±1σ error bars come from --fisher empirical_fisher.pt when it
+    # carries the θ-net-weight Fisher propagated to the per-η outputs (the φ-std
+    # band is a separate, systematic-like φ-variation overlay).
     mlp_scale_grid = mlp_smear_grid = None
     mlp_scale_band = mlp_smear_band = None
     mlp_scale_slices = mlp_smear_slices = None
@@ -1713,7 +1718,11 @@ def main() -> int:
         # linear combination's spread ≠ the combination of per-component stds).
         mlp_scale_avg_samples = AeM_avg.cpu().numpy()                   # [n_eta, n_phi, 3]
         mlp_smear_avg_samples = ac_avg.cpu().numpy()                    # [n_eta, n_phi, 2]
-        sigma_scale = sigma_smear = None
+        # Keep the Fisher-propagated ±1σ bands ONLY when the file was produced
+        # for the MLP (θ-net-weight covariance propagated to the per-η outputs);
+        # a binned fisher file's per-bin σ does not apply to the net outputs.
+        if not mlp_fisher:
+            sigma_scale = sigma_smear = None
     if model.scale_enabled:
         # binned θ_scale is the O(1) fit param → ×THETA_SCALE_REF for physical
         # (A,e,M); the MLP grid is already physical (scale_ref inside the net).
