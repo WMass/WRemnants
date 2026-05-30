@@ -836,6 +836,7 @@ def plot_theta_vs_eta(
     band: "np.ndarray | None" = None,  # [n_eta, n_comp] φ-std for shaded band
     slices: "np.ndarray | None" = None,    # [n_eta, n_slices, n_comp] φ-slices
     slice_labels: "list | None" = None,    # length n_slices, e.g. ['φ=0', ...]
+    sigma_band: bool = False,    # draw `sigma` as a continuous shaded band (MLP)
 ):
     n_eta, n_comp = theta.shape
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
@@ -859,9 +860,18 @@ def plot_theta_vs_eta(
                 ax.plot(eta_centers, slices[:, s_i, i],
                         color=slice_colors[s_i % len(slice_colors)],
                         lw=0.9, alpha=0.6, label=lab)
-        # Main: error bars (binned θ has ±σ) or φ-mean line (MLP).
+        # Main: per-bin error bars (binned θ) or a continuous φ-mean line (MLP).
         main_label = "fit" if band is None else "fit (φ-mean)"
-        if sigma is not None:
+        if sigma is not None and sigma_band:
+            # MLP: the θ output is a continuous function of η, so show the
+            # Fisher-propagated ±1σ as a SHADED BAND around the φ-mean curve
+            # rather than discrete error bars (which would imply per-bin params).
+            ax.fill_between(
+                eta_centers, theta[:, i] - sigma[:, i], theta[:, i] + sigma[:, i],
+                color="C0", alpha=0.30, linewidth=0, label="±1σ (Fisher)")
+            ax.plot(eta_centers, theta[:, i], "-", color="k", lw=1.6,
+                    label=main_label)
+        elif sigma is not None:
             ax.errorbar(
                 eta_centers, theta[:, i], yerr=sigma[:, i],
                 fmt="o", color="k", markersize=4, capsize=2, label=main_label,
@@ -1749,6 +1759,7 @@ def main() -> int:
             chi2_info=chi2_info, ref=ref,
             band=mlp_scale_band, slices=mlp_scale_slices,
             slice_labels=mlp_slice_labels,
+            sigma_band=(model.theta_mode == "mlp"),
         )
     else:
         print("  --disable-scale: skipping theta_scale_vs_eta")
@@ -1763,6 +1774,7 @@ def main() -> int:
             ref=(inject_smear_np if inject_smear_np is not None else None),
             band=mlp_smear_band, slices=mlp_smear_slices,
             slice_labels=mlp_slice_labels,
+            sigma_band=(model.theta_mode == "mlp"),
         )
     else:
         print("  --disable-smearing: skipping theta_smear_vs_eta")

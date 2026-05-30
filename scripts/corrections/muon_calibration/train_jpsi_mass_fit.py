@@ -1538,14 +1538,17 @@ def _propagate_net_cov_to_outputs(model, cov_w, eta_edges, *, n_phi_avg=16,
     o_smear = ac_phys.reshape(-1)                                # [n_eta*2]
 
     def _jac(o_flat):
+        # Autograd runs on the net's device; move each row to CPU float64 so the
+        # delta-method matmul below matches cov_w (returned on CPU from the
+        # CPU-side Fisher) — avoids a cuda/cpu device mismatch on GPU runs.
         rows = []
         for k in range(int(o_flat.numel())):
             g = torch.autograd.grad(o_flat[k], net_params, retain_graph=True,
                                     allow_unused=True)
             rows.append(torch.cat([
                 (gi if gi is not None else torch.zeros_like(p)).reshape(-1)
-                for gi, p in zip(g, net_params)]).to(torch.float64))
-        return torch.stack(rows)                                # [n_out, n_net]
+                for gi, p in zip(g, net_params)]).to(torch.float64).cpu())
+        return torch.stack(rows)                                # [n_out, n_net] cpu
 
     G_s = _jac(o_scale)
     G_c = _jac(o_smear)
