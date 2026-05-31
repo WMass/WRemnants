@@ -524,18 +524,22 @@ def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None,
     a known θ_scale shift / per-muon qop smear into the (pseudo-)data m_ll
     (validation closure)."""
     seed = int(getattr(args, "inject_smear_seed", 12345))
+    me = int(getattr(args, "max_events", 0) or 0)
+    ef = float(getattr(args, "event_fraction", 1.0) or 1.0)
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=True, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=me, event_fraction=ef)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=me, event_fraction=ef)
     return train_loader, val_loader
 
 
@@ -1977,6 +1981,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="Fraction of events held out for validation.")
     p.add_argument("--holdout-fraction", type=float, default=0.05,
                    help="Fraction held out from train+val (e.g. for Fisher info).")
+    p.add_argument("--max-events", type=int, default=0,
+                   help="Subsample to ~this many events for the flow + fit stages "
+                   "(0 = use all). Applied per shard AFTER the --validation "
+                   "half-split and BEFORE the train/val/holdout split, so each "
+                   "half is independently capped and the splits stay proportional. "
+                   "Rows are pre-shuffled, so this is an unbiased subset.")
+    p.add_argument("--event-fraction", type=float, default=1.0,
+                   help="Keep this fraction of events per shard for the flow + fit "
+                   "stages (1.0 = all), composed the same way as --max-events "
+                   "(after the validation half-split, before the split; the "
+                   "tighter of the two wins per shard).")
     p.add_argument("--m-lo", type=float, default=2.92, dest="m_lo",
                    help="Lower edge of the m_ll fit window [GeV].")
     p.add_argument("--m-hi", type=float, default=3.28, dest="m_hi",

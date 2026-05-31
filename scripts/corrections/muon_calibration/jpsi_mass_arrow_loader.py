@@ -623,6 +623,8 @@ class JpsiMassArrowLoader(IterableDataset):
         inject_theta_smear: "np.ndarray | None" = None,
         inject_seed: int = 12345,
         cond_basis: str = "muon_kin",
+        max_events: int = 0,
+        event_fraction: float = 1.0,
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
@@ -661,6 +663,19 @@ class JpsiMassArrowLoader(IterableDataset):
             raise ValueError(
                 f"cond_basis must be 'muon_kin' or 'event_level'; got {cond_basis!r}")
         self.cond_basis = str(cond_basis)
+        # Optional event subsample, applied per shard AFTER the half selection and
+        # BEFORE the train/val/holdout split — so it composes with the validation
+        # half-split (each half independently subsampled) and keeps the split
+        # fractions proportional. Rows are pre-shuffled by the sharder, so keeping
+        # the first N (or a leading fraction) is an unbiased random subset.
+        # ``max_events`` is the TOTAL target across this loader's shards (split
+        # evenly per shard); ``event_fraction`` keeps that fraction of each shard.
+        # Both compose (the tighter wins per shard). 0 / 1.0 = no subsample.
+        if not (0.0 < float(event_fraction) <= 1.0):
+            raise ValueError(
+                f"event_fraction must be in (0, 1]; got {event_fraction!r}")
+        self.max_events = max(0, int(max_events))
+        self.event_fraction = float(event_fraction)
 
     # -- helpers --------------------------------------------------------
 
@@ -709,6 +724,22 @@ class JpsiMassArrowLoader(IterableDataset):
                     # train/val/holdout windows.
                     idx = np.arange(self.half, table.num_rows, 2)
                     table = table.take(pa.array(idx))
+                # Event subsample (after the half selection, before the split):
+                # keep the first ``keep`` (pre-shuffled → unbiased) rows of this
+                # shard, the tighter of the per-shard max-events budget and the
+                # fraction. The split below then applies to the kept rows, so
+                # train/val/holdout stay proportional.
+                if self.max_events > 0 or self.event_fraction < 1.0:
+                    keep = table.num_rows
+                    if self.event_fraction < 1.0:
+                        keep = min(keep, int(round(table.num_rows * self.event_fraction)))
+                    if self.max_events > 0:
+                        per_shard = int(np.ceil(
+                            self.max_events / max(1, len(self.my_shards))))
+                        keep = min(keep, per_shard)
+                    if keep <= 0:
+                        continue
+                    table = table.slice(0, keep)
                 n_rows = table.num_rows
                 start_row, stop_row = self._split_range(
                     n_rows, self.val_fraction, self.holdout_fraction, self.split,
