@@ -1269,6 +1269,15 @@ def _theta_cov_extras(cov_theta: torch.Tensor, model, smear_cols, n_scale: int) 
                 sig_eff[b, c] = smear_scale[c] * sig_raw[k]
                 k += 1
         out["sigma_smear_eff_24_2"] = sig_eff
+        # Full PHYSICAL (a,c) covariance (24×2×24×2) — needed for the whitened
+        # (stiff/sloppy) band, which mixes a and c. Only when BOTH float (the
+        # whitened smear plot requires smear_fit_params=='both'); cv is then
+        # ordered (bin0_a, bin0_c, bin1_a, …).
+        if smear_cols == [0, 1]:
+            sv = torch.tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C] * n_eta,
+                              dtype=cv.dtype)
+            cv_phys = cv * sv.unsqueeze(0) * sv.unsqueeze(1)
+            out["covariance_smear_24_2_24_2"] = cv_phys.view(n_eta, 2, n_eta, 2)
     return out
 
 
@@ -1559,8 +1568,8 @@ def _propagate_net_cov_to_outputs(model, cov_w, eta_edges, *, n_phi_avg=16,
     """Propagate the θ-net weight covariance ``cov_w`` [n_net, n_net] to the
     per-η (A,e,M) and effective (a,c) output covariances via the Jacobian
     ``G = ∂o/∂w`` of the φ-AVERAGED outputs (the closure plot's central value),
-    delta-method ``C_o = G cov_w Gᵀ``. Returns
-    ``(cov_scale_24_3_24_3, sigma_scale_24_3, sigma_smear_eff_24_2)`` (physical
+    delta-method ``C_o = G cov_w Gᵀ``. Returns ``(cov_scale_24_3_24_3,
+    sigma_scale_24_3, sigma_smear_eff_24_2, cov_smear_24_2_24_2)`` (physical
     units), matching the binned Fisher keys consumed by the diagnostics."""
     net_params = list(model.theta_net.parameters())
     cov_w = cov_w.to(torch.float64)
@@ -1603,7 +1612,8 @@ def _propagate_net_cov_to_outputs(model, cov_w, eta_edges, *, n_phi_avg=16,
                              ).view(n_eta, 3).float()
     sigma_smear = torch.sqrt(torch.clamp(torch.diag(cov_smear), min=0.0)
                              ).view(n_eta, 2).float()
-    return (cov_scale.view(n_eta, 3, n_eta, 3).float(), sigma_scale, sigma_smear)
+    return (cov_scale.view(n_eta, 3, n_eta, 3).float(), sigma_scale, sigma_smear,
+            cov_smear.view(n_eta, 2, n_eta, 2).float())
 
 
 def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
@@ -1654,7 +1664,8 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
     rank = int(torch.linalg.matrix_rank(J).item())
     # θ_net block of the ridge-regularised inverse = the weight covariance.
     cov_w = _empirical_cov_theta_block(J, n_net, ridge)          # [n_net, n_net]
-    cov_scale_24_3, sigma_scale_24_3, sigma_smear_eff = _propagate_net_cov_to_outputs(
+    (cov_scale_24_3, sigma_scale_24_3, sigma_smear_eff,
+     cov_smear_24_2) = _propagate_net_cov_to_outputs(
         model, cov_w, stats.eta_edges, device=device)
     out = {
         "method": (f"theta-net empirical Fisher (ridge={ridge:g}) propagated to "
@@ -1663,6 +1674,7 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
         "covariance_24_3_24_3": cov_scale_24_3,
         "sigma_scale_24_3": sigma_scale_24_3,
         "sigma_smear_eff_24_2": sigma_smear_eff,
+        "covariance_smear_24_2_24_2": cov_smear_24_2,
         "smear_fit_params": model.smear_fit_params,
         "n_events": layout["seen"], "sum_weight": layout["sw"],
         "n_net": n_net, "n_bg": layout["n_bg"],

@@ -1749,6 +1749,7 @@ def main() -> int:
     sigma_scale = None
     sigma_smear = None
     cov_scale_flat = None   # 72×72 θ_scale covariance block (for the χ² test)
+    cov_smear_flat = None    # 48×48 θ_smear (a,c) covariance (for the whitened band)
     edm = None
     mlp_fisher = False   # the file carries θ-net-weight Fisher propagated to per-η σ
     if args.fisher and os.path.exists(args.fisher):
@@ -1768,6 +1769,9 @@ def main() -> int:
         ss = f.get("sigma_smear_eff_24_2")
         if ss is not None:
             sigma_smear = ss.cpu().numpy()
+        cs_pt = f.get("covariance_smear_24_2_24_2")
+        if cs_pt is not None:
+            cov_smear_flat = cs_pt.reshape(48, 48).cpu().numpy()
         # Covariance + correlation matrix over the FULL joint parameter set
         # (θ_scale + active θ_smear); fall back to the θ_scale-only correlation
         # for legacy files that store only the 24×3×24×3 scale block.
@@ -1921,11 +1925,14 @@ def main() -> int:
               % (l_c[0], E_c[0, 0], E_c[1, 0], E_c[0, 1], E_c[1, 1]))
 
         def _whitened_plot(phys_grid, phys_samples, phys_slices, ref_phys,
-                           inj_phys, refE, lam, name, unit_pair):
+                           inj_phys, refE, lam, name, unit_pair, cov_phys=None):
             """Project a 2-component (A,e)/(a,c) set onto the eigenbasis and plot
             stiff/sloppy closure. ``phys_grid`` [n_eta,2]; ``phys_samples``
-            [n_eta,n_phi,2] or None (→ band); ``phys_slices`` [n_eta,n_s,2] or
-            None; ``inj_phys`` [n_eta,2] or None."""
+            [n_eta,n_phi,2] or None (→ φ-spread band); ``phys_slices``
+            [n_eta,n_s,2] or None; ``inj_phys`` [n_eta,2] or None. ``cov_phys``
+            [n_eta,2,2] (per-bin PHYSICAL covariance of the pair) → the
+            Fisher ±1σ band IN the stiff/sloppy basis: standardise (÷ref⊗ref)
+            then rotate, σ_w = √diag(Eᵀ C_o E)."""
             grid_w = _project_whitened(phys_grid, ref_phys, refE)        # [n_eta,2]
             band_w = None
             if phys_samples is not None:
@@ -1935,12 +1942,21 @@ def main() -> int:
             slices_w = (None if phys_slices is None
                         else _project_whitened(phys_slices, ref_phys, refE))
             ref_w = None if inj_phys is None else _project_whitened(inj_phys, ref_phys, refE)
+            sigma_w = None
+            if cov_phys is not None:
+                rf = np.asarray(ref_phys, dtype=np.float64)
+                co1 = (np.asarray(cov_phys, dtype=np.float64)
+                       / (rf[None, :, None] * rf[None, None, :]))      # ÷ref⊗ref
+                cw = np.einsum('ij,nik,kl->njl', refE, co1, refE)      # Eᵀ C_o E
+                sigma_w = np.sqrt(np.clip(
+                    np.diagonal(cw, axis1=1, axis2=2), 0.0, None))     # [n_eta,2]
             names = [f"STIFF (measured, info×{lam[0]:.0f})",
                      f"SLOPPY (degenerate, info×1)"]
             plot_theta_vs_eta(
-                grid_w, None, names, name, stats.eta_edges, out_dir, edm=edm,
+                grid_w, sigma_w, names, name, stats.eta_edges, out_dir, edm=edm,
                 ref=ref_w, band=band_w, slices=slices_w,
-                slice_labels=mlp_slice_labels)
+                slice_labels=mlp_slice_labels,
+                sigma_band=(model.theta_mode == "mlp"))
 
         scale_pair_fit = ("A" in model.scale_fit_params and "e" in model.scale_fit_params)
         if model.scale_enabled and scale_pair_fit:
@@ -1950,16 +1966,27 @@ def main() -> int:
             ss = None if mlp_scale_avg_samples is None else mlp_scale_avg_samples[:, :, :2]
             sl = None if mlp_scale_slices is None else mlp_scale_slices[:, :, :2]
             ij = None if inject_ref_np is None else inject_ref_np[:, :2]
+            # Per-bin (A,e) physical covariance for the Fisher band (diagonal
+            # blocks of the 72×72 θ_scale covariance).
+            cov_ae = None
+            if cov_scale_flat is not None:
+                c4 = cov_scale_flat.reshape(24, 3, 24, 3)
+                cov_ae = np.stack([c4[b, :2, b, :2] for b in range(c4.shape[0])])
             _whitened_plot(sg, ss, sl, THETA_SCALE_REF[:2], ij, E_s, l_s,
-                           "theta_scale_whitened_vs_eta", ("A", "e"))
+                           "theta_scale_whitened_vs_eta", ("A", "e"), cov_phys=cov_ae)
         if model.smearing_enabled and model.smear_fit_params == "both":
             cg = (mlp_smear_grid if mlp_smear_grid is not None
                   else model.effective_theta_smear().detach().cpu().numpy())
             cs = mlp_smear_avg_samples
             csl = mlp_smear_slices
             ij = inject_smear_ref_np
+            cov_ac = None
+            if cov_smear_flat is not None:
+                c4 = cov_smear_flat.reshape(24, 2, 24, 2)
+                cov_ac = np.stack([c4[b, :, b, :] for b in range(c4.shape[0])])
             _whitened_plot(cg, cs, csl, [SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
-                           ij, E_c, l_c, "theta_smear_whitened_vs_eta", ("a", "c"))
+                           ij, E_c, l_c, "theta_smear_whitened_vs_eta", ("a", "c"),
+                           cov_phys=cov_ac)
 
     # Plot 5: pulls.
     print("plotting per-bin pulls...")
