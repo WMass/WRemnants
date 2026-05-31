@@ -978,7 +978,7 @@ def train_loop(args: argparse.Namespace) -> int:
         train_stage2(args, model, s2_train, s2_val, stats, mc_as_data=args.validation)
         if args.fisher_info:
             _run_fisher_continuity(args, model, shard_files, stats, device)
-        if args.empirical_fisher:
+        if args.empirical_fisher or getattr(args, "output_fisher", False):
             _run_empirical_fisher(args, model, shard_files, stats, device)
         if args.bootstrap > 0:
             run_bootstrap_continuity(args, model, shard_files, stats, device,
@@ -1693,6 +1693,247 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
           f"{float(ss[:,2].median()):.2e})")
 
 
+def compute_output_fisher_2d(model, loader, device, *, method="empirical",
+                             n_phi=4, eta_edges=None, mc_as_data=False, n_iter=2,
+                             chunk_events=64, max_events=0, progress=True):
+    """OUTPUT-space Fisher for --theta-mlp: reparametrise θ as a 2-D (η-bin ×
+    φ-bin) TABLE seeded from the net at the bin centres, with the per-muon lookup
+    reading that table, so the data's information about the per-(η,φ) OUTPUTS is
+    measured directly — no 1349-weight over-parameterisation, no arbitrary
+    weight-space ridge. Accumulates, over the table's ACTIVE entries (the fitted
+    A/e/M and a/c columns):
+      • observed  H = Σ w ∂²(−ln L)/∂θ²  (double-backward through data_nll);
+      • empirical J = Σ w (∂ln L/∂θ)(…)ᵀ (per-event score outer products);
+      • sandwich → both.
+    The per-η φ-mean covariance is recovered downstream by averaging the table
+    covariance over its φ axes. θ_scale is physical (A,e,M); θ_smear is the O(1)
+    (a,c). Returns ``(H|None, J|None, layout)`` (cpu)."""
+    need_H = method in ("observed", "sandwich")
+    need_J = method in ("empirical", "sandwich")
+    model.eval()
+    for p in model.flow.parameters():
+        p.requires_grad_(False)
+    for p in model.mlp.parameters():
+        p.requires_grad_(False)
+    model.theta_scale.requires_grad_(False)
+    model.theta_smear.requires_grad_(False)
+    centres = 0.5 * (np.asarray(eta_edges[:-1]) + np.asarray(eta_edges[1:]))
+    n_eta = int(len(centres))
+    eta_c = torch.as_tensor(centres, dtype=torch.float32, device=device)
+    phi_edges = torch.linspace(-float(np.pi), float(np.pi), n_phi + 1, device=device)
+    phi_c = 0.5 * (phi_edges[:-1] + phi_edges[1:])
+    eg = eta_c[:, None, None].expand(n_eta, n_phi, 2).reshape(-1, 2)
+    pg = phi_c[None, :, None].expand(n_eta, n_phi, 2).reshape(-1, 2)
+    with torch.no_grad():
+        AeM, ac = model.theta_net(eg, pg)
+        t2s = AeM[:, 0, :].view(n_eta, n_phi, 3).contiguous()          # physical A,e,M
+        t2c = model._smear_raw_to_effective(ac[:, 0, :]).view(
+            n_eta, n_phi, 2).contiguous()                             # O(1) a,c
+    t2s = t2s.detach().clone().requires_grad_(model.scale_enabled)
+    t2c = t2c.detach().clone().requires_grad_(model.smearing_enabled)
+    bnd = phi_edges[1:-1].contiguous()
+
+    def _phibin(phi):
+        return torch.clamp(torch.bucketize(phi, bnd), 0, n_phi - 1)
+
+    orig_s, orig_c = model._scale_AeM_pm, model._smear_ac_pm
+    model._scale_AeM_pm = lambda e, p, b: t2s[b, _phibin(p)] * model.scale_param_mask
+    model._smear_ac_pm = lambda e, p, b: t2c[b, _phibin(p)] * model.smear_param_mask
+
+    scale_cols = ([c for c in range(3) if float(model.scale_param_mask[c]) != 0.0]
+                  if model.scale_enabled else [])
+    smear_cols = _smear_active_cols(model) if model.smearing_enabled else []
+    params, active, off = [], [], 0
+    if model.scale_enabled:
+        params.append(t2s)
+        for ie in range(n_eta):
+            for ip in range(n_phi):
+                for c in scale_cols:
+                    active.append(off + (ie * n_phi + ip) * 3 + c)
+        off += t2s.numel()
+    if smear_cols:
+        params.append(t2c)
+        for ie in range(n_eta):
+            for ip in range(n_phi):
+                for c in smear_cols:
+                    active.append(off + (ie * n_phi + ip) * 2 + c)
+    if not active:
+        for p in (t2s, t2c):
+            p.requires_grad_(False)
+        model._scale_AeM_pm, model._smear_ac_pm = orig_s, orig_c
+        raise RuntimeError("output Fisher: no active θ columns.")
+    active_idx = torch.tensor(active, dtype=torch.long, device=device)
+    n_act = int(active_idx.numel())
+
+    H = torch.zeros((n_act, n_act), device=device) if need_H else None
+    J = torch.zeros((n_act, n_act), device=device) if need_J else None
+    sw = 0.0; seen = 0; hit = False
+    try:
+        bar = tqdm(loader, desc=f"out-fisher({method})", disable=not progress, unit="batch")
+        for batch in bar:
+            if max_events > 0 and seen >= max_events:
+                hit = True; break
+            batch = _move_batch(batch, device)
+            dm = ~batch["is_data_mask"] if mc_as_data else batch["is_data_mask"]
+            di = dm.nonzero(as_tuple=True)[0]
+            if di.numel() == 0:
+                continue
+            per = model.data_nll_continuity(
+                batch["mll"], batch["pt_pm"], batch["eta_pm"], batch["phi_pm"],
+                batch["q_pm"], batch["b_pm"], batch["cond_std"], dm, n_iter=n_iter)
+            per_d = per[di]; w_d = batch["w"][di].detach()
+            nd = int(per_d.shape[0])
+            if max_events > 0 and seen + nd > max_events:
+                nd = max(0, max_events - seen); hit = True
+            if nd == 0:
+                break
+            per_d = per_d[:nd]; w_d = w_d[:nd]
+            if need_J:                                  # per-event scores first
+                for s0 in range(0, nd, max(1, chunk_events)):
+                    s1 = min(s0 + chunk_events, nd)
+                    rows = []
+                    for j in range(s0, s1):
+                        gj = torch.autograd.grad(per_d[j], params, retain_graph=True,
+                                                 allow_unused=True)
+                        rows.append(torch.cat([
+                            (x if x is not None else torch.zeros_like(p)).reshape(-1)
+                            for x, p in zip(gj, params)]))
+                    S = torch.stack(rows)[:, active_idx]
+                    J += (S * w_d[s0:s1].unsqueeze(1)).t() @ S
+            if need_H:
+                nll = (w_d * per_d).sum()
+                if torch.isfinite(nll):
+                    g = torch.autograd.grad(nll, params, create_graph=True,
+                                            retain_graph=True)
+                    g_full = torch.cat([gi.reshape(-1) for gi in g])
+                    H += _hessian_block_loop(g_full, params, active_idx, n_act).detach()
+            sw += float(w_d.sum()); seen += nd
+            bar.set_postfix_str(f"events={seen:,}")
+        bar.close()
+    finally:
+        model._scale_AeM_pm, model._smear_ac_pm = orig_s, orig_c
+    if seen == 0:
+        raise RuntimeError("output Fisher: zero data-branch events seen.")
+    if H is not None:
+        H = (0.5 * (H + H.T)).detach().cpu()
+    if J is not None:
+        J = (0.5 * (J + J.T)).detach().cpu()
+    layout = {"n_eta": n_eta, "n_phi": n_phi, "scale_cols": scale_cols,
+              "smear_cols": smear_cols, "n_sa": n_eta * n_phi * len(scale_cols),
+              "n_ca": n_eta * n_phi * len(smear_cols), "sw": sw, "seen": seen,
+              "hit_cap": hit}
+    return H, J, layout
+
+
+def _run_output_fisher_mlp(args, model, shard_files, stats, device) -> None:
+    """--theta-mlp OUTPUT-space Fisher (observed / empirical / sandwich over a
+    2-D η×φ θ-table) → ``<output>/empirical_fisher.pt`` with the diagnostics
+    σ-band keys, the φ-mean per-η covariance obtained by averaging the table
+    covariance over φ. The smarter alternative to the weight-space empirical
+    Fisher + ridge: the degeneracy structure is physical (output space), the
+    regularisation scale is physical, and observed/sandwich are available."""
+    method = getattr(args, "output_fisher_method", "empirical")
+    n_phi = max(1, int(getattr(args, "output_fisher_nphi", 4)))
+    ridge = float(args.empirical_fisher_ridge)
+    half = _validation_half(args, "fit")
+    inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
+    fbs = args.batch_size
+    if args.empirical_fisher_max_events > 0:
+        fbs = min(fbs, max(1, args.empirical_fisher_max_events))
+    loader = JpsiMassArrowLoader(
+        shard_files, stats, batch_size=fbs, split=args.fisher_split,
+        val_fraction=0.0, holdout_fraction=0.0, drop_last=False, half=half,
+        inject_theta_scale=inj, inject_theta_smear=inj_sm,
+        inject_seed=int(args.inject_smear_seed),
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=int(getattr(args, "max_events", 0) or 0),
+        event_fraction=float(getattr(args, "event_fraction", 1.0) or 1.0))
+    print(f"\ncomputing OUTPUT-space Fisher (method={method}, 2-D η×φ table "
+          f"n_phi={n_phi}, ridge={ridge:g}) on split={args.fisher_split}"
+          + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
+             if args.validation else "")
+          + (f"; ≤{args.empirical_fisher_max_events:,} events"
+             if args.empirical_fisher_max_events > 0 else ""))
+    t0 = time.time()
+    H, J, layout = compute_output_fisher_2d(
+        model, loader, device, method=method, n_phi=n_phi,
+        eta_edges=stats.eta_edges, mc_as_data=args.validation,
+        n_iter=args.continuity_n_iter, chunk_events=args.empirical_fisher_chunk,
+        max_events=args.empirical_fisher_max_events, progress=args.progress)
+    n_act = layout["n_sa"] + layout["n_ca"]
+    # Scale H/J to full subset Σw if the event budget capped them (both ∝ Σw).
+    if layout["hit_cap"] and layout["sw"] > 0:
+        sw_total = 0.0
+        for batch in loader:
+            dm = (~batch["is_data_mask"] if args.validation else batch["is_data_mask"])
+            sw_total += float((batch["w"] * dm.to(batch["w"].dtype)).sum())
+        if sw_total > layout["sw"]:
+            sc = sw_total / layout["sw"]
+            if H is not None:
+                H = H * sc
+            if J is not None:
+                J = J * sc
+            print(f"  scaled Fisher by Σw_total/Σw_seen = {sc:.2f}")
+            layout["sw"] = sw_total
+    # Invert per method → active θ-table covariance C [n_act, n_act].
+    if method == "empirical":
+        C = _empirical_cov_theta_block(J, n_act, ridge)
+    elif method == "observed":
+        C = _empirical_cov_theta_block(H, n_act, ridge)      # robust ridge inverse
+    else:  # sandwich  C = H⁻¹ J H⁻¹
+        Hinv = _empirical_cov_theta_block(H, n_act, ridge)
+        C = Hinv @ J @ Hinv
+    C = C.numpy()
+    n_sa, n_eta, nphi = layout["n_sa"], layout["n_eta"], layout["n_phi"]
+    sc_cols, cc_cols = layout["scale_cols"], layout["smear_cols"]
+    out = {
+        "method": f"output-space Fisher ({method}, 2-D η×φ n_phi={nphi}, ridge={ridge:g})",
+        "ridge": ridge, "theta_mode": "mlp", "output_fisher_method": method,
+        "smear_fit_params": model.smear_fit_params,
+        "n_events": layout["seen"], "sum_weight": layout["sw"],
+        "param_space": "2-D (η,φ) θ-table outputs (physical A,e,M; O(1) a,c)",
+    }
+    # φ-mean per-η covariance = average the table covariance over BOTH φ axes
+    # (cov of a mean over φ = mean of the cov over the two φ indices).
+    if sc_cols:
+        Cs = C[:n_sa, :n_sa].reshape(n_eta, nphi, len(sc_cols),
+                                     n_eta, nphi, len(sc_cols)).mean(axis=(1, 4))
+        cov_s = np.zeros((n_eta, 3, n_eta, 3), dtype=np.float64)
+        for i, ci in enumerate(sc_cols):
+            for j, cj in enumerate(sc_cols):
+                cov_s[:, ci, :, cj] = Cs[:, i, :, j]
+        cs2 = cov_s.reshape(72, 72)                       # symmetrise ULP asymmetry
+        cov_s = (0.5 * (cs2 + cs2.T)).reshape(n_eta, 3, n_eta, 3)
+        out["covariance_24_3_24_3"] = torch.tensor(cov_s, dtype=torch.float32).view(24, 3, 24, 3)
+        out["sigma_scale_24_3"] = torch.sqrt(torch.clamp(
+            torch.tensor(np.einsum('icic->ic', cov_s)), min=0.0)).float()
+    if cc_cols:
+        Cc = C[n_sa:, n_sa:].reshape(n_eta, nphi, len(cc_cols),
+                                     n_eta, nphi, len(cc_cols)).mean(axis=(1, 4))
+        sv = [SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C]
+        cov_c = np.zeros((n_eta, 2, n_eta, 2), dtype=np.float64)
+        for i, ci in enumerate(cc_cols):
+            for j, cj in enumerate(cc_cols):
+                cov_c[:, ci, :, cj] = Cc[:, i, :, j] * sv[ci] * sv[cj]   # → physical
+        cc2 = cov_c.reshape(48, 48)                       # symmetrise ULP asymmetry
+        cov_c = (0.5 * (cc2 + cc2.T)).reshape(n_eta, 2, n_eta, 2)
+        out["covariance_smear_24_2_24_2"] = torch.tensor(cov_c, dtype=torch.float32).view(24, 2, 24, 2)
+        sig_sm = torch.sqrt(torch.clamp(
+            torch.tensor(np.einsum('icic->ic', cov_c)), min=0.0)).float()
+        out["sigma_smear_eff_24_2"] = sig_sm
+    path = os.path.join(args.output, "empirical_fisher.pt")
+    torch.save(out, path)
+    print(f"  wrote {path}: output-space {method} Fisher ({n_act}-param η×φ table, "
+          f"n_phi={nphi}) → per-η φ-mean σ ({layout['seen']:,} events, "
+          f"Σw={layout['sw']:.2e}) in {time.time()-t0:.1f}s")
+    if "sigma_scale_24_3" in out:
+        ss = out["sigma_scale_24_3"]
+        print(f"  σ(A,e,M) median over bins = "
+              f"({float(ss[:,0].median()):.2e}, {float(ss[:,1].median()):.2e}, "
+              f"{float(ss[:,2].median()):.2e})")
+
+
 def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
     """Joint (θ,φ) empirical Fisher → ``<output>/empirical_fisher.pt`` (PSD,
     background-included θ covariance via pinv; diagnostics-compatible)."""
@@ -1700,7 +1941,10 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         print("skipping empirical Fisher: both --disable-scale and --disable-smearing.")
         return
     if model.theta_mode == "mlp":
-        _run_empirical_fisher_mlp(args, model, shard_files, stats, device)
+        if getattr(args, "output_fisher", False):
+            _run_output_fisher_mlp(args, model, shard_files, stats, device)
+        else:
+            _run_empirical_fisher_mlp(args, model, shard_files, stats, device)
         return
     half = _validation_half(args, "fit")
     inj = _inject_theta_np(args, len(stats.eta_edges) - 1) if args.validation else None
@@ -1851,14 +2095,15 @@ def _run_uncertainties_stage(args, device) -> int:
     os.makedirs(args.output, exist_ok=True)
     with open(os.path.join(args.output, "preproc_stats.json"), "w") as f:
         json.dump(_stats_to_dict(stats), f, indent=2)
-    if not args.fisher_info and not args.empirical_fisher and args.bootstrap <= 0:
+    if (not args.fisher_info and not args.empirical_fisher
+            and not getattr(args, "output_fisher", False) and args.bootstrap <= 0):
         print("warning: --stage uncertainties but none of --fisher-info / "
-              "--empirical-fisher / --bootstrap (>0) requested — nothing to "
-              "compute.", file=sys.stderr)
+              "--empirical-fisher / --output-fisher / --bootstrap (>0) requested "
+              "— nothing to compute.", file=sys.stderr)
         return 0
     if args.fisher_info:
         _run_fisher_continuity(args, model, shard_files, stats, device)
-    if args.empirical_fisher:
+    if args.empirical_fisher or getattr(args, "output_fisher", False):
         _run_empirical_fisher(args, model, shard_files, stats, device)
     if args.bootstrap > 0:
         run_bootstrap_continuity(args, model, shard_files, stats, device,
@@ -2292,6 +2537,32 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    "so a degenerate direction reads as a LARGE finite σ instead. "
                    "Dimensionless (relative to each parameter's own information); "
                    "try ~1e-3.")
+    # OUTPUT-space Fisher for --theta-mlp: measure the information on the per-(η,φ)
+    # OUTPUTS directly via a 2-D η×φ θ-table shadow, instead of the 1349-weight
+    # net + weight-space ridge. Physical degeneracy structure + physical ridge
+    # scale; observed / sandwich available (the net empirical Fisher is empirical-
+    # only). The φ-mean per-η σ band is recovered by averaging the table cov over φ.
+    p.add_argument("--output-fisher", action="store_true",
+                   help="(--theta-mlp) After the fit, compute the OUTPUT-space "
+                   "Fisher over a 2-D η×φ θ-table seeded from the net at the bin "
+                   "centres (physical A/e/M; O(1) a/c) → <output>/empirical_fisher.pt "
+                   "(same keys the diagnostics σ-band consumes). Measures the data's "
+                   "information about the per-(η,φ) OUTPUTS directly, so the ridge "
+                   "scale and degeneracy structure are physical (output space), not "
+                   "the 1349 net weights. The per-η φ-mean covariance is the table "
+                   "covariance averaged over its φ axes. Falls back to the net "
+                   "empirical Fisher when off. Ignored for binned θ.")
+    p.add_argument("--output-fisher-method", default="empirical",
+                   choices=("observed", "empirical", "sandwich"),
+                   help="(--output-fisher) Information estimator over the η×φ table: "
+                   "'empirical' J=Σw·ssᵀ (per-event scores, default); 'observed' "
+                   "H=Σw·∂²(−lnL)/∂θ² (Hessian, double-backward); 'sandwich' "
+                   "H⁻¹JH⁻¹ (robust). Empirical is the cheapest; observed/sandwich "
+                   "cost a per-batch Hessian block over the active table entries.")
+    p.add_argument("--output-fisher-nphi", type=int, default=4,
+                   help="(--output-fisher) Number of φ bins in the η×φ table "
+                   "(default 4). More bins resolve φ structure but split the "
+                   "statistics per cell; the per-η band averages over them.")
     # Warm-start Poisson bootstrap (Hessian-free covariance incl. the background)
     p.add_argument("--bootstrap", type=int, default=0,
                    help="(two-stage) After the stage-2 fit, run this many warm-start "
