@@ -51,9 +51,11 @@ if _HERE not in sys.path:
 from jpsi_mass_arrow_loader import (  # noqa: E402
     JpsiMassArrowLoader,
     discover_shards,
+    _event_cond_raw_np,
 )
 from jpsi_mass_model import (  # noqa: E402
-    JpsiMassMixtureModel, _event_mll, N_THETA_SCALE_PM, N_THETA_SMEAR_PM,
+    JpsiMassMixtureModel, _event_mll, _event_cond_raw,
+    N_THETA_SCALE_PM, N_THETA_SMEAR_PM,
     SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C, THETA_SCALE_REF,
 )
 from train_jpsi_mass_fit import _move_batch, _stats_from_dict  # noqa: E402
@@ -404,17 +406,18 @@ def evaluate_predictions(
             model, batch, idx, m_centers_dev, chunk_events=chunk_events,
             n_iter=n_iter)
 
+    # Conditional slice variables for the closure plots, chosen for the active
+    # basis (muon_kin → ρ, cos α; event_level → p_T^ll, y_ll, cos θ*). The
+    # tertile-mode ones are accumulated per event below; |η₊| (eta_edges mode)
+    # uses eta_data.
+    _slv = _diag_slice_vars(getattr(model, "cond_basis", "muon_kin"))
+    _tkeys = [k for k, _, _, m in _slv if m == "tertile"]
+
     out = {
         "mll_data": [], "w_data": [], "eta_data": [], "f_data": [],
         "pred_signal_data": [],
         "mll_mc_fold": [], "w_mc": [], "eta_mc": [],
         "pred_signal_mc": [],
-        # Conditional slice variables (besides |η₊|) for the m_ll closure plots:
-        # ρ (pt asymmetry, = muon_kin[-1]) and cos α (3-D opening angle). Both
-        # are functions of the conditioning, computed exactly as in
-        # plot_param_sensitivity, per data + MC event.
-        "rho_data": [], "cosalpha_data": [],
-        "rho_mc": [], "cosalpha_mc": [],
         # continuity only: the nominal (θ=0, unshifted/unsmeared) MC + flow,
         # to overlay the stage-1 closure alongside the folded stage-2 one.
         "mll_mc_nominal": [], "pred_nominal_mc": [],
@@ -427,6 +430,9 @@ def evaluate_predictions(
         # fitted-θ density should converge to if the fit recovers the truth).
         "pred_signal_mc_at_inj": [],
     }
+    for _k in _tkeys:
+        out[f"sl_{_k}_data"] = []
+        out[f"sl_{_k}_mc"] = []
     # Convert the loader's replayed injection (physical) to RAW θ tensors that
     # produce them through the model — used below to evaluate the model
     # density at the truth.
@@ -477,11 +483,11 @@ def evaluate_predictions(
                 out["mll_data"].append(batch["mll"][data_idx].cpu().numpy())
                 out["w_data"].append(batch["w"][data_idx].cpu().numpy())
                 out["eta_data"].append(batch["eta_pm"][data_idx, 0].cpu().numpy())
-                _rho_d, _cosa_d = _rho_cosalpha_np(
-                    batch["pt_pm"][data_idx], batch["eta_pm"][data_idx],
+                _sv_d = _slice_vals_np(
+                    _tkeys, batch["pt_pm"][data_idx], batch["eta_pm"][data_idx],
                     batch["phi_pm"][data_idx])
-                out["rho_data"].append(_rho_d)
-                out["cosalpha_data"].append(_cosa_d)
+                for _k in _tkeys:
+                    out[f"sl_{_k}_data"].append(_sv_d[_k])
                 out["f_data"].append(f.cpu().numpy())
                 out["pred_signal_data"].append(log_p_grid.exp().cpu().numpy())
 
@@ -505,13 +511,13 @@ def evaluate_predictions(
                 out["mll_mc_fold"].append(mll_fold.cpu().numpy())
                 out["w_mc"].append(batch["w"][mc_idx].cpu().numpy())
                 out["eta_mc"].append(batch["eta_pm"][mc_idx, 0].cpu().numpy())
-                # Slice ρ/cos α by the conditioning the model sees (batch pt_pm
-                # = injected pt in validation), matching the data side so a given
-                # bin compares the same physical region. cos α is pt-independent.
-                _rho_m, _cosa_m = _rho_cosalpha_np(
-                    batch["pt_pm"][mc_idx], etam, phim)
-                out["rho_mc"].append(_rho_m)
-                out["cosalpha_mc"].append(_cosa_m)
+                # Slice variables from the conditioning the model sees (batch
+                # pt_pm = injected pt in validation), matching the data side so a
+                # given bin compares the same physical region.
+                _sv_m = _slice_vals_np(
+                    _tkeys, batch["pt_pm"][mc_idx], etam, phim)
+                for _k in _tkeys:
+                    out[f"sl_{_k}_mc"].append(_sv_m[_k])
                 out["pred_signal_mc"].append(log_p_grid_mc.exp().cpu().numpy())
                 # Closure target: signal density at the INJECTED θ values.
                 # Temporarily SET the model's effective per-muon θ to the
@@ -561,6 +567,9 @@ def evaluate_predictions(
     out["bin_width"] = bin_width
     out["continuity"] = True
     out["mc_as_data"] = mc_as_data
+    # Basis-aware slice variables (key, label, fmt, mode) consumed by the closure
+    # plots; tertile-mode values are in out["sl_<key>_data/_mc"].
+    out["slice_specs"] = _slv
     # Whether the loader replayed a validation injection into batch["mll"] — so
     # the closure plot draws the injected pseudo-data curve only when it is
     # genuinely distinct from the (un-injected) nominal.
@@ -671,18 +680,53 @@ def _chi2_compat_zero(theta: np.ndarray, cov: np.ndarray):
     return chi2, dof, p
 
 
-def _rho_cosalpha_np(pt_pm, eta_pm, phi_pm):
-    """(ρ, cos α) per event as numpy, from the per-muon pt/η/φ — the same
-    conditional quantities used to slice the param-sensitivity plots. ρ is the
-    pt asymmetry (= muon_kin[-1]); cos α is the 3-D opening angle (pt cancels):
-        cos α = (cos Δφ + sinh η₊ sinh η₋) / (cosh η₊ cosh η₋)."""
-    pt = pt_pm.cpu().numpy()
-    e = eta_pm.cpu().numpy()
-    p = phi_pm.cpu().numpy()
-    rho = (pt[:, 0] - pt[:, 1]) / (pt[:, 0] + pt[:, 1])
-    num = np.cos(p[:, 0] - p[:, 1]) + np.sinh(e[:, 0]) * np.sinh(e[:, 1])
-    cosa = num / (np.cosh(e[:, 0]) * np.cosh(e[:, 1]))
-    return rho, cosa
+def _diag_slice_vars(cond_basis):
+    """Slice variables for the closure / param-sensitivity plots, all DERIVABLE
+    FROM THE ACTIVE CONDITIONING (so a slice never leaks the observable m_ll).
+    Each entry: ``(key, label, fmt, mode)``; mode ``'eta_edges'`` uses the passed
+    fixed η-bin edges, ``'tertile'`` uses adaptive tertiles.
+
+    - ``muon_kin``: |η₊| (directions are in the basis), ρ (= muon_kin[-1]), and
+      cos α (3-D opening angle, a pure function of the muon directions).
+    - ``event_level``: the conditioning components themselves — p_T^ll, y_ll, and
+      cos θ* (CS polar decay angle). cos α / |η₊| / ρ are NOT used here: they
+      depend on the lab→CS boost (hence m_ll), so they are not functions of the
+      event-level conditioning alone. cos θ* is the event-level analog of ρ for
+      M-sensitivity; p_T^ll discriminates the A/e and a/c pt-scale degeneracies."""
+    if cond_basis == "event_level":
+        return [("ptll", "p_T^ll [GeV]", ".1f", "tertile"),
+                ("yll", "y_ll", ".2f", "tertile"),
+                ("costhetastar", "cos θ*", ".2f", "tertile")]
+    return [("eta", "|η₊|", ".1f", "eta_edges"),
+            ("rho", "ρ", ".2f", "tertile"),
+            ("cosalpha", "cos α", ".3f", "tertile")]
+
+
+def _slice_vals_np(keys, pt_pm, eta_pm, phi_pm):
+    """``{key: [N] array}`` for the requested tertile slice keys, from per-muon
+    pt/η/φ. ptll/yll/cosθ* come from ``_event_cond_raw_np`` (cols 1/0/4); ρ and
+    cos α are the pt-asymmetry and opening angle. cos α uses only directions
+    (pt cancels): ``(cosΔφ + sinhη₊sinhη₋)/(coshη₊coshη₋)``."""
+    keys = set(keys)
+    pt = pt_pm.detach().cpu().numpy()
+    e = eta_pm.detach().cpu().numpy()
+    p = phi_pm.detach().cpu().numpy()
+    out = {}
+    if "rho" in keys:
+        out["rho"] = (pt[:, 0] - pt[:, 1]) / (pt[:, 0] + pt[:, 1])
+    if "cosalpha" in keys:
+        num = np.cos(p[:, 0] - p[:, 1]) + np.sinh(e[:, 0]) * np.sinh(e[:, 1])
+        out["cosalpha"] = num / (np.cosh(e[:, 0]) * np.cosh(e[:, 1]))
+    if keys & {"ptll", "yll", "costhetastar"}:
+        ev = _event_cond_raw_np(pt.astype(np.float32), e.astype(np.float32),
+                                p.astype(np.float32))
+        if "ptll" in keys:
+            out["ptll"] = np.exp(ev[:, 1].astype(np.float64))
+        if "yll" in keys:
+            out["yll"] = ev[:, 0]
+        if "costhetastar" in keys:
+            out["costhetastar"] = ev[:, 4]
+    return out
 
 
 def _select_slice(eta_abs: np.ndarray, slice_def):
@@ -694,16 +738,14 @@ def _select_slice(eta_abs: np.ndarray, slice_def):
 
 
 def _closure_slice_dims(evals, eta_slice_edges):
-    """Slice dimensions shared by the m_ll- and MC-closure PANEL plots. Returns
-    a list of ``(prefix, label, fmt, data_vals, mc_vals, columns)`` where
-    ``columns`` is the per-panel ``[(tag, slice_def), ...]`` of that figure:
-      • ``eta``      — |η₊| with the passed fixed edges, plus a leading
-                       inclusive panel (slice_def=None).
-      • ``rho``      — ρ (pt asymmetry) adaptive tertiles.
-      • ``cosalpha`` — cos α (3-D opening angle) adaptive tertiles.
-    ρ / cos α are the conditional discriminants used by plot_param_sensitivity
-    (ρ → M; cos α → A vs e and a vs c). Each figure is one slice dimension; the
-    panels are its slices."""
+    """Slice dimensions shared by the m_ll- and MC-closure PANEL plots, from the
+    active basis's ``evals["slice_specs"]`` (all DERIVABLE FROM THE CONDITIONING):
+      • muon_kin → |η₊| (fixed edges + leading inclusive panel), ρ, cos α tertiles.
+      • event_level → p_T^ll, y_ll, cos θ* tertiles (the conditioning components;
+        cos α / |η₊| / ρ are not functions of the event-level conditioning alone).
+    The inclusive panel leads the FIRST dimension. Returns a list of
+    ``(prefix, label, fmt, data_vals, mc_vals, columns)`` with ``columns`` the
+    per-panel ``[(tag, slice_def), ...]``."""
     def _tertiles(d, mc):
         v = d if (d is not None and d.size) else mc
         if v is None or v.size == 0:
@@ -714,25 +756,26 @@ def _closure_slice_dims(evals, eta_slice_edges):
         e = np.unique(np.percentile(v, [0.0, 100.0 / 3.0, 200.0 / 3.0, 100.0]))
         return e if e.size >= 2 else None
 
-    abseta_d = np.abs(evals["eta_data"])
-    abseta_m = np.abs(evals["eta_mc"])
-    eta_cols = [("inclusive", None)] + [
-        (f"eta{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
-        for i in range(len(eta_slice_edges) - 1)
-    ]
-    dims = [("eta", "|η₊|", ".1f", abseta_d, abseta_m, eta_cols)]
-    for key, prefix, label, fmt in (
-        ("rho", "rho", "ρ", ".2f"),
-        ("cosalpha", "cosalpha", "cos α", ".3f"),
-    ):
-        dv = evals.get(f"{key}_data", np.zeros((0,)))
-        mv = evals.get(f"{key}_mc", np.zeros((0,)))
-        edges = _tertiles(dv, mv)
-        if edges is None:
-            continue
-        cols = [(f"{prefix}{i}", (edges[i], edges[i + 1]))
-                for i in range(len(edges) - 1)]
-        dims.append((prefix, label, fmt, dv, mv, cols))
+    specs = evals.get("slice_specs") or _diag_slice_vars("muon_kin")
+    dims = []
+    for key, label, fmt, mode in specs:
+        if mode == "eta_edges":
+            dv = np.abs(evals["eta_data"]); mv = np.abs(evals["eta_mc"])
+            cols = [(f"{key}{i}", (eta_slice_edges[i], eta_slice_edges[i + 1]))
+                    for i in range(len(eta_slice_edges) - 1)]
+        else:
+            dv = evals.get(f"sl_{key}_data", np.zeros((0,)))
+            mv = evals.get(f"sl_{key}_mc", np.zeros((0,)))
+            edges = _tertiles(dv, mv)
+            if edges is None:
+                continue
+            cols = [(f"{key}{i}", (edges[i], edges[i + 1]))
+                    for i in range(len(edges) - 1)]
+        dims.append((key, label, fmt, dv, mv, cols))
+    # The shared inclusive panel leads the first dimension's figure.
+    if dims:
+        k, lb, fm, dv, mv, cols = dims[0]
+        dims[0] = (k, lb, fm, dv, mv, [("inclusive", None)] + cols)
     return dims
 
 
@@ -1399,13 +1442,27 @@ def plot_param_sensitivity(model, loader, stats, m_centers, out_dir, *,
         num = torch.cos(p[:, 0] - p[:, 1]) + torch.sinh(e[:, 0]) * torch.sinh(e[:, 1])
         return num / (torch.cosh(e[:, 0]) * torch.cosh(e[:, 1]))
 
-    # All slice variables are conditional (or functions of muon_kin).
-    slice_vars = {
-        "abseta": (lambda b: b["eta_pm"].abs().max(1).values, "|η|max"),
-        "rho": (lambda b: (b["pt_pm"][:, 0] - b["pt_pm"][:, 1])
-                / (b["pt_pm"][:, 0] + b["pt_pm"][:, 1]), "ρ"),
-        "cosalpha": (_cos_alpha, "cos α (opening angle)"),
-    }
+    # Slice variables, chosen for the active basis so each is a function of the
+    # CONDITIONING (never the observable m_ll). For event_level, cos α / |η₊| / ρ
+    # depend on the lab→CS boost (hence m_ll) and are NOT conditional, so use the
+    # conditioning components themselves: p_T^ll discriminates the A/e and a/c
+    # pt-scale degeneracies; cos θ* (CS polar angle) is the M-sensitive analog
+    # of ρ (it controls the charge-odd pt sharing).
+    if getattr(model, "cond_basis", "muon_kin") == "event_level":
+        def _ev(b):
+            return _event_cond_raw(b["pt_pm"], b["eta_pm"], b["phi_pm"])
+        slice_vars = {
+            "ptll": (lambda b: torch.exp(_ev(b)[:, 1]), "p_T^ll [GeV]"),
+            "yll": (lambda b: _ev(b)[:, 0], "y_ll"),
+            "costhetastar": (lambda b: _ev(b)[:, 4], "cos θ*"),
+        }
+    else:
+        slice_vars = {
+            "abseta": (lambda b: b["eta_pm"].abs().max(1).values, "|η|max"),
+            "rho": (lambda b: (b["pt_pm"][:, 0] - b["pt_pm"][:, 1])
+                    / (b["pt_pm"][:, 0] + b["pt_pm"][:, 1]), "ρ"),
+            "cosalpha": (_cos_alpha, "cos α (opening angle)"),
+        }
 
     def _select(b):
         s = (~b["is_data_mask"]) if mc_as_data else b["is_data_mask"]
