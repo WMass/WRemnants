@@ -1297,10 +1297,8 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument("--max-events", type=int, default=0,
                    help="Stop after this many events (0 = run to end). "
                    "Bounds the grid-eval cost (O(N × n_mll_bins) flow "
-                   "forwards) on full-statistics shards. Applies to the main "
-                   "evaluation AND the param-sensitivity pass; when unset, the "
-                   "param-sensitivity pass defaults to the TRAINING run's "
-                   "--max-events (from the checkpoint).")
+                   "forwards) on full-statistics shards. Applies identically to "
+                   "the main closure evaluation and the param-sensitivity pass.")
     p.add_argument("--split", default="holdout", choices=("train", "val", "holdout", "all"),
                    help="Which loader split to evaluate on. 'holdout' is the "
                    "untouched-by-training default and the canonical choice.")
@@ -1479,13 +1477,17 @@ def plot_param_sensitivity(model, loader, stats, m_centers, out_dir, *,
         if max_events > 0 and seen >= max_events:
             break
         batch = _move_batch(batch, device)
+        # Count ALL events per batch (as the main closure evaluate_predictions
+        # does), so the same --max-events selects the same events in both passes.
+        seen += int(batch["mll"].shape[0])
         idx = _select(batch)
         if idx.numel() == 0:
             continue
-        seen += int(idx.numel())
         for v, (fn, _) in slice_vars.items():
             vals[v].append(fn(batch)[idx].cpu().numpy())
-    if seen == 0:
+    # `seen` now counts all events (for the cap); guard on whether any SELECTED
+    # events were collected for the tertile edges.
+    if all(len(lst) == 0 for lst in vals.values()):
         print("  no events selected → skipping param-sensitivity plots")
         return
     edges = {}
@@ -1509,11 +1511,13 @@ def plot_param_sensitivity(model, loader, stats, m_centers, out_dir, *,
         if max_events > 0 and seen >= max_events:
             break
         batch = _move_batch(batch, device)
+        # Count ALL events per batch (matching the main closure), so the same
+        # --max-events selects the same events here as in evaluate_predictions.
+        seen += int(batch["mll"].shape[0])
         sel = (~batch["is_data_mask"]) if mc_as_data else batch["is_data_mask"]
         idx = sel.nonzero(as_tuple=True)[0]
         if idx.numel() == 0:
             continue
-        seen += int(idx.numel())
         mll = batch["mll"][idx].cpu().numpy()
         w = batch["w"][idx].cpu().numpy()
         p_fit = torch.exp(_tilt_density_on_grid(
@@ -1936,22 +1940,14 @@ def main() -> int:
 
     # Plot 7: parameter-sensitivity slices — model density at ±shifts of each
     # fitted param, in conditional slices chosen to break degeneracies.
-    # Re-iterates the loader (own pass; extra grid evals per shift) — the slowest
-    # diagnostic. Bound it by default to the TRAINING run's --max-events (the
-    # "overall" run setting, from the checkpoint), so a model trained on a subset
-    # gets a proportionate param-sensitivity pass without a manual flag; the
-    # diagnostics --max-events still overrides when set. (The main closure
-    # evaluation above is left at full statistics.)
+    # Re-iterates the loader (own pass; extra grid evals per shift). Uses the
+    # same --max-events as the main closure above, counted the same way (all
+    # events per batch), so both passes select the same events.
     if not bool(getattr(args, "no_param_sensitivity", False)):
-        ps_max = (args.max_events if args.max_events > 0
-                  else int(train_args.get("max_events", 0) or 0))
-        if ps_max and not args.max_events:
-            print(f"  (param-sensitivity inherits the training --max-events="
-                  f"{ps_max:,})")
         print("plotting parameter-sensitivity slices...")
         plot_param_sensitivity(
             model, loader, stats, m_centers, out_dir,
-            shift_scale=args.param_shift, max_events=ps_max,
+            shift_scale=args.param_shift, max_events=args.max_events,
             chunk_events=args.grid_chunk_events, n_iter=args.continuity_n_iter,
             device=device, mc_as_data=mc_as_data,
             progress=getattr(args, "progress", True))
