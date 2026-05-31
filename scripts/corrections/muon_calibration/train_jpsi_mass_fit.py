@@ -999,7 +999,7 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if args.validation else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=0.0, holdout_fraction=0.0,   # all events, matching the all-events fit
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
@@ -1103,7 +1103,7 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
     inj_sm = _inject_smear_np(args, len(stats.eta_edges) - 1) if mc_as_data else None
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split=args.fisher_split,
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=0.0, holdout_fraction=0.0,   # all events, matching the all-events fit
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
@@ -1614,7 +1614,7 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
         fisher_bs = min(fisher_bs, max(1, args.empirical_fisher_max_events))
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=0.0, holdout_fraction=0.0,   # all events, matching the all-events fit
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
@@ -1699,7 +1699,7 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         fisher_bs = min(fisher_bs, max(1, args.empirical_fisher_max_events))
     loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=fisher_bs, split=args.fisher_split,
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=0.0, holdout_fraction=0.0,   # all events, matching the all-events fit
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
@@ -2237,7 +2237,10 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                    help="(two-stage) Loader split the Fisher info is summed over. "
                    "Default 'train' = the data the fit used, so the covariance has "
                    "the correct statistical scale (∝ 1/N_fit). In --validation mode "
-                   "the half-1 MC pseudo-data of this split is used.")
+                   "the half-1 MC pseudo-data of this split is used. NOTE: the fit "
+                   "and the Fisher/bootstrap use ALL events (no val/holdout split), "
+                   "so 'train' == 'all' here and 'val'/'holdout' are EMPTY — keep "
+                   "the default 'train'.")
     p.add_argument("--fisher-vectorized", default=True,
                    action=argparse.BooleanOptionalAction,
                    help="(two-stage) Compute the Hessian with one vmapped "
