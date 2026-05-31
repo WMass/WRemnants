@@ -726,7 +726,12 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
             val_nll = train_nll; v_w = tr_w; metric = train_nll
 
         d_train = None if prev_train_nll is None else (train_nll - prev_train_nll)
-        d_str = "n/a" if d_train is None else f"{d_train:+.4f}"
+        # Fixed notation for visible changes; scientific once |Δ| is too small to
+        # show at 4 decimals (e.g. near the train-NLL plateau), so it never reads
+        # as a flat "+0.0000".
+        d_str = ("n/a" if d_train is None
+                 else (f"{d_train:+.4f}" if abs(d_train) >= 1e-3
+                       else f"{d_train:+.2e}"))
         extra = ""
         if stage_name == "fit":
             if model.theta_mode == "mlp":
