@@ -979,7 +979,9 @@ def _run_fisher_continuity(args, model, shard_files, stats, device) -> None:
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=int(getattr(args, "max_events", 0) or 0),
+        event_fraction=float(getattr(args, "event_fraction", 1.0) or 1.0))
     print(f"\ncomputing observed Fisher information (θ_scale + active θ_smear, "
           f"fixed flow + MLP) on split={args.fisher_split}"
           + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
@@ -1081,7 +1083,9 @@ def run_bootstrap_continuity(args, model, shard_files, stats, device, *,
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=int(getattr(args, "max_events", 0) or 0),
+        event_fraction=float(getattr(args, "event_fraction", 1.0) or 1.0))
     nominal_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
     # Freeze the flow; float the MLP + active θ (the MLP must re-fit per replica
@@ -1590,7 +1594,9 @@ def _run_empirical_fisher_mlp(args, model, shard_files, stats, device) -> None:
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=int(getattr(args, "max_events", 0) or 0),
+        event_fraction=float(getattr(args, "event_fraction", 1.0) or 1.0))
     ridge = float(args.empirical_fisher_ridge)
     print(f"\ncomputing θ-NET-weight empirical Fisher (per-event scores → ridge="
           f"{ridge:g} inverse → output Jacobian) on split={args.fisher_split}"
@@ -1673,7 +1679,9 @@ def _run_empirical_fisher(args, model, shard_files, stats, device) -> None:
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inj,
         inject_theta_smear=inj_sm, inject_seed=int(args.inject_smear_seed),
-        cond_basis=getattr(args, "cond_basis", "muon_kin"))
+        cond_basis=getattr(args, "cond_basis", "muon_kin"),
+        max_events=int(getattr(args, "max_events", 0) or 0),
+        event_fraction=float(getattr(args, "event_fraction", 1.0) or 1.0))
     print(f"\ncomputing joint (θ,φ) empirical Fisher (per-event scores → pinv) on "
           f"split={args.fisher_split}"
           + ("  half=%s (MC pseudo-data)" % ('all' if half is None else half)
