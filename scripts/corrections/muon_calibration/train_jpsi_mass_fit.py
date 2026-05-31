@@ -516,27 +516,31 @@ def _setup_common(args, *, stats_override=None):
 
 
 def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None,
-                  inject_smear=None):
+                  inject_smear=None, val_fraction=None, holdout_fraction=None):
     """Build the ``(train, val)`` loaders for one stage. ``half`` selects a
     deterministic disjoint event half (0/1) — used by the MC-closure
     validation mode (stage 1 ← half 0, stage 2 ← half 1); ``None`` = all
     events. ``inject_theta`` ([n_eta, 3]) / ``inject_smear`` ([n_eta, 2]) inject
     a known θ_scale shift / per-muon qop smear into the (pseudo-)data m_ll
-    (validation closure)."""
+    (validation closure). ``val_fraction``/``holdout_fraction`` override the
+    args defaults (the fit stage passes 0/0 to use ALL events — within the
+    half — with no held-out split)."""
     seed = int(getattr(args, "inject_smear_seed", 12345))
     me = int(getattr(args, "max_events", 0) or 0)
     ef = float(getattr(args, "event_fraction", 1.0) or 1.0)
     nu = bool(getattr(args, "inject_nonuniform", False))
+    vf = args.val_fraction if val_fraction is None else float(val_fraction)
+    hf = args.holdout_fraction if holdout_fraction is None else float(holdout_fraction)
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=vf, holdout_fraction=hf,
         drop_last=True, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
         max_events=me, event_fraction=ef, inject_nonuniform=nu)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
-        val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
+        val_fraction=vf, holdout_fraction=hf,
         drop_last=False, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
@@ -638,13 +642,18 @@ def _build_model(args, stats, device):
 
 
 def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
-                step_fn, ckpt_prefix, stage_name, epochs):
-    """Generic weighted-NLL epoch loop with val + best/last checkpoints +
-    early-stop. ``step_fn(model, batch) -> (loss, sum_w)`` returns the batch's
-    weighted-mean NLL (scalar tensor) over the rows the stage uses and the
-    corresponding Σw. Runs under ``enable_grad`` in val too (stage 2's score is
-    autograd-based). Returns the best val metric."""
-    best_val = float("inf"); no_improve = 0
+                step_fn, ckpt_prefix, stage_name, epochs, monitor="val"):
+    """Generic weighted-NLL epoch loop with best/last checkpoints + early-stop.
+    ``step_fn(model, batch) -> (loss, sum_w)`` returns the batch's weighted-mean
+    NLL (scalar tensor) over the rows the stage uses and the corresponding Σw.
+
+    ``monitor`` selects the metric the early-stop / plateau-LR / best-checkpoint
+    act on: ``"val"`` (the held-out validation NLL, stage 1) or ``"train"`` (the
+    training NLL itself — stage 2 uses ALL events with no held-out split, so the
+    train-NLL plateau is the convergence signal; the val pass is skipped). The
+    per-epoch line always reports the train NLL and its change from the previous
+    epoch. Returns the best monitored metric."""
+    best_val = float("inf"); no_improve = 0; prev_train_nll = None
     best_ckpt = os.path.join(args.output, f"{ckpt_prefix}_best.pt")
     last_ckpt = os.path.join(args.output, f"{ckpt_prefix}_last.pt")
     device = args.device
@@ -701,16 +710,23 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
             n_batches_total = n_seen   # exact count for the % bar from epoch 2 on
         train_nll = tr_sum / max(tr_w, 1e-30)
 
-        model.eval(); v_sum = 0.0; v_w = 0.0
-        for batch in val_loader:
-            batch = _move_batch(batch, device)
-            with torch.enable_grad():
-                loss, sw = step_fn(model, batch)
-            if sw <= 0:
-                continue
-            v_sum += float(loss.item()) * sw; v_w += sw
-        val_nll = v_sum / max(v_w, 1e-30)
+        # Monitored metric: held-out val NLL (stage 1) or the training NLL itself
+        # (stage 2 — all events, no held-out split; skip the val pass).
+        if monitor == "val" and val_loader is not None:
+            model.eval(); v_sum = 0.0; v_w = 0.0
+            for batch in val_loader:
+                batch = _move_batch(batch, device)
+                with torch.enable_grad():
+                    loss, sw = step_fn(model, batch)
+                if sw <= 0:
+                    continue
+                v_sum += float(loss.item()) * sw; v_w += sw
+            val_nll = v_sum / max(v_w, 1e-30); metric = val_nll
+        else:
+            val_nll = train_nll; v_w = tr_w; metric = train_nll
 
+        d_train = None if prev_train_nll is None else (train_nll - prev_train_nll)
+        d_str = "n/a" if d_train is None else f"{d_train:+.4f}"
         extra = ""
         if stage_name == "fit":
             if model.theta_mode == "mlp":
@@ -720,18 +736,20 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
             else:
                 extra = (f" θ_scale‖∞={model.theta_scale.abs().max().item():.3e}"
                          f" θ_smear‖∞={model.theta_smear.abs().max().item():.3e}")
+        val_str = f"val_nll={val_nll:+.4f} " if monitor == "val" else ""
         print(f"[{stage_name}] epoch {epoch:>3}: train_nll={train_nll:+.4f} "
-              f"val_nll={val_nll:+.4f} (Σw={v_w:.2e}) lr={lr_str} "
+              f"(Δ={d_str}) {val_str}(Σw={v_w:.2e}) lr={lr_str} "
               f"dt={time.time()-t0:.1f}s{extra}")
+        prev_train_nll = train_nll
 
-        improved = val_nll < best_val - args.patience_threshold
+        improved = metric < best_val - args.patience_threshold
         if improved:
-            best_val = val_nll; no_improve = 0
+            best_val = metric; no_improve = 0
         else:
             no_improve += 1
-        torch.save(_ckpt(epoch, best_val, val_nll), last_ckpt)
+        torch.save(_ckpt(epoch, best_val, metric), last_ckpt)
         if improved:
-            torch.save(_ckpt(epoch, best_val, val_nll), best_ckpt)
+            torch.save(_ckpt(epoch, best_val, metric), best_ckpt)
         # Step the LR schedule. The early-stop counter is NOT reset on lr
         # reduction — `patience` is the total number of stalled epochs allowed
         # since the last improvement, regardless of any lr drops that happen
@@ -744,7 +762,7 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
         # lr schedule on already-converged runs. Re-enable manually by raising
         # `--patience` or with `--no-early-stop` for diagnostic runs.
         if sched is not None:
-            sched.step(val_nll) if sched_kind == "plateau" else sched.step()
+            sched.step(metric) if sched_kind == "plateau" else sched.step()
         if not improved and not args.no_early_stop and no_improve >= args.patience:
             print(f"[{stage_name}] early-stop: no improvement for {no_improve} epochs")
             break
@@ -752,7 +770,8 @@ def _run_epochs(args, model, optim, train_loader, val_loader, stats, *,
     if os.path.exists(best_ckpt):
         ckpt = torch.load(best_ckpt, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["state_dict"])
-        print(f"[{stage_name}] reloaded best ({best_ckpt}, val={ckpt['best_val']:+.4f})")
+        print(f"[{stage_name}] reloaded best ({best_ckpt}, "
+              f"{monitor}_nll={ckpt['best_val']:+.4f})")
     return best_val
 
 
@@ -852,7 +871,7 @@ def train_stage2(args, model, train_loader, val_loader, stats,
 
     return _run_epochs(args, model, optim, train_loader, val_loader, stats,
                        step_fn=step2, ckpt_prefix="fit", stage_name="fit",
-                       epochs=args.fit_epochs or args.epochs)
+                       epochs=args.fit_epochs or args.epochs, monitor="train")
 
 
 def train_loop(args: argparse.Namespace) -> int:
@@ -934,15 +953,19 @@ def train_loop(args: argparse.Namespace) -> int:
         if inj_sm is not None:
             print("    injecting the per-muon qop smear into the stage-2 pseudo-data m_ll")
         s1_train, s1_val = _make_loaders(args, shard_files, stats, half=h_flow)   # flow: NOT injected
+        # Fit: ALL events of its half (no held-out val/holdout); stops on train NLL.
         s2_train, s2_val = _make_loaders(args, shard_files, stats, half=h_fit,
-                                         inject_theta=inj, inject_smear=inj_sm)
+                                         inject_theta=inj, inject_smear=inj_sm,
+                                         val_fraction=0.0, holdout_fraction=0.0)
     else:
         if (_inject_theta_np(args, len(stats.eta_edges) - 1) is not None
                 or _inject_smear_np(args, len(stats.eta_edges) - 1) is not None):
             print("warning: --inject-A/e/M/a/c only apply in --validation mode; ignoring.",
                   file=sys.stderr)
         s1_train, s1_val = train_loader, val_loader
-        s2_train, s2_val = train_loader, val_loader
+        # Fit: ALL events (no held-out val/holdout); stops on train NLL.
+        s2_train, s2_val = _make_loaders(args, shard_files, stats,
+                                         val_fraction=0.0, holdout_fraction=0.0)
 
     if args.stage in ("both", "flow"):
         train_stage1(args, model, s1_train, s1_val, stats)
