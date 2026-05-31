@@ -526,20 +526,21 @@ def _make_loaders(args, shard_files, stats, *, half=None, inject_theta=None,
     seed = int(getattr(args, "inject_smear_seed", 12345))
     me = int(getattr(args, "max_events", 0) or 0)
     ef = float(getattr(args, "event_fraction", 1.0) or 1.0)
+    nu = bool(getattr(args, "inject_nonuniform", False))
     train_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="train",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=True, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
-        max_events=me, event_fraction=ef)
+        max_events=me, event_fraction=ef, inject_nonuniform=nu)
     val_loader = JpsiMassArrowLoader(
         shard_files, stats, batch_size=args.batch_size, split="val",
         val_fraction=args.val_fraction, holdout_fraction=args.holdout_fraction,
         drop_last=False, half=half, inject_theta_scale=inject_theta,
         inject_theta_smear=inject_smear, inject_seed=seed,
         cond_basis=getattr(args, "cond_basis", "muon_kin"),
-        max_events=me, event_fraction=ef)
+        max_events=me, event_fraction=ef, inject_nonuniform=nu)
     return train_loader, val_loader
 
 
@@ -1763,7 +1764,7 @@ def _load_full_fit(args, device):
               "disable_scale", "disable_smearing", "validation",
               "no_validation_split",
               "inject_A", "inject_e", "inject_M",
-              "inject_a", "inject_c", "inject_smear_seed"):
+              "inject_a", "inject_c", "inject_smear_seed", "inject_nonuniform"):
         if k in ck_args:
             setattr(args, k, ck_args[k])
     # Stats: --stats-in overrides; else the fit's own stats.
@@ -1912,6 +1913,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     p.add_argument("--inject-smear-seed", type=int, default=12345,
                    help="Seed for the injected-smear Gaussian qop kick, so the "
                    "pseudo-data realisation is reproducible across epochs/runs.")
+    p.add_argument("--inject-nonuniform", action="store_true",
+                   help="(--validation) Make the injected θ NON-UNIFORM across the "
+                   "detector: multiply each injected term by a quadratic-in-η × "
+                   "sinusoidal-in-φ factor (the φ sinusoid does ~2 oscillations "
+                   "over 2π). Each factor varies ~±50% and is ~zero-mean (φ "
+                   "exactly; η centred over uniform η), so the detector-average "
+                   "injection stays ≈ the nominal --inject-* values. Tests the "
+                   "η/φ-dependent (MLP) θ recovery; the constant --inject-* are "
+                   "the base values that get modulated.")
     p.add_argument("--flow-epochs", type=int, default=0,
                    help="Max epochs for stage 1 (0 → use --epochs).")
     p.add_argument("--fit-epochs", type=int, default=0,

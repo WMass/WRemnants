@@ -52,6 +52,8 @@ from jpsi_mass_arrow_loader import (  # noqa: E402
     JpsiMassArrowLoader,
     discover_shards,
     _event_cond_raw_np,
+    _inject_modulation_eta_np,
+    _INJECT_ETA_REF, _INJECT_PHI_NOSC, _INJECT_AMP,
 )
 from jpsi_mass_model import (  # noqa: E402
     JpsiMassMixtureModel, _event_mll, _event_cond_raw,
@@ -527,7 +529,9 @@ def evaluate_predictions(
                 # --theta-mlp, leaving this curve meaningless). The fitted curve
                 # should converge to this when the closure is good.
                 if has_inj:
-                    with _set_theta_output(model, inj_scale_full, inj_smear_full):
+                    with _set_theta_output(
+                            model, inj_scale_full, inj_smear_full,
+                            nonuniform=getattr(loader, "inject_nonuniform", False)):
                         log_p_grid_mc_inj = _sig_grid(mc_idx)
                     out["pred_signal_mc_at_inj"].append(
                         log_p_grid_mc_inj.exp().cpu().numpy())
@@ -1326,8 +1330,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _inject_modulation_torch(eta, phi):
+    """Per-muon non-uniform injection factor f(η,φ) (torch twin of the loader's
+    ``_inject_modulation_np``) — quadratic-in-η × sinusoidal-in-φ, ~±50%."""
+    u = eta / _INJECT_ETA_REF
+    f_eta = 1.0 + _INJECT_AMP * (2.0 * u * u - 2.0 / 3.0)
+    f_phi = 1.0 + _INJECT_AMP * torch.sin(_INJECT_PHI_NOSC * phi)
+    return f_eta * f_phi
+
+
 @contextlib.contextmanager
-def _set_theta_output(model, scale_phys=None, smear_phys=None):
+def _set_theta_output(model, scale_phys=None, smear_phys=None, nonuniform=False):
     """Temporarily SET the model's per-muon parameter output to fixed per-η-bin
     PHYSICAL values (masked to the fitted terms), for BOTH binned and MLP θ —
     used for the 'flow at injected θ' closure-target curve. Replaces
@@ -1336,17 +1349,25 @@ def _set_theta_output(model, scale_phys=None, smear_phys=None):
     ``scale_phys`` is [n_eta, 3] = (A, e, M); ``smear_phys`` is [n_eta, 2] =
     (a, c). The smear is converted to the O(1) coefficient (÷ SMEAR_VAR_SCALE)
     since ``_smear_ac_pm`` returns O(1) ac. The model's masks are applied so
-    non-fitted terms are exactly 0 (matching the fit's parameterisation)."""
+    non-fitted terms are exactly 0 (matching the fit's parameterisation).
+
+    ``nonuniform``: multiply the per-muon output by the (η,φ) modulation factor
+    so the closure target matches a non-uniform injection (--inject-nonuniform).
+    """
     dev = model.m_lo.device
+
+    def _fmod(e, p):
+        return _inject_modulation_torch(e, p).unsqueeze(-1) if nonuniform else 1.0
+
     orig_s, orig_c = model._scale_AeM_pm, model._smear_ac_pm
     if scale_phys is not None:
         S = torch.as_tensor(scale_phys, dtype=torch.float32, device=dev)  # [n_eta,3]
-        model._scale_AeM_pm = lambda e, p, b: S[b] * model.scale_param_mask
+        model._scale_AeM_pm = lambda e, p, b: S[b] * model.scale_param_mask * _fmod(e, p)
     if smear_phys is not None:
         sc = torch.tensor([SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
                           dtype=torch.float32, device=dev)
         C = torch.as_tensor(smear_phys, dtype=torch.float32, device=dev) / sc  # O(1)
-        model._smear_ac_pm = lambda e, p, b: C[b] * model.smear_param_mask
+        model._smear_ac_pm = lambda e, p, b: C[b] * model.smear_param_mask * _fmod(e, p)
     try:
         yield
     finally:
@@ -1653,6 +1674,10 @@ def main() -> int:
             print(f"checkpoint injected smear (a,c)=({isa:g},{isc:g}) — replaying "
                   f"the per-muon qop fold into the pseudo-data")
 
+    nonuniform = bool(train_args.get("inject_nonuniform", False))
+    if nonuniform and (inject_np is not None or inject_smear_np is not None):
+        print("  injection is NON-UNIFORM (quadratic-η × sinusoidal-φ); the "
+              "θ-vs-η reference uses the φ-averaged truth base·f_η(η)")
     print(f"found {len(shard_files)} shard(s); split={args.split}")
     loader = JpsiMassArrowLoader(
         shard_files, stats,
@@ -1665,7 +1690,17 @@ def main() -> int:
         inject_theta_smear=inject_smear_np,
         inject_seed=int(train_args.get("inject_smear_seed", 12345)),
         cond_basis=train_args.get("cond_basis", "muon_kin"),
+        inject_nonuniform=nonuniform,
     )
+    # φ-AVERAGED injected reference for the θ-vs-η plots + χ²: the φ sinusoid
+    # averages to 1 over the plotted φ-mean, leaving base·f_η(η) per η-bin
+    # centre. (The loader keeps the un-modulated base; it applies f(η,φ) per muon
+    # to the pseudo-data itself.)
+    _eta_c = 0.5 * (np.asarray(stats.eta_edges[:-1]) + np.asarray(stats.eta_edges[1:]))
+    _feta = _inject_modulation_eta_np(_eta_c) if nonuniform else np.ones_like(_eta_c)
+    inject_ref_np = None if inject_np is None else inject_np * _feta[:, None]
+    inject_smear_ref_np = (None if inject_smear_np is None
+                           else inject_smear_np * _feta[:, None])
 
     # m_ll grid.
     m_edges = torch.linspace(stats.m_lo, stats.m_hi, args.n_mll_bins + 1)
@@ -1830,7 +1865,7 @@ def main() -> int:
         # χ² for compatibility of all θ_scale (A,e,M over the η bins) with the
         # reference (the injected values if a shift was injected, else 0), using
         # the full θ_scale covariance block (correlations included).
-        ref = inject_np if inject_np is not None else None
+        ref = inject_ref_np if inject_ref_np is not None else None
         chi2_info = None
         if cov_scale_flat is not None:
             resid = theta_scale.reshape(-1)
@@ -1859,7 +1894,7 @@ def main() -> int:
         plot_theta_vs_eta(
             theta_smear_eff, sigma_smear, ["a [qop²]", "c [qop²·GeV²]"],
             "theta_smear_vs_eta", stats.eta_edges, out_dir, edm=edm,
-            ref=(inject_smear_np if inject_smear_np is not None else None),
+            ref=(inject_smear_ref_np if inject_smear_ref_np is not None else None),
             band=mlp_smear_band, slices=mlp_smear_slices,
             slice_labels=mlp_slice_labels,
             sigma_band=(model.theta_mode == "mlp"),
@@ -1914,7 +1949,7 @@ def main() -> int:
                         * np.asarray(THETA_SCALE_REF))[:, :2])
             ss = None if mlp_scale_avg_samples is None else mlp_scale_avg_samples[:, :, :2]
             sl = None if mlp_scale_slices is None else mlp_scale_slices[:, :, :2]
-            ij = None if inject_np is None else inject_np[:, :2]
+            ij = None if inject_ref_np is None else inject_ref_np[:, :2]
             _whitened_plot(sg, ss, sl, THETA_SCALE_REF[:2], ij, E_s, l_s,
                            "theta_scale_whitened_vs_eta", ("A", "e"))
         if model.smearing_enabled and model.smear_fit_params == "both":
@@ -1922,7 +1957,7 @@ def main() -> int:
                   else model.effective_theta_smear().detach().cpu().numpy())
             cs = mlp_smear_avg_samples
             csl = mlp_smear_slices
-            ij = inject_smear_np
+            ij = inject_smear_ref_np
             _whitened_plot(cg, cs, csl, [SMEAR_VAR_SCALE_A, SMEAR_VAR_SCALE_C],
                            ij, E_c, l_c, "theta_smear_whitened_vs_eta", ("a", "c"))
 

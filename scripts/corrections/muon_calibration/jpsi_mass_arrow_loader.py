@@ -415,8 +415,36 @@ def _event_cond_raw_np(pt_pm, eta_pm, phi_pm, eps=1e-6):
                      sinphi, cosphi], axis=1).astype(np.float32)
 
 
+# ── Non-uniform injection modulation (validation closure) ──────────────────
+# A quadratic-in-η × sinusoidal-in-φ factor multiplying the (otherwise constant)
+# injected θ, so the injected calibration varies across the detector — a test of
+# the η/φ-dependent (MLP) θ. Each factor is constructed ~zero-mean (the φ
+# sinusoid exactly; the η quadratic centred over uniform η), so the detector
+# average stays ≈ the nominal --inject-* values, and each varies ~±50%. The φ
+# sinusoid does ~2 full oscillations across the 2π azimuth.
+_INJECT_ETA_REF = 2.4      # |η| acceptance edge → u = η/η_ref ∈ [−1, 1]
+_INJECT_PHI_NOSC = 2.0     # sinusoid oscillations across the 2π azimuth
+_INJECT_AMP = 0.5          # ±50% modulation amplitude
+
+
+def _inject_modulation_eta_np(eta):
+    """η factor of the non-uniform injection: a quadratic centred to be zero-mean
+    over uniform η (mean → 1, so the η-average injection ≈ nominal), spanning
+    ~±50%. ``[…]`` in, same shape out."""
+    u = np.asarray(eta, dtype=np.float64) / _INJECT_ETA_REF
+    return 1.0 + _INJECT_AMP * (2.0 * u * u - 2.0 / 3.0)
+
+
+def _inject_modulation_np(eta, phi):
+    """Per-muon non-uniform injection factor f(η,φ) = f_η(η)·f_φ(φ)."""
+    f_phi = 1.0 + _INJECT_AMP * np.sin(
+        _INJECT_PHI_NOSC * np.asarray(phi, dtype=np.float64))
+    return _inject_modulation_eta_np(eta) * f_phi
+
+
 def _inject_pt_np(pt_pm, eta_pm, q_pm, b_pm, scale_inj, smear_inj, rng,
-                  qop_floor_frac: float = 0.25):
+                  qop_floor_frac: float = 0.25, phi_pm=None,
+                  nonuniform: bool = False):
     """Apply the injected θ_scale (deterministic δqop) THEN the θ_smear (per-muon
     Gaussian qop kick) to the per-muon pt, entirely in qop/pt space, with the
     sign-preserving qop floor at each step — mirroring the model's forward
@@ -430,6 +458,11 @@ def _inject_pt_np(pt_pm, eta_pm, q_pm, b_pm, scale_inj, smear_inj, rng,
     quantities with no rescaling, exactly as for real data."""
     sinth = 1.0 / np.cosh(eta_pm)                          # [N,2]
     pt_cur = pt_pm.astype(np.float64, copy=True)
+    # Non-uniform injection: per-muon (η,φ) factor multiplying the injected θ
+    # (the scale δqop and the smear variance each scale by f, i.e. A,e,M and a,c
+    # are each modulated by the same f(η,φ)). f≡1 when uniform.
+    fmod = (_inject_modulation_np(eta_pm, phi_pm)
+            if (nonuniform and phi_pm is not None) else None)
 
     def _floor_to_pt(qop_new, qop_ref):
         if qop_floor_frac > 0.0:
@@ -441,11 +474,15 @@ def _inject_pt_np(pt_pm, eta_pm, q_pm, b_pm, scale_inj, smear_inj, rng,
         k = 1.0 / pt_cur
         A = scale_inj[b_pm, 0]; e = scale_inj[b_pm, 1]; M = scale_inj[b_pm, 2]
         dqop = q_pm * sinth * ((A - e * k) * k + q_pm * M)
+        if fmod is not None:
+            dqop = dqop * fmod                              # modulate A,e,M ∝ f
         qop_ref = q_pm * sinth / pt_cur
         pt_cur = _floor_to_pt(qop_ref + dqop, qop_ref)
     if smear_inj is not None:
         k2 = (1.0 / pt_cur) ** 2
         vq = smear_inj[b_pm, 0] + smear_inj[b_pm, 1] * k2   # σ²_qop = a + c·k²
+        if fmod is not None:
+            vq = vq * fmod                                  # modulate a,c ∝ f
         sig = np.sqrt(np.clip(vq, 0.0, None))
         eps = rng.standard_normal(pt_pm.shape)
         qop_ref = q_pm * sinth / pt_cur
@@ -485,6 +522,7 @@ def _batch_tensors(
     inject_theta_smear: "np.ndarray | None" = None,
     rng: "np.random.Generator | None" = None,
     cond_basis: str = "muon_kin",
+    inject_nonuniform: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Build the tensor batch from one Arrow record batch's columns.
 
@@ -527,7 +565,8 @@ def _batch_tensors(
         # pt, then saw the nominal mass and missed the injected smear.)
         mc = ~is_data_mask
         pt_inj = _inject_pt_np(
-            pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale, inject_theta_smear, rng)
+            pt_pm, eta_pm, q_pm, b_pm, inject_theta_scale, inject_theta_smear, rng,
+            phi_pm=phi_pm, nonuniform=inject_nonuniform)
         mll_inj = _event_mll_np(pt_inj, eta_pm, phi_pm).astype(np.float32)
         rho_inj = ((pt_inj[:, 0] - pt_inj[:, 1]) /
                    (pt_inj[:, 0] + pt_inj[:, 1])).astype(np.float32)
@@ -625,6 +664,7 @@ class JpsiMassArrowLoader(IterableDataset):
         cond_basis: str = "muon_kin",
         max_events: int = 0,
         event_fraction: float = 1.0,
+        inject_nonuniform: bool = False,
     ):
         if split not in self._SPLITS:
             raise ValueError(f"split must be one of {self._SPLITS}, got {split!r}")
@@ -676,6 +716,8 @@ class JpsiMassArrowLoader(IterableDataset):
                 f"event_fraction must be in (0, 1]; got {event_fraction!r}")
         self.max_events = max(0, int(max_events))
         self.event_fraction = float(event_fraction)
+        # Non-uniform (η²·sin φ) modulation of the injected θ (validation closure).
+        self.inject_nonuniform = bool(inject_nonuniform)
 
     # -- helpers --------------------------------------------------------
 
@@ -786,14 +828,16 @@ class JpsiMassArrowLoader(IterableDataset):
                 accum_n -= self.batch_size
                 yield _batch_tensors(
                     emit, self.stats, self.inject_theta_scale,
-                    self.inject_theta_smear, rng, self.cond_basis)
+                    self.inject_theta_smear, rng, self.cond_basis,
+                self.inject_nonuniform)
 
         # Final partial batch.
         if accum_n > 0 and not self.drop_last:
             cols = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
             yield _batch_tensors(
                 cols, self.stats, self.inject_theta_scale,
-                self.inject_theta_smear, rng, self.cond_basis)
+                self.inject_theta_smear, rng, self.cond_basis,
+                self.inject_nonuniform)
 
 
 # ---------------------------------------------------------------------------
