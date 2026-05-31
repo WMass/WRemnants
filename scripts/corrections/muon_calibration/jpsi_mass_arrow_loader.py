@@ -701,6 +701,72 @@ class JpsiMassArrowLoader(IterableDataset):
 
     # -- iteration ------------------------------------------------------
 
+    def _iter_shard_cols(self) -> "Iterator[dict[str, np.ndarray]]":
+        """Yield per-shard ``{col: np.ndarray}`` of the KEPT rows (after the half
+        selection, the event subsample, and the train/val/holdout split).
+
+        When subsampling, only the rows that survive are read from disk: the shard
+        is MEMORY-MAPPED and sliced to the leading window that contains the kept
+        rows BEFORE the parity take / to_numpy, so a small --event-fraction /
+        --max-events touches ~that fraction of each shard's bytes each epoch (the
+        OS page cache makes repeat epochs cheap) — no full read-then-discard and
+        no in-RAM caching. The full-dataset path is unchanged (OSFile read_all)."""
+        subsample = self.max_events > 0 or self.event_fraction < 1.0
+        for path in self.my_shards:
+            if not subsample:
+                # Full dataset: read the whole shard (~a few MB) as before.
+                with pa.OSFile(path, "rb") as src:
+                    table = ipc.open_file(src).read_all()
+                if self.half is not None:
+                    idx = np.arange(self.half, table.num_rows, 2)
+                    table = table.take(pa.array(idx))
+                n_rows = table.num_rows
+                start_row, stop_row = self._split_range(
+                    n_rows, self.val_fraction, self.holdout_fraction, self.split)
+                if start_row >= stop_row:
+                    continue
+                sub = table.slice(start_row, stop_row - start_row)
+                yield {c: sub.column(c).combine_chunks().to_numpy(zero_copy_only=False)
+                       for c in _RAW_COLUMNS}
+                continue
+            # Subsample: memory-map and read only the needed leading rows.
+            with pa.memory_map(path, "r") as src:
+                table = ipc.open_file(src).read_all()      # lazy (mmap-backed)
+                n_shard = table.num_rows
+                # Rows surviving the half selection (half 0 = even, half 1 = odd;
+                # the sharder pre-shuffles globally so parity is a clean mix).
+                step = 1 if self.half is None else 2
+                base = 0 if self.half is None else self.half
+                n_half = len(range(base, n_shard, step))
+                # Keep the FIRST ``keep`` half-rows (pre-shuffled → unbiased): the
+                # tighter of the per-shard max-events budget and the fraction.
+                keep = n_half
+                if self.event_fraction < 1.0:
+                    keep = min(keep, int(round(n_half * self.event_fraction)))
+                if self.max_events > 0:
+                    keep = min(keep, int(np.ceil(
+                        self.max_events / max(1, len(self.my_shards)))))
+                if keep <= 0:
+                    continue
+                # Those keep half-rows lie within the first base+step*keep rows;
+                # slice to that window first (zero-copy on the mmap) so the parity
+                # take + materialisation only touch the needed bytes.
+                table = table.slice(0, min(n_shard, base + step * keep))
+                if self.half is not None:
+                    idx = np.arange(self.half, table.num_rows, 2)
+                    table = table.take(pa.array(idx))
+                table = table.slice(0, keep)               # exact (defensive)
+                # The split then applies to the kept rows → proportional.
+                start_row, stop_row = self._split_range(
+                    keep, self.val_fraction, self.holdout_fraction, self.split)
+                if start_row >= stop_row:
+                    continue
+                sub = table.slice(start_row, stop_row - start_row)
+                # Copy out of the mmap so the arrays outlive the `with` block; the
+                # kept set is small (that's the whole point), so the copy is cheap.
+                yield {c: sub.column(c).combine_chunks().to_numpy(zero_copy_only=False).copy()
+                       for c in _RAW_COLUMNS}
+
     def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
         accum: dict[str, list[np.ndarray]] = {c: [] for c in _RAW_COLUMNS}
         accum_n = 0
@@ -708,61 +774,19 @@ class JpsiMassArrowLoader(IterableDataset):
         # (and identical across epochs → a fixed pseudo-data set).
         rng = np.random.default_rng(self.inject_seed)
 
-        for path in self.my_shards:
-            with pa.OSFile(path, "rb") as src:
-                reader = ipc.open_file(src)
-                # Read the whole shard as one Arrow Table. For our shard
-                # sizes (~10⁴-10⁵ rows × ~20 float32 cols ≈ a few MB)
-                # this is cheap; zero-copy where possible because Arrow
-                # IPC is memory-mapped on disk.
-                table = reader.read_all()
-                if self.half is not None:
-                    # Deterministic disjoint half by row-index parity (half 0 =
-                    # even rows, half 1 = odd). The sharder pre-shuffles rows
-                    # globally, so parity is a clean ~50/50 mix. Applied before
-                    # the split below so each half carries its own
-                    # train/val/holdout windows.
-                    idx = np.arange(self.half, table.num_rows, 2)
-                    table = table.take(pa.array(idx))
-                # Event subsample (after the half selection, before the split):
-                # keep the first ``keep`` (pre-shuffled → unbiased) rows of this
-                # shard, the tighter of the per-shard max-events budget and the
-                # fraction. The split below then applies to the kept rows, so
-                # train/val/holdout stay proportional.
-                if self.max_events > 0 or self.event_fraction < 1.0:
-                    keep = table.num_rows
-                    if self.event_fraction < 1.0:
-                        keep = min(keep, int(round(table.num_rows * self.event_fraction)))
-                    if self.max_events > 0:
-                        per_shard = int(np.ceil(
-                            self.max_events / max(1, len(self.my_shards))))
-                        keep = min(keep, per_shard)
-                    if keep <= 0:
-                        continue
-                    table = table.slice(0, keep)
-                n_rows = table.num_rows
-                start_row, stop_row = self._split_range(
-                    n_rows, self.val_fraction, self.holdout_fraction, self.split,
-                )
-                if start_row >= stop_row:
-                    continue
-                sub = table.slice(start_row, stop_row - start_row)
-                # Iterate in record batches of at most ``batch_size`` rows
-                # so the cross-shard accumulator can stitch them into the
-                # caller's requested mini-batch size.
-                for batch in sub.to_batches(max_chunksize=self.batch_size):
-                    for c in _RAW_COLUMNS:
-                        accum[c].append(batch.column(c).to_numpy())
-                    accum_n += batch.num_rows
-                    while accum_n >= self.batch_size:
-                        cols = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
-                        emit = {c: cols[c][: self.batch_size] for c in _RAW_COLUMNS}
-                        rem = {c: cols[c][self.batch_size :] for c in _RAW_COLUMNS}
-                        accum = {c: [rem[c]] for c in _RAW_COLUMNS}
-                        accum_n -= self.batch_size
-                        yield _batch_tensors(
-                            emit, self.stats, self.inject_theta_scale,
-                            self.inject_theta_smear, rng, self.cond_basis)
+        for cols in self._iter_shard_cols():
+            for c in _RAW_COLUMNS:
+                accum[c].append(cols[c])
+            accum_n += int(cols[_RAW_COLUMNS[0]].shape[0])
+            while accum_n >= self.batch_size:
+                full = {c: np.concatenate(accum[c]) for c in _RAW_COLUMNS}
+                emit = {c: full[c][: self.batch_size] for c in _RAW_COLUMNS}
+                rem = {c: full[c][self.batch_size :] for c in _RAW_COLUMNS}
+                accum = {c: [rem[c]] for c in _RAW_COLUMNS}
+                accum_n -= self.batch_size
+                yield _batch_tensors(
+                    emit, self.stats, self.inject_theta_scale,
+                    self.inject_theta_smear, rng, self.cond_basis)
 
         # Final partial batch.
         if accum_n > 0 and not self.drop_last:
