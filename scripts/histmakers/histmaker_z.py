@@ -19,7 +19,7 @@ from wremnants.production import (
     systematics,
     theory_corrections,
 )
-from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.datasets.dataset_tools import getDatasets, makeFilelist
 from wremnants.production.histmaker_tools import (
     make_quantile_helper,
     write_analysis_output,
@@ -31,15 +31,52 @@ datasets = getDatasets(
     excl=args.excludeProcs,
     base_path=args.dataPath,
     era=args.era,
-    nanoVersion="v12",
 )
 
-theory_corrs = args.theoryCorr
+if args.era == "2017G":
+    mc_paths = makeFilelist(
+        [
+            "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos"
+            "/NanoV9MC2017_{NANO_PROD_TAG}"
+        ],
+        maxFiles=args.maxFiles if args.maxFiles is not None else -1,
+        base_path="/scratch/submit/cms/wmass/NanoAOD",
+        nano_prod_tags=["TrackFitV722_NanoProdv3"],
+        era="2017G",
+    )
+    if mc_paths:
+        zmumu = next((d for d in datasets if d.name == "Zmumu_2017G"), None)
+        if zmumu:
+            zmumu.filepaths = mc_paths
+        else:
+            datasets.append(
+                narf.Dataset(
+                    name="Zmumu_2017G",
+                    filepaths=mc_paths,
+                    xsec=698.3,
+                    group="Zmumu",
+                )
+            )
 
+import lz4.frame
+import pickle
+
+theory_corrs = args.theoryCorr
+theory_corr_base = f"{common.data_dir}/TheoryCorrections/5020GeV"
+
+def load_corr_hist_5020(filename, proc, histname):
+    """5020 GeV pickles use ZMUMU5020GEV keys and legacy hist names."""
+    with lz4.frame.open(filename) as f:
+        corr = pickle.load(f)
+    key = histname.replace("scetlib_dyturbo_LatticeNP", "scetlib_dyturboLatticeNP")
+    key = key.replace("_minnlo_ratio", "__minnlo_ratio")
+    return corr["ZMUMU5020GEV"][key]
+
+theory_corrections.load_corr_hist = load_corr_hist_5020
 corr_helpers = theory_corrections.load_corr_helpers(
     [d.name for d in datasets if d.name in samples.zprocs],
     theory_corrs,
-    base_dir=f"{common.data_dir}/TheoryCorrections/5020GeV",
+    base_dir=theory_corr_base,
 )
 
 quantile_file = "histmaker_test_scetlib_dyturboCorr.hdf5"
