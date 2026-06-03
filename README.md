@@ -15,8 +15,43 @@ source WRemnants/setup.sh
 
 Singularity> cd /work/submit/hayden17/WRemnants
 
-Singularity>  python scripts/histmakers/histmaker_test.py      --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/      --era 2017G      --filterProcs Zmumu2017G --theoryCorr scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas
+Singularity> python scripts/histmakers/histmaker_test.py \
+    --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ \
+    --era 2017G \
+    --filterProcs Zmumu_2017G \
+    --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas
 
+=======
+with PDF variations:
+python scripts/histmakers/histmaker_test.py \
+    --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ \
+    --era 2017G \
+    --filterProcs Zmumu_2017G \
+    --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas \
+                scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
+
+
+
+cd rabbit
+
+python tests/new_make_tensor.py \
+    /work/submit/hayden17/WRemnants/histmaker_test_scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr.hdf5 \
+    -o /tmp/rabbit_test/ \
+    --outname my_tensor \
+    --histName ptll \
+    --procFilters Zmumu
+    
+rabbit_fit.py /tmp/rabbit_test/my_tensor.hdf5 \
+    -o /tmp/rabbit_test/ \
+    -t 0 \
+    --unblind \
+    --doImpacts \
+    --globalImpacts \
+    --saveHists \
+    --computeHistErrors \
+    --computeVariation
+
+>>>>>>> b34c1f60 (updates)
 import pdb; pdb.set_trace()
 
 ## Making Plots
