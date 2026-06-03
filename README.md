@@ -31,15 +31,14 @@ python scripts/histmakers/histmaker_test.py \
                 scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
 
 
-
-cd rabbit
-
-python tests/new_make_tensor.py \
-    /work/submit/hayden17/WRemnants/histmaker_test_scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr.hdf5 \
+python rabbit/tests/new_make_tensor.py \
+    histmaker_test_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas_Corr.hdf5 \
     -o /tmp/rabbit_test/ \
     --outname my_tensor \
     --histName ptll \
     --procFilters Zmumu
+
+cd rabbit
     
 rabbit_fit.py /tmp/rabbit_test/my_tensor.hdf5 \
     -o /tmp/rabbit_test/ \
@@ -56,9 +55,13 @@ import pdb; pdb.set_trace()
 
 ## Making Plots
 
+=======
+https://submit.mit.edu/~hayden17/jun{date}/
+
+>>>>>>> ab94b846 (made new_make_tensor compatible with new version and recreated the plot!)
 IN=histmaker_test_scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasCorr.hdf5
 OUT=~/public_html/
-TAG=jan{date}
+TAG=jun{date}
 PROCS="Data Zmumu" - or Ztautau/Other
 
 IN=/tmp/rabbit_test/fitresults.hdf5
