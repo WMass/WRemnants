@@ -1,13 +1,10 @@
 import os
 import math
 
-from utilities import common, parsing
-from wremnants.datasets.datagroups import Datagroups
-from wremnants.histmaker_tools import make_quantile_helper
-from wremnants import syst_tools, theory_corrections, theory_tools
+from wremnants.utilities import common, parsing, samples
 from wums import logging
 
-analysis_label = Datagroups.analysisLabel(os.path.basename(__file__))
+analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
 
 args = parser.parse_args()
@@ -17,29 +14,33 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 import hist
 
 import narf
-from wremnants.datasets.dataset_tools import getDatasets
-from wremnants.histmaker_tools import write_analysis_output
+from wremnants.production import (
+    generator_level_definitions,
+    systematics,
+    theory_corrections,
+)
+from wremnants.production.datasets.dataset_tools import getDatasets
+from wremnants.production.histmaker_tools import (
+    make_quantile_helper,
+    write_analysis_output,
+)
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
     excl=args.excludeProcs,
     base_path=args.dataPath,
-    mode=analysis_label,
     era=args.era,
+    nanoVersion="v12",
 )
 
 theory_corrs = args.theoryCorr
 
 corr_helpers = theory_corrections.load_corr_helpers(
-    [d.name for d in datasets if d.name in common.zprocs], theory_corrs, base_dir=f"{common.data_dir}/TheoryCorrections/5020GeV"
+    [d.name for d in datasets if d.name in samples.zprocs],
+    theory_corrs,
+    base_dir=f"{common.data_dir}/TheoryCorrections/5020GeV",
 )
-
-procs = [
-    p
-    for p, grp in (("Z", common.zprocs),)
-    if any(d.name in grp for d in datasets)
-]
 
 quantile_file = "histmaker_test_scetlib_dyturboCorr.hdf5"
 
@@ -183,7 +184,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define("exp_weight", "weight*L1PreFiringWeight_Nom")
 
-        df = theory_tools.define_prefsr_vars(df)
+        df = generator_level_definitions.define_prefsr_vars(df)
         df = df.DefinePerSample("central_pdf_weight", "1.0")
         df = df.Alias("nominal_weight_uncorr", "exp_weight")
         df = df.DefinePerSample("theory_weight_truncate", "10.0")
@@ -291,7 +292,7 @@ def build_graph(df, dataset):
         )
         results.append(hist_mutraileta_prefire)
 
-        df = syst_tools.add_theory_corr_hists(
+        systematics.add_theory_corr_hists(
             results,
             df,
             [axis_ptll, axis_absYll, axis_cosThetaStarll],
