@@ -2,11 +2,26 @@
 
 Architecture (template-style fit):
 
-    σ_reco(λ; b) = Σ_g  R(b, g) · σ_gen(λ; g)
+    P(b, g)      = R_raw(b, g) / N_gen(g)               (normalized response)
+    σ_reco(λ; b) = Σ_g  P(b, g) · σ_gen(λ; g)
     ratio(b)     = σ_reco(λ; b) / σ_reco(λ_central; b)
     rnorm        = ratio per reco bin, broadcast over signal proc; ones elsewhere.
 
-R is the (reco × gen) response matrix loaded from the upstream unfolding
+The raw response counts R_raw(b, g) carry the MC's absolute gen spectrum, which
+is theory-dependent. A response matrix should encode only the gen→reco
+*mapping*, so each gen column is normalized by the gen-total N_gen(g) →
+P(b, g) = efficiency × migration (theory-independent). N_gen(g) is the xnorm
+"postfsr" histogram from the unfolding output — the generated fiducial yield
+per gen bin BEFORE reco selection — loaded alongside R by response_matrix.
+Then σ_gen(λ) is folded through P. NB normalizing instead by the reco-passing
+marginal Σ_b R_raw(b, g) is wrong: R is post-reco-selection so that marginal
+already includes efficiency, and dividing by it cancels efficiency
+(migration-only), which closes far worse — efficiency is not flat in gen bin.
+(If the gen-total hist is absent, σ_gen(λ_c) is used as a proxy for N_gen, but
+then σ_gen cancels in σ_reco(λ_c) = R_raw·1 and the λ_central closure can't
+test the integral.)
+
+R_raw is the (reco × gen) response matrix loaded from the upstream unfolding
 histmaker output (a separate hdf5 from the fit-tensor input).
 
 λ_central is read from the fit-tensor's meta_info_input via the upstream
@@ -27,6 +42,9 @@ The np_model and np_model_nu strings are fixed at construction (from
 λ_central). All λ values are TF Variables — differentiable in the fit.
 """
 
+import json
+import os
+import re
 from typing import Mapping, Optional
 
 import numpy as np
@@ -40,29 +58,27 @@ from wremnants.postprocessing.scetlib_np import btgrid_integrate as fz_int
 from wremnants.postprocessing.scetlib_np import btgrid_tf as fz_tf
 from wremnants.postprocessing.scetlib_np import lambda_central as scetlib_lambda_central
 from wremnants.postprocessing.scetlib_np import response_matrix as fz_R
+from wremnants.utilities import common as wrem_common
+
+# Default fixed-order inputs for the NP-independent nonsingular term
+# σ_ns = DYTurbo − SCETlib_singular, resolved relative to this package via
+# wrem_common.data_dir (= <WRemnants>/wremnants-data/data). These are the CT18Z
+# N3+0LL fixed-order pieces; both are NP-independent (same for any λ tune).
+_NONSING_FO_SING_DEFAULT = os.path.join(
+    wrem_common.data_dir,
+    "TheoryCorrections",
+    "inclusive_Z_COM13_CT18Z_N3+0LL_lattice_lambda4bugfix_fine_nnlo_sing_combined.pkl",
+)
+_NONSING_DYTURBO_DEFAULT = os.path.join(
+    wrem_common.data_dir,
+    "TheoryCorrections",
+    "results_z-2d-nnlo-vj-CT18ZNNLO-{scale}-scetlibmatch.txt",
+)
 
 # Ordered list of the v1 continuous λ. CS-side first, then TMD-effective.
 GNU_PARAMS = ("lambda2_nu", "lambda4_nu", "lambda_inf_nu")
 EFF_PARAMS = ("lambda2", "lambda4", "lambda6", "delta_lambda2", "lambda_inf")
 ALL_PARAMS = GNU_PARAMS + EFF_PARAMS
-
-# Physical lower bounds used by the Taylor surrogate so the finite-difference
-# step (λ_central − h) can't cross into a region where F_eff / γ_ν^NP blow up.
-# - lambda6 enters as `lambda6 · bT⁵ / lambda_inf` inside a tanh; if lambda6 is
-#   negative the tanh saturates to −1 at large bT and the outer exp inverts
-#   sign → exp(+huge). So lambda6 ≥ 0 is enforced.
-# - lambda_inf / lambda_inf_nu sit in denominators (and in `exp(−2·lambda_inf·bT)`);
-#   require strictly positive with a safety margin.
-PARAM_MIN_VALUE = {
-    "lambda2_nu": None,
-    "lambda4_nu": None,
-    "lambda_inf_nu": 0.05,
-    "lambda2": None,
-    "lambda4": None,
-    "lambda6": 0.0,
-    "delta_lambda2": None,
-    "lambda_inf": 0.05,
-}
 
 
 # Theorist-recommended Gaussian prior widths for the SCETlib NP λ parameters.
@@ -90,6 +106,45 @@ THEORIST_PRIOR_SIGMAS = {
     "lambda4": 0.50,  # 0.4 ⁺⁰·⁶₋₀.₄ -> symmetric average
     "delta_lambda2": 0.20,  # 0 ± 0.20 wide default (no theorist value yet)
 }
+
+
+def _load_lambda_central_file(path):
+    """Load a λ_central override from a JSON or YAML file.
+
+    The file must decode to a dict with ``eff_params`` and ``gnu_params``
+    sub-dicts (same shape as :func:`scetlib_lambda_central.read_lambda_central`).
+    Format is chosen by extension (``.yaml``/``.yml`` → YAML, else JSON);
+    YAML's loader also accepts JSON, so this is forgiving either way.
+    """
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"SCETLIB_NP_LAMBDA_CENTRAL_FILE points to a missing file: {path!r}"
+        )
+    with open(path) as f:
+        text = f.read()
+    if path.lower().endswith((".yaml", ".yml")):
+        import yaml
+
+        data = yaml.safe_load(text)
+    else:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"SCETLIB_NP_LAMBDA_CENTRAL_FILE {path!r} is not valid JSON; got {exc}"
+            ) from exc
+    if (
+        not isinstance(data, dict)
+        or "eff_params" not in data
+        or "gnu_params" not in data
+    ):
+        raise ValueError(
+            f"SCETLIB_NP_LAMBDA_CENTRAL_FILE {path!r} must decode to a dict with "
+            f"'eff_params' and 'gnu_params' keys; got {type(data).__name__} "
+            f"with keys {list(data) if isinstance(data, dict) else '<n/a>'}."
+        )
+    return data
 
 
 def _crop_R_to_fit(R, R_reco_axes, fit_reco_axes, tol=1e-9):
@@ -125,6 +180,97 @@ def _crop_R_to_fit(R, R_reco_axes, fit_reco_axes, tol=1e-9):
     return R[slices]
 
 
+def _bin_sum_matrix(src_centers, target_edges, tol=1e-6):
+    """(N_target, N_src) 0/1 matrix that SUMS bin-integrated source bins whose
+    centre falls in each target bin. Source bins outside all target bins are
+    dropped — a natural truncation to the target range (qT>ptVGen_max, |Y|>absY_max)."""
+    src = np.asarray(src_centers, dtype=np.float64)
+    edges = np.asarray(target_edges, dtype=np.float64)
+    W = np.zeros((edges.size - 1, src.size), dtype=np.float64)
+    for i in range(edges.size - 1):
+        m = (src >= edges[i] - tol) & (src <= edges[i + 1] + tol)
+        W[i, m] = 1.0
+    return W
+
+
+def compute_nonsingular_gen(
+    fo_sing_path,
+    dyturbo_path,
+    gen_axes_meta,
+    charge=0,
+    q_lo=60.0,
+    q_hi=120.0,
+    qt_cutoff=1.0,
+    dyturbo_axes=("Q", "Y", "qT"),
+):
+    """Nonsingular FO term on the model gen grid (NptVGen, NabsYVGen).
+
+    The fixed-order/DYTurbo matching adds a NP-INDEPENDENT piece to σ_gen:
+        σ_gen^matched(λ) = σ_gen^resum(λ) + σ_ns ,
+    where the nonsingular is read straight from the original fixed-order inputs:
+        σ_ns = (DYTurbo fixed order) − (SCETlib singular fixed order)
+    — exactly the ``-hfo_sing + hfo`` that ``read_matched_scetlib_hist`` forms.
+    ``fo_sing_path`` is the SCETlib singular ``…_nnlo_sing…combined.pkl``;
+    ``dyturbo_path`` is the DYTurbo fixed-order ``results_…scetlibmatch.txt``
+    (use ``{scale}`` → mur1-muf1 for the central). The nonsingular is zeroed below
+    ``qt_cutoff`` (as make_theory_corr does), Q-windowed to [q_lo, q_hi], |Y|-folded,
+    and projected onto the coarse (ptVGen, absYVGen) gen bins by SUMMING the
+    bin-integrated native bins.
+    """
+    from wremnants.utilities.io_tools import input_tools
+    from wums import boostHistHelpers as hh
+
+    def _central(h):
+        if "vars" in h.axes.name:
+            names = list(h.axes["vars"])
+            idx = 0
+            for c in ("central", "pdf0", "nominal"):
+                if c in names:
+                    idx = names.index(c)
+                    break
+            h = h[{"vars": idx}]
+        return h
+
+    # SCETlib singular fixed order, and DYTurbo fixed order, from their own files.
+    dyturbo_path = (
+        dyturbo_path.format(scale="mur1-muf1")
+        if "{scale}" in dyturbo_path
+        else dyturbo_path
+    )
+    hfo_sing = _central(input_tools.read_scetlib_hist(fo_sing_path, charge=charge))
+    hfo = input_tools.read_dyturbo_hist(
+        [dyturbo_path], axes=list(dyturbo_axes), charge=charge
+    )
+    if "vars" in hfo.axes.name:
+        hfo = _central(hfo)
+
+    # Align shared physics axes (DYTurbo is coarser), then σ_ns = DYTurbo − singular.
+    for ax in ("Y", "Q", "qT"):
+        if ax in set(hfo.axes.name) & set(hfo_sing.axes.name):
+            hfo, hfo_sing = hh.rebinHistsToCommon([hfo, hfo_sing], ax)
+    nonsing_h = hh.addHists(-1.0 * hfo_sing, hfo, flow=False, by_ax_name=False)
+
+    if "charge" in nonsing_h.axes.name:
+        nonsing_h = nonsing_h[{"charge": sum}]
+    # Q-window: slice(...,sum) sums ONLY the in-range Q bins (no underflow leak).
+    Qe = np.asarray(nonsing_h.axes["Q"].edges, dtype=np.float64)
+    qi = int(np.argmin(np.abs(Qe - q_lo)))
+    qj = int(np.argmin(np.abs(Qe - q_hi)))
+    nonsing_h = nonsing_h[{"Q": slice(qi, qj, sum)}]
+    nonsing_h = hh.makeAbsHist(nonsing_h, "Y")  # signed Y -> |Y|
+
+    qT_c = np.asarray(nonsing_h.axes["qT"].centers, dtype=np.float64)
+    absY_c = np.asarray(nonsing_h.axes["absY"].centers, dtype=np.float64)
+    v = nonsing_h.project("qT", "absY").values(flow=False)  # (qT, absY)
+    v[qT_c < qt_cutoff, :] = 0.0  # zero the nonsingular below the cutoff
+
+    ptV_edges = np.asarray(gen_axes_meta[0][1], dtype=np.float64)
+    absY_edges = np.asarray(gen_axes_meta[1][1], dtype=np.float64)
+    Wp = _bin_sum_matrix(qT_c, ptV_edges)  # (NptVGen, NqT)
+    Wa = _bin_sum_matrix(absY_c, absY_edges)  # (NabsYVGen, NabsYsrc)
+    return Wp @ v @ Wa.T  # (NptVGen, NabsYVGen)
+
+
 class SCETlibNPParamModel(ParamModel):
 
     def __init__(
@@ -138,10 +284,10 @@ class SCETlibNPParamModel(ParamModel):
         Q_hi: float = 120.0,
         poi_params: Optional[tuple] = (),
         prior_sigmas: Optional[Mapping] = None,
-        use_taylor: bool = False,
-        taylor_order: int = 2,
-        taylor_h_rel: float = 0.10,
-        taylor_h_min: float = 0.005,
+        include_nonsingular: bool = True,
+        nonsingular_fo_sing: str = _NONSING_FO_SING_DEFAULT,
+        nonsingular_dyturbo: str = _NONSING_DYTURBO_DEFAULT,
+        nonsingular_qt_cutoff: float = 1.0,
         **kwargs,
     ):
         """Construct the ParamModel.
@@ -202,22 +348,18 @@ class SCETlibNPParamModel(ParamModel):
         # ---- λ_central
         # Three sources of λ_central, in priority order:
         #   1. ``lambda_central`` constructor arg (explicit dict).
-        #   2. ``SCETLIB_NP_LAMBDA_CENTRAL_JSON`` env var (JSON-encoded dict
-        #      with ``eff_params`` and ``gnu_params``). Useful when the upstream
-        #      SCETlib pkl isn't accessible (e.g. colleague's input).
+        #   2. ``SCETLIB_NP_LAMBDA_CENTRAL_FILE`` env var — path to a JSON or
+        #      YAML file with ``eff_params`` and ``gnu_params``. Overrides the
+        #      metadata auto-detect; useful when the upstream SCETlib pkl isn't
+        #      accessible (e.g. a colleague's input).
         #   3. Auto-detect from the fit hdf5's theoryCorr → upstream pkl.
-        import json
-        import os
-
-        env_lc = os.environ.get("SCETLIB_NP_LAMBDA_CENTRAL_JSON", "").strip()
-        if lambda_central is None and env_lc:
-            try:
-                lambda_central = json.loads(env_lc)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"SCETLIB_NP_LAMBDA_CENTRAL_JSON must be valid JSON; got {exc}"
-                )
-            print(f"[SCETlibNPParamModel] λ_central from env var", flush=True)
+        env_lc_file = os.environ.get("SCETLIB_NP_LAMBDA_CENTRAL_FILE", "").strip()
+        if lambda_central is None and env_lc_file:
+            lambda_central = _load_lambda_central_file(env_lc_file)
+            print(
+                f"[SCETlibNPParamModel] λ_central from file {env_lc_file!r}",
+                flush=True,
+            )
         if lambda_central is None:
             # Auto-detect from indata.metadata (loaded by rabbit's
             # FitInputData from the input HDF5's "meta" group).
@@ -231,6 +373,14 @@ class SCETlibNPParamModel(ParamModel):
             lambda_central = scetlib_lambda_central.read_lambda_central_from_meta(
                 indata_meta, _source="indata.metadata"
             )
+            print(
+                f"[SCETlibNPParamModel] λ_central auto-detected from indata.metadata",
+                flush=True,
+            )
+        print(f"[SCETlibNPParamModel] λ_central:", flush=True)
+        for key, value in lambda_central.items():
+            print(f"  {key} = {value!r}", flush=True)
+
         self.eff_central = dict(lambda_central["eff_params"])
         self.gnu_central = dict(lambda_central["gnu_params"])
         self.np_model = self.eff_central["np_model"]
@@ -238,10 +388,6 @@ class SCETlibNPParamModel(ParamModel):
 
         # ---- btgrid + dense layout
         grid = btgrid_cache.load(btgrid_dir)
-        self._btgrid_meta = dict(
-            shards=grid["n_shards"],
-            n_bins=len(grid["bins"]),
-        )
         idx_map = fz_int.dense_index_map(grid["bins"])
         self.Q_unique = idx_map["Q_unique"]
         self.Y_unique = idx_map["Y_unique"]
@@ -296,7 +442,24 @@ class SCETlibNPParamModel(ParamModel):
         self.gen_shape = R_arr.shape[len(fit_reco_axes) :]
         N_reco = int(np.prod(self.reco_shape))
         N_gen = int(np.prod(self.gen_shape))
-        self.R = tf.constant(R_arr.reshape(N_reco, N_gen), dtype=fz_tf.DTYPE)
+        # Raw response counts; normalized to a response below.
+        self._R_raw = tf.constant(R_arr.reshape(N_reco, N_gen), dtype=fz_tf.DTYPE)
+        # Gen-total denominator N_gen(g) from the xnorm hist ("postfsr"): the
+        # generated fiducial yield per gen bin (pre-reco-selection). Dividing R
+        # by this gives the theory-independent efficiency×migration response.
+        # Falls back to the σ_gen(λ_c) proxy if the gen-total isn't in the file.
+        if R_info.get("N_gen") is not None:
+            self._N_gen_flat = tf.constant(
+                R_info["N_gen"].reshape(-1), dtype=fz_tf.DTYPE
+            )
+        else:
+            self._N_gen_flat = None
+            print(
+                "[SCETlibNPParamModel] WARNING: no gen-total hist in unfolding "
+                "output; falling back to σ_gen(λ_c) as the response normalizer "
+                "(circular closure — see param_model docstring).",
+                flush=True,
+            )
         self._reco_axes_meta = [
             (name, fit_axes[1])
             for (name, fit_axes) in zip(
@@ -331,14 +494,88 @@ class SCETlibNPParamModel(ParamModel):
             dtype=fz_tf.DTYPE,
         )
 
-        # ---- Cache σ_reco(λ_central): the denominator of the ratio.
+        # ---- Normalize the response, then cache σ_reco(λ_central).
+        # A response matrix must encode only the gen→reco *mapping*, not the
+        # MC's absolute gen spectrum. Normalize each gen column by the gen-total
+        # N_gen(g) (the xnorm "postfsr" hist — generated fiducial yield before
+        # reco selection) → P(b|g) = eff×migration (theory-independent):
+        #     P(b|g)        = R_raw(b,g) / N_gen(g)
+        #     σ_reco(λ;b)   = Σ_g P(b|g) · σ_gen(λ;g)
+        #     σ_reco(λ_c;b) = Σ_g P(b|g) · σ_gen(λ_c;g)
+        # NB the reco-passing marginal Σ_b R_raw(b,g) is the WRONG normalizer:
+        # it already includes efficiency (R is post-reco-selection), so dividing
+        # by it cancels efficiency (migration-only) — closes far worse, ε is not
+        # flat in gen bin. We use the true gen-total N_gen instead. Because
+        # σ_reco_central then depends on σ_gen(λ_c) (it does NOT collapse to
+        # R_raw·1), the λ_central closure is a genuine test of the integral.
+        # Fallback: if the gen-total hist is absent, use σ_gen(λ_c) as a proxy
+        # for N_gen (∝ σ_gen^MC) — keeps efficiency but makes the closure
+        # circular (σ_gen cancels to R_raw·1).
+        # Native-binning Q-integrated reconstruction (NY, NqT) on the signed-Y /
+        # qT grid, BEFORE the |Y|-fold and qT-rebin — exposed so the native-binning
+        # validation can compare it to the SCETlib reference / numpy factorize
+        # without the projection layer.
+        self.sigma_YqT_central = self._sigma_YqT_native_at(
+            self.eff_central, self.gnu_central
+        )
+        # ---- Optional fixed-order/DYTurbo nonsingular term (NP-independent).
+        # σ_gen^matched(λ) = σ_gen^resum(λ) + σ_ns. Added at GEN level, so it folds
+        # through the same response R as the resummed piece. Because rnorm is a
+        # ratio, this correctly DILUTES the NP variation where the FO dominates
+        # (high qT). σ_ns is a constant (no λ dependence).
+        self.include_nonsingular = bool(include_nonsingular)
+        if self.include_nonsingular:
+            _dy0 = (
+                nonsingular_dyturbo.format(scale="mur1-muf1")
+                if (nonsingular_dyturbo and "{scale}" in nonsingular_dyturbo)
+                else nonsingular_dyturbo
+            )
+            missing = [
+                p for p in (nonsingular_fo_sing, _dy0) if not (p and os.path.exists(p))
+            ]
+            if missing:
+                raise FileNotFoundError(
+                    "include_nonsingular=True needs the fixed-order inputs for "
+                    "σ_ns = DYTurbo − SCETlib_singular, but these are missing:\n  "
+                    + "\n  ".join(missing)
+                    + "\nThey live under wremnants-data/data/TheoryCorrections (the "
+                    "SCETlib singular …_nnlo_sing…combined.pkl and the DYTurbo "
+                    "results_…scetlibmatch.txt). Pass nonsingular_fo_sing / "
+                    "nonsingular_dyturbo, or set include_nonsingular=False for resum-only."
+                )
+            sigma_ns_np = compute_nonsingular_gen(
+                nonsingular_fo_sing,
+                nonsingular_dyturbo,
+                self._gen_axes_meta,
+                q_lo=Q_lo,
+                q_hi=Q_hi,
+                qt_cutoff=nonsingular_qt_cutoff,
+            )
+            if sigma_ns_np.shape != tuple(self.gen_shape):
+                raise ValueError(
+                    f"nonsingular gen shape {sigma_ns_np.shape} != model gen shape "
+                    f"{tuple(self.gen_shape)}"
+                )
+            self.sigma_ns = tf.constant(sigma_ns_np, dtype=fz_tf.DTYPE)
+        else:
+            self.sigma_ns = tf.zeros(self.gen_shape, dtype=fz_tf.DTYPE)
         sigma_gen_central = self._sigma_gen_at(self.eff_central, self.gnu_central)
-        # σ_reco(λ_central) = R · σ_gen(λ_central). Flatten the gen axes.
+        # The pure gen-level integral (NptVGen, NabsYVGen), BEFORE folding through
+        # the response — used by the gen-level validation to test the integral
+        # in isolation (no R).
+        self.sigma_gen_central = sigma_gen_central
         gen_flat = tf.reshape(sigma_gen_central, [-1])
-        self.sigma_reco_central = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
-        # Sanity floor — if any reco bin has zero or negative central yield,
-        # the ratio would blow up. Use the central yield directly; any genuine
-        # zero is a binning issue to flag.
+        if tf.reduce_any(gen_flat <= 0).numpy():
+            n_bad = int(tf.reduce_sum(tf.cast(gen_flat <= 0, tf.int32)))
+            raise ValueError(
+                f"SCETlibNPParamModel: {n_bad} gen bins have non-positive "
+                f"σ_gen(λ_central); cannot normalize / fold the response."
+            )
+        N_gen = self._N_gen_flat if self._N_gen_flat is not None else gen_flat
+        # Guard empty gen bins (no generated events): leave column at 0.
+        safe_N_gen = tf.where(N_gen > 0, N_gen, tf.ones_like(N_gen))
+        self.R = self._R_raw / safe_N_gen[tf.newaxis, :]  # P(b|g) = R_raw / N_gen
+        self.sigma_reco_central = tf.linalg.matvec(self.R, gen_flat)  # Σ_g P·σ_gen(λ_c)
         if tf.reduce_any(self.sigma_reco_central <= 0).numpy():
             n_bad = int(tf.reduce_sum(tf.cast(self.sigma_reco_central <= 0, tf.int32)))
             raise ValueError(
@@ -373,7 +610,6 @@ class SCETlibNPParamModel(ParamModel):
         defaults = np.array(
             [central_lookup[p] for p in self._param_order], dtype=np.float64
         )
-        import os
 
         env_override = os.environ.get("SCETLIB_NP_XPARAMDEFAULT", "").strip()
         if env_override:
@@ -420,46 +656,6 @@ class SCETlibNPParamModel(ParamModel):
         # prior_means defaults to xparamdefault if not set, so don't store
         # redundantly — Fitter will fall back to xparamdefault.
 
-        # ---- Taylor surrogate (optional, default OFF)
-        # Precompute σ_gen(λ_central) plus first/second derivatives so that
-        # per-fit-step compute() is a polynomial in (λ − λ_central) instead of
-        # a full Hankel/Simpson integral. Drops per-step cost from O(10s) to
-        # O(ms). Accuracy: validated against the full integral; expected
-        # sub-percent within typical NP variation ranges for quadratic order.
-        # Off by default — opt in via ``use_taylor=True`` kwarg (or env var
-        # ``SCETLIB_NP_USE_TAYLOR=1``). Env var ``SCETLIB_NP_USE_TAYLOR=0``
-        # also forces it off (useful when the kwarg is set by a CLI wrapper).
-        env_taylor = os.environ.get("SCETLIB_NP_USE_TAYLOR", "").strip().lower()
-        if env_taylor in ("0", "false", "no", "off"):
-            use_taylor = False
-            print(
-                "[SCETlibNPParamModel] Taylor surrogate disabled by env var", flush=True
-            )
-        elif env_taylor in ("1", "true", "yes", "on"):
-            use_taylor = True
-            print(
-                "[SCETlibNPParamModel] Taylor surrogate enabled by env var", flush=True
-            )
-        self.use_taylor = use_taylor
-        self.taylor_order = int(taylor_order)
-        if self.use_taylor:
-            print(
-                f"[SCETlibNPParamModel] Taylor surrogate ON "
-                f"(order={int(taylor_order)}, h_rel={taylor_h_rel}, "
-                f"h_min={taylor_h_min}) — per-step compute() is a polynomial "
-                f"in (λ − λ_central), not the full Hankel integral",
-                flush=True,
-            )
-            self._build_taylor_surrogate(
-                h_rel=taylor_h_rel, h_min=taylor_h_min, order=self.taylor_order
-            )
-        else:
-            print(
-                "[SCETlibNPParamModel] Taylor surrogate OFF — per-step "
-                "compute() runs the full Hankel/Simpson integral",
-                flush=True,
-            )
-
     # =========================================================================
     # Helpers
     # =========================================================================
@@ -502,7 +698,6 @@ class SCETlibNPParamModel(ParamModel):
             the ParamModel should describe → print a loud banner with the
             exact freeze args to add.
         """
-        import re
 
         systs = getattr(self.indata, "systs", None)
         if systs is None or len(systs) == 0:
@@ -589,8 +784,12 @@ class SCETlibNPParamModel(ParamModel):
     # σ_gen evaluation
     # =========================================================================
 
-    def _sigma_gen_at(self, eff_params, gnu_params):
-        """Evaluate σ_gen(λ) on R's gen binning. Returns shape (NptVGen, NabsYVGen)."""
+    def _sigma_YqT_native_at(self, eff_params, gnu_params):
+        """Reconstruct σ(λ) on the btgrid and Q-integrate, returning the result
+        in the btgrid's *native* binning: shape (NY, NqT) on the signed-Y /
+        qT grid (Y_unique, qT_unique), BEFORE the |Y|-fold and qT-rebin. This
+        is the object that the native-binning validation compares against the
+        SCETlib spectrum reference (curve 1) and the numpy `factorize` (curve 2)."""
         # 1. Reconstruct σ on the btgrid's flat (Nbins,) layout.
         sigma_flat = fz_tf.reconstruct_batch_tf(
             qT_per_bin=self.qT_per_bin,
@@ -611,7 +810,11 @@ class SCETlibNPParamModel(ParamModel):
         # 2. Sparse → dense (NQ, NY, NqT). Missing cells get 0.
         sigma_dense = fz_int.sparse_to_dense_tf(sigma_flat, self.flat_idx)
         # 3. Integrate over Q (arctan_Q² Simpson) → (NY, NqT).
-        sigma_YqT = fz_int.integrate_over_Q_tf(sigma_dense, self.Q_weights)
+        return fz_int.integrate_over_Q_tf(sigma_dense, self.Q_weights)
+
+    def _sigma_gen_at(self, eff_params, gnu_params):
+        """Evaluate σ_gen(λ) on R's gen binning. Returns shape (NptVGen, NabsYVGen)."""
+        sigma_YqT = self._sigma_YqT_native_at(eff_params, gnu_params)
         # 4. Rebin Y (signed) → absYVGen (|Y|-folded): (NabsYVGen, NqT).
         sigma_absY_qT = fz_int.rebin_axis_tf(sigma_YqT, axis=0, weights=self.W_absY)
         # 5. Rebin qT → ptVGen: (NabsYVGen, NptVGen).
@@ -619,10 +822,12 @@ class SCETlibNPParamModel(ParamModel):
             sigma_absY_qT, axis=1, weights=self.W_ptVGen
         )
         # 6. Reorder to (NptVGen, NabsYVGen) to match R's gen axis order.
-        return tf.transpose(sigma_absY_ptV, perm=[1, 0])
+        sigma_resum = tf.transpose(sigma_absY_ptV, perm=[1, 0])
+        # 7. Add the NP-independent fixed-order/DYTurbo nonsingular (zeros if off).
+        return sigma_resum + self.sigma_ns
 
     # =========================================================================
-    # Taylor surrogate
+    # λ-vector helpers
     # =========================================================================
 
     def _eff_gnu_from_array(self, lambdas_np):
@@ -638,156 +843,6 @@ class SCETlibNPParamModel(ParamModel):
             else:
                 raise KeyError(name)
         return eff, gnu
-
-    def _sigma_gen_at_lambdas(self, lambdas_np):
-        """Wrapper around :meth:`_sigma_gen_at` taking a flat numpy λ vector."""
-        eff, gnu = self._eff_gnu_from_array(lambdas_np)
-        return self._sigma_gen_at(eff, gnu).numpy()
-
-    def _build_taylor_surrogate(self, h_rel, h_min, order):
-        """Precompute σ_gen(λ_central), ∂σ_gen/∂λ_i, and (order≥2) ∂²σ_gen/∂λ_i∂λ_j.
-
-        Uses central finite differences with step size h_i = max(|λ_i|·h_rel, h_min).
-        Total full-Hankel evaluations: 1 + 16 + (28 if order≥2) = 45.
-
-        Stored as ``tf.constant`` so the per-step ``_sigma_gen_taylor`` is
-        a small polynomial evaluation.
-        """
-        import time
-
-        t_start = time.time()
-        lambda_central = self.xparamdefault.numpy().astype(np.float64)
-        n = len(lambda_central)
-        h_i = np.maximum(np.abs(lambda_central) * h_rel, h_min)
-        # Per-parameter strategy:
-        #   "central" — symmetric ±h FD: D = (σ⁺ − σ⁻)/(2h), H_ii = (σ⁺ − 2σ₀ + σ⁻)/h²
-        #   "forward" — one-sided FD using σ₀, σ⁺ at h, σ⁺⁺ at 2h. Used when
-        #       λ_c is at the physical lower bound (e.g. lambda6 = 0 in
-        #       FranksVals). σ⁻ would be unphysical and produce overflow.
-        # Off-diagonal Hessian uses the σ⁺⁺_ij stencil which doesn't need σ⁻,
-        # so it works for both modes.
-        fd_mode = ["central"] * n
-        for i, name in enumerate(self._param_order):
-            min_v = PARAM_MIN_VALUE.get(name)
-            if min_v is None:
-                continue
-            max_h_allowed = lambda_central[i] - min_v
-            if max_h_allowed <= 0:
-                # Boundary case: use forward FD. Keep h_i at its preferred value.
-                fd_mode[i] = "forward"
-            else:
-                h_i[i] = min(h_i[i], 0.95 * max_h_allowed)
-        print(
-            f"[SCETlibNPParamModel] building Taylor surrogate (order={order}); "
-            f"h_i={dict(zip(self._param_order, h_i.round(4).tolist()))}",
-            flush=True,
-        )
-
-        # σ₀ at λ_central
-        sigma_0 = self._sigma_gen_at_lambdas(lambda_central)  # (NptVGen, NabsYVGen)
-        elapsed = time.time() - t_start
-        print(f"  central done in {elapsed:.1f}s; shape {sigma_0.shape}", flush=True)
-
-        # σ₊ᵢ at λ_central + h_i e_i; σ₋ᵢ at λ_central − h_i e_i
-        sigma_plus = np.empty((n,) + sigma_0.shape, dtype=np.float64)
-        sigma_minus = np.empty_like(sigma_plus)
-        # Storage: for "central" mode params we keep σ⁻; for "forward" mode
-        # params we keep σ⁺⁺ (at +2h) in the same slot. The use site selects
-        # the correct stencil per-param.
-        sigma_other = np.empty_like(sigma_plus)
-        for i in range(n):
-            lp = lambda_central.copy()
-            lp[i] += h_i[i]
-            sigma_plus[i] = self._sigma_gen_at_lambdas(lp)
-            if fd_mode[i] == "central":
-                lm = lambda_central.copy()
-                lm[i] -= h_i[i]
-                sigma_other[i] = self._sigma_gen_at_lambdas(lm)
-                tag = "±h"
-            else:  # forward
-                lpp = lambda_central.copy()
-                lpp[i] += 2.0 * h_i[i]
-                sigma_other[i] = self._sigma_gen_at_lambdas(lpp)
-                tag = "+h,+2h (forward)"
-            print(
-                f"  {tag} for {self._param_order[i]} ({i+1}/{n}) at "
-                f"t+{time.time()-t_start:.1f}s",
-                flush=True,
-            )
-        sigma_minus = sigma_other  # retain old name for the central-FD slots
-
-        # First derivatives D_i and diagonal Hessian H_ii — stencil depends on mode.
-        D = np.empty_like(sigma_plus)
-        H_full = None
-        if order >= 2:
-            H_full = np.zeros((n, n) + sigma_0.shape, dtype=np.float64)
-        for i in range(n):
-            if fd_mode[i] == "central":
-                D[i] = (sigma_plus[i] - sigma_minus[i]) / (2.0 * h_i[i])
-                if H_full is not None:
-                    H_full[i, i] = (sigma_plus[i] - 2.0 * sigma_0 + sigma_minus[i]) / (
-                        h_i[i] ** 2
-                    )
-            else:  # forward; sigma_minus[i] actually holds σ⁺⁺ at +2h
-                D[i] = (4.0 * sigma_plus[i] - sigma_minus[i] - 3.0 * sigma_0) / (
-                    2.0 * h_i[i]
-                )
-                if H_full is not None:
-                    H_full[i, i] = (sigma_minus[i] - 2.0 * sigma_plus[i] + sigma_0) / (
-                        h_i[i] ** 2
-                    )
-        if H_full is not None:
-            # Off-diagonals: 1-sided stencil
-            #   H_ij ≈ [σ(λ_c + h_i e_i + h_j e_j) − σ(λ_c + h_i e_i)
-            #           − σ(λ_c + h_j e_j) + σ(λ_c)] / (h_i h_j)
-            # 8·7/2 = 28 additional evaluations.
-            for i in range(n):
-                for j in range(i + 1, n):
-                    lpp = lambda_central.copy()
-                    lpp[i] += h_i[i]
-                    lpp[j] += h_i[j]
-                    sigma_pp = self._sigma_gen_at_lambdas(lpp)
-                    H_ij = (sigma_pp - sigma_plus[i] - sigma_plus[j] + sigma_0) / (
-                        h_i[i] * h_i[j]
-                    )
-                    H_full[i, j] = H_ij
-                    H_full[j, i] = H_ij  # symmetric
-                    print(
-                        f"  H[{self._param_order[i]},{self._param_order[j]}] "
-                        f"at t+{time.time()-t_start:.1f}s",
-                        flush=True,
-                    )
-
-        # Stash as tf.constants
-        dtype = self.indata.dtype
-        self._taylor_lambda_central = tf.constant(lambda_central, dtype=dtype)
-        self._taylor_sigma_central_2d = tf.constant(sigma_0, dtype=dtype)
-        self._taylor_D = tf.constant(D, dtype=dtype)  # (n, NptVGen, NabsYVGen)
-        self._taylor_H = (
-            tf.constant(H_full, dtype=dtype) if H_full is not None else None
-        )
-        self._taylor_h_i = h_i  # kept for diagnostics
-        print(
-            f"[SCETlibNPParamModel] surrogate ready in "
-            f"{time.time()-t_start:.1f}s; storage "
-            f"~{(1 + n + (n*n if H_full is not None else 0)) * sigma_0.size * 8 / 1e6:.1f} MB",
-            flush=True,
-        )
-
-    def _sigma_gen_taylor(self, lambdas_tf):
-        """Evaluate σ_gen(λ) via the precomputed Taylor surrogate.
-
-        Returns shape (NptVGen, NabsYVGen). All ops are linear in (λ−λ_central)
-        for order=1, plus a quadratic correction for order=2.
-        """
-        delta = lambdas_tf - self._taylor_lambda_central  # (n,)
-        sigma = self._taylor_sigma_central_2d + tf.tensordot(
-            delta, self._taylor_D, axes=1
-        )  # (NptVGen, NabsYVGen)
-        if self._taylor_H is not None:
-            quad = 0.5 * tf.einsum("i,j,ijab->ab", delta, delta, self._taylor_H)
-            sigma = sigma + quad
-        return sigma
 
     # =========================================================================
     # compute
@@ -817,12 +872,9 @@ class SCETlibNPParamModel(ParamModel):
         import time
 
         t_start = time.perf_counter()
-        if self.use_taylor:
-            # Fast path: polynomial in (λ − λ_central) with precomputed coefficients.
-            sigma_gen = self._sigma_gen_taylor(param)  # (NptVGen, NabsYVGen)
-        else:
-            eff_params, gnu_params = self._unpack_params(param)
-            sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
+        eff_params, gnu_params = self._unpack_params(param)
+        sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
+        # Fold σ_gen(λ) through the normalized migration response P (self.R).
         gen_flat = tf.reshape(sigma_gen, [-1])
         sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
         ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
