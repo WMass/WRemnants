@@ -17,7 +17,7 @@ xsec_WminusJetsToLL = 2940  # +/- 9.153
 dataDict = {
     "SingleMuon_2017G": {
         "filepaths": [
-            "{BASE_PATH}/SingleMuon/Run2017G-UL2017_MiniAODv2_NanoAODv9_GT36-v2",
+            "{BASE_PATH}/LowPU/2017G/SingleMuon/Run2017G-UL2017_MiniAODv2_NanoAODv9_GT36-v2",
         ],
         "group": "Data",
         "lumicsv": lumicsv,
@@ -25,28 +25,28 @@ dataDict = {
     },
     "Zmumu_2017G": {
         "filepaths": [
-            "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
+            "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_TrackFitV722_NanoProdv3",
         ],
         "xsec": xsec_DYJetsToLL,
         "group": "Zmumu",
     },
     "Ztautau_2017G": {
         "filepaths": [
-            "{BASE_PATH}/DYJetsToTauTau_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
+            "{BASE_PATH}/DYJetsToTauTau_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_TrackFitV722_NanoProdv3",
         ],
         "xsec": xsec_DYJetsToLL * common.Z_TAU_TO_LEP_RATIO,
         "group": "Ztautau",
     },
     "Wplusmunu_2017G": {
         "filepaths": [
-            "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
+            "{BASE_PATH}/WplusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_TrackFitV722_NanoProdv3",
         ],
         "xsec": xsec_WplusJetsToLNu,
         "group": "Wmunu",
     },
     "Wminusmunu_2017G": {
         "filepaths": [
-            "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
+            "{BASE_PATH}/WminusJetsToMuNu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_TrackFitV722_NanoProdv3",
         ],
         "xsec": xsec_WminusJetsToLL,
         "group": "Wmunu",
@@ -60,7 +60,7 @@ dataDict = {
     # },
     "Wminustaunu_2017G": {
         "filepaths": [
-            "{BASE_PATH}/WminusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17pp5TeVNanoAODv9-106X_mc2017_realistic_forppRef5TeV_v3-v2",
+            "{BASE_PATH}/WminusJetsToTauNu_TauToMuorE_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_TrackFitV722_NanoProdv3",
         ],
         "xsec": xsec_WminusJetsToLL * (common.BR_TAUToMU + common.BR_TAUToE),
         "group": "Wtaunu",

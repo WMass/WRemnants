@@ -18,50 +18,17 @@ from wremnants.production import (
     generator_level_definitions,
     systematics,
     theory_corrections,
-)git 
-from wremnants.production.datasets.dataset_tools import getDatasets, makeFilelist
+)
+from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import write_analysis_output
-
-MC_BASE = "/scratch/submit/cms/wmass/NanoAOD"
-ZMUMU_2017G_PATH = (
-    "{BASE_PATH}/DYJetsToMuMu_H2ErratumFix_PDFExt_TuneCP5_5020GeV-powhegMiNNLO-pythia8-photos"
-    "/NanoV9MC2017_{NANO_PROD_TAG}"
-)
-
-wants_zmumu = not args.filterProcs or any(
-    p in args.filterProcs for p in ("Zmumu_2017G", "Zmumu")
-)
-excl = list(args.excludeProcs)
-if args.era == "2017G" and wants_zmumu and "Zmumu_2017G" not in excl:
-    excl.append("Zmumu_2017G")  # skip wrong path in datasetDict_2017G; load below
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
-    excl=excl,
+    excl=args.excludeProcs,
     base_path=args.dataPath,
     era=args.era,
 )
-
-if args.era == "2017G" and wants_zmumu:
-    mc_paths = makeFilelist(
-        [ZMUMU_2017G_PATH],
-        maxFiles=args.maxFiles if args.maxFiles is not None else -1,
-        base_path=MC_BASE,
-        nano_prod_tags=["TrackFitV722_NanoProdv3"],
-        era="2017G",
-    )
-    if mc_paths:
-        datasets.append(
-            narf.Dataset(
-                name="Zmumu_2017G",
-                filepaths=mc_paths,
-                xsec=698.3,
-                group="Zmumu",
-            )
-        )
-    else:
-        logger.warning(f"No Zmumu_2017G MC files found under {MC_BASE}")
 
 import lz4.frame
 import pickle
