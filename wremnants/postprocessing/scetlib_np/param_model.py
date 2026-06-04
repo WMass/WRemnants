@@ -1,45 +1,174 @@
 """SCETlibNPParamModel — continuous-λ rabbit ParamModel for SCETlib NP.
 
-Architecture (template-style fit):
+This ParamModel scales the signal reco template by a per-bin ratio of the
+SCETlib nonperturbative (NP) prediction at the fitted λ vs. at λ_central. The
+prediction is built in THREE STEPS, written out in order below — read top to
+bottom for the full maths. This module docstring is the SINGLE SOURCE OF TRUTH:
+:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch_tf`, the numpy
+reference :mod:`btgrid_numpy`, ``sigma_reco_central.md``, and the validation
+scripts all point here rather than restate it.
 
-    P(b, g)      = R_raw(b, g) / N_gen(g)               (normalized response)
-    σ_reco(λ; b) = Σ_g  P(b, g) · σ_gen(λ; g)
-    ratio(b)     = σ_reco(λ; b) / σ_reco(λ_central; b)
-    rnorm        = ratio per reco bin, broadcast over signal proc; ones elsewhere.
+Pipeline at a glance (everything is a function of the NP parameters λ):
 
-The raw response counts R_raw(b, g) carry the MC's absolute gen spectrum, which
-is theory-dependent. A response matrix should encode only the gen→reco
-*mapping*, so each gen column is normalized by the gen-total N_gen(g) →
-P(b, g) = efficiency × migration (theory-independent). N_gen(g) is the xnorm
-"postfsr" histogram from the unfolding output — the generated fiducial yield
-per gen bin BEFORE reco selection — loaded alongside R by response_matrix.
-Then σ_gen(λ) is folded through P. NB normalizing instead by the reco-passing
-marginal Σ_b R_raw(b, g) is wrong: R is post-reco-selection so that marginal
-already includes efficiency, and dividing by it cancels efficiency
-(migration-only), which closes far worse — efficiency is not flat in gen bin.
+    Step 1   btgrid Hankel + Q integral  →  σ_resum(λ; g)   resummed, on the gen grid
+    Step 2   + fixed-order matching      →  σ_gen(λ; g)  = σ_resum(λ; g) + σ_ns(g)
+    Step 3   fold through response R      →  σ_reco(λ; b)    gen → reco
+    Step 4   ratio vs λ_central          →  rnorm(b, proc)  the shape handed to rabbit
+
+Steps 1–3 build the absolute physical cross section; Step 4 alone produces the
+per-bin variation the fit consumes — they are kept separate on purpose.
+
+Indices: Q, Y, qT are the SCETlib btgrid axes (boson mass / rapidity / qT);
+g = flattened gen bin (ptVGen, absYVGen); b = flattened reco bin (ptll, yll,
+cosThetaStarll_quantile, phiStarll_quantile). λ splits into λ_eff (for F_eff)
+and λ_ν (for γ_ν^NP) — the 8 differentiable parameters listed at the end.
+
+═════════════════════════════════════════════════════════════════════════════
+Step 1 — σ_resum(λ; g): the resummed prediction from the bT grid
+═════════════════════════════════════════════════════════════════════════════
+
+(1a) Per-(Q, Y, qT) bT-space (Hankel) integral — the NP parameters enter HERE:
+
+    σ(Q, Y, qT; λ) = qT · ∫ dbT  bT · J₀(qT·bT)
+                          · I_pert(Q, Y, qT;  b*(bT))
+                          · exp[ C_ν(Q, Y, qT;  bT) · γ_ν^NP(b*(bT); λ_ν) ]
+                          · F_eff(Y;  b*(bT); λ_eff)
+
+Where each factor lives — bare bT vs the b*-frozen b̄T:
+
+  bT          bare bT, the Hankel integration variable. Enters ONLY the
+              measure factor bT and the Fourier kernel J₀(qT·bT). The leading
+              qT· prefactor is SCETlib's x = qT·bT integration convention.
+  b*(bT)      the b*-prescription b_star_global(bT), cached as ``b_bar``: bT
+              frozen below b_max so the NP factors never reach the Landau pole.
+              EVERY NP-carrying factor is evaluated at b*(bT) — I_pert, γ_ν^NP,
+              and F_eff — never at bare bT.
+  I_pert      perturbative bT-space integrand with NP off. Cached per
+              (Q, Y, qT) along the bT axis; λ-independent.
+  C_ν         coefficient of γ_ν^NP in the rapidity (CS) log evolution. Cached
+              per (Q, Y, qT) AND bT — a full (Nbins, Nbt) array; λ-independent.
+              Taken at the BARE bT: the lone NP-exponent factor NOT frozen to
+              b* (per the SCETlib convention; see btgrid_numpy NP-model notes).
+              Because it varies with bT it sits inside the bT integral (not a
+              constant out front); because it varies with Q the Q integral
+              cannot be collapsed ahead of the fit — the λ-dependence does not
+              factor through ∫dQ (exp is nonlinear in C_ν·γ_ν^NP).
+  γ_ν^NP      CS-side NP rapidity anomalous dimension; depends on b*(bT) and
+              λ_ν only (no Q/Y/qT). λ-dependent.
+  F_eff       TMD-effective NP factor; depends on Y² and b*(bT) and λ_eff only
+              (no Q/qT). λ-dependent.
+
+Only γ_ν^NP and F_eff carry λ; everything else (bT, J₀, I_pert, C_ν, b*) is
+λ-independent and precomputed once — the bT·J₀ kernel, the bT Simpson weights,
+and the arctan_Q² Q-integration weights are all built at construction.
+
+(1b) Integrate over Q, then rebin onto the gen grid:
+
+    σ_resum(λ; g) = rebin_{qT→ptVGen, |Y|→absYVGen} [ ∫_{Q_lo}^{Q_hi} dQ  σ(Q, Y, qT; λ) ]
+
+The Q integral uses an arctan_Q² Simpson rule (the x = arctan((Q²−q0²)/(q0·Γ))
+transform flattens the Breit-Wigner Z peak). The result (Y, qT) is then rebinned
+(Simpson) onto the unfolding hist's gen edges: qT → ptVGen, and the signed btgrid
+Y axis folded into |Y| → absYVGen. The |Y| fold is valid because NP is
+Y-symmetric (F_eff depends on Y², γ_ν^NP doesn't depend on Y at all).
+
+═════════════════════════════════════════════════════════════════════════════
+Step 2 — σ_gen(λ; g): add the NP-independent fixed-order nonsingular
+═════════════════════════════════════════════════════════════════════════════
+
+    σ_gen(λ; g) = σ_resum(λ; g) + σ_ns(g)
+
+    σ_ns(g)     = rebin_{qT→ptVGen, |Y|→absYVGen} [ σ_DYTurbo^FO − σ_SCETlib-sing^FO ]
+
+The fixed-order matching adds the nonsingular piece σ_ns = (DYTurbo fixed order)
+− (SCETlib singular fixed order), read straight from the original FO inputs
+(the ``…_nnlo_sing…combined.pkl`` and the DYTurbo ``results_…scetlibmatch.txt``),
+Q-windowed to [Q_lo, Q_hi], |Y|-folded, zeroed below qt_cutoff, and summed onto
+the (ptVGen, absYVGen) gen bins (see :func:`compute_nonsingular_gen`).
+
+σ_ns is NP-INDEPENDENT (the same for every λ) and is added at GEN level, so it
+folds through the same response R as σ_resum in Step 3. Because the fit uses a
+ratio (Step 3), σ_ns correctly DILUTES the NP variation where the FO dominates
+(high qT). Set include_nonsingular=False for a resum-only model (σ_ns = 0).
+
+═════════════════════════════════════════════════════════════════════════════
+Step 3 — σ_reco(λ; b): fold gen → reco through the response matrix
+═════════════════════════════════════════════════════════════════════════════
+
+    P(b | g)     = R_raw(b, g) / N_gen(g)               (efficiency × migration)
+    σ_reco(λ; b) = Σ_g  P(b | g) · σ_gen(λ; g)
+
+where, in these expressions,
+    g = the flattened GEN bin  (ptVGen, absYVGen)   — the grid σ_gen from Steps
+        1–2 lives on (boson qT and |Y|), summed over by Σ_g;
+    b = the flattened RECO bin (ptll, yll, cosThetaStarll_quantile,
+        phiStarll_quantile) — the measured dilepton observables σ_reco lives on.
+P(b | g) is the gen→reco mapping (one reco column per gen bin), so σ_reco(λ; b)
+is just σ_gen pushed through the detector. The Σ_g is the matvec
+``tf.linalg.matvec(self.R, σ_gen_flat)``. This step is pure detector folding —
+no λ_central and no ratio enter here; that is Step 4.
+
+Factors (all loaded by :mod:`response_matrix`; see it for the hist mechanics):
+
+  R_raw(b, g)   reco×gen yield from the unfolding histmaker output
+                (``nominal_prefsr_yieldsUnfolding``, sample Zmumu): slice
+                acceptance=True (gen-fiducial), then project to reco×gen —
+                which SUMS the helicitySig axis. R is filled with
+                ``nominal_weight_helicity``, a PARTITION of the event weight
+                into the 8 helicity pieces that ADD BACK UP, so the physical
+                yield is the helicitySig SUM. Units: reco-selected,
+                gen-fiducial weighted event counts (already × reco efficiency).
+  N_gen(g)      gen-total normalizer: the xnorm ``prefsr`` hist, gen-fiducial
+                but BEFORE reco selection. Takes the UL component
+                (helicitySig = −1), NOT the sum — N_gen is filled with
+                ``csAngularMoments``, a moment expansion whose A_i bins (0..7)
+                do NOT sum to σ (some are negative); UL is the
+                angular-integrated total.
+                ⚠ Same axis as R, OPPOSITE reduction: R is a weight partition
+                (SUM helicitySig), N_gen is a moment expansion (take UL).
+                Taking UL of R instead would discard the angular partition and
+                inflate the closure ~15×.
+
+Why N_gen and not the reco-passing marginal Σ_b R_raw(b, g): R is
+post-reco-selection so that marginal already carries efficiency, and dividing
+by it cancels efficiency (migration-only) — closes far worse, since efficiency
+is strongly gen-dependent (ε ≈ 0.07–0.54 across gen bins on the current file).
+N_gen(g) is the true generated total, so P = R_raw/N_gen is the
+theory-independent gen→reco map. Pre-FSR: σ_gen, R, and N_gen must all sit at
+the same QCD/boson gen level (the postfsr variants in the file close ~1% worse
+— FSR mismatch).
+
+═════════════════════════════════════════════════════════════════════════════
+Step 4 — rnorm(b, proc): the per-reco-bin variation handed to rabbit
+═════════════════════════════════════════════════════════════════════════════
+
+    ratio(b)       = σ_reco(λ; b) / σ_reco(λ_central; b)
+    rnorm(b, proc) = 1 + (ratio(b) − 1) · [proc is signal]   (1 in every other proc)
+
+This is the only object that leaves the model: compute() returns rnorm(b, proc),
+and rabbit multiplies the signal process's reco template (reco bin b) by it,
+leaving every other process at 1. Dividing by σ_reco(λ_central) cancels the
+event-count↔cross-section scale and any overall normalization, so rnorm carries
+purely the SHAPE of the NP variation per reco bin — Steps 1–3 build the absolute
+σ_reco(λ; b), and Step 4 reduces it to the bin-by-bin template scaling the fit
+needs. σ_reco(λ_central) is precomputed once at construction as the denominator.
 (If the gen-total hist is absent, σ_gen(λ_c) is used as a proxy for N_gen, but
-then σ_gen cancels in σ_reco(λ_c) = R_raw·1 and the λ_central closure can't
-test the integral.)
+then σ_gen cancels in σ_reco(λ_c) = R_raw·1 and the λ_central closure can't test
+the integral.)
 
-R_raw is the (reco × gen) response matrix loaded from the upstream unfolding
-histmaker output (a separate hdf5 from the fit-tensor input).
+─────────────────────────────────────────────────────────────────────────────
+Parameters and inputs
+─────────────────────────────────────────────────────────────────────────────
 
-λ_central is read from the fit-tensor's meta_info_input via the upstream
-SCETlib correction pkl (see :mod:`scetlib_lambda_central`).
-
-σ_gen(λ; g) is evaluated on the btgrid then integrated over Q (arctan_Q²
-Simpson) and rebinned (Simpson) onto the unfolding hist's gen edges
-(ptVGen, absYVGen). The absYVGen-side rebin folds the signed btgrid Y axis
-into |Y| bins (NP is Y-symmetric: F_eff depends on Y², γ_ν^NP doesn't depend
-on Y at all).
-
-The 8 v1 parameters (all factorisable through the current btgrid):
+The 8 v1 parameters λ (all factorisable through the current btgrid):
 
     γ_ν^NP (CS-side):       lambda2_nu, lambda4_nu, lambda_inf_nu
     F_eff  (TMD-effective): lambda2, lambda4, lambda6, delta_lambda2, lambda_inf
 
-The np_model and np_model_nu strings are fixed at construction (from
-λ_central). All λ values are TF Variables — differentiable in the fit.
+λ_central is read from the fit-tensor's meta_info_input via the upstream
+SCETlib correction pkl (see :mod:`scetlib_lambda_central`). The np_model and
+np_model_nu strings are fixed at construction (from λ_central). All λ values
+are TF Variables — differentiable in the fit.
 """
 
 import json
@@ -79,6 +208,20 @@ _NONSING_DYTURBO_DEFAULT = os.path.join(
 GNU_PARAMS = ("lambda2_nu", "lambda4_nu", "lambda_inf_nu")
 EFF_PARAMS = ("lambda2", "lambda4", "lambda6", "delta_lambda2", "lambda_inf")
 ALL_PARAMS = GNU_PARAMS + EFF_PARAMS
+
+# Positivity floor for the per-bin reco ratio in compute() (see its docstring).
+# A pathological λ (e.g. λ4 < 0 with the bounded-tanh model) can drive σ_reco —
+# and hence the predicted signal yield — negative, which makes the Poisson NLL
+# NaN and stalls the minimizer. We soft-floor the ratio to a small positive value
+# so a bad point becomes a LARGE-BUT-FINITE penalty the fit can back off from,
+# with a non-zero gradient through the transition (softplus, not a hard clamp).
+#   RATIO_FLOOR_SCALE — softplus transition width. Chosen FAR below any physical
+#     response so healthy ratios (~0.9–1.1, and every validated λ-variation) pass
+#     through to machine precision: scale·softplus(r/scale) == r for r ≫ scale.
+#   RATIO_FLOOR_MIN — hard positive ground: softplus underflows to exactly 0 for
+#     the extreme (r ~ -1e43) case, so this keeps the yield strictly > 0 (no NaN).
+RATIO_FLOOR_SCALE = 1.0e-4
+RATIO_FLOOR_MIN = 1.0e-9
 
 
 # Theorist-recommended Gaussian prior widths for the SCETlib NP λ parameters.
@@ -298,7 +441,8 @@ class SCETlibNPParamModel(ParamModel):
             rabbit's input-data structure (passed by ``ph.load_models``).
         unfolding_hdf5_path
             Path to the upstream histmaker output containing
-            ``nominal_postfsr_yieldsUnfolding`` for R.
+            ``nominal_prefsr_yieldsUnfolding`` for R (and the ``prefsr`` xnorm
+            hist for N_gen) — see :mod:`response_matrix` for the defaults.
         btgrid_dir
             Directory of the SCETlib bT-grid shards (fineall).
         lambda_central
@@ -444,7 +588,7 @@ class SCETlibNPParamModel(ParamModel):
         N_gen = int(np.prod(self.gen_shape))
         # Raw response counts; normalized to a response below.
         self._R_raw = tf.constant(R_arr.reshape(N_reco, N_gen), dtype=fz_tf.DTYPE)
-        # Gen-total denominator N_gen(g) from the xnorm hist ("postfsr"): the
+        # Gen-total denominator N_gen(g) from the xnorm hist ("prefsr"): the
         # generated fiducial yield per gen bin (pre-reco-selection). Dividing R
         # by this gives the theory-independent efficiency×migration response.
         # Falls back to the σ_gen(λ_c) proxy if the gen-total isn't in the file.
@@ -485,10 +629,14 @@ class SCETlibNPParamModel(ParamModel):
         W_absY[:, Y_pos_mask] = 2.0 * absY_rebin_pos
         self.W_absY = tf.constant(W_absY, dtype=fz_tf.DTYPE)
 
-        # qT rebin: btgrid qT (signed nonneg, NqT=141) → ptVGen edges (e.g. 20 bins, 0-44).
-        # Anything past ptVGen_max is out of fit range; we drop it silently for now
-        # (events with gen qT > ptVGen_max are routed through R's overflow which is
-        # not present in our materialised R — see plan doc, dyturbo-handoff item).
+        # qT rebin: btgrid qT (signed nonneg, NqT=141) → ptVGen edges. When
+        # load_R was built with ptVGen_overflow=True (default), ptVGen_edges ends
+        # in the overflow bin [last_gen_edge, PTVGEN_OVERFLOW_EDGE] (e.g. [44, 100]),
+        # so rebin_weights' last row Simpson-integrates the btgrid tail qT∈(44,100]
+        # into that overflow gen bin — matching R's gen-overflow column (true qT>44
+        # migrating into the high-ptll reco bins). btgrid qT past the last edge
+        # (>100, beyond the grid) is dropped; negligible. Without the overflow
+        # column ptVGen_edges ends at 44 and that tail is simply truncated.
         self.W_ptVGen = tf.constant(
             fz_int.rebin_weights(self.qT_unique, ptVGen_edges, name="ptVGen"),
             dtype=fz_tf.DTYPE,
@@ -497,7 +645,7 @@ class SCETlibNPParamModel(ParamModel):
         # ---- Normalize the response, then cache σ_reco(λ_central).
         # A response matrix must encode only the gen→reco *mapping*, not the
         # MC's absolute gen spectrum. Normalize each gen column by the gen-total
-        # N_gen(g) (the xnorm "postfsr" hist — generated fiducial yield before
+        # N_gen(g) (the xnorm "prefsr" hist — generated fiducial yield before
         # reco selection) → P(b|g) = eff×migration (theory-independent):
         #     P(b|g)        = R_raw(b,g) / N_gen(g)
         #     σ_reco(λ;b)   = Σ_g P(b|g) · σ_gen(λ;g)
@@ -559,7 +707,11 @@ class SCETlibNPParamModel(ParamModel):
             self.sigma_ns = tf.constant(sigma_ns_np, dtype=fz_tf.DTYPE)
         else:
             self.sigma_ns = tf.zeros(self.gen_shape, dtype=fz_tf.DTYPE)
-        sigma_gen_central = self._sigma_gen_at(self.eff_central, self.gnu_central)
+        # Reuse the native (NY, NqT) integral already computed above for
+        # sigma_YqT_central — no need to run the bT reconstruction at λ_central twice.
+        sigma_gen_central = self._sigma_gen_at(
+            self.eff_central, self.gnu_central, sigma_YqT=self.sigma_YqT_central
+        )
         # The pure gen-level integral (NptVGen, NabsYVGen), BEFORE folding through
         # the response — used by the gen-level validation to test the integral
         # in isolation (no R).
@@ -575,6 +727,9 @@ class SCETlibNPParamModel(ParamModel):
         # Guard empty gen bins (no generated events): leave column at 0.
         safe_N_gen = tf.where(N_gen > 0, N_gen, tf.ones_like(N_gen))
         self.R = self._R_raw / safe_N_gen[tf.newaxis, :]  # P(b|g) = R_raw / N_gen
+        # Free the raw counts: only the normalized response self.R is used from
+        # here on (compute() never touches _R_raw) — no need to hold both.
+        del self._R_raw
         self.sigma_reco_central = tf.linalg.matvec(self.R, gen_flat)  # Σ_g P·σ_gen(λ_c)
         if tf.reduce_any(self.sigma_reco_central <= 0).numpy():
             n_bad = int(tf.reduce_sum(tf.cast(self.sigma_reco_central <= 0, tf.int32)))
@@ -593,6 +748,12 @@ class SCETlibNPParamModel(ParamModel):
             )
         self.signal_proc_idx = procs.index(signal_proc)
         self.nproc = indata.nproc
+        # Precompute the (1, N_proc) one-hot selecting the signal column, reused
+        # in every compute() to place the per-bin ratio (others stay at 1).
+        self._signal_col_mask = tf.reshape(
+            tf.one_hot(self.signal_proc_idx, self.nproc, dtype=indata.dtype),
+            [1, self.nproc],
+        )
 
         # ---- ParamModel registration (POIs first, then NOUs).
         poi_params = tuple(poi_params or ())
@@ -812,9 +973,15 @@ class SCETlibNPParamModel(ParamModel):
         # 3. Integrate over Q (arctan_Q² Simpson) → (NY, NqT).
         return fz_int.integrate_over_Q_tf(sigma_dense, self.Q_weights)
 
-    def _sigma_gen_at(self, eff_params, gnu_params):
-        """Evaluate σ_gen(λ) on R's gen binning. Returns shape (NptVGen, NabsYVGen)."""
-        sigma_YqT = self._sigma_YqT_native_at(eff_params, gnu_params)
+    def _sigma_gen_at(self, eff_params, gnu_params, sigma_YqT=None):
+        """Evaluate σ_gen(λ) on R's gen binning. Returns shape (NptVGen, NabsYVGen).
+
+        ``sigma_YqT`` lets a caller pass an already-computed native (NY, NqT)
+        integral to skip the (expensive) bT reconstruction — used at construction
+        to reuse ``self.sigma_YqT_central`` instead of integrating λ_central twice.
+        """
+        if sigma_YqT is None:
+            sigma_YqT = self._sigma_YqT_native_at(eff_params, gnu_params)
         # 4. Rebin Y (signed) → absYVGen (|Y|-folded): (NabsYVGen, NqT).
         sigma_absY_qT = fz_int.rebin_axis_tf(sigma_YqT, axis=0, weights=self.W_absY)
         # 5. Rebin qT → ptVGen: (NabsYVGen, NptVGen).
@@ -868,57 +1035,40 @@ class SCETlibNPParamModel(ParamModel):
 
         Shape: (N_reco, N_proc). Signal-proc column carries the per-reco-bin
         ratio σ_reco(λ; b) / σ_reco(λ_central; b); other columns are 1.
-        """
-        import time
 
-        t_start = time.perf_counter()
+        Positivity floor: the bT integral has no hard wall against pathological λ
+        (e.g. λ4 < 0 with the bounded-tanh models), which — via the b*-saturated,
+        hugely enhanced large-b region — can make σ_reco, and thus the predicted
+        signal yield, NEGATIVE. That would give a NaN Poisson NLL and a flat
+        gradient (tanh saturates), trapping the minimizer. We soft-floor the ratio
+        to a small positive value (RATIO_FLOOR_SCALE / RATIO_FLOOR_MIN) so a bad
+        point is a large-but-finite penalty with a usable gradient, NOT a crash.
+        The scale is far below any physical response, so the validated central and
+        λ-variation closures are unchanged (ratio == 1 at λ_central, to fp). This
+        is a numerical safety net, not a physics constraint — it does not stop the
+        fit from exploring negative-λ; it just keeps that exploration finite.
+        """
         eff_params, gnu_params = self._unpack_params(param)
         sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
         # Fold σ_gen(λ) through the normalized migration response P (self.R).
         gen_flat = tf.reshape(sigma_gen, [-1])
         sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
         ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
-
-        # Build (N_reco, N_proc) scaling: ones except signal column.
-        N_reco = int(self.sigma_reco_central.shape[0])
-        col_ones = tf.ones([N_reco, self.nproc], dtype=self.indata.dtype)
-        # Place ratio into the signal column.
-        ratio_col = tf.cast(tf.reshape(ratio, [N_reco, 1]), self.indata.dtype)
-        # mask: one-hot vector for signal_proc_idx.
-        mask = tf.one_hot(
-            self.signal_proc_idx, self.nproc, dtype=self.indata.dtype
-        )  # (N_proc,)
-        # rnorm = ones + (ratio - 1) * one_hot_signal
-        # → (ratio at signal col, 1 elsewhere)
-        rnorm = col_ones + (ratio_col - 1.0) * mask[tf.newaxis, :]
-
-        # ---- Diagnostic timing ----
-        if not hasattr(self, "_n_compute_calls"):
-            self._n_compute_calls = 0
-            self._t_compute_total = 0.0
-            import atexit
-
-            atexit.register(self._print_compute_summary)
-        self._n_compute_calls += 1
-        self._t_compute_total += time.perf_counter() - t_start
-        if self._n_compute_calls % 100 == 0:
-            n, t = self._n_compute_calls, self._t_compute_total
-            print(
-                f"[SCETlibNPParamModel] compute() running: {n} calls, "
-                f"total {t:.1f}s, mean {t*1000/n:.1f} ms/call",
-                flush=True,
-            )
-        return rnorm
-
-    def _print_compute_summary(self):
-        """Print final tally of compute() calls and time. Atexit hook."""
-        n = getattr(self, "_n_compute_calls", 0)
-        t = getattr(self, "_t_compute_total", 0.0)
-        if n == 0:
-            return
-        print(
-            f"[SCETlibNPParamModel] compute() FINAL: {n} calls, "
-            f"total {t:.2f}s wall in compute(), "
-            f"mean {t*1000/n:.2f} ms/call",
-            flush=True,
+        # Soft positivity floor (see docstring): scale·softplus(r/scale) ≈ r for
+        # healthy r and → 0⁺ smoothly for r ≤ 0; the max() with a tiny ground
+        # keeps it strictly positive even when softplus underflows (r ~ -1e43).
+        scale = tf.constant(RATIO_FLOOR_SCALE, dtype=ratio.dtype)
+        ratio = tf.maximum(
+            scale * tf.math.softplus(ratio / scale),
+            tf.constant(RATIO_FLOOR_MIN, dtype=ratio.dtype),
         )
+
+        # Build (N_reco, N_proc) scaling: 1 everywhere except the signal column,
+        # which carries the per-bin ratio. Broadcasting the precomputed (1, N_proc)
+        # one-hot avoids materializing a separate ones tensor / rebuilding one_hot.
+        ratio_col = tf.cast(
+            tf.reshape(ratio, [-1, 1]), self.indata.dtype
+        )  # (N_reco, 1)
+        rnorm = 1.0 + (ratio_col - 1.0) * self._signal_col_mask
+
+        return rnorm

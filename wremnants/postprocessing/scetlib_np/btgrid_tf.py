@@ -243,6 +243,11 @@ def reconstruct_batch_tf(
 ):
     """TF port of :func:`scetlib_btgrid_numpy.reconstruct_batch`.
 
+    Implements the per-(Q, Y, qT) bT-space integrand. The full formula with
+    every factor and its bare-bT / b*(bT) / (Q,Y,qT) / λ dependence is written
+    out once in the :mod:`param_model` module docstring (single source of
+    truth) — consult it rather than re-deriving the factors from this code.
+
     All array-shape arguments are TF tensors or numpy arrays (will be cast).
     The λ values inside ``eff_params`` / ``gnu_params`` are the differentiable
     parameters — pass them as TF scalars (Variables or constants).

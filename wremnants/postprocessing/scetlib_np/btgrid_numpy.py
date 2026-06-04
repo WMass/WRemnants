@@ -12,10 +12,11 @@
 # Provides:
 #   - Pure-numpy transcriptions of NP_model_effective (F_eff) and
 #     NP_model_gammanu (gamma_nu^NP) that match the C++ code byte-for-byte.
-#   - A vectorised Hankel reconstruction of sigma(qT) from a cached bT-grid:
-#         sigma(qT) ~  int dbT  bT  J0(qT bT) * I_pert(b_bar)
-#                              * exp(C_nu(bT) * gamma_nu^NP(b_bar))
-#                              * F_eff(Y, b_bar)
+#   - A vectorised Hankel reconstruction of sigma(qT) from a cached bT-grid.
+#     The full integrand — every factor and its bare-bT / b*(bT) / (Q,Y,qT) /
+#     lambda dependence — is written out ONCE in the module docstring of
+#     wremnants/postprocessing/scetlib_np/param_model.py (single source of
+#     truth). The reconstruct_* functions below implement it.
 #   - Loaders for the bT-grid pickle shards produced by --bt-grid and for the
 #     prior-art spectrum-mode "combined" pickles.
 #
