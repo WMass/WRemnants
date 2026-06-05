@@ -26,9 +26,9 @@ with PDF variations:
 python scripts/histmakers/histmaker_test.py \
     --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ \
     --era 2017G \
-    --filterProcs Zmumu_2017G \
+    --filterProcs Zmumu_2017G SingleMuon_2017G \
     --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas \
-                scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
+                 scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
 
 
 python rabbit/tests/new_make_tensor.py \
