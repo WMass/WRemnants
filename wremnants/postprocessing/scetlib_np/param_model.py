@@ -784,7 +784,8 @@ class SCETlibNPParamModel(ParamModel):
                 i = self._param_order.index(name)
                 defaults[i] = float(val)
             print(
-                f"[SCETlibNPParamModel] xparamdefault overridden: {dict(zip(self._param_order, defaults))}"
+                f"[SCETlibNPParamModel] xparamdefault overridden: {dict(zip(self._param_order, defaults))}",
+                flush=True,
             )
         # rabbit's set_param_default expects an internal-storage convention
         # where POIs (npoi entries) are SQRT(value) if not allowNegativeParam.

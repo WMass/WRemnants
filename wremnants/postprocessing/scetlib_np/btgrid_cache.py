@@ -64,7 +64,10 @@ def load(submitdir, rebuild=False, verbose=True):
         with open(combined, "rb") as f:
             grid = pickle.load(f)
         if verbose:
-            print(f"[btgrid_cache] loaded combined pickle in {time.time()-t0:.1f}s")
+            print(
+                f"[btgrid_cache] loaded combined pickle in {time.time()-t0:.1f}s",
+                flush=True,
+            )
         return grid
 
     if not shards:
