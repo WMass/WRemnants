@@ -19,8 +19,33 @@ logger = logging.child_logger(__name__)
 
 narf.clingutils.Declare('#include "muon_calibration.hpp"')
 narf.clingutils.Declare('#include "lowpu_utils.hpp"')
+narf.clingutils.Declare('#include "shift_smear_reweight_helpers.hpp"')
 
 data_dir = common.data_dir
+
+
+# Default ONNX model for the shift+smear-reweight uncertainty helpers
+# (mlp-factored architecture, muon_source-conditioned, single-file
+# inline-weights export). Produced by
+# scripts/corrections/muon_calibration/shift_smear_reweight_export.py.
+#
+# Two variants are bundled in wremnants-data: one trained on snapshots
+# built with the data/MC resolution-matching smearing helper applied to
+# the reco muon pt (the histmaker default), and one trained on the
+# un-smeared corrected pt. The network's reweight is conditioned on
+# whichever sample it learned on, so the right variant has to be
+# selected to match the kinematics the histmaker feeds in.
+def default_shift_smear_reweight_onnx(smearing=True):
+    """Return the path to the bundled shift+smear-reweight ONNX model
+    matching the chosen resolution-smearing setting. ``smearing=True``
+    (the histmaker default) returns the model trained on smeared reco
+    pt; pass ``smearing=False`` for the un-smeared variant.
+    """
+    suffix = "smearing" if smearing else "nosmearing"
+    return (
+        f"{data_dir}/calibration/"
+        f"shift_smear_reweight_mlp_factored_combined_{suffix}.onnx"
+    )
 
 
 def make_muon_calibration_helpers(
@@ -78,6 +103,7 @@ def make_jpsi_crctn_helpers(
     central=False,
     central_eta_min=-1.4,
     central_eta_max=1.4,
+    smearing=True,
 ):
     if muon_corr_mc in ["idealMC_massfit", "idealMC_lbltruth_massfit"]:
         mc_corrfile = calib_filepaths["mc_corrfile"][muon_corr_mc]
@@ -104,6 +130,7 @@ def make_jpsi_crctn_helpers(
                 central=central,
                 central_eta_min=central_eta_min,
                 central_eta_max=central_eta_max,
+                smearing=smearing,
             )
             if mc_corrfile
             else None
@@ -119,6 +146,7 @@ def make_jpsi_crctn_helpers(
                 central=central,
                 central_eta_min=central_eta_min,
                 central_eta_max=central_eta_max,
+                smearing=smearing,
             )
             if data_corrfile
             else None
@@ -130,12 +158,14 @@ def make_jpsi_crctn_helpers(
 
 
 def make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths):
+    smearing = not getattr(args, "noSmearing", False)
     parametrized_helper = (
         make_Z_non_closure_parametrized_helper(
             closure_filepaths["parametrized"],
             calib_filepaths["tflite_file"],
             correlated=args.correlatedNonClosureNP,
             scale_var_method=args.muonScaleVariation,
+            smearing=smearing,
             dummy_A=args.dummyNonClosureA,
             dummy_M=args.dummyNonClosureM,
             dummy_A_mag=args.dummyNonClosureAMag,
@@ -153,6 +183,7 @@ def make_Z_non_closure_helpers(args, calib_filepaths, closure_filepaths):
             calib_filepaths["tflite_file"],
             correlated=args.correlatedNonClosureNP,
             scale_var_method=args.muonScaleVariation,
+            smearing=smearing,
         )
         if (args.nonClosureScheme in ["binned", "binned-plus-M"])
         else None
@@ -298,7 +329,14 @@ def make_muon_smearing_helpers(
     filenamemc=f"{data_dir}/calibration/resolutionMC_LBL_JZ_deltaphim_Apr3.root",
     override_d=None,
     dummy_vars=False,
+    smearing=True,
+    scale_var_method="onnxReweight",
+    onnx_path=None,
+    onnx_nslots=None,
 ):
+    is_onnx = scale_var_method == "onnxReweight"
+    if is_onnx and onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     # this helper smears muon pT to match the resolution in data
 
     def load_res(filename):
@@ -415,9 +453,31 @@ def make_muon_smearing_helpers(
     hvar = narf.hist_to_pyroot_boost(hvar, tensor_rank=2)
 
     helper = ROOT.wrem.SmearingHelperParametrized[type(hnom)](ROOT.std.move(hnom))
-    helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[
-        type(hnom), type(hvar), nvar
-    ](helper, ROOT.std.move(hvar))
+    if is_onnx:
+        # ONNX-backed drop-in: same nominal smearer + ONNX-backed
+        # uncertainty helper.  The new uncertainty helper consumes gen
+        # kinematics in addition to reco -- see add_resolution_uncertainty
+        # for the matching column list.  All preprocessing (mean/std on
+        # y/c, std on u/σ) is baked into the ONNX, so the C++ helper
+        # passes everything in physical units and no preproc.json is
+        # needed at runtime.
+        n = (
+            int(onnx_nslots)
+            if onnx_nslots is not None
+            else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+        )
+        helper_var = ROOT.wrem.SmearingUncertaintyReweightHelper[
+            type(hnom), type(hvar), nvar
+        ](
+            helper,
+            ROOT.std.move(hvar),
+            str(onnx_path),
+            max(int(n), 1),
+        )
+    else:
+        helper_var = ROOT.wrem.SmearingUncertaintyHelperParametrized[
+            type(hnom), type(hvar), nvar
+        ](helper, ROOT.std.move(hvar))
 
     helper_var.tensor_axes = [axis_res_var]
 
@@ -437,15 +497,37 @@ def add_resolution_uncertainty(
     if smearing_uncertainty_helper is None:
         return df
 
-    df = df.Define(
-        "muonResolutionSyst_weights",
-        smearing_uncertainty_helper,
-        [
+    # The ONNX-backed helper needs the full gen-matched (reco/gen
+    # pt/η/φ/charge) tuple plus muon_source for the network's y/c.
+    # The analytic helper keeps its compact (recoPt, recoEta,
+    # response_weight) signature. Routing is by C++ class so it stays
+    # in sync with the helper type itself rather than a separate marker.
+    if _is_onnx_reweight_helper(smearing_uncertainty_helper):
+        df = _define_muon_source_for_onnx_helper(df, reco_sel_GF)
+        cols = [
+            f"{reco_sel_GF}_recoPt",
+            f"{reco_sel_GF}_recoEta",
+            f"{reco_sel_GF}_recoPhi",
+            f"{reco_sel_GF}_recoCharge",
+            f"{reco_sel_GF}_genPt",
+            f"{reco_sel_GF}_genEta",
+            f"{reco_sel_GF}_genPhi",
+            f"{reco_sel_GF}_genCharge",
+            f"{reco_sel_GF}_muon_source",
+            "nominal_weight",
+        ]
+    else:
+        cols = [
             f"{reco_sel_GF}_recoPt",
             f"{reco_sel_GF}_recoEta",
             f"{reco_sel_GF}_response_weight",
             "nominal_weight",
-        ],
+        ]
+
+    df = df.Define(
+        "muonResolutionSyst_weights",
+        smearing_uncertainty_helper,
+        cols,
     )
 
     var_axes = smearing_uncertainty_helper.tensor_axes
@@ -532,18 +614,111 @@ def make_jpsi_crctn_helper(filepath):
     return jpsi_crctn_helper
 
 
+def _define_muon_source_for_onnx_helper(df, reco_sel_GF):
+    """Define ``{reco_sel_GF}_muon_source`` — an ``RVec<int>`` of
+    ``Muon_genPartFlav`` values for the gen-matched reco muons,
+    needed by the ONNX-reweight helpers (Jpsi scale and resolution
+    uncertainty) as the per-muon class tag. The C++ helper applies
+    the post-mapping rule (``genPartFlav == 15 -> 15, else 1``) and
+    the ORT graph remaps the {1, 15, 443} integer codes to the
+    compact {-1, 0, +1} representation the network was trained on.
+
+    Guarded against multiple definition since both
+    ``add_resolution_uncertainty`` and ``add_jpsi_crctn_stats_unc_hists``
+    may want the column on the same dataframe.
+    """
+    col = f"{reco_sel_GF}_muon_source"
+    if col in df.GetColumnNames():
+        return df
+    return df.Define(
+        col,
+        f"ROOT::VecOps::RVec<int>(Muon_genPartFlav[{reco_sel_GF}])",
+    )
+
+
+_ONNX_REWEIGHT_HELPER_PREFIXES = (
+    "wrem::JpsiCorrectionsUncReweightHelper",
+    "wrem::SmearingUncertaintyReweightHelper",
+    "wrem::ZNonClosureParametrizedReweightHelper",
+    "wrem::ZNonClosureParametrizedReweightHelperCorl",
+    "wrem::ZNonClosureBinnedReweightHelper",
+    "wrem::ZNonClosureBinnedReweightHelperCorl",
+)
+
+
+def _is_onnx_reweight_helper(helper):
+    """True iff ``helper`` is one of the ONNX-backed reweight helpers
+    declared in ``shift_smear_reweight_helpers.hpp`` (which carry the
+    full reco+gen+φ kinematics through the trained network).  Used by
+    the Define call sites to switch column lists; ``False`` on the
+    analytic helpers and on anything else."""
+    name = type(helper).__cpp_name__ if helper is not None else ""
+    return any(name.startswith(p) for p in _ONNX_REWEIGHT_HELPER_PREFIXES)
+
+
+def jpsi_style_cols(df, helper, reco_sel_GF, response_weight_col):
+    """Return ``(df, cols)`` for calling a J/psi-style scale-uncertainty
+    helper (any of ``JpsiCorrectionsUncHelperSplines``, the new
+    ``JpsiCorrectionsUncReweightHelper``, the Z non-closure
+    parametrized / binned helpers (Splines / analytic / Reweight
+    variants) -- anything that takes a per-muon kinematic batch).
+
+    For ONNX-backed helpers returns the 9-element list (kinematics +
+    ``muon_source``) and defines the muon_source column on demand.
+    The network gives the full multiplicative reweight directly, so
+    the ``response_weight`` column is *not* consumed -- the spline
+    response-weight evaluation can be skipped entirely when every
+    consumer is ONNX-backed.
+
+    For the analytic Splines helper returns the 7-element list
+    including ``response_weight_col``.
+
+    In both cases the caller appends ``nominal_weight`` (and any flag
+    column such as ``AMFlag``) itself.
+    """
+    if _is_onnx_reweight_helper(helper):
+        df = _define_muon_source_for_onnx_helper(df, reco_sel_GF)
+        cols = [
+            f"{reco_sel_GF}_recoPt",
+            f"{reco_sel_GF}_recoEta",
+            f"{reco_sel_GF}_recoPhi",
+            f"{reco_sel_GF}_recoCharge",
+            f"{reco_sel_GF}_genPt",
+            f"{reco_sel_GF}_genEta",
+            f"{reco_sel_GF}_genPhi",
+            f"{reco_sel_GF}_genCharge",
+            f"{reco_sel_GF}_muon_source",
+        ]
+    else:
+        cols = [
+            f"{reco_sel_GF}_recoPt",
+            f"{reco_sel_GF}_recoEta",
+            f"{reco_sel_GF}_recoCharge",
+            f"{reco_sel_GF}_genPt",
+            f"{reco_sel_GF}_genEta",
+            f"{reco_sel_GF}_genCharge",
+            response_weight_col,
+        ]
+    return df, cols
+
+
 def make_jpsi_crctn_unc_helper(
     filepath_correction,
     scale_A=1.0,
     scale_e=1.0,
     scale_M=1.0,
     isW=True,
-    scale_var_method="smearingWeightsSplines",
+    scale_var_method="onnxReweight",
     include_covariance=True,
     central=False,
     central_eta_min=-1.4,
     central_eta_max=1.4,
+    smearing=True,
+    onnx_path=None,
+    onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("A")
@@ -656,10 +831,16 @@ def make_jpsi_crctn_unc_helper(
         helper = ROOT.wrem.JpsiCorrectionsUncHelper[
             type(hist_scale_params_unc_cpp).__cpp_name__
         ](ROOT.std.move(hist_scale_params_unc_cpp))
-    elif scale_var_method == "smearingWeightsSplines":
-        helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
-            type(hist_scale_params_unc_cpp).__cpp_name__
-        ](ROOT.std.move(hist_scale_params_unc_cpp))
+    elif scale_var_method in ("smearingWeightsSplines", "onnxReweight"):
+        # Both routes share the same boost-histogram input and the same
+        # ``out_tensor_t`` shape; only the per-muon evaluation differs.
+        # See ``_make_jpsi_style_unc_helper``.
+        helper = _make_jpsi_style_unc_helper(
+            hist_scale_params_unc_cpp,
+            scale_var_method,
+            onnx_path,
+            onnx_nslots,
+        )
     elif scale_var_method == "massWeights":
         nweights = 21 if isW else 23
         helper = ROOT.wrem.JpsiCorrectionsUncHelper_massWeights[
@@ -714,7 +895,46 @@ def make_dummy_closure_uncertainty_helper(neta=24, etalow=-2.4, etahigh=2.4):
     return helper
 
 
-def make_closure_uncertainty_helper(filepath_correction):
+def _make_jpsi_style_unc_helper(
+    hist_scale_params_unc_cpp,
+    scale_var_method,
+    onnx_path,
+    onnx_nslots,
+):
+    """Instantiate a J/psi-style scale-uncertainty helper from a packed
+    ``[eta × scale_params × unc]`` boost histogram.
+
+    Closure-uncertainty and J/psi-stats-uncertainty share this final
+    instantiation step -- only the histogram contents differ. Routing to
+    the ONNX-backed ``JpsiCorrectionsUncReweightHelper`` vs. the analytic
+    ``JpsiCorrectionsUncHelperSplines`` is identical in both cases.
+    """
+    type_str = type(hist_scale_params_unc_cpp).__cpp_name__
+    if scale_var_method == "onnxReweight":
+        n = (
+            int(onnx_nslots)
+            if onnx_nslots is not None
+            else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+        )
+        return ROOT.wrem.JpsiCorrectionsUncReweightHelper[type_str](
+            ROOT.std.move(hist_scale_params_unc_cpp),
+            str(onnx_path),
+            max(int(n), 1),
+        )
+    return ROOT.wrem.JpsiCorrectionsUncHelperSplines[type_str](
+        ROOT.std.move(hist_scale_params_unc_cpp),
+    )
+
+
+def make_closure_uncertainty_helper(
+    filepath_correction,
+    scale_var_method="onnxReweight",
+    smearing=True,
+    onnx_path=None,
+    onnx_nslots=None,
+):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
 
     f = ROOT.TFile.Open(filepath_correction)
     A = f.Get("AZ")
@@ -791,15 +1011,27 @@ def make_closure_uncertainty_helper(filepath_correction):
         hist_scale_params_unc, tensor_rank=2
     )
 
-    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
-        type(hist_scale_params_unc_cpp).__cpp_name__
-    ](ROOT.std.move(hist_scale_params_unc_cpp))
+    helper = _make_jpsi_style_unc_helper(
+        hist_scale_params_unc_cpp,
+        scale_var_method,
+        onnx_path,
+        onnx_nslots,
+    )
 
     helper.tensor_axes = (hist_scale_params_unc.axes["unc"], binning.down_up_axis)
     return helper
 
 
-def make_uniform_closure_uncertainty_helper(iparm=0, val=1e-5):
+def make_uniform_closure_uncertainty_helper(
+    iparm=0,
+    val=1e-5,
+    scale_var_method="onnxReweight",
+    smearing=True,
+    onnx_path=None,
+    onnx_nslots=None,
+):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     nvars = 1
     n_scale_params = 3
 
@@ -820,9 +1052,12 @@ def make_uniform_closure_uncertainty_helper(iparm=0, val=1e-5):
         hist_scale_params_unc, tensor_rank=2
     )
 
-    helper = ROOT.wrem.JpsiCorrectionsUncHelperSplines[
-        type(hist_scale_params_unc_cpp).__cpp_name__
-    ](ROOT.std.move(hist_scale_params_unc_cpp))
+    helper = _make_jpsi_style_unc_helper(
+        hist_scale_params_unc_cpp,
+        scale_var_method,
+        onnx_path,
+        onnx_nslots,
+    )
 
     helper.tensor_axes = (hist_scale_params_unc.axes["unc"], binning.down_up_axis)
     return helper
@@ -834,12 +1069,17 @@ def make_Z_non_closure_parametrized_helper(
     n_eta_bins=24,
     n_scale_params=3,
     correlated=False,
-    scale_var_method="smearingWeightsSplines",
+    scale_var_method="onnxReweight",
+    smearing=True,
+    onnx_path=None,
+    onnx_nslots=None,
     dummy_A=True,
     dummy_M=False,
     dummy_A_mag=7.5e-5,
     dummy_M_mag=0,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     f = uproot.open(filepath_correction)
     M = f["MZ"].to_hist()
     A = f["AZ"].to_hist()
@@ -858,25 +1098,54 @@ def make_Z_non_closure_parametrized_helper(
         hist_non_closure.view()[..., 2] = M.values()
 
     hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure, tensor_rank=1)
+    type_str = type(hist_non_closure_cpp).__cpp_name__
+    is_onnx = scale_var_method == "onnxReweight"
+    is_splines = scale_var_method == "smearingWeightsSplines"
     if correlated:
-        if scale_var_method == "smearingWeightsSplines":
+        if is_onnx:
+            n = (
+                int(onnx_nslots)
+                if onnx_nslots is not None
+                else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+            )
+            z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedReweightHelperCorl[
+                type_str, n_eta_bins
+            ](
+                ROOT.std.move(hist_non_closure_cpp),
+                str(onnx_path),
+                max(int(n), 1),
+            )
+        elif is_splines:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplinesCorl[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+                type_str, n_eta_bins
             ](ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperCorl[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+                type_str, n_eta_bins
             ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = tuple([binning.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == "smearingWeightsSplines":
+        if is_onnx:
+            n = (
+                int(onnx_nslots)
+                if onnx_nslots is not None
+                else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+            )
+            z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedReweightHelper[
+                type_str, n_eta_bins
+            ](
+                ROOT.std.move(hist_non_closure_cpp),
+                str(onnx_path),
+                max(int(n), 1),
+            )
+        elif is_splines:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelperSplines[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+                type_str, n_eta_bins
             ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureParametrizedHelper[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins
+                type_str, n_eta_bins
             ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = (
             hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name="unc"),
@@ -891,27 +1160,62 @@ def make_Z_non_closure_binned_helper(
     n_eta_bins=24,
     n_pt_bins=5,
     correlated=False,
-    scale_var_method="smearingWeightsSplines",
+    scale_var_method="onnxReweight",
+    smearing=True,
+    onnx_path=None,
+    onnx_nslots=None,
 ):
+    if onnx_path is None:
+        onnx_path = default_shift_smear_reweight_onnx(smearing=smearing)
     f = uproot.open(filepath_correction)
 
     # TODO: convert variable axis to regular if the bin width is uniform
     hist_non_closure = f["closure"].to_hist()
     hist_non_closure_cpp = narf.hist_to_pyroot_boost(hist_non_closure)
+    type_str = type(hist_non_closure_cpp).__cpp_name__
+    is_onnx = scale_var_method == "onnxReweight"
+    is_splines = scale_var_method == "smearingWeightsSplines"
     if correlated:
-        z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperCorl[
-            type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
-        ](ROOT.std.move(hist_non_closure_cpp))
+        if is_onnx:
+            n = (
+                int(onnx_nslots)
+                if onnx_nslots is not None
+                else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+            )
+            z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedReweightHelperCorl[
+                type_str, n_eta_bins, n_pt_bins
+            ](
+                ROOT.std.move(hist_non_closure_cpp),
+                str(onnx_path),
+                max(int(n), 1),
+            )
+        else:
+            z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperCorl[
+                type_str, n_eta_bins, n_pt_bins
+            ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = tuple([binning.down_up_axis])
         return z_non_closure_helper
     else:
-        if scale_var_method == "smearingWeightsSplines":
+        if is_onnx:
+            n = (
+                int(onnx_nslots)
+                if onnx_nslots is not None
+                else (ROOT.GetThreadPoolSize() if ROOT.IsImplicitMTEnabled() else 1)
+            )
+            z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedReweightHelper[
+                type_str, n_eta_bins, n_pt_bins
+            ](
+                ROOT.std.move(hist_non_closure_cpp),
+                str(onnx_path),
+                max(int(n), 1),
+            )
+        elif is_splines:
             z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelperSplines[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
+                type_str, n_eta_bins, n_pt_bins
             ](filepath_tflite, ROOT.std.move(hist_non_closure_cpp))
         else:
             z_non_closure_helper = ROOT.wrem.ZNonClosureBinnedHelper[
-                type(hist_non_closure_cpp).__cpp_name__, n_eta_bins, n_pt_bins
+                type_str, n_eta_bins, n_pt_bins
             ](ROOT.std.move(hist_non_closure_cpp))
         z_non_closure_helper.tensor_axes = (
             hist.axis.Regular(n_eta_bins, 0, n_eta_bins, name="unc_ieta"),
@@ -1271,10 +1575,7 @@ def add_jpsi_crctn_stats_unc_hists(
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 scale_var_method="smearingWeightsGaus",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )
         df = df.Define(
             "muonScaleSyst_responseWeights_tensor_gaus",
@@ -1312,24 +1613,18 @@ def add_jpsi_crctn_stats_unc_hists(
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 scale_var_method="smearingWeightsSplines",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )
+        df, splines_cols = jpsi_style_cols(
+            df,
+            jpsi_unc_helper,
+            reco_sel_GF,
+            f"{reco_sel_GF}_response_weight",
+        )
         df = df.Define(
             "muonScaleSyst_responseWeights_tensor_splines",
             jpsi_unc_helper,
-            [
-                f"{reco_sel_GF}_recoPt",
-                f"{reco_sel_GF}_recoEta",
-                f"{reco_sel_GF}_recoCharge",
-                f"{reco_sel_GF}_genPt",
-                f"{reco_sel_GF}_genEta",
-                f"{reco_sel_GF}_genCharge",
-                f"{reco_sel_GF}_response_weight",
-                "nominal_weight",
-            ],
+            [*splines_cols, "nominal_weight"],
         )
         if args.validationHists:
             muonScaleSyst_responseWeights_splines = df.HistoBoost(
@@ -1341,17 +1636,44 @@ def add_jpsi_crctn_stats_unc_hists(
             )
             results.append(muonScaleSyst_responseWeights_splines)
 
+    if args.muonScaleVariation == "onnxReweight" or args.validationHists:
+        if args.muonScaleVariation == "onnxReweight":
+            jpsi_unc_helper = jpsi_crctn_data_unc_helper
+        else:
+            jpsi_unc_helper = make_jpsi_crctn_unc_helper(
+                calib_filepaths["data_corrfile"][args.muonCorrData],
+                scale_var_method="onnxReweight",
+                smearing=not getattr(args, "noSmearing", False),
+            )
+        df, onnx_cols = jpsi_style_cols(
+            df,
+            jpsi_unc_helper,
+            reco_sel_GF,
+            f"{reco_sel_GF}_response_weight",
+        )
+        df = df.Define(
+            "muonScaleSyst_responseWeights_tensor_onnx",
+            jpsi_unc_helper,
+            [*onnx_cols, "nominal_weight"],
+        )
+        if args.validationHists:
+            muonScaleSyst_responseWeights_onnx = df.HistoBoost(
+                "muonScaleSyst_responseWeights_onnx",
+                axes,
+                [*nominal_cols, "muonScaleSyst_responseWeights_tensor_onnx"],
+                tensor_axes=jpsi_unc_helper.tensor_axes,
+                storage=hist.storage.Double(),
+            )
+            results.append(muonScaleSyst_responseWeights_onnx)
+
     if args.muonScaleVariation == "massWeights" or args.validationHists:
         if args.muonScaleVariation == "massWeights" and isW:
             jpsi_unc_helper = jpsi_crctn_data_unc_helper
         else:
             jpsi_unc_helper = make_jpsi_crctn_unc_helper(
                 calib_filepaths["data_corrfile"][args.muonCorrData],
-                calib_filepaths["tflite_file"],
                 isW=isW,
                 scale_var_method="massWeights",
-                dummy_mu_scale_var=args.dummyMuScaleVar,
-                dummy_var_mag=args.muonCorrMag,
             )  # need to make a new massweights helper due to different nweights for Z and W
         df = df.Define(
             "muonScaleSyst_responseWeights_tensor_massWeights",
@@ -1389,6 +1711,11 @@ def add_jpsi_crctn_stats_unc_hists(
                 "nominal_muonScaleSyst_responseWeights_tensor",
                 "muonScaleSyst_responseWeights_tensor_massWeights",
             )
+        elif args.muonScaleVariation == "onnxReweight":
+            df = df.Define(
+                "nominal_muonScaleSyst_responseWeights_tensor",
+                "muonScaleSyst_responseWeights_tensor_onnx",
+            )
         nominal_muonScaleSyst_responseWeights = df.HistoBoost(
             "nominal_muonScaleSyst_responseWeights",
             axes,
@@ -1412,7 +1739,17 @@ def add_jpsi_crctn_Z_non_closure_hists(
     reco_sel_GF,
     storage_type=hist.storage.Double(),
 ):
-    if args.muonScaleVariation == "smearingWeightsSplines":
+    if _is_onnx_reweight_helper(
+        z_non_closure_parametrized_helper
+    ) or _is_onnx_reweight_helper(z_non_closure_binned_helper):
+        df, input_kinematics = jpsi_style_cols(
+            df,
+            z_non_closure_parametrized_helper or z_non_closure_binned_helper,
+            reco_sel_GF,
+            f"{reco_sel_GF}_response_weight",
+        )
+        nominal_cols_non_closure = nominal_cols
+    elif args.muonScaleVariation == "smearingWeightsSplines":
         input_kinematics = [
             f"{reco_sel_GF}_recoPt",
             f"{reco_sel_GF}_recoEta",

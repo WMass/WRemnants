@@ -1,3 +1,6 @@
+#ifndef WREM_MUON_CALIBRATION_H
+#define WREM_MUON_CALIBRATION_H
+
 #include <Math/GenVector/PtEtaPhiM4D.h>
 #include <ROOT/RVec.hxx>
 #include <TFile.h>
@@ -1716,16 +1719,19 @@ public:
 
       const double qop = charge / pt / std::cosh(eta);
 
-      const double dsigma = sigmarel_ * qop;
+      // ``sigmarel_ * qop`` is signed (qop is negative for q<0); std::normal_distribution
+      // requires stddev > 0. Sigmarel == 0 (legitimate "no smearing") collapses
+      // to a δ-function -- pass pt through unchanged in that case.
+      const double dsigma = std::abs(sigmarel_ * qop);
 
-      std::normal_distribution gaus{qop, dsigma};
-
-      const double qopout = gaus(rng_[slot]);
-      const double pout = std::fabs(1. / qopout);
-
-      const double ptout = pout / std::cosh(eta);
-
-      res.emplace_back(ptout);
+      if (dsigma > 0.) {
+        std::normal_distribution gaus{qop, dsigma};
+        const double qopout = gaus(rng_[slot]);
+        const double pout = std::fabs(1. / qopout);
+        res.emplace_back(pout / std::cosh(eta));
+      } else {
+        res.emplace_back(pt);
+      }
     }
 
     return res;
@@ -1761,14 +1767,19 @@ public:
 
       const double qop = charge / pt / std::cosh(eta);
 
+      // std::normal_distribution requires stddev > 0. Sigmarel == 0
+      // collapses to a δ-function -- emit N copies of qop in that case.
       const double dsigma = std::abs(sigmarel_ * qop);
 
-      std::normal_distribution gaus{qop, dsigma};
-
-      for (std::size_t irep = 0; irep < N; ++irep) {
-        const double qopout = gaus(rng);
-
-        res.emplace_back(qopout);
+      if (dsigma > 0.) {
+        std::normal_distribution gaus{qop, dsigma};
+        for (std::size_t irep = 0; irep < N; ++irep) {
+          res.emplace_back(gaus(rng));
+        }
+      } else {
+        for (std::size_t irep = 0; irep < N; ++irep) {
+          res.emplace_back(qop);
+        }
       }
     }
 
@@ -2095,3 +2106,5 @@ private:
 };
 
 } // namespace wrem
+
+#endif

@@ -176,17 +176,35 @@ def makeFilelist(
 def getDataPath():
     import socket
 
-    hostname = socket.gethostname()
+    # Explicit override wins (containers, custom mounts, CI runners).
+    base_path = os.environ.get("WREMNANTS_DATA_PATH")
+    if base_path:
+        return base_path
 
-    if hostname.endswith(".cern.ch"):
+    # In containers ``gethostname()`` returns just the short container
+    # ID, so also check the FQDN via reverse-DNS — that's usually the
+    # real ``<host>.cern.ch`` even from inside a Singularity image.
+    short = socket.gethostname()
+    fqdn = socket.getfqdn()
+    names = (short, fqdn)
+
+    if any(n.endswith(".cern.ch") for n in names):
         base_path = "/scratch/shared/NanoAOD"
-    elif hostname.endswith(".mit.edu"):
+    elif any(n.endswith(".mit.edu") for n in names):
         base_path = "/scratch/submit/cms/wmass/NanoAOD"
-    elif hostname == "cmsanalysis.pi.infn.it":
+    elif "cmsanalysis.pi.infn.it" in names:
         # NOTE: If anyone wants to run lowpu analysis at Pisa they'd probably want a different path
         base_path = "/scratchnvme/wmass/NANOV9/postVFP"
-    elif hostname == "cmsasymow.pi.infn.it":
+    elif "cmsasymow.pi.infn.it" in names:
         base_path = "/scratch/wmass/y2016"
+    else:
+        raise RuntimeError(
+            f"getDataPath: no default NanoAOD location for host "
+            f"{short!r} (fqdn={fqdn!r}). Set the WREMNANTS_DATA_PATH "
+            f"environment variable, pass base_path= to "
+            f"getDatasets(), or add this host to "
+            f"dataset_tools.getDataPath()."
+        )
     return base_path
 
 
