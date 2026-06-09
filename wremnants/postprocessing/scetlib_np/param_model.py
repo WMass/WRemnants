@@ -169,6 +169,61 @@ The 8 v1 parameters λ (all factorisable through the current btgrid):
 SCETlib correction pkl (see :mod:`scetlib_lambda_central`). The np_model and
 np_model_nu strings are fixed at construction (from λ_central). All λ values
 are TF Variables — differentiable in the fit.
+
+═════════════════════════════════════════════════════════════════════════════
+Getting the postfit Hessian / covariance (uncertainties on λ)
+═════════════════════════════════════════════════════════════════════════════
+
+The fit floats λ fine, but rabbit's postfit covariance step
+``loss_val_grad_hess`` → ``t2.jacobian(grad, x)`` differentiates through the bT
+fold once per fit parameter (~3754). pfor cannot see that the fold depends on
+the parameters only through the ≤8 λ, so it re-materializes the internal
+(Ng × Nbt) ≈ 8.75 GB bT slab for EVERY parameter → ~33 TB → OOM.
+
+Fix (this module): a "straight-through" surrogate that keeps the exact ratio
+VALUE but exposes only a compact quadratic in the ≤8 λ to autodiff:
+
+    ratio~(λ) = stop_gradient(ratio) + J·d + ½ dᵀ K d ,   d = λ − stop_gradient(λ)
+
+with J = dratio/dλ ([Nreco, nλ]) and K = d²ratio/dλ² ([Nreco, nλ, nλ]) computed
+by forward-mode AD (≤8 / ≤64 fold passes, NOT tiled). d is identically 0 so the
+value is unchanged, but ∂d/∂λ = I, so ∂ratio~/∂λ = J and ∂²ratio~/∂λ² = K:
+rabbit's jacobian gets the exact derivatives while the big slab stays inside
+stop_gradient and never enters the differentiated graph (33 TB → a few MB).
+Implemented in ``_ratio_straightthrough`` (+ ``_ratio_compact_jac``,
+``_ratio_compact_hess``); selected in ``compute()`` by env flags. Full
+derivation + validation in ``HESSIAN_PLAN.md``.
+
+Two-pass recipe (rabbit still computes the Hessian; NO rabbit changes):
+
+  1. Fit, no Hessian → postfit:
+       rabbit_fit.py <FIT> --paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel <UNFOLD> <BTGRID> \
+           --noHessian -o fit/
+
+  2. Covariance at that postfit (no refit), straight-through ON:
+       SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH=1 SCETLIB_NP_HESSIAN_GN=1 \
+       rabbit_fit.py <FIT> --paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel <UNFOLD> <BTGRID> \
+           --externalPostfit fit/fitresults.hdf5 --externalPostfitResult nominal \
+           --noFit -t 0 --pseudoData nominal -o cov/
+     (do NOT pass --noHessian; do NOT pass --eager.) ~5 min, no OOM.
+     Uncertainties are sqrt(diag(cov)) in cov/fitresults.hdf5 (results_nominal).
+
+Env flags (both OFF by default → the fit path is unchanged):
+  SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH=1  use the straight-through path in compute()
+  SCETLIB_NP_HESSIAN_GN=1               Gauss-Newton: keep J only, drop the K term
+
+GN vs full-K. The Poisson Hessian is
+    H_ij = Σ_b [ (n_b/μ_b²) J_bi J_bj  +  (1 − n_b/μ_b) K_bij ].
+For ASIMOV data the residual (1 − n/μ) = 0, so the K term vanishes and GN (J
+only) is EXACT. For real/toy data K is needed for the exact Hessian — but the
+nested-forward-mode K (``_ratio_compact_hess``) currently CRASHES under rabbit's
+@tf.function (the tf.where in ``_safe_div``) and is impractically slow under
+--eager, so GN (the recipe above) is the working production path today. See
+HESSIAN_PLAN.md §9 for the open K item and its fixes.
+
+WARNING: keep SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH UNSET during the FIT. The
+surrogate recomputes J(/K) on every compute() call — fine for the one-shot
+covariance pass, but it would cripple the minimizer (many gradient/HVP evals).
 """
 
 import json
@@ -203,6 +258,51 @@ _NONSING_DYTURBO_DEFAULT = os.path.join(
     "TheoryCorrections",
     "results_z-2d-nnlo-vj-CT18ZNNLO-{scale}-scetlibmatch.txt",
 )
+
+# Default fit inputs, so collaborators can run
+# ``--paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel`` with no
+# extra positional args. Passing the two positional args explicitly still wins.
+#
+# The unfolding response lives in wremnants-data (a skim of only the two hists
+# load_R reads — ``nominal_prefsr_yieldsUnfolding`` + ``prefsr`` — 6.8 GB → 211 MB;
+# made with scripts/inspect/open_narf_h5py.py). Resolved via wrem_common.data_dir.
+_UNFOLDING_HDF5_DEFAULT = os.path.join(
+    wrem_common.data_dir,
+    "TheoryCorrections",
+    "scetlib_np",
+    "mz_dilepton_unfolding_R_skim.hdf5",
+)
+# The bT-grid combined pickle is ~17.5 GB (two [Nbins×Nbt] float64 slabs: I_pert
+# and C_nu) — too large for wremnants-data/git-LFS — so it lives on the shared
+# data area next to NanoAOD, as a sibling of NanoAOD under the data base. We
+# resolve the NanoAOD base by REPLICATING dataset_tools.getDataPath()'s hostname
+# logic rather than importing it: that module does ``import ROOT`` / ``import narf``
+# at module scope (and wremnants.production.__init__ runs ROOT.gInterpreter +
+# narf.clingutils.Load), which segfaults when imported mid-fit (after TF is up).
+# Only the subMIT copy exists today — pass btgrid_dir explicitly at other sites.
+_BTGRID_SUBDIR = ("scetlib_np", "Z_COM13_CT18Z_N3p0LL_btgrid_fineall")
+
+
+def _nano_data_base():
+    """NanoAOD base dir per host — mirrors dataset_tools.getDataPath() WITHOUT
+    importing it (that import pulls ROOT/narf; see note above). Falls back to the
+    subMIT path on unknown hosts (the only site with the grid today)."""
+    import socket
+
+    hostname = socket.gethostname()
+    if hostname.endswith(".cern.ch"):
+        return "/scratch/shared/NanoAOD"
+    if hostname == "cmsanalysis.pi.infn.it":
+        return "/scratchnvme/wmass/NANOV9/postVFP"
+    if hostname == "cmsasymow.pi.infn.it":
+        return "/scratch/wmass/y2016"
+    # .mit.edu and any unknown host -> subMIT shared scratch
+    return "/scratch/submit/cms/wmass/NanoAOD"
+
+
+def _default_btgrid_dir():
+    return os.path.join(os.path.dirname(_nano_data_base()), *_BTGRID_SUBDIR)
+
 
 # Ordered list of the v1 continuous λ. CS-side first, then TMD-effective.
 GNU_PARAMS = ("lambda2_nu", "lambda4_nu", "lambda_inf_nu")
@@ -419,8 +519,8 @@ class SCETlibNPParamModel(ParamModel):
     def __init__(
         self,
         indata,
-        unfolding_hdf5_path: str,
-        btgrid_dir: str,
+        unfolding_hdf5_path: Optional[str] = None,
+        btgrid_dir: Optional[str] = None,
         lambda_central: Optional[Mapping] = None,
         signal_proc: str = "Zmumu",
         Q_lo: float = 60.0,
@@ -443,8 +543,15 @@ class SCETlibNPParamModel(ParamModel):
             Path to the upstream histmaker output containing
             ``nominal_prefsr_yieldsUnfolding`` for R (and the ``prefsr`` xnorm
             hist for N_gen) — see :mod:`response_matrix` for the defaults.
+            Defaults (when None) to the skim shipped in wremnants-data
+            (``_UNFOLDING_HDF5_DEFAULT``); pass explicitly to override.
         btgrid_dir
-            Directory of the SCETlib bT-grid shards (fineall).
+            Directory holding the SCETlib bT-grid ``combined_btgrid.pkl``.
+            Defaults (when None) to the shared data-area copy next to NanoAOD
+            (``_default_btgrid_dir()``, which mirrors
+            ``dataset_tools.getDataPath()``'s per-host logic without importing it —
+            that import pulls ROOT/narf and segfaults mid-fit); pass explicitly at
+            non-subMIT sites.
         lambda_central
             Dict with two sub-dicts ``eff_params`` and ``gnu_params`` (same
             shape as returned by :func:`scetlib_lambda_central.read_lambda_central`).
@@ -482,6 +589,15 @@ class SCETlibNPParamModel(ParamModel):
         self.indata = indata
 
         # ---- Double-counting guard
+        # Resolve default inputs so collaborators can run with no extra
+        # --paramModel positional args (explicit args still override). The
+        # unfolding skim ships in wremnants-data; the big bT-grid lives on the
+        # shared data area next to NanoAOD (see _default_btgrid_dir).
+        if unfolding_hdf5_path is None:
+            unfolding_hdf5_path = _UNFOLDING_HDF5_DEFAULT
+        if btgrid_dir is None:
+            btgrid_dir = _default_btgrid_dir()
+
         # If the histmaker baked discrete NP κ-template variations into the
         # input HDF5, those systs describe the same physics as our continuous
         # λ POUs. Running both → double-counting (the discrete syst absorbs
@@ -1031,6 +1147,82 @@ class SCETlibNPParamModel(ParamModel):
                 raise KeyError(name)
         return eff_params, gnu_params
 
+    # =========================================================================
+    # ratio(λ) and the straight-through compact-derivative path (Hessian Phase B)
+    # =========================================================================
+
+    def _ratio_from_param(self, param):
+        """λ (full param vector) → floored per-reco-bin ratio, shape (N_reco,).
+
+        The differentiable map that the straight-through Hessian path wraps. The
+        soft positivity floor (see ``compute``) lives here so both the normal and
+        straight-through paths apply it identically.
+        """
+        eff_params, gnu_params = self._unpack_params(param)
+        sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
+        gen_flat = tf.reshape(sigma_gen, [-1])
+        sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
+        ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
+        scale = tf.constant(RATIO_FLOOR_SCALE, dtype=ratio.dtype)
+        ratio = tf.maximum(
+            scale * tf.math.softplus(ratio / scale),
+            tf.constant(RATIO_FLOOR_MIN, dtype=ratio.dtype),
+        )
+        return ratio
+
+    def _ratio_compact_jac(self, param):
+        """J = d(ratio)/d(param), shape (N_reco, nparam), via forward-mode AD.
+
+        One JVP per parameter (nparam ≤ 8), each a single bT-fold pass — NOT
+        tiled over params. This is the compact object the Hessian actually needs
+        from the fold (see HESSIAN_PLAN.md §2)."""
+        n = int(param.shape[0])
+        cols = []
+        for i in range(n):
+            tangent = tf.one_hot(i, n, dtype=param.dtype)
+            with tf.autodiff.ForwardAccumulator(param, tangent) as acc:
+                r = self._ratio_from_param(param)
+            cols.append(acc.jvp(r))  # (N_reco,) = dratio/dparam_i
+        return tf.stack(cols, axis=1)  # (N_reco, nparam)
+
+    def _ratio_compact_hess(self, param):
+        """K = d²(ratio)/d(param)², shape (N_reco, nparam, nparam), forward-over-forward.
+
+        nparam² JVP-of-JVP passes (≤ 64), each one bT-fold pass — never tiled."""
+        n = int(param.shape[0])
+        rows = []
+        for i in range(n):
+            ti = tf.one_hot(i, n, dtype=param.dtype)
+            cols = []
+            for j in range(n):
+                tj = tf.one_hot(j, n, dtype=param.dtype)
+                with tf.autodiff.ForwardAccumulator(param, tj) as acc_j:
+                    with tf.autodiff.ForwardAccumulator(param, ti) as acc_i:
+                        r = self._ratio_from_param(param)
+                    di = acc_i.jvp(r)  # (N_reco,)
+                cols.append(acc_j.jvp(di))  # (N_reco,) = d²ratio/dparam_i dparam_j
+            rows.append(tf.stack(cols, axis=1))  # (N_reco, nparam) over j
+        return tf.stack(rows, axis=2)  # (N_reco, j, i) — symmetric in (i, j)
+
+    def _ratio_straightthrough(self, param, use_curvature=True):
+        """Exact ratio value, but autodiff sees only a compact quadratic in the
+        ≤8 λ (J, and optionally K) — so the (N_grid, N_bt) bT slab never enters
+        the differentiated graph and rabbit's covariance jacobian does not OOM.
+
+        At the evaluation point (d = 0) the value is exact, the 1st derivative is
+        J, and the 2nd derivative is K. ``use_curvature=False`` keeps only J
+        (Gauss-Newton / Fisher — exact for Asimov data, 8 vs 72 fold passes).
+        """
+        val = self._ratio_from_param(param)
+        J = tf.stop_gradient(self._ratio_compact_jac(param))  # (N_reco, nparam)
+        d = param - tf.stop_gradient(param)  # value 0, unit gradient
+        d = tf.cast(d, J.dtype)
+        out = tf.stop_gradient(val) + tf.linalg.matvec(J, d)
+        if use_curvature:
+            K = tf.stop_gradient(self._ratio_compact_hess(param))  # (N_reco, n, n)
+            out = out + 0.5 * tf.einsum("rij,i,j->r", K, d, d)
+        return out
+
     def compute(self, param, full=False):
         """Return per-(bin, proc) scaling tensor.
 
@@ -1049,20 +1241,21 @@ class SCETlibNPParamModel(ParamModel):
         is a numerical safety net, not a physics constraint — it does not stop the
         fit from exploring negative-λ; it just keeps that exploration finite.
         """
-        eff_params, gnu_params = self._unpack_params(param)
-        sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
-        # Fold σ_gen(λ) through the normalized migration response P (self.R).
-        gen_flat = tf.reshape(sigma_gen, [-1])
-        sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
-        ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
-        # Soft positivity floor (see docstring): scale·softplus(r/scale) ≈ r for
-        # healthy r and → 0⁺ smoothly for r ≤ 0; the max() with a tiny ground
-        # keeps it strictly positive even when softplus underflows (r ~ -1e43).
-        scale = tf.constant(RATIO_FLOOR_SCALE, dtype=ratio.dtype)
-        ratio = tf.maximum(
-            scale * tf.math.softplus(ratio / scale),
-            tf.constant(RATIO_FLOOR_MIN, dtype=ratio.dtype),
-        )
+        # ratio(λ) per reco bin. Normal path = exact fold (used for the fit).
+        # Straight-through path (Hessian-only Phase B) keeps the bT slab off the
+        # autodiff graph so rabbit's covariance jacobian doesn't OOM. Toggled by
+        # SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH; SCETLIB_NP_HESSIAN_GN=1 drops the
+        # curvature term (Gauss-Newton/Fisher — exact for Asimov, 8 vs 72 passes).
+        # Do NOT enable during the fit: it recomputes J(/K) every call.
+        if not hasattr(self, "_hess_st"):
+            self._hess_st = bool(
+                os.environ.get("SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH", "").strip()
+            )
+        if self._hess_st:
+            gn = bool(os.environ.get("SCETLIB_NP_HESSIAN_GN", "").strip())
+            ratio = self._ratio_straightthrough(param, use_curvature=not gn)
+        else:
+            ratio = self._ratio_from_param(param)
 
         # Build (N_reco, N_proc) scaling: 1 everywhere except the signal column,
         # which carries the per-bin ratio. Broadcasting the precomputed (1, N_proc)
