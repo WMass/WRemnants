@@ -21,36 +21,6 @@ Singularity> python scripts/histmakers/histmaker_test.py \
     --filterProcs Zmumu_2017G \
     --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas
 
-=======
-with PDF variations:
-python scripts/histmakers/histmaker_test.py \
-    --dataPath /scratch/submit/cms/wmass/NanoAOD/LowPU/2017G/ \
-    --era 2017G \
-    --filterProcs Zmumu_2017G SingleMuon_2017G \
-    --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas \
-                 scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
-
-
-python rabbit/tests/new_make_tensor.py \
-    histmaker_test_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas_Corr.hdf5 \
-    -o /tmp/rabbit_test/ \
-    --outname my_tensor \
-    --histName ptll \
-    --procFilters Zmumu
-
-cd rabbit
-    
-rabbit_fit.py /tmp/rabbit_test/my_tensor.hdf5 \
-    -o /tmp/rabbit_test/ \
-    -t 0 \
-    --unblind \
-    --doImpacts \
-    --globalImpacts \
-    --saveHists \
-    --computeHistErrors \
-    --computeVariation
-
->>>>>>> b34c1f60 (updates)
 import pdb; pdb.set_trace()
 
 ## Making Plots
@@ -85,6 +55,9 @@ https://submit.mit.edu/~hayden17/jan{date}/
 
 
 # WRemnants (Old README)
+=======
+# WRemnants
+>>>>>>> b5062833 (put my notes in a separate file)
 
 WRemnants is the analysis framework for the CMS electroweak precision measurements such as the W boson mass, Z boson mass, strong coupling constraint, cross section measurements, and related studies on generator level, experimental calibrations, and future projections. It handles the full analysis chain from processing collision events (NanoAOD) into histograms, through systematic uncertainty estimation, to fit input preparation. The statistical inference is performed by the companion [rabbit](https://github.com/WMass/rabbit) framework.
 
