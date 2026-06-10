@@ -1,5 +1,7 @@
 # Hayden notes
 
+note: histmaker_test.py was recently renamed to mz_5TeV.py
+
 ## Setup
 
 cd /work/submit/hayden17
