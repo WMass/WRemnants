@@ -1,6 +1,6 @@
 # Hayden notes
 
-note: histmaker_test.py was recently renamed to mz_5TeV.py
+note: histmaker_test.py was recently renamed to mz_5TeV.py and rabbit turned from a regular folder into a submodule
 
 ## Setup
 
