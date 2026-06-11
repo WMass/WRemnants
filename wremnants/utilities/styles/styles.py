@@ -272,6 +272,7 @@ common_groups = [
     "ZmassAndWidth",
     "massAndWidth",
     "normXsecZ",
+    "resumNonpert",
 ]
 nuisance_grouping = {
     "super": [
