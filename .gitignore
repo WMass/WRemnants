@@ -158,4 +158,8 @@ cython_debug/
 *.pdf
 *.png
 *.hdf5
-*.root.DS_Store
+*.root
+hayden_notes.txt
+plots/
+*.php
+.DS_Store
