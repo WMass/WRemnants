@@ -1,7 +1,5 @@
 # Hayden notes
 
-note: histmaker_test.py was recently renamed to mz_5TeV.py and rabbit turned from a regular folder into a submodule
-
 ## Setup
 
 cd /work/submit/hayden17
@@ -21,26 +19,6 @@ python scripts/histmakers/mz_5TeV_rochester.py \
     --theoryCorr scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas \
                  scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars
 
-
-python rabbit/tests/new_make_tensor.py \
-    histmaker_test_scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas_Corr.hdf5 \
-    -o /tmp/rabbit_test/ \
-    --outname my_tensor \
-    --histName ptll \
-    --procFilters Zmumu
-
-cd rabbit
-    
-rabbit_fit.py /tmp/rabbit_test/my_tensor.hdf5 \
-    -o /tmp/rabbit_test/ \
-    -t 0 \
-    --unblind \
-    --doImpacts \
-    --globalImpacts \
-    --saveHists \
-    --computeHistErrors \
-    --computeVariation
-
 import pdb; pdb.set_trace()
 
 ## Making Plots
@@ -56,99 +34,3 @@ Singularity> python scripts/plotting/makeDataMCStackPlot.py $IN   -o $OUT python
 -f $TAG   -n ptll   --hists ptll   --rrange 0.995 1.005   --procFilters Zmumu Data --flow none   variation --varName scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfas_Corr  --selectAxis vars --selectEntries pdfCT18ZNNLO_as_0116  pdfCT18ZNNLO_as_0120
 
 python scripts/plotting/makeDataMCStackPlot.py $IN   -o $OUT -f $TAG --postfix rochester -n mll --hists mll --rrange 0.9 1.1 --procFilters Data Zmumu
-
-
-IN=/tmp/rabbit_test/fitresults.hdf5
-OUT=~/public_html/
-TAG=jun5
-PROCS="Data Zmumu"
-
-mkdir -p $OUT/$TAG
-
-rabbit_plot_hists.py /tmp/rabbit_test/fitresults.hdf5 \
-    -o $OUT/$TAG \
-    -m Basemodel \
-    --varNames pdfAlphaS pdf1_pdf2 pdf3_pdf4 pdf5_pdf6 pdf7_pdf8 pdf9_pdf10 pdf11_pdf12 pdf13_pdf14 pdf15_pdf16 pdf17_pdf18 pdf19_pdf20 pdf21_pdf22 pdf23_pdf24 pdf25_pdf26 pdf27_pdf28 pdf29_pdf30 pdf31_pdf32 pdf33_pdf34 pdf35_pdf36 pdf37_pdf38 pdf39_pdf40 pdf41_pdf42 pdf43_pdf44 pdf45_pdf46 pdf47_pdf48 pdf49_pdf50 pdf51_pdf52 pdf53_pdf54 pdf55_pdf56 pdf57_pdf58 \
-    --rrange 0.995 1.005
-    
-rabbit_plot_hists.py /tmp/rabbit_test/fitresults.hdf5 \
-    -o $OUT/$TAG \
-    -m Basemodel \
-    --postfix important \
-    --varNames pdfAlphaS pdf29_pdf30 pdf51_pdf52 \
-    --rrange 0.975 1.025
-    
-rabbit_plot_pulls_and_impacts.py /tmp/rabbit_test/fitresults.hdf5 \
-    -o $OUT/$TAG
-    
-    can add --result toy1
-    
-rabbit_print_pulls_and_constraints.py /tmp/rabbit_test/fitresults.hdf5
-
-# from january
-   Parameter                        pull +/- constraint (pull prefit +/- constraint prefit)
-   ----------------------------------------------------------------------------------------------------
-   pdfAlphaS                         0.0 +/-    0.64975 (        0.0 +/-               0.0)
-   pdf1_pdf2                         0.0 +/-    0.99286 (        0.0 +/-               1.0)
-   pdf3_pdf4                         0.0 +/-     0.9905 (        0.0 +/-               1.0)
-   pdf5_pdf6                         0.0 +/-    0.96807 (        0.0 +/-               1.0)
-   pdf7_pdf8                         0.0 +/-    0.99635 (        0.0 +/-               1.0)
-   pdf9_pdf10                        0.0 +/-    0.98483 (        0.0 +/-               1.0)
-   pdf11_pdf12                       0.0 +/-    0.94644 (        0.0 +/-               1.0)
-   pdf13_pdf14                       0.0 +/-    0.99113 (        0.0 +/-               1.0)
-   pdf15_pdf16                       0.0 +/-    0.99134 (        0.0 +/-               1.0)
-   pdf17_pdf18                       0.0 +/-     0.9773 (        0.0 +/-               1.0)
-   pdf19_pdf20                       0.0 +/-    0.96259 (        0.0 +/-               1.0)
-   pdf21_pdf22                       0.0 +/-    0.98321 (        0.0 +/-               1.0)
-   pdf23_pdf24                       0.0 +/-    0.99058 (        0.0 +/-               1.0)
-   pdf25_pdf26                       0.0 +/-    0.91367 (        0.0 +/-               1.0)
-   pdf27_pdf28                       0.0 +/-    0.96396 (        0.0 +/-               1.0)
-   pdf29_pdf30                       0.0 +/-    0.96501 (        0.0 +/-               1.0)
-   pdf31_pdf32                       0.0 +/-     0.9597 (        0.0 +/-               1.0)
-   pdf33_pdf34                       0.0 +/-    0.98627 (        0.0 +/-               1.0)
-   pdf35_pdf36                       0.0 +/-    0.97596 (        0.0 +/-               1.0)
-   pdf37_pdf38                       0.0 +/-     0.9791 (        0.0 +/-               1.0)
-   pdf39_pdf40                       0.0 +/-     0.9438 (        0.0 +/-               1.0)
-   pdf41_pdf42                       0.0 +/-    0.96955 (        0.0 +/-               1.0)
-   pdf43_pdf44                       0.0 +/-     0.8633 (        0.0 +/-               1.0)
-   pdf45_pdf46                       0.0 +/-    0.93356 (        0.0 +/-               1.0)
-   pdf47_pdf48                       0.0 +/-    0.92405 (        0.0 +/-               1.0)
-   pdf49_pdf50                       0.0 +/-    0.89836 (        0.0 +/-               1.0)
-   pdf51_pdf52                       0.0 +/-    0.84553 (        0.0 +/-               1.0)
-   pdf53_pdf54                       0.0 +/-    0.96855 (        0.0 +/-               1.0)
-   pdf55_pdf56                       0.0 +/-     0.9291 (        0.0 +/-               1.0)
-   pdf57_pdf58                       0.0 +/-    0.87174 (        0.0 +/-               1.0)
-
-# from june
-   Parameter                        pull +/- constraint (pull prefit +/- constraint prefit)
-   ----------------------------------------------------------------------------------------------------
-   pdfAlphaS                         0.0 +/-    0.37394 (        0.0 +/-               0.0)
-   pdf1_pdf2                         0.0 +/-    0.99423 (        0.0 +/-               1.0)
-   pdf3_pdf4                         0.0 +/-    0.97696 (        0.0 +/-               1.0)
-   pdf5_pdf6                         0.0 +/-    0.95721 (        0.0 +/-               1.0)
-   pdf7_pdf8                         0.0 +/-    0.99688 (        0.0 +/-               1.0)
-   pdf9_pdf10                        0.0 +/-    0.97593 (        0.0 +/-               1.0)
-   pdf11_pdf12                       0.0 +/-    0.94098 (        0.0 +/-               1.0)
-   pdf13_pdf14                       0.0 +/-    0.97694 (        0.0 +/-               1.0)
-   pdf15_pdf16                       0.0 +/-    0.99236 (        0.0 +/-               1.0)
-   pdf17_pdf18                       0.0 +/-    0.97271 (        0.0 +/-               1.0)
-   pdf19_pdf20                       0.0 +/-    0.94018 (        0.0 +/-               1.0)
-   pdf21_pdf22                       0.0 +/-    0.97246 (        0.0 +/-               1.0)
-   pdf23_pdf24                       0.0 +/-    0.96862 (        0.0 +/-               1.0)
-   pdf25_pdf26                       0.0 +/-    0.90181 (        0.0 +/-               1.0)
-   pdf27_pdf28                       0.0 +/-    0.92958 (        0.0 +/-               1.0)
-   pdf29_pdf30                       0.0 +/-    0.93899 (        0.0 +/-               1.0)
-   pdf31_pdf32                       0.0 +/-    0.92255 (        0.0 +/-               1.0)
-   pdf33_pdf34                       0.0 +/-    0.97027 (        0.0 +/-               1.0)
-   pdf35_pdf36                       0.0 +/-    0.97173 (        0.0 +/-               1.0)
-   pdf37_pdf38                       0.0 +/-     0.9435 (        0.0 +/-               1.0)
-   pdf39_pdf40                       0.0 +/-    0.93899 (        0.0 +/-               1.0)
-   pdf41_pdf42                       0.0 +/-    0.96191 (        0.0 +/-               1.0)
-   pdf43_pdf44                       0.0 +/-    0.82942 (        0.0 +/-               1.0)
-   pdf45_pdf46                       0.0 +/-    0.92418 (        0.0 +/-               1.0)
-   pdf47_pdf48                       0.0 +/-    0.92845 (        0.0 +/-               1.0)
-   pdf49_pdf50                       0.0 +/-    0.86516 (        0.0 +/-               1.0)
-   pdf51_pdf52                       0.0 +/-    0.79407 (        0.0 +/-               1.0)
-   pdf53_pdf54                       0.0 +/-    0.95492 (        0.0 +/-               1.0)
-   pdf55_pdf56                       0.0 +/-    0.92909 (        0.0 +/-               1.0)
-   pdf57_pdf58                       0.0 +/-    0.86107 (        0.0 +/-               1.0)
