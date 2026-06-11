@@ -159,9 +159,3 @@ cython_debug/
 *.png
 *.hdf5
 *.root
-hayden_notes.txt
-plots/
-*.php
-.DS_Store
-wremnants/production/include/lowpu_muonscarekit.hpp
-scripts/histmakers/mz_5TeV_calibrations.py
