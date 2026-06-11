@@ -618,43 +618,6 @@ for h in args.hists:
 
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")
-        
-    # --- added code ---
-#    import numpy as np
-#
-#    def print_lowest_k(h2d, label, k=10):
-#        vals2d = h2d.values(flow=False)
-#        flat = vals2d.ravel()
-#
-#        # take k smallest (including zeros)
-#        k = min(k, flat.size)
-#        idx = np.argpartition(flat, k-1)[:k]
-#        idx = idx[np.argsort(flat[idx])]  # sort those k
-#
-#        ax0, ax1 = h2d.axes[0], h2d.axes[1]
-#
-#        print(f"\n[{label}] lowest {k} bins:")
-#        for rank, imin in enumerate(idx, 1):
-#            i0, i1 = np.unravel_index(int(imin), vals2d.shape)
-#            x_lo, x_hi = ax0.edges[i0], ax0.edges[i0+1]
-#            y_lo, y_hi = ax1.edges[i1], ax1.edges[i1+1]
-#            print(
-#                f"  {rank:2d}) val={flat[imin]:.6g}  (i0,i1)=({i0},{i1})  "
-#                f"{ax0.name}:[{x_lo},{x_hi})  {ax1.name}:[{y_lo},{y_hi})"
-#            )
-#
-#    # --- stacked MC ---
-#    hstack = None
-#    for p in prednames:
-#        hp = base_action(histInfo[p].hists[args.baseName])
-#        hstack = hp.copy() if hstack is None else (hstack + hp)
-#
-#    print_lowest_k(hstack, f"{h} STACK", k=10)
-#
-#    # --- data ---
-#    hdata = base_action(histInfo["Data"].hists[args.baseName])
-#    print_lowest_k(hdata, f"{h} DATA", k=10)
-    # --- end ---
 
     if args.customXlabel is not None:
         xlabel = rf"{args.customXlabel}"
