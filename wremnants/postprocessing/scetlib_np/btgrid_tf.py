@@ -1,8 +1,9 @@
 """TensorFlow port of the bT-grid factorization library.
 
-Mirrors :mod:`scetlib_btgrid_numpy` function-by-function. The numpy module is
-the byte-for-byte transcription of SCETlib C++ and the parity test in
-:mod:`scetlib_btgrid_tf_parity` keeps the two in sync.
+Function-by-function TF port of a numpy reference implementation (itself a
+byte-for-byte transcription of SCETlib C++). The numpy reference and the
+parity tests that keep the two in sync live in the development tree; only
+the TF port is shipped here.
 
 Design choices:
   * ``np_model`` / ``np_model_nu`` strings are fixed at trace time (the SCETlib
@@ -49,7 +50,7 @@ def simpson_weights(x):
     """Return weights ``w`` such that Simpson(y, x) == sum(w * y, axis=-1).
 
     ``x`` is a numpy array with size ``N``. Implementation mirrors the numpy
-    ``simpson`` in :mod:`scetlib_btgrid_numpy` (composite Simpson with
+    ``simpson`` of the numpy reference (composite Simpson with
     trapezoid fallback on the last segment when N-1 is odd).
     """
     x = np.asarray(x, dtype=np.float64)
@@ -146,7 +147,7 @@ def _safe_div(num, den):
 
 
 def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_model):
-    """TF port of :func:`scetlib_btgrid_numpy.F_eff` for a fixed ``np_model``."""
+    """TF port of the numpy-reference ``F_eff`` for a fixed ``np_model``."""
     if np_model not in EFF_MODELS:
         raise ValueError(f"F_eff_tf: unsupported np_model {np_model!r}")
 
@@ -202,7 +203,7 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
 
 
 def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
-    """TF port of :func:`scetlib_btgrid_numpy.gamma_nu_NP` for fixed ``np_model_nu``."""
+    """TF port of the numpy-reference ``gamma_nu_NP`` for fixed ``np_model_nu``."""
     if np_model_nu not in GNU_MODELS:
         raise ValueError(f"gamma_nu_NP_tf: unsupported np_model_nu {np_model_nu!r}")
 
@@ -266,7 +267,7 @@ def reconstruct_batch_tf(
     Y_unique=None,
     Y_inverse_idx=None,
 ):
-    """TF port of :func:`scetlib_btgrid_numpy.reconstruct_batch`.
+    """TF port of the numpy-reference ``reconstruct_batch``.
 
     Implements the per-(Q, Y, qT) bT-space integrand. The full formula with
     every factor and its bare-bT / b*(bT) / (Q,Y,qT) / λ dependence is written

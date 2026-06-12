@@ -18,8 +18,7 @@ Three pieces:
    edge list, builds a ``(N_target, N_source)`` Simpson weight matrix.
    Apply via ``tf.tensordot``.
 
-Parity tests against the numpy reference in :mod:`scetlib_btgrid_numpy` are in
-:mod:`scetlib_btgrid_tf_parity` (added in Phase 3).
+Parity-tested against the numpy reference implementation (development tree).
 """
 
 import numpy as np
@@ -30,7 +29,7 @@ from wremnants.postprocessing.scetlib_np.btgrid_tf import (
     simpson_weights,
 )
 
-# Z resonance defaults (matches integrate_over_Q in btgrid_numpy).
+# Z resonance defaults (matches the numpy-reference integrate_over_Q).
 MZ_PDG = 91.1876
 GAMMAZ_PDG = 2.4952
 
@@ -110,7 +109,7 @@ def q_integrate_weights(Q_grid, Q_lo, Q_hi, q0=MZ_PDG, Gamma=GAMMAZ_PDG):
     """Simpson weights for integrating over Q ∈ [Q_lo, Q_hi] in arctan-Q² space.
 
     Implements the same change of variable as
-    :func:`scetlib_btgrid_numpy.integrate_over_Q` with ``method="arctan_Q2"``:
+    the numpy-reference ``integrate_over_Q`` with ``method="arctan_Q2"``:
     x = arctan((Q² - q0²) / (q0 Γ)) flattens the Breit-Wigner peak, then
     Simpson on x with the Jacobian dQ/dx.
 
@@ -154,7 +153,7 @@ def rebin_weights(source_grid, target_edges, name="axis", tol=1e-9):
     target bin.
 
     Mirrors the per-bin call pattern of
-    :func:`scetlib_btgrid_numpy.integrate_over_axis_bin`.
+    the numpy-reference ``integrate_over_axis_bin``.
     """
     source_grid = np.asarray(source_grid, dtype=np.float64)
     target_edges = np.asarray(target_edges, dtype=np.float64)

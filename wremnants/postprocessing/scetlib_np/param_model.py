@@ -4,9 +4,9 @@ This ParamModel scales the signal reco template by a per-bin ratio of the
 SCETlib nonperturbative (NP) prediction at the fitted λ vs. at λ_central. The
 prediction is built in THREE STEPS, written out in order below — read top to
 bottom for the full maths. This module docstring is the SINGLE SOURCE OF TRUTH:
-:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch_tf`, the numpy
-reference :mod:`btgrid_numpy`, ``sigma_reco_central.md``, and the validation
-scripts all point here rather than restate it.
+:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch_tf`,
+``sigma_reco_central.md``, and the development-tree numpy reference and
+validation scripts all point here rather than restate it.
 
 Pipeline at a glance (everything is a function of the NP parameters λ):
 
@@ -48,7 +48,7 @@ Where each factor lives — bare bT vs the b*-frozen b̄T:
   C_ν         coefficient of γ_ν^NP in the rapidity (CS) log evolution. Cached
               per (Q, Y, qT) AND bT — a full (Nbins, Nbt) array; λ-independent.
               Taken at the BARE bT: the lone NP-exponent factor NOT frozen to
-              b* (per the SCETlib convention; see btgrid_numpy NP-model notes).
+              b* (per the SCETlib convention).
               Because it varies with bT it sits inside the bT integral (not a
               constant out front); because it varies with Q the Q integral
               cannot be collapsed ahead of the fit — the λ-dependence does not
@@ -1045,9 +1045,7 @@ class SCETlibNPParamModel(ParamModel):
             return
         syst_names = [s.decode() if isinstance(s, bytes) else str(s) for s in systs]
 
-        conflicting = [
-            s for s in syst_names if _DISCRETE_NP_SUBSTRING in s.lower()
-        ]
+        conflicting = [s for s in syst_names if _DISCRETE_NP_SUBSTRING in s.lower()]
         if not conflicting:
             return
 
