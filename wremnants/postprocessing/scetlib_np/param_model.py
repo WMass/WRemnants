@@ -1046,7 +1046,7 @@ class SCETlibNPParamModel(ParamModel):
         syst_names = [s.decode() if isinstance(s, bytes) else str(s) for s in systs]
 
         conflicting = [
-            s for s in syst_names if self._DISCRETE_NP_SUBSTRING in s.lower()
+            s for s in syst_names if _DISCRETE_NP_SUBSTRING in s.lower()
         ]
         if not conflicting:
             return
