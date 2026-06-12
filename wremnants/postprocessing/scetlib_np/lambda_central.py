@@ -11,6 +11,7 @@ Single entry point:
     read_lambda_central(hdf5_path, proc="Z") -> dict
 """
 
+import json
 import os
 import pickle
 import sys
@@ -117,8 +118,58 @@ def read_lambda_central_from_meta(meta, proc="Z", _source="<meta>"):
     return _resolve_tag_to_lambda(tag, proc)
 
 
+def load_lambda_central_file(path):
+    """Load a λ_central override from a JSON or YAML file.
+
+    The file must decode to a dict with ``eff_params`` and ``gnu_params``
+    sub-dicts (same shape as :func:`read_lambda_central`). Format is chosen
+    by extension (``.yaml``/``.yml`` → YAML, else JSON); YAML's loader also
+    accepts JSON, so this is forgiving either way.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"λ_central file missing: {path!r}")
+    with open(path) as f:
+        text = f.read()
+    if path.lower().endswith((".yaml", ".yml")):
+        import yaml
+
+        data = yaml.safe_load(text)
+    else:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"λ_central file {path!r} is not valid JSON; got {exc}"
+            ) from exc
+    if (
+        not isinstance(data, dict)
+        or "eff_params" not in data
+        or "gnu_params" not in data
+    ):
+        raise ValueError(
+            f"λ_central file {path!r} must decode to a dict with "
+            f"'eff_params' and 'gnu_params' keys; got {type(data).__name__} "
+            f"with keys {list(data) if isinstance(data, dict) else '<n/a>'}."
+        )
+    return data
+
+
 def read_lambda_central(hdf5_path, proc="Z"):
     """Extract λ_central from the SCETlib correction referenced by the hdf5.
+
+    Accepts either a fit-input datacard (setupRabbit output) OR a rabbit
+    ``fitresults*.hdf5``: rabbit propagates the whole datacard meta into the
+    fitresults as ``meta_info_input``, so for fitresults the lookup is the
+    same after unwrapping one level. Handy to answer "which λ_central was
+    this fit's ParamModel initialized with?" from the fit output alone.
+
+    λ_central overrides: the override route is the ``lambda_central=<file>``
+    token in the ``--paramModel`` spec — the fit command (including the
+    token) is stored in the fitresults ``meta_info.args``, so this function
+    recovers the override automatically. A programmatic constructor-arg dict
+    is NOT visible in the fit output — for such fits the theoryCorr-tag
+    route below silently reports the auto-detect values (check the fit log
+    for "λ_central from" lines).
 
     Returns a dict with:
 
@@ -137,7 +188,32 @@ def read_lambda_central(hdf5_path, proc="Z"):
         if "meta" not in f:
             raise KeyError(f"{hdf5_path}: no 'meta' group — wrong file type?")
         meta = wums_io.pickle_load_h5py(f["meta"])
-    return read_lambda_central_from_meta(meta, proc=proc, _source=hdf5_path)
+
+    # Preference 1 (fitresults): a lambda_central=<file> token in the stored
+    # --paramModel spec — the fit command records the override for free.
+    args_meta = (meta.get("meta_info") or {}).get("args") or {}
+    for spec in args_meta.get("paramModel") or []:
+        for tok in spec:
+            if isinstance(tok, str) and tok.startswith("lambda_central="):
+                path = tok.split("=", 1)[1]
+                lc = load_lambda_central_file(path)
+                lc["source"] = f"cli-file:{path}"
+                return lc
+
+    # Fallback: resolve the datacard's theoryCorr tag. For fitresults this
+    # ASSUMES no env-var/constructor override was active (those are not
+    # visible in the output; check the fit log). fitresults nest the
+    # datacard meta (which itself carries meta_info_input) one level down —
+    # unwrap until the histmaker args are in view.
+    while (
+        isinstance(meta.get("meta_info_input"), dict)
+        and "args" not in meta.get("meta_info_input", {})
+        and "meta_info_input" in meta["meta_info_input"]
+    ):
+        meta = meta["meta_info_input"]
+    lc = read_lambda_central_from_meta(meta, proc=proc, _source=hdf5_path)
+    lc["source"] = "theoryCorr-tag (assumes no runtime override)"
+    return lc
 
 
 def _resolve_tag_to_lambda(tag, proc):

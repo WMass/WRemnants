@@ -62,6 +62,13 @@ Only γ_ν^NP and F_eff carry λ; everything else (bT, J₀, I_pert, C_ν, b*) i
 λ-independent and precomputed once — the bT·J₀ kernel, the bT Simpson weights,
 and the arctan_Q² Q-integration weights are all built at construction.
 
+The default evaluation uses the memory-factorized layout (deduplicated
+(I_pert, C_ν) rows + J₀ kernel on the unique-qT grid + Simpson-as-matmul),
+which is numerically equivalent to the per-bin (Nbins, Nbt) layout (≲1e-14
+rel., floating-point summation order only) but ~6× smaller — required to fit
+a 32 GB GPU. See FACTORIZED_RECON.md in this directory; the legacy_recon=1
+spec token restores the legacy layout.
+
 (1b) Integrate over Q, then rebin onto the gen grid:
 
     σ_resum(λ; g) = rebin_{qT→ptVGen, |Y|→absYVGen} [ ∫_{Q_lo}^{Q_hi} dQ  σ(Q, Y, qT; λ) ]
@@ -89,7 +96,9 @@ the (ptVGen, absYVGen) gen bins (see :func:`compute_nonsingular_gen`).
 σ_ns is NP-INDEPENDENT (the same for every λ) and is added at GEN level, so it
 folds through the same response R as σ_resum in Step 3. Because the fit uses a
 ratio (Step 3), σ_ns correctly DILUTES the NP variation where the FO dominates
-(high qT). Set include_nonsingular=False for a resum-only model (σ_ns = 0).
+(high qT). σ_ns is ALWAYS included (it is what the histmaker nominal carries);
+for resum-only diagnostics subtract the exposed ``sigma_ns`` from
+``sigma_gen_central`` (and re-fold with ``R`` for reco level).
 
 ═════════════════════════════════════════════════════════════════════════════
 Step 3 — σ_reco(λ; b): fold gen → reco through the response matrix
@@ -201,34 +210,48 @@ Two-pass recipe (rabbit still computes the Hessian; NO rabbit changes):
            --noHessian -o fit/
 
   2. Covariance at that postfit (no refit), straight-through ON:
-       SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH=1 SCETLIB_NP_HESSIAN_GN=1 \
        rabbit_fit.py <FIT> --paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel <UNFOLD> <BTGRID> \
+           hessian_straightthrough=1 hessian_gn=1 \
            --externalPostfit fit/fitresults.hdf5 --externalPostfitResult nominal \
            --noFit -t 0 --pseudoData nominal -o cov/
      (do NOT pass --noHessian; do NOT pass --eager.) ~5 min, no OOM.
      Uncertainties are sqrt(diag(cov)) in cov/fitresults.hdf5 (results_nominal).
 
-Env flags (both OFF by default → the fit path is unchanged):
-  SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH=1  use the straight-through path in compute()
-  SCETLIB_NP_HESSIAN_GN=1               Gauss-Newton: keep J only, drop the K term
+Switches (both OFF by default → the fit path is unchanged). They are spec
+tokens inside the --paramModel spec (shown above) — the spec is stored in the
+fitresults meta_info.args, so the configuration is recorded in the output
+(env vars are NOT supported; all model knobs go through the spec):
+  hessian_straightthrough=1  use the straight-through path in compute()
+  hessian_gn=1               Gauss-Newton: keep J only, drop the K term
+WARNING: hessian_straightthrough=1 WITHOUT hessian_gn=1 is full-K mode —
+correct in principle (needed for real/toy data) but currently INFEASIBLE at
+full grid scale (the 64 nested-FA passes unroll into one graph, ~TB peak →
+OOM-kill). Until HESSIAN_PLAN.md §9 (precomputed chunked K) is implemented,
+always pass hessian_gn=1 (exact for Asimov).
 
 GN vs full-K. The Poisson Hessian is
     H_ij = Σ_b [ (n_b/μ_b²) J_bi J_bj  +  (1 − n_b/μ_b) K_bij ].
 For ASIMOV data the residual (1 − n/μ) = 0, so the K term vanishes and GN (J
-only) is EXACT. For real/toy data K is needed for the exact Hessian — but the
-nested-forward-mode K (``_ratio_compact_hess``) currently CRASHES under rabbit's
-@tf.function (the tf.where in ``_safe_div``) and is impractically slow under
---eager, so GN (the recipe above) is the working production path today. See
-HESSIAN_PLAN.md §9 for the open K item and its fixes.
+only) is EXACT — drop the K term with hessian_gn=1. For real/toy data
+the K term is needed for the exact Hessian. The nested-forward-mode K
+(``_ratio_compact_hess``) USED to crash under rabbit's @tf.function: building the
+JVP of an ``Equal`` op that carries a tangent raised ``IndexError`` in TF's
+nested-forward-mode autodiff. The culprit was the λ_inf==0 / den==0 masks in
+:mod:`btgrid_tf` comparing a differentiated tensor; freezing the comparison input
+(``btgrid_tf._frozen_eq_zero`` = ``tf.equal(stop_gradient(x), 0)``) removes the
+tangent into ``Equal`` without changing any value or derivative (the comparison
+is a measure-zero boundary ``tf.where`` never differentiates). Full-K now runs
+under @tf.function and matches the exact reverse-mode Hessian to machine
+precision (≤3e-16 rel; see HESSIAN_PLAN.md §7 + the isolation validation). So
+both GN and full-K are available; GN remains the default for Asimov (exact and
+cheaper — 8 vs 72 fold passes).
 
-WARNING: keep SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH UNSET during the FIT. The
+WARNING: do NOT pass hessian_straightthrough=1 during the FIT. The
 surrogate recomputes J(/K) on every compute() call — fine for the one-shot
 covariance pass, but it would cripple the minimizer (many gradient/HVP evals).
 """
 
-import json
 import os
-import re
 from typing import Mapping, Optional
 
 import numpy as np
@@ -243,11 +266,8 @@ from wremnants.postprocessing.scetlib_np import btgrid_tf as fz_tf
 from wremnants.postprocessing.scetlib_np import lambda_central as scetlib_lambda_central
 from wremnants.postprocessing.scetlib_np import response_matrix as fz_R
 from wremnants.utilities import common as wrem_common
+from wremnants.utilities.data_paths import getDataPath
 
-# Default fixed-order inputs for the NP-independent nonsingular term
-# σ_ns = DYTurbo − SCETlib_singular, resolved relative to this package via
-# wrem_common.data_dir (= <WRemnants>/wremnants-data/data). These are the CT18Z
-# N3+0LL fixed-order pieces; both are NP-independent (same for any λ tune).
 _NONSING_FO_SING_DEFAULT = os.path.join(
     wrem_common.data_dir,
     "TheoryCorrections",
@@ -258,51 +278,14 @@ _NONSING_DYTURBO_DEFAULT = os.path.join(
     "TheoryCorrections",
     "results_z-2d-nnlo-vj-CT18ZNNLO-{scale}-scetlibmatch.txt",
 )
-
-# Default fit inputs, so collaborators can run
-# ``--paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel`` with no
-# extra positional args. Passing the two positional args explicitly still wins.
-#
-# The unfolding response lives in wremnants-data (a skim of only the two hists
-# load_R reads — ``nominal_prefsr_yieldsUnfolding`` + ``prefsr`` — 6.8 GB → 211 MB;
-# made with scripts/inspect/open_narf_h5py.py). Resolved via wrem_common.data_dir.
 _UNFOLDING_HDF5_DEFAULT = os.path.join(
     wrem_common.data_dir,
     "TheoryCorrections",
     "scetlib_np",
     "mz_dilepton_unfolding_R_skim.hdf5",
 )
-# The bT-grid combined pickle is ~17.5 GB (two [Nbins×Nbt] float64 slabs: I_pert
-# and C_nu) — too large for wremnants-data/git-LFS — so it lives on the shared
-# data area next to NanoAOD, as a sibling of NanoAOD under the data base. We
-# resolve the NanoAOD base by REPLICATING dataset_tools.getDataPath()'s hostname
-# logic rather than importing it: that module does ``import ROOT`` / ``import narf``
-# at module scope (and wremnants.production.__init__ runs ROOT.gInterpreter +
-# narf.clingutils.Load), which segfaults when imported mid-fit (after TF is up).
-# Only the subMIT copy exists today — pass btgrid_dir explicitly at other sites.
 _BTGRID_SUBDIR = ("scetlib_np", "Z_COM13_CT18Z_N3p0LL_btgrid_fineall")
-
-
-def _nano_data_base():
-    """NanoAOD base dir per host — mirrors dataset_tools.getDataPath() WITHOUT
-    importing it (that import pulls ROOT/narf; see note above). Falls back to the
-    subMIT path on unknown hosts (the only site with the grid today)."""
-    import socket
-
-    hostname = socket.gethostname()
-    if hostname.endswith(".cern.ch"):
-        return "/scratch/shared/NanoAOD"
-    if hostname == "cmsanalysis.pi.infn.it":
-        return "/scratchnvme/wmass/NANOV9/postVFP"
-    if hostname == "cmsasymow.pi.infn.it":
-        return "/scratch/wmass/y2016"
-    # .mit.edu and any unknown host -> subMIT shared scratch
-    return "/scratch/submit/cms/wmass/NanoAOD"
-
-
-def _default_btgrid_dir():
-    return os.path.join(os.path.dirname(_nano_data_base()), *_BTGRID_SUBDIR)
-
+_DISCRETE_NP_SUBSTRING = "scetlibnp"
 
 # Ordered list of the v1 continuous λ. CS-side first, then TMD-effective.
 GNU_PARAMS = ("lambda2_nu", "lambda4_nu", "lambda_inf_nu")
@@ -323,27 +306,8 @@ ALL_PARAMS = GNU_PARAMS + EFF_PARAMS
 RATIO_FLOOR_SCALE = 1.0e-4
 RATIO_FLOOR_MIN = 1.0e-9
 
-
-# Theorist-recommended Gaussian prior widths for the SCETlib NP λ parameters.
-# Source: NP-NP discussion slide, central values 2026-05, plus a wide
-# in-house default for delta_lambda2 (the theorist hasn't quoted a width
-# for it; 0 ± 0.2 is comfortably wider than its expected scale).
-#
-#     λ₂^ν       = 0.15 ± 0.10
-#     Λ₂         = 0.40 ⁺⁰·⁶₋₀.₄   (asymmetric)
-#     Λ₄         = 0.40 ⁺⁰·⁶₋₀.₄   (asymmetric)
-#     δ Λ₂       = 0.00 ± 0.20      (in-house wide default; not from the slide)
-#
-# Asymmetric uncertainties (Λ₂, Λ₄) are approximated by a symmetric Gaussian
-# with σ = (σ⁺ + σ⁻) / 2. Slightly conservative on the upper side, slightly
-# loose on the lower side. A future patch can implement a split-Gaussian if
-# needed.
-#
-# Any λ not listed here gets σ = NaN by default → no prior, floats free.
-# Currently those are: lambda_inf, lambda_inf_nu, lambda4_nu, lambda6.
-# They are expected to be FROZEN via rabbit's --freezeParameters until
-# the theorist provides priors for them.
-THEORIST_PRIOR_SIGMAS = {
+# Recommended Gaussian prior widths for the SCETlib NP λ parameters
+DEFAULT_PRIOR_SIGMAS = {
     "lambda2_nu": 0.10,
     "lambda2": 0.50,  # 0.4 ⁺⁰·⁶₋₀.₄ -> symmetric average
     "lambda4": 0.50,  # 0.4 ⁺⁰·⁶₋₀.₄ -> symmetric average
@@ -351,43 +315,16 @@ THEORIST_PRIOR_SIGMAS = {
 }
 
 
+def _default_btgrid_dir():
+    base = getDataPath(fallback="/scratch/submit/cms/wmass/NanoAOD")
+    return os.path.join(os.path.dirname(base), *_BTGRID_SUBDIR)
+
+
 def _load_lambda_central_file(path):
-    """Load a λ_central override from a JSON or YAML file.
-
-    The file must decode to a dict with ``eff_params`` and ``gnu_params``
-    sub-dicts (same shape as :func:`scetlib_lambda_central.read_lambda_central`).
-    Format is chosen by extension (``.yaml``/``.yml`` → YAML, else JSON);
-    YAML's loader also accepts JSON, so this is forgiving either way.
     """
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"SCETLIB_NP_LAMBDA_CENTRAL_FILE points to a missing file: {path!r}"
-        )
-    with open(path) as f:
-        text = f.read()
-    if path.lower().endswith((".yaml", ".yml")):
-        import yaml
-
-        data = yaml.safe_load(text)
-    else:
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"SCETLIB_NP_LAMBDA_CENTRAL_FILE {path!r} is not valid JSON; got {exc}"
-            ) from exc
-    if (
-        not isinstance(data, dict)
-        or "eff_params" not in data
-        or "gnu_params" not in data
-    ):
-        raise ValueError(
-            f"SCETLIB_NP_LAMBDA_CENTRAL_FILE {path!r} must decode to a dict with "
-            f"'eff_params' and 'gnu_params' keys; got {type(data).__name__} "
-            f"with keys {list(data) if isinstance(data, dict) else '<n/a>'}."
-        )
-    return data
+    Load a λ_central override from a JSON or YAML file.
+    """
+    return scetlib_lambda_central.load_lambda_central_file(path)
 
 
 def _crop_R_to_fit(R, R_reco_axes, fit_reco_axes, tol=1e-9):
@@ -516,24 +453,54 @@ def compute_nonsingular_gen(
 
 class SCETlibNPParamModel(ParamModel):
 
+    @classmethod
+    def parse_args(cls, indata, *args, **kwargs):
+        import inspect
+
+        sig = inspect.signature(cls.__init__)
+        valid = {n: p for n, p in sig.parameters.items() if n not in ("self", "indata")}
+        positional = []
+        for tok in args:
+            key = tok.split("=", 1)[0] if isinstance(tok, str) and "=" in tok else None
+            if key in valid:
+                val = tok.split("=", 1)[1]
+                default = valid[key].default
+                if isinstance(default, bool):
+                    val = str(val).strip().lower() in ("1", "true", "yes", "on")
+                elif isinstance(default, float):
+                    val = float(val)
+                elif isinstance(default, int):
+                    val = int(val)
+                kwargs[key] = val
+            else:
+                positional.append(tok)
+        return cls(indata, *positional, **kwargs)
+
     def __init__(
         self,
         indata,
         unfolding_hdf5_path: Optional[str] = None,
         btgrid_dir: Optional[str] = None,
-        lambda_central: Optional[Mapping] = None,
+        lambda_central=None,
         signal_proc: str = "Zmumu",
         Q_lo: float = 60.0,
         Q_hi: float = 120.0,
         poi_params: Optional[tuple] = (),
+        priors: bool = False,
         prior_sigmas: Optional[Mapping] = None,
-        include_nonsingular: bool = True,
         nonsingular_fo_sing: str = _NONSING_FO_SING_DEFAULT,
         nonsingular_dyturbo: str = _NONSING_DYTURBO_DEFAULT,
         nonsingular_qt_cutoff: float = 1.0,
+        legacy_recon: bool = False,
+        xparam_default: Optional[str] = None,
+        hessian_straightthrough: bool = False,
+        hessian_gn: bool = False,
         **kwargs,
     ):
         """Construct the ParamModel.
+
+        Usage::
+            --paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel [key=value ...]
 
         Parameters
         ----------
@@ -548,10 +515,9 @@ class SCETlibNPParamModel(ParamModel):
         btgrid_dir
             Directory holding the SCETlib bT-grid ``combined_btgrid.pkl``.
             Defaults (when None) to the shared data-area copy next to NanoAOD
-            (``_default_btgrid_dir()``, which mirrors
-            ``dataset_tools.getDataPath()``'s per-host logic without importing it —
-            that import pulls ROOT/narf and segfaults mid-fit); pass explicitly at
-            non-subMIT sites.
+            (``_default_btgrid_dir()``, built on the ROOT/narf-free
+            ``wremnants.utilities.data_paths.getDataPath()``); pass explicitly
+            at non-subMIT sites.
         lambda_central
             Dict with two sub-dicts ``eff_params`` and ``gnu_params`` (same
             shape as returned by :func:`scetlib_lambda_central.read_lambda_central`).
@@ -568,9 +534,19 @@ class SCETlibNPParamModel(ParamModel):
             POIs (reported as POIs in the fit output). The rest are reported
             as model nuisances (npou). The POI vs POU split is independent
             of the prior assignment (see ``prior_sigmas``).
+        priors
+            Enable Gaussian priors on the λ parameters (spec token
+            ``priors=1``). Rabbit applies priors whenever a ParamModel
+            *declares* ``prior_sigmas`` — there is no rabbit-side CLA (the
+            old ``--paramModelPriors`` flag was dropped in WMass/rabbit#133);
+            the model itself decides. This token IS that decision: only when
+            set does the model declare ``prior_sigmas``. Default off →
+            everything floats free.
         prior_sigmas
-            Per-name override dict for the Gaussian prior σ on each
-            parameter. Defaults come from ``THEORIST_PRIOR_SIGMAS``:
+            Per-name override for the Gaussian prior σ on each parameter —
+            a Mapping, or as spec token the comma-separated string form
+            ``prior_sigmas=lambda2=0.3,delta_lambda2=nan`` (same format as
+            ``xparam_default``). Defaults come from ``DEFAULT_PRIOR_SIGMAS``:
 
                 lambda2_nu : 0.10
                 lambda2    : 0.50   (symmetric approx of +0.6/-0.4)
@@ -581,43 +557,64 @@ class SCETlibNPParamModel(ParamModel):
             ``--freezeParameters`` until the theorist provides priors for
             them. Pass ``np.nan`` here to free a constrained param, or a
             finite value to add a prior on one that defaults to NaN.
-            Only consumed when the fitter is invoked with
-            ``--paramModelPriors``; otherwise everything floats free.
+            Only meaningful together with ``priors=1``; ignored (with a
+            warning) otherwise.
             Prior mean for each param is ``self.xparamdefault`` (the
             runcard's λ_central).
+        nonsingular_fo_sing, nonsingular_dyturbo
+            Paths to the σ_ns inputs (SCETlib singular pkl / DYTurbo
+            scetlibmatch txt); default to the wremnants-data
+            TheoryCorrections copies. σ_ns is always included — the matched
+            σ_gen^matched(λ) = σ_gen^resum(λ) + σ_ns is what the histmaker
+            nominal carries; resum-only diagnostics subtract ``sigma_ns``.
+        nonsingular_qt_cutoff
+            Low-qT cutoff (GeV) below which σ_ns is zeroed (the FO−singular
+            difference is numerically unreliable at tiny qT).
+        legacy_recon
+            Use the legacy per-bin (Nbins, Nbt) reconstruction layout instead
+            of the default memory-factorized one (numerically equivalent to
+            ≲1e-14 rel; for parity checks only). See FACTORIZED_RECON.md.
+        xparam_default
+            Comma-separated ``name=value,...`` string shifting the fit START
+            (and the prior mean) off the runcard's λ_central — for closure /
+            injection tests. The truth (ratio denominator) is NOT moved.
+        hessian_straightthrough
+            Expose compact λ-derivatives (J, optionally K) to autodiff while
+            keeping the exact value — for the one-shot two-pass covariance
+            recipe ONLY (see the module docstring); never set during a fit.
+        hessian_gn
+            With ``hessian_straightthrough``: Gauss-Newton, keep J and drop
+            the K term (exact for Asimov, where the residual vanishes).
         """
         self.indata = indata
 
-        # ---- Double-counting guard
-        # Resolve default inputs so collaborators can run with no extra
-        # --paramModel positional args (explicit args still override). The
-        # unfolding skim ships in wremnants-data; the big bT-grid lives on the
-        # shared data area next to NanoAOD (see _default_btgrid_dir).
         if unfolding_hdf5_path is None:
             unfolding_hdf5_path = _UNFOLDING_HDF5_DEFAULT
         if btgrid_dir is None:
             btgrid_dir = _default_btgrid_dir()
 
-        # If the histmaker baked discrete NP κ-template variations into the
-        # input HDF5, those systs describe the same physics as our continuous
-        # λ POUs. Running both → double-counting (the discrete syst absorbs
-        # whatever shape variation our ParamModel should describe). Warn
-        # loudly if any such systs are present and unfrozen.
-        self._check_discrete_np_double_counting(kwargs.get("freezeParameters"))
+        self._check_discrete_np_double_counting()
 
         # ---- λ_central
         # Three sources of λ_central, in priority order:
-        #   1. ``lambda_central`` constructor arg (explicit dict).
-        #   2. ``SCETLIB_NP_LAMBDA_CENTRAL_FILE`` env var — path to a JSON or
-        #      YAML file with ``eff_params`` and ``gnu_params``. Overrides the
+        #   1. ``lambda_central=<file>`` spec token — path to a JSON or YAML
+        #      file with ``eff_params`` and ``gnu_params``. Overrides the
         #      metadata auto-detect; useful when the upstream SCETlib pkl isn't
         #      accessible (e.g. a colleague's input).
+        #   2. ``lambda_central`` constructor arg (explicit dict, programmatic).
         #   3. Auto-detect from the fit hdf5's theoryCorr → upstream pkl.
-        env_lc_file = os.environ.get("SCETLIB_NP_LAMBDA_CENTRAL_FILE", "").strip()
-        if lambda_central is None and env_lc_file:
-            lambda_central = _load_lambda_central_file(env_lc_file)
+        lambda_central_source = (
+            "constructor-arg" if lambda_central is not None else None
+        )
+        if isinstance(lambda_central, str):
+            # CLI token (lambda_central=<file>): RECOMMENDED override route —
+            # the --paramModel spec is stored in the fitresults meta, so the
+            # override is recorded in the output (env var/dict are not).
+            lc_path = lambda_central
+            lambda_central = _load_lambda_central_file(lc_path)
+            lambda_central_source = f"cli-file:{lc_path}"
             print(
-                f"[SCETlibNPParamModel] λ_central from file {env_lc_file!r}",
+                f"[SCETlibNPParamModel] λ_central from CLI file {lc_path!r}",
                 flush=True,
             )
         if lambda_central is None:
@@ -633,6 +630,7 @@ class SCETlibNPParamModel(ParamModel):
             lambda_central = scetlib_lambda_central.read_lambda_central_from_meta(
                 indata_meta, _source="indata.metadata"
             )
+            lambda_central_source = "auto-detect:indata.metadata theoryCorr"
             print(
                 f"[SCETlibNPParamModel] λ_central auto-detected from indata.metadata",
                 flush=True,
@@ -640,6 +638,8 @@ class SCETlibNPParamModel(ParamModel):
         print(f"[SCETlibNPParamModel] λ_central:", flush=True)
         for key, value in lambda_central.items():
             print(f"  {key} = {value!r}", flush=True)
+
+        self.lambda_central_source = lambda_central_source
 
         self.eff_central = dict(lambda_central["eff_params"])
         self.gnu_central = dict(lambda_central["gnu_params"])
@@ -657,32 +657,81 @@ class SCETlibNPParamModel(ParamModel):
         # Cache btgrid arrays as TF constants.
         self.bT = tf.constant(grid["bT"], dtype=fz_tf.DTYPE)
         self.b_bar = tf.constant(grid["b_bar"], dtype=fz_tf.DTYPE)
-        self.I_pert = tf.constant(grid["I_pert"][0], dtype=fz_tf.DTYPE)  # (Nbins, Nbt)
-        self.C_nu = tf.constant(grid["C_nu"][0], dtype=fz_tf.DTYPE)
 
-        # Per-bin qT and Y (from the bin tuple), for reconstruct_batch_tf.
+        # Per-bin qT and Y (from the bin tuple).
         bins = grid["bins"]
-        self.qT_per_bin = tf.constant(
-            np.array([b[2] for b in bins], dtype=np.float64), dtype=fz_tf.DTYPE
-        )
+        qT_pb_np = np.array([b[2] for b in bins], dtype=np.float64)
+        self.qT_per_bin = tf.constant(qT_pb_np, dtype=fz_tf.DTYPE)
         Y_pb_np = np.array([b[1] for b in bins], dtype=np.float64)
         self.Y_per_bin = tf.constant(Y_pb_np, dtype=fz_tf.DTYPE)
 
         # F_eff depends on the bin only through Y (not Q or qT), and Y takes few
-        # distinct values across the grid. Precompute the unique-Y map so
-        # reconstruct_batch_tf evaluates the NP transcendentals on NY rows and
+        # distinct values across the grid. Precompute the unique-Y map so the
+        # reconstruction evaluates the NP transcendentals on NY rows and
         # gathers, instead of recomputing identical rows for every (Q, qT).
         Y_feff_unique_np, Y_feff_inv_np = np.unique(Y_pb_np, return_inverse=True)
+        Y_feff_inv_np = Y_feff_inv_np.reshape(-1).astype(np.int32)
         self.Y_feff_unique = tf.constant(Y_feff_unique_np, dtype=fz_tf.DTYPE)
-        self.Y_feff_inverse_idx = tf.constant(
-            Y_feff_inv_np.reshape(-1).astype(np.int32), dtype=tf.int32
-        )
+        self.Y_feff_inverse_idx = tf.constant(Y_feff_inv_np, dtype=tf.int32)
 
-        # Precompute the bT·J0(qT·bT) kernel (λ-independent).
-        self.bT_J0_kernel = fz_tf.build_bT_J0_kernel(self.qT_per_bin, self.bT)
-        self.bT_simpson_w = tf.constant(
-            fz_tf.simpson_weights(np.asarray(self.bT)), dtype=fz_tf.DTYPE
-        )
+        bT_simpson_w_np = fz_tf.simpson_weights(np.asarray(grid["bT"]))
+        self.bT_simpson_w = tf.constant(bT_simpson_w_np, dtype=fz_tf.DTYPE)
+
+        # Reconstruction layout. Default: factorized (deduplicated rows +
+        # unique-qT J0 kernel + Simpson-as-matmul) — numerically equivalent to
+        # the legacy (Nbins, Nbt) layout (≲1e-14 rel., summation order only)
+        # but ~6x smaller, which is what lets the fit run on a 32 GB GPU.
+        # The legacy_recon=1 spec token selects the legacy path (parity
+        # checks).
+        self.factorized = not bool(legacy_recon)
+
+        # Hessian straight-through switches (see the module docstring's
+        # two-pass recipe). Spec tokens hessian_straightthrough=1 /
+        # hessian_gn=1, recorded in the fitresults meta via the stored
+        # --paramModel spec.
+        self._hess_st = bool(hessian_straightthrough)
+        self._hess_gn = bool(hessian_gn)
+        if self.factorized:
+            dd = fz_tf.dedup_grid_rows(
+                grid["I_pert"][0], grid["C_nu"][0], Y_feff_inv_np
+            )
+            self.I_pert_u = tf.constant(dd["I_u"], dtype=fz_tf.DTYPE)  # (Nu, Nbt)
+            # C_ν via the second-level dedup: exp(C·g) runs on the small
+            # (Ncu, Nbt) table and is gathered — bit-identical, ~150x fewer
+            # transcendentals, no (Nu, Nbt) C constant on device.
+            self.C_nu_uu = tf.constant(dd["C_uu"], dtype=fz_tf.DTYPE)  # (Ncu, Nbt)
+            self.c_of_u = tf.constant(dd["c_of_u"], dtype=tf.int32)
+            self.feff_idx_u = tf.constant(dd["feff_idx_u"], dtype=tf.int32)
+            # Per-bin index into the unique-qT axis. The bin qT values are by
+            # construction members of qT_unique, so searchsorted is an exact
+            # lookup (asserted).
+            qT_idx_np = np.searchsorted(idx_map["qT_unique"], qT_pb_np)
+            assert np.array_equal(idx_map["qT_unique"][qT_idx_np], qT_pb_np)
+            self.gather_idx = tf.constant(
+                np.stack([dd["row_uid"].astype(np.int64), qT_idx_np], axis=1),
+                dtype=tf.int32,
+            )
+            # Drop the host-side dedup copies (the tf.constants own the data now).
+            del dd
+            # Weighted J0 kernel on the unique-qT grid, with the per-bin qT
+            # prefactor and the Simpson weights folded in: (NqT, Nbt).
+            K_u = fz_tf.build_bT_J0_kernel(
+                tf.constant(idx_map["qT_unique"], dtype=fz_tf.DTYPE), self.bT
+            )
+            self.KwqT = (
+                tf.constant(idx_map["qT_unique"], dtype=fz_tf.DTYPE)[:, tf.newaxis]
+                * K_u
+                * self.bT_simpson_w[tf.newaxis, :]
+            )
+        else:
+            self.I_pert = tf.constant(
+                grid["I_pert"][0], dtype=fz_tf.DTYPE
+            )  # (Nbins, Nbt)
+            self.C_nu = tf.constant(grid["C_nu"][0], dtype=fz_tf.DTYPE)
+            # Precompute the bT·J0(qT·bT) kernel (λ-independent).
+            self.bT_J0_kernel = fz_tf.build_bT_J0_kernel(self.qT_per_bin, self.bT)
+        # Drop the ~17.5 GB host-side grid reference before TF graph building.
+        del grid
 
         # ---- Q-integration weights (arctan_Q² Simpson on Z mass window).
         self.Q_weights = tf.constant(
@@ -782,47 +831,45 @@ class SCETlibNPParamModel(ParamModel):
         self.sigma_YqT_central = self._sigma_YqT_native_at(
             self.eff_central, self.gnu_central
         )
-        # ---- Optional fixed-order/DYTurbo nonsingular term (NP-independent).
+        # ---- Fixed-order/DYTurbo nonsingular term (NP-independent).
         # σ_gen^matched(λ) = σ_gen^resum(λ) + σ_ns. Added at GEN level, so it folds
         # through the same response R as the resummed piece. Because rnorm is a
         # ratio, this correctly DILUTES the NP variation where the FO dominates
-        # (high qT). σ_ns is a constant (no λ dependence).
-        self.include_nonsingular = bool(include_nonsingular)
-        if self.include_nonsingular:
-            _dy0 = (
-                nonsingular_dyturbo.format(scale="mur1-muf1")
-                if (nonsingular_dyturbo and "{scale}" in nonsingular_dyturbo)
-                else nonsingular_dyturbo
+        # (high qT). σ_ns is a constant (no λ dependence), always included —
+        # the matched σ_gen is what the histmaker nominal carries; resum-only
+        # diagnostics subtract self.sigma_ns instead of rebuilding the model.
+        _dy0 = (
+            nonsingular_dyturbo.format(scale="mur1-muf1")
+            if (nonsingular_dyturbo and "{scale}" in nonsingular_dyturbo)
+            else nonsingular_dyturbo
+        )
+        missing = [
+            p for p in (nonsingular_fo_sing, _dy0) if not (p and os.path.exists(p))
+        ]
+        if missing:
+            raise FileNotFoundError(
+                "The matched model needs the fixed-order inputs for "
+                "σ_ns = DYTurbo − SCETlib_singular, but these are missing:\n  "
+                + "\n  ".join(missing)
+                + "\nThey live under wremnants-data/data/TheoryCorrections (the "
+                "SCETlib singular …_nnlo_sing…combined.pkl and the DYTurbo "
+                "results_…scetlibmatch.txt). Pass nonsingular_fo_sing / "
+                "nonsingular_dyturbo to point at them."
             )
-            missing = [
-                p for p in (nonsingular_fo_sing, _dy0) if not (p and os.path.exists(p))
-            ]
-            if missing:
-                raise FileNotFoundError(
-                    "include_nonsingular=True needs the fixed-order inputs for "
-                    "σ_ns = DYTurbo − SCETlib_singular, but these are missing:\n  "
-                    + "\n  ".join(missing)
-                    + "\nThey live under wremnants-data/data/TheoryCorrections (the "
-                    "SCETlib singular …_nnlo_sing…combined.pkl and the DYTurbo "
-                    "results_…scetlibmatch.txt). Pass nonsingular_fo_sing / "
-                    "nonsingular_dyturbo, or set include_nonsingular=False for resum-only."
-                )
-            sigma_ns_np = compute_nonsingular_gen(
-                nonsingular_fo_sing,
-                nonsingular_dyturbo,
-                self._gen_axes_meta,
-                q_lo=Q_lo,
-                q_hi=Q_hi,
-                qt_cutoff=nonsingular_qt_cutoff,
+        sigma_ns_np = compute_nonsingular_gen(
+            nonsingular_fo_sing,
+            nonsingular_dyturbo,
+            self._gen_axes_meta,
+            q_lo=Q_lo,
+            q_hi=Q_hi,
+            qt_cutoff=nonsingular_qt_cutoff,
+        )
+        if sigma_ns_np.shape != tuple(self.gen_shape):
+            raise ValueError(
+                f"nonsingular gen shape {sigma_ns_np.shape} != model gen shape "
+                f"{tuple(self.gen_shape)}"
             )
-            if sigma_ns_np.shape != tuple(self.gen_shape):
-                raise ValueError(
-                    f"nonsingular gen shape {sigma_ns_np.shape} != model gen shape "
-                    f"{tuple(self.gen_shape)}"
-                )
-            self.sigma_ns = tf.constant(sigma_ns_np, dtype=fz_tf.DTYPE)
-        else:
-            self.sigma_ns = tf.zeros(self.gen_shape, dtype=fz_tf.DTYPE)
+        self.sigma_ns = tf.constant(sigma_ns_np, dtype=fz_tf.DTYPE)
         # Reuse the native (NY, NqT) integral already computed above for
         # sigma_YqT_central — no need to run the bT reconstruction at λ_central twice.
         sigma_gen_central = self._sigma_gen_at(
@@ -879,24 +926,45 @@ class SCETlibNPParamModel(ParamModel):
         self.npou = len(nou_params)
         self.params = np.array([p.encode() for p in self._param_order])
 
+        # Impact groups over our own parameters, consumed by the Fitter's
+        # traditional impacts. rabbit's built-in systgroup machinery can't
+        # represent these: its group indices are syst-relative, but our λ are
+        # POUs (model nuisances), which have no syst index. The Fitter resolves
+        # these labels -> floating full-x indices and computes the conditional
+        # group impact from the covariance. Split into the two NP sectors:
+        # CS-side γ_ν (lambda*_nu) vs TMD-effective F_eff.
+        #
+        # ``resumNonpert`` is the SAME group name setupRabbit assigns to the
+        # discrete scetlibNP* template variations in the old-style datacard
+        # (there resumNonpert == exactly those 4 nuisances). Emitting it here
+        # (= all our lambda) makes the grouped-impact bar directly comparable
+        # between the new param model and the old NP variations. It does NOT
+        # collide with a syst group: the new-model datacard excludes scetlibNP,
+        # so resumNonpert is absent from indata.systgroups.
+        self.param_impact_groups = {
+            "resumNonpert": tuple(ALL_PARAMS),
+            "scetlibNPgammaNu": tuple(GNU_PARAMS),
+            "scetlibNPFeff": tuple(EFF_PARAMS),
+        }
+
         # Defaults: λ_central values per parameter. Optionally overridden by
-        # the ``SCETLIB_NP_XPARAMDEFAULT`` env var — comma-separated
-        # ``name=value`` pairs (for closure tests where the data-generating
-        # / fit-start point should differ from the card's λ_central).
+        # the ``xparam_default=name=value,...`` spec token — comma-separated
+        # pairs (for closure tests where the data-generating / fit-start
+        # point should differ from the card's λ_central).
         central_lookup = {**self.eff_central, **self.gnu_central}
         defaults = np.array(
             [central_lookup[p] for p in self._param_order], dtype=np.float64
         )
 
-        env_override = os.environ.get("SCETLIB_NP_XPARAMDEFAULT", "").strip()
-        if env_override:
+        start_override = (xparam_default or "").strip()
+        if start_override:
             overrides = dict(
-                tuple(s.split("=")) for s in env_override.split(",") if s.strip()
+                tuple(s.split("=")) for s in start_override.split(",") if s.strip()
             )
             for name, val in overrides.items():
                 name = name.strip()
                 if name not in self._param_order:
-                    raise KeyError(f"SCETLIB_NP_XPARAMDEFAULT: unknown param {name!r}")
+                    raise KeyError(f"xparam_default: unknown param {name!r}")
                 i = self._param_order.index(name)
                 defaults[i] = float(val)
             print(
@@ -911,70 +979,65 @@ class SCETlibNPParamModel(ParamModel):
         self.is_linear = False
         self.xparamdefault = tf.constant(defaults, dtype=indata.dtype)
 
-        # Gaussian priors (consumed by rabbit's Fitter when --paramModelPriors
-        # is set; ignored otherwise). Default σ values come from
-        # ``THEORIST_PRIOR_SIGMAS`` (lambda2_nu, lambda2, lambda4 — the only
-        # params the theorist provides widths for as of 2026-05).
-        # All other params default to σ = NaN → no prior, float free; in
-        # practice those should be frozen via rabbit's --freezeParameters
-        # until the theorist gives priors for them.
-        # The ``prior_sigmas`` kwarg is a per-name override dict; pass NaN to
-        # force a parameter free, or a finite value to add / change a prior.
-        # The mean of each prior is λ_central (i.e. self.xparamdefault).
-        prior_sigmas = dict(prior_sigmas or {})
-        sigmas_arr = np.empty(self.nparams, dtype=np.float64)
-        for i, p in enumerate(self._param_order):
-            if p in prior_sigmas:
-                sigmas_arr[i] = float(prior_sigmas[p])  # explicit override (may be NaN)
-            elif p in THEORIST_PRIOR_SIGMAS:
-                sigmas_arr[i] = THEORIST_PRIOR_SIGMAS[p]  # theorist recommendation
-            else:
-                sigmas_arr[i] = np.nan  # free (expected to be frozen)
-        self.prior_sigmas = sigmas_arr
-        # prior_means defaults to xparamdefault if not set, so don't store
-        # redundantly — Fitter will fall back to xparamdefault.
+        # Gaussian priors (semantics documented on the constructor args).
+        # Rabbit's Fitter applies them whenever the model DECLARES
+        # ``prior_sigmas`` (no rabbit-side CLA — WMass/rabbit#133), so the
+        # declaration is gated behind ``priors``: off → no attribute →
+        # everything floats free. The Fitter takes the prior means from
+        # xparamdefault, so an xparam_default shift moves start AND prior
+        # mean together (to centre priors on truth while starting shifted,
+        # prior_means would have to be decoupled from xparamdefault).
+        self._use_priors = bool(priors)
+        # ``prior_sigmas`` may be a Mapping (programmatic) or the spec-token
+        # string ``prior_sigmas=lambda2=0.3,delta_lambda2=nan`` — the same
+        # comma-separated name=value format as xparam_default; value ``nan``
+        # frees the param.
+        if isinstance(prior_sigmas, str):
+            prior_sigmas = dict(
+                tuple(s.split("=")) for s in prior_sigmas.split(",") if s.strip()
+            )
+        prior_sigmas = {k.strip(): v for k, v in dict(prior_sigmas or {}).items()}
+        for name in prior_sigmas:
+            if name not in self._param_order:
+                raise KeyError(f"prior_sigmas: unknown param {name!r}")
+        if self._use_priors:
+            sigmas_arr = np.empty(self.nparams, dtype=np.float64)
+            for i, p in enumerate(self._param_order):
+                if p in prior_sigmas:
+                    sigmas_arr[i] = float(
+                        prior_sigmas[p]
+                    )  # explicit override (may be NaN)
+                elif p in DEFAULT_PRIOR_SIGMAS:
+                    sigmas_arr[i] = DEFAULT_PRIOR_SIGMAS[p]  # theorist recommendation
+                else:
+                    sigmas_arr[i] = np.nan  # free (expected to be frozen)
+            self.prior_sigmas = sigmas_arr
+            # prior_means defaults to xparamdefault if not set, so don't store
+            # redundantly — Fitter will fall back to xparamdefault.
+            print(
+                "[SCETlibNPParamModel] Gaussian priors ENABLED (priors=1); "
+                "applied by rabbit's Fitter (pre-#133 rabbit additionally "
+                "needs --paramModelPriors):",
+                flush=True,
+            )
+            for i, p in enumerate(self._param_order):
+                if np.isfinite(sigmas_arr[i]) and sigmas_arr[i] > 0:
+                    print(f"  {p}: σ = {sigmas_arr[i]:.4g}", flush=True)
+        elif prior_sigmas:
+            print(
+                "[SCETlibNPParamModel] WARNING: prior_sigmas overrides given "
+                "but priors are not enabled (pass priors=1); ignoring them — "
+                "all λ float free.",
+                flush=True,
+            )
 
-    # =========================================================================
-    # Helpers
-    # =========================================================================
+    def _check_discrete_np_double_counting(self):
+        """Refuse to run on a datacard containing discrete scetlibNP systs.
 
-    # Substrings (case-insensitive) that mark indata.systs as discrete
-    # NP-template variations of one of our 8 continuous λ parameters.
-    # Matching is case-insensitive because the histmaker uses inconsistent
-    # casing (canonical names are uppercase Lambda, but some configurations
-    # serialize them lowercase).
-    #
-    # Canonical names (see theory_variation_labels.py):
-    #   chargeVgenNP0scetlibNPZLambda2          → catches "scetlibnpzlambda"
-    #   chargeVgenNP0scetlibNPZLambda4          → catches "scetlibnpzlambda"
-    #   chargeVgenNP0scetlibNPZDelta_Lambda2    → catches "scetlibnpzdelta"
-    #   chargeVgenNP0scetlibNPLambda2  (W-side) → catches "scetlibnplambda"
-    #   chargeVgenNP0scetlibNPLambda4  (W-side) → catches "scetlibnplambda"
-    #   chargeVgenNP0scetlibNPDelta_Lambda2     → catches "scetlibnpdelta"
-    #   scetlibNPgamma                          → catches "scetlibnpgamma"
-    #   scetlibNPgammaEigvar{1,2,3}             → catches "scetlibnpgamma"
-    #   scetlibNPgammaLambda{2,4,Inf}           → catches "scetlibnpgamma"
-    _DISCRETE_NP_PATTERNS = (
-        "scetlibnpzlambda",  # Z-side Lambda2 / Lambda4 templates
-        "scetlibnpzdelta",  # Z-side Delta_Lambda2 template
-        "scetlibnplambda",  # W-side Lambda2 / Lambda4 templates
-        "scetlibnpdelta",  # W-side Delta_Lambda2 template
-        "scetlibnpgamma",  # all γ_ν templates (Lambda2/4/Inf, Eigvar1/2/3, "gamma")
-    )
-
-    def _check_discrete_np_double_counting(self, freeze_patterns):
-        """Detect indata systs that overlap with our continuous λ POUs.
-
-        Three outcomes:
-          - The discrete NP syst is **absent** from ``indata.systs`` entirely
-            (histmaker didn't include it): nothing to do, silent return.
-          - The discrete NP syst is **present and matched** by
-            ``freeze_patterns``: it's frozen at central → no double-counting,
-            silent return.
-          - The discrete NP syst is **present and unfrozen**: it overlaps
-            with one of our continuous λ POUs and will absorb shape variation
-            the ParamModel should describe → print a loud banner with the
-            exact freeze args to add.
+        They describe the same physics as this ParamModel's continuous λ;
+        running both double-counts (the discrete syst absorbs shape variation
+        the ParamModel should describe: spurious pull on the indata syst,
+        postfit λ not what the data prefers).
         """
 
         systs = getattr(self.indata, "systs", None)
@@ -982,59 +1045,19 @@ class SCETlibNPParamModel(ParamModel):
             return
         syst_names = [s.decode() if isinstance(s, bytes) else str(s) for s in systs]
 
-        # Case-insensitive substring match: canonical names use uppercase
-        # Lambda but some histmaker outputs lowercase the names.
         conflicting = [
-            s
-            for s in syst_names
-            if any(pat in s.lower() for pat in self._DISCRETE_NP_PATTERNS)
+            s for s in syst_names if self._DISCRETE_NP_SUBSTRING in s.lower()
         ]
         if not conflicting:
-            return  # not in indata.systs at all → nothing to warn about
+            return
 
-        # Which of those are NOT already covered by a user-supplied freeze
-        # pattern (exact match or anchored regex)?
-        patterns = list(freeze_patterns or [])
-        unfrozen = []
-        for s in conflicting:
-            covered = False
-            for pat in patterns:
-                if pat == s:
-                    covered = True
-                    break
-                try:
-                    if re.fullmatch(pat, s):
-                        covered = True
-                        break
-                except re.error:
-                    continue
-            if not covered:
-                unfrozen.append(s)
-
-        if not unfrozen:
-            return  # all conflicting systs are already frozen by the user
-
-        print(
-            "\n"
-            "===================================================================\n"
-            "[SCETlibNPParamModel] DOUBLE-COUNTING WARNING\n"
-            "===================================================================\n"
-            f"Detected {len(unfrozen)} discrete NP κ-template syst(s) in the\n"
-            "input HDF5 that describe the same physics as this ParamModel's\n"
-            "continuous λ parameters. Running both leads to double-counting:\n"
-            "the discrete syst absorbs shape variation that the ParamModel\n"
-            "should describe (the indata syst will show a spurious pull, and\n"
-            "the postfit λ values are not what the data actually prefers).\n\n"
-            "Unfrozen conflicting systs:\n"
-            + "\n".join(f"    {s}" for s in unfrozen)
-            + "\n\n"
-            "Fix by adding to --freezeParameters, e.g.:\n"
-            "    --freezeParameters '.*scetlibNPZ.*lambda.*' "
-            "'.*scetlibNPgammaLambda.*' ...\n"
-            "or list them explicitly:\n"
-            "    --freezeParameters " + " ".join(repr(s) for s in unfrozen) + "\n"
-            "===================================================================",
-            flush=True,
+        raise ValueError(
+            f"[SCETlibNPParamModel] {len(conflicting)} discrete scetlibNP "
+            "κ-template syst(s) found in the input HDF5; they describe the "
+            "same physics as this ParamModel's continuous λ parameters and "
+            "running both double-counts. Remake the datacard without them "
+            "(setupRabbit --excludeNuisances '.*scetlibNP.*'). Conflicting "
+            "systs:\n" + "\n".join(f"    {s}" for s in conflicting)
         )
 
     def _fit_reco_axes(self, indata):
@@ -1068,23 +1091,43 @@ class SCETlibNPParamModel(ParamModel):
         qT grid (Y_unique, qT_unique), BEFORE the |Y|-fold and qT-rebin. This
         is the object that the native-binning validation compares against the
         SCETlib spectrum reference (curve 1) and the numpy `factorize` (curve 2)."""
-        # 1. Reconstruct σ on the btgrid's flat (Nbins,) layout.
-        sigma_flat = fz_tf.reconstruct_batch_tf(
-            qT_per_bin=self.qT_per_bin,
-            bT=self.bT,
-            I_pert=self.I_pert,
-            C_nu=self.C_nu,
-            b_bar=self.b_bar,
-            Y_per_bin=self.Y_per_bin,
-            eff_params={k: v for k, v in eff_params.items() if k != "np_model"},
-            gnu_params={k: v for k, v in gnu_params.items() if k != "np_model_nu"},
-            np_model=self.np_model,
-            np_model_nu=self.np_model_nu,
-            bT_J0_kernel=self.bT_J0_kernel,
-            bT_simpson_weights=self.bT_simpson_w,
-            Y_unique=self.Y_feff_unique,
-            Y_inverse_idx=self.Y_feff_inverse_idx,
-        )
+        # 1. Reconstruct σ on the btgrid's flat (Nbins,) layout. Factorized
+        # (default) and legacy layouts are numerically equivalent (≲1e-14
+        # rel.; summation order only — see FACTORIZED_RECON.md).
+        eff = {k: v for k, v in eff_params.items() if k != "np_model"}
+        gnu = {k: v for k, v in gnu_params.items() if k != "np_model_nu"}
+        if self.factorized:
+            sigma_flat = fz_tf.reconstruct_batch_factorized_tf(
+                b_bar=self.b_bar,
+                I_pert_u=self.I_pert_u,
+                C_nu_uu=self.C_nu_uu,
+                c_of_u=self.c_of_u,
+                eff_params=eff,
+                gnu_params=gnu,
+                np_model=self.np_model,
+                np_model_nu=self.np_model_nu,
+                KwqT=self.KwqT,
+                gather_idx=self.gather_idx,
+                Y_unique=self.Y_feff_unique,
+                feff_idx_u=self.feff_idx_u,
+            )
+        else:
+            sigma_flat = fz_tf.reconstruct_batch_tf(
+                qT_per_bin=self.qT_per_bin,
+                bT=self.bT,
+                I_pert=self.I_pert,
+                C_nu=self.C_nu,
+                b_bar=self.b_bar,
+                Y_per_bin=self.Y_per_bin,
+                eff_params=eff,
+                gnu_params=gnu,
+                np_model=self.np_model,
+                np_model_nu=self.np_model_nu,
+                bT_J0_kernel=self.bT_J0_kernel,
+                bT_simpson_weights=self.bT_simpson_w,
+                Y_unique=self.Y_feff_unique,
+                Y_inverse_idx=self.Y_feff_inverse_idx,
+            )
         # 2. Sparse → dense (NQ, NY, NqT). Missing cells get 0.
         sigma_dense = fz_int.sparse_to_dense_tf(sigma_flat, self.flat_idx)
         # 3. Integrate over Q (arctan_Q² Simpson) → (NY, NqT).
@@ -1244,16 +1287,13 @@ class SCETlibNPParamModel(ParamModel):
         # ratio(λ) per reco bin. Normal path = exact fold (used for the fit).
         # Straight-through path (Hessian-only Phase B) keeps the bT slab off the
         # autodiff graph so rabbit's covariance jacobian doesn't OOM. Toggled by
-        # SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH; SCETLIB_NP_HESSIAN_GN=1 drops the
-        # curvature term (Gauss-Newton/Fisher — exact for Asimov, 8 vs 72 passes).
+        # hessian_straightthrough=1 spec token;
+        # hessian_gn=1 drops the curvature term
+        # (Gauss-Newton/Fisher — exact for Asimov, 8 vs 72 passes). Resolved at
+        # construction (self._hess_st / self._hess_gn).
         # Do NOT enable during the fit: it recomputes J(/K) every call.
-        if not hasattr(self, "_hess_st"):
-            self._hess_st = bool(
-                os.environ.get("SCETLIB_NP_HESSIAN_STRAIGHTTHROUGH", "").strip()
-            )
         if self._hess_st:
-            gn = bool(os.environ.get("SCETLIB_NP_HESSIAN_GN", "").strip())
-            ratio = self._ratio_straightthrough(param, use_curvature=not gn)
+            ratio = self._ratio_straightthrough(param, use_curvature=not self._hess_gn)
         else:
             ratio = self._ratio_from_param(param)
 
