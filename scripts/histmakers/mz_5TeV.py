@@ -113,6 +113,13 @@ axis_absYll = hist.axis.Variable(
 )
 axis_mu_pt = hist.axis.Regular(60, 25, 150, name="mu_pt")
 axis_mu_eta = hist.axis.Regular(48, -2.4, 2.4, name="mu_eta")
+axis_mu_phi = hist.axis.Regular(32, -math.pi, math.pi, circular=True, name="mu_phi")
+axis_mu_oneOverPt = hist.axis.Regular(50, 0.005, 0.04, name="mu_oneOverPt")
+axis_mu_charge = hist.axis.Variable([-1.5, -0.5, 0.5, 1.5], name="mu_charge")
+axis_mu_nl = hist.axis.Variable(
+    [6.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 17.5], name="mu_nl"
+)
+axis_mu_masspt = hist.axis.Regular(100, 0, 1e4, name="mu_masspt")
 axis_cosThetaStarll = hist.axis.Regular(
     200, -1.0, 1.0, name="cosThetaStarll", underflow=False, overflow=False
 )
@@ -197,6 +204,16 @@ def build_graph(df, dataset):
         .Define("munegpt", "Muon_pt[i_neg]")
         .Define("muposeta", "Muon_eta[i_pos]")
         .Define("munegeta", "Muon_eta[i_neg]")
+        .Define("muposphi", "Muon_phi[i_pos]")
+        .Define("munegphi", "Muon_phi[i_neg]")
+        .Define("mupos_oneOverPt", "1.0/Muon_pt[i_pos]")
+        .Define("muneg_oneOverPt", "1.0/Muon_pt[i_neg]")
+        .Define("muposcharge", "(double)Muon_charge[i_pos]")
+        .Define("munegcharge", "(double)Muon_charge[i_neg]")
+        .Define("mupos_nl", "(double)Muon_nTrackerLayers[i_pos]")
+        .Define("muneg_nl", "(double)Muon_nTrackerLayers[i_neg]")
+        .Define("mupos_masspt", "mll * Muon_pt[i_pos]")
+        .Define("muneg_masspt", "mll * Muon_pt[i_neg]")
     )
 
     # ---- Build CS angles ----
@@ -231,20 +248,28 @@ def build_graph(df, dataset):
         df = df.Define(
             # "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasWeight_tensor",
             f"{theory_corr_name}Weight_tensor",
-            corr_helpers[dataset.name][
-                "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas"
-            ],
+            corr_helpers[dataset.name][theory_corr_name],
             [
                 "massVgen",
                 "absYVgen",
                 "ptVgen",
                 "chargeVgen",
-                "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas_corr_weight",
+                f"{theory_corr_name}_corr_weight",
             ],
         )
 
         # df = df.Define("nominal_weight", "scetlib_dyturboN3p0LL_LatticeNP_pdfasWeight_tensor[0]")
         df = df.Define("nominal_weight", f"{theory_corr_name}Weight_tensor[0]")
+
+        for corr in theory_corrs[1:]:
+            if corr not in corr_helpers.get(dataset.name, {}):
+                continue
+            df = theory_corrections.define_theory_corr_weight_column(df, corr)
+            df = df.Define(
+                f"{corr}Weight_tensor",
+                corr_helpers[dataset.name][corr],
+                ["massVgen", "absYVgen", "ptVgen", "chargeVgen", f"{corr}_corr_weight"],
+            )
 
     # ---- Fill histograms ----
     hist_nLepton = df.HistoBoost(
@@ -281,6 +306,36 @@ def build_graph(df, dataset):
     )
     hist_mu_neg_eta = df.HistoBoost(
         "munegeta", [axis_mu_eta], ["munegeta", "nominal_weight"]
+    )
+    hist_mu_pos_phi = df.HistoBoost(
+        "muposphi", [axis_mu_phi], ["muposphi", "nominal_weight"]
+    )
+    hist_mu_neg_phi = df.HistoBoost(
+        "munegphi", [axis_mu_phi], ["munegphi", "nominal_weight"]
+    )
+    hist_mu_pos_oneOverPt = df.HistoBoost(
+        "mupos_oneOverPt", [axis_mu_oneOverPt], ["mupos_oneOverPt", "nominal_weight"]
+    )
+    hist_mu_neg_oneOverPt = df.HistoBoost(
+        "muneg_oneOverPt", [axis_mu_oneOverPt], ["muneg_oneOverPt", "nominal_weight"]
+    )
+    hist_mu_pos_charge = df.HistoBoost(
+        "muposcharge", [axis_mu_charge], ["muposcharge", "nominal_weight"]
+    )
+    hist_mu_neg_charge = df.HistoBoost(
+        "munegcharge", [axis_mu_charge], ["munegcharge", "nominal_weight"]
+    )
+    hist_mu_pos_nl = df.HistoBoost(
+        "mupos_nl", [axis_mu_nl], ["mupos_nl", "nominal_weight"]
+    )
+    hist_mu_neg_nl = df.HistoBoost(
+        "muneg_nl", [axis_mu_nl], ["muneg_nl", "nominal_weight"]
+    )
+    hist_mu_pos_masspt = df.HistoBoost(
+        "mupos_masspt", [axis_mu_masspt], ["mupos_masspt", "nominal_weight"]
+    )
+    hist_mu_neg_masspt = df.HistoBoost(
+        "muneg_masspt", [axis_mu_masspt], ["muneg_masspt", "nominal_weight"]
     )
 
     # CS angles
@@ -363,6 +418,16 @@ def build_graph(df, dataset):
         hist_mu_neg_pt,
         hist_mu_pos_eta,
         hist_mu_neg_eta,
+        hist_mu_pos_phi,
+        hist_mu_neg_phi,
+        hist_mu_pos_oneOverPt,
+        hist_mu_neg_oneOverPt,
+        hist_mu_pos_charge,
+        hist_mu_neg_charge,
+        hist_mu_pos_nl,
+        hist_mu_neg_nl,
+        hist_mu_pos_masspt,
+        hist_mu_neg_masspt,
         hist_cosThetaStarll,
         hist_phiStarll,
         hist_ptll_vs_yll,
