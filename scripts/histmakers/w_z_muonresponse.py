@@ -26,6 +26,9 @@ args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
+if args.dxybsVeto > 0 and args.dxybsVeto < args.dxybs:
+    raise ValueError("When using together '--dxybsVeto X --dxybs Y' it must be X > Y.")
+
 datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
@@ -133,9 +136,16 @@ def build_graph(df, dataset):
         df, cvh_helper, jpsi_helper, args, dataset, smearing_helper, bias_helper
     )
 
-    df = muon_selections.select_veto_muons(df, nMuons=-1)
+    df = muon_selections.select_veto_muons(
+        df,
+        nMuons=-1,
+        ptCut=args.vetoRecoPt,
+        etaCut=args.vetoRecoEta,
+        staPtCut=args.vetoRecoStaPt,
+        dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
+    )
     df = muon_selections.select_good_muons(
-        df, ptLow=0.0, ptHigh=1e6, nMuons=-1, datasetGroup=None
+        df, ptLow=0.0, ptHigh=1e6, nMuons=-1, datasetGroup=None, dxybsCut=args.dxybs
     )
 
     df = df.Define(

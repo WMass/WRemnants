@@ -131,6 +131,10 @@ if args.useRefinedVeto and args.useGlobalOrTrackerVeto:
     raise NotImplementedError(
         "Options --useGlobalOrTrackerVeto and --useRefinedVeto cannot be used together at the moment."
     )
+
+if args.dxybsVeto > 0 and args.dxybsVeto < args.dxybs:
+    raise ValueError("When using together '--dxybsVeto X --dxybs Y' it must be X > Y.")
+
 if args.validateVetoSF:
     if args.useGlobalOrTrackerVeto or not args.useRefinedVeto:
         raise NotImplementedError(
@@ -232,17 +236,14 @@ if args.addAxisSignUt:
     )
 
 # for isoMt region validation and related tests
-# use very high upper edge as a proxy for infinity (cannot exploit overflow bins in the fit)
-# can probably use numpy infinity, but this is compatible with the root conversion
-# FIXME: now we can probably use overflow bins in the fit
 axis_mtCat = hist.axis.Variable(
-    [0, int(args.mtCut / 2.0), args.mtCut, 1000],
+    [0, int(args.mtCut / 2.0), args.mtCut, np.inf],
     name="mt",
     underflow=False,
     overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
-    [0, 0.15, 0.3, 100], name="relIso", underflow=False, overflow=False
+    [0, 0.15, 0.3, np.inf], name="relIso", underflow=False, overflow=False
 )
 
 if args.addIsoMtAxes:
@@ -306,12 +307,14 @@ muon_prefiring_helper, muon_prefiring_helper_stat, muon_prefiring_helper_syst = 
     muon_prefiring.make_muon_prefiring_helpers(era=era)
 )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr, corrs=["qcdScale", "alphaS", "pdf"]
 )
 
 # extra axes which can be used to label tensor_axes
-if args.binnedScaleFactors:
+if args.noScaleFactors:
+    logger.info("Running with no scale factors")
+elif args.binnedScaleFactors:
     logger.info("Using binned scale factors and uncertainties")
     # add usePseudoSmoothing=True for tests with Asimov
     muon_efficiency_helper, muon_efficiency_helper_syst, muon_efficiency_helper_stat = (
@@ -336,18 +339,19 @@ else:
 logger.info(f"SF file: {args.sfFile}")
 
 muon_efficiency_helper_syst_altBkg = {}
-for es in common.muonEfficiency_altBkgSyst_effSteps:
-    altSFfile = args.sfFile.replace(".root", "_altBkg.root")
-    logger.info(f"Additional SF file for alternate syst with {es}: {altSFfile}")
-    muon_efficiency_helper_syst_altBkg[es] = (
-        muon_efficiencies_smooth.make_muon_efficiency_helpers_smooth_altSyst(
-            filename=altSFfile,
-            era=era,
-            what_analysis=thisAnalysis,
-            max_pt=axis_pt.edges[-1],
-            effStep=es,
+if not args.noScaleFactors:
+    for es in common.muonEfficiency_altBkgSyst_effSteps:
+        altSFfile = args.sfFile.replace(".root", "_altBkg.root")
+        logger.info(f"Additional SF file for alternate syst with {es}: {altSFfile}")
+        muon_efficiency_helper_syst_altBkg[es] = (
+            muon_efficiencies_smooth.make_muon_efficiency_helpers_smooth_altSyst(
+                filename=altSFfile,
+                era=era,
+                what_analysis=thisAnalysis,
+                max_pt=axis_pt.edges[-1],
+                effStep=es,
+            )
         )
-    )
 
 if args.validateVetoSF:
     logger.warning(
@@ -470,9 +474,9 @@ def build_graph(df, dataset):
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
 
-    theory_helpers = None
+    helicity_smoothing_helpers = None
     if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -596,7 +600,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     [a for a in unfolding_axes[level] if a.name != "acceptance"],
                     [c for c in unfolding_cols[level] if c != f"{level}_acceptance"],
                     base_name=level,
@@ -624,7 +628,14 @@ def build_graph(df, dataset):
         df, cvh_helper, jpsi_helper, args, dataset, smearing_helper, bias_helper
     )
 
-    df = muon_selections.select_veto_muons(df, nMuons=2, ptCut=args.vetoRecoPt)
+    df = muon_selections.select_veto_muons(
+        df,
+        nMuons=2,
+        ptCut=args.vetoRecoPt,
+        etaCut=args.vetoRecoEta,
+        staPtCut=args.vetoRecoStaPt,
+        dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
+    )
 
     isoThreshold = args.isolationThreshold
 
@@ -645,6 +656,7 @@ def build_graph(df, dataset):
             isoThreshold=isoThreshold,
             requirePixelHits=args.requirePixelHits,
             requireID=False,
+            dxybsCut=args.dxybs,
         )
         df = muon_selections.define_trigger_muons(df)
         # apply lower pt cut and medium ID on triggering muon
@@ -924,7 +936,11 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
     results.append(
@@ -1388,38 +1404,39 @@ def build_graph(df, dataset):
 
     if not dataset.is_data and not args.onlyMainHistograms:
 
-        df = systematics.add_muon_efficiency_unc_hists(
-            results,
-            df,
-            muon_efficiency_helper_stat,
-            muon_efficiency_helper_syst,
-            axes,
-            cols,
-            what_analysis=thisAnalysis,
-            singleMuonCollection="trigMuons",
-            smooth3D=args.smooth3dsf,
-        )
-        for es in common.muonEfficiency_altBkgSyst_effSteps:
-            df = systematics.add_muon_efficiency_unc_hists_altBkg(
+        if not args.noScaleFactors:
+            df = systematics.add_muon_efficiency_unc_hists(
                 results,
                 df,
-                muon_efficiency_helper_syst_altBkg[es],
+                muon_efficiency_helper_stat,
+                muon_efficiency_helper_syst,
                 axes,
                 cols,
-                singleMuonCollection="trigMuons",
                 what_analysis=thisAnalysis,
-                step=es,
+                singleMuonCollection="trigMuons",
+                smooth3D=args.smooth3dsf,
             )
-        if args.validateVetoSF:
-            df = systematics.add_muon_efficiency_veto_unc_hists(
-                results,
-                df,
-                muon_efficiency_veto_helper_stat,
-                muon_efficiency_veto_helper_syst,
-                axes,
-                cols,
-                muons="nonTrigMuons",
-            )
+            for es in common.muonEfficiency_altBkgSyst_effSteps:
+                df = systematics.add_muon_efficiency_unc_hists_altBkg(
+                    results,
+                    df,
+                    muon_efficiency_helper_syst_altBkg[es],
+                    axes,
+                    cols,
+                    singleMuonCollection="trigMuons",
+                    what_analysis=thisAnalysis,
+                    step=es,
+                )
+            if args.validateVetoSF:
+                df = systematics.add_muon_efficiency_veto_unc_hists(
+                    results,
+                    df,
+                    muon_efficiency_veto_helper_stat,
+                    muon_efficiency_veto_helper_syst,
+                    axes,
+                    cols,
+                    muons="nonTrigMuons",
+                )
 
         if era == "2016PostVFP" and args.addRunAxis and not args.randomizeDataByRun:
             # to simplify the code, use helper with largest uncertainty for all eras when splitting data
@@ -1451,7 +1468,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=False,

@@ -38,6 +38,7 @@ from wremnants.production.histmaker_tools import (
     aggregate_groups,
     define_norm_weight_nRecoVtx,
     get_run_lumi_edges,
+    make_muon_dxybs_axis,
     make_muon_phi_axis,
     scale_to_data,
     write_analysis_output,
@@ -177,10 +178,8 @@ if args.useRefinedVeto and args.useGlobalOrTrackerVeto:
         "Options --useGlobalOrTrackerVeto and --useRefinedVeto cannot be used together at the moment."
     )
 
-if args.useRefinedVeto:
-    pass
-else:
-    pass
+if args.dxybsVeto > 0 and args.dxybsVeto < args.dxybs:
+    raise ValueError("When using together '--dxybsVeto X --dxybs Y' it must be X > Y.")
 
 if args.unfolding or args.theoryAgnostic:
     if args.theoryAgnostic:
@@ -312,13 +311,13 @@ axis_mtCat = hist.axis.Variable(
     ),
     name="mt",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
     binning.get_binning_fakes_relIso(high_iso_bins=False),
     name="relIso",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axes_abcd = [axis_mtCat, axis_isoCat]
 
@@ -449,9 +448,15 @@ if args.unfolding:
             args.fitresult, channel="ch1_masked"
         )
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
-    args.pdfs, args.theoryCorr, procs=["Z", "W"]
-)
+if args.skipByHelicityCorrection:
+    helicity_smoothing_helpers_procs = {}
+else:
+    helicity_smoothing_helpers_procs = (
+        theory_corrections.make_helicity_smoothing_helpers(
+            args.pdfs, args.theoryCorr, procs=["Z", "W"]
+        )
+    )
+
 
 if args.theoryAgnostic:
     theoryAgnostic_axes, theoryAgnostic_cols = binning.get_theoryAgnostic_axes(
@@ -481,7 +486,7 @@ axis_dxybs = hist.axis.Regular(
     args.dxybs,
     name="dxybs",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axis_hasjet_fakes = hist.axis.Boolean(
     name="hasJets"
@@ -722,11 +727,8 @@ def build_graph(df, dataset):
     isW = dataset.group in ["Wmunu", "Wtaunu"]
     isBSM = dataset.name.startswith("WtoNMu")
     isWmunu = isBSM or dataset.group in ["Wmunu"]
-    isZ = dataset.group in [
-        "Zmumu",
-        "Ztautau",
-    ]
-    isZveto = isZ or dataset.group in ["DYlowMass"]
+    isZ = dataset.group in ["Zmumu", "Ztautau"]
+    isZmumu = dataset.group in ["Zmumu"]
     isWorZ = isW or isZ
     isTop = dataset.group == "Top"
     isQCDMC = dataset.group == "QCD"
@@ -735,9 +737,10 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
-    theory_helpers = {}
-    if isWorZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
+    else:
+        helicity_smoothing_helpers = {}
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -768,6 +771,10 @@ def build_graph(df, dataset):
 
     axes = nominal_axes
     cols = nominal_cols
+
+    if args.addMuonDxybsAxis is not None:
+        axes = [*axes, make_muon_dxybs_axis(args.addMuonDxybsAxis)]
+        cols = [*cols, "goodMuons_dxybs0"]
 
     if args.addMuonPhiAxis is not None:
         axes = [*axes, make_muon_phi_axis(args.addMuonPhiAxis)]
@@ -833,7 +840,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            theory_helpers,
+            helicity_smoothing_helpers,
             [],
             [],
             base_name="gen",
@@ -890,7 +897,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -911,7 +918,7 @@ def build_graph(df, dataset):
                         args,
                         dataset.name,
                         corr_helpers,
-                        theory_helpers,
+                        helicity_smoothing_helpers,
                         [a for a in unfolding_axes[level] if a.name != "acceptance"],
                         [
                             c
@@ -928,7 +935,7 @@ def build_graph(df, dataset):
         elif dataset.name == "Zmumu_2016PostVFP":
             if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
                 df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, theory_helpers
+                    args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
                 )
 
                 if not unfolder_z.poi_as_noi:
@@ -998,7 +1005,7 @@ def build_graph(df, dataset):
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
         staPtCut=args.vetoRecoStaPt,
-        dxybsCut=args.dxybs,
+        dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
     df = muon_selections.select_good_muons(
@@ -1012,6 +1019,7 @@ def build_graph(df, dataset):
         nonPromptFromSV=args.selectNonPromptFromSV,
         nonPromptFromLighMesonDecay=args.selectNonPromptFromLightMesonDecay,
         requirePixelHits=args.requirePixelHits,
+        dxybsCut=args.dxybs,
     )
 
     # the corrected RECO muon kinematics, which is intended to be used as the nominal
@@ -1283,7 +1291,7 @@ def build_graph(df, dataset):
             )
             weight_expr += "*weight_fullMuonSF_withTrackingReco"
 
-            if isZveto and not args.noGenMatchMC:
+            if isZ and not args.noGenMatchMC:
                 if args.scaleDYvetoFraction > 0.0:
                     # weight different from 1 only for events with >=2 gen muons in acceptance but only 1 reco muon
                     df = df.Define(
@@ -1338,7 +1346,11 @@ def build_graph(df, dataset):
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
 
         if (
@@ -1716,9 +1728,8 @@ def build_graph(df, dataset):
 
         # Defined as Threshold - |dxybs| so that for signal it peaks at Threshold instead of 0
         # for convenience in the later study
-        df = df.Define(
-            "goodMuons_dxybs0", f"{args.dxybs} - abs(Muon_dxybs[goodMuons][0])"
-        )
+        df = df.Define("goodMuons_dxybs0", f"std::abs(Muon_dxybs[goodMuons][0])")
+        df = df.Define("goodMuons_dxybsFlip0", f"{args.dxybs} - goodMuons_dxybs0")
 
         mTStudyForFakes = df.HistoBoost(
             "mTStudyForFakes",
@@ -1743,7 +1754,7 @@ def build_graph(df, dataset):
                 "goodMuons_eta0",
                 "goodMuons_pt0",
                 "goodMuons_charge0",
-                "goodMuons_dxybs0",
+                "goodMuons_dxybsFlip0",
                 "passIso",
                 "passMT",
                 "nominal_weight",
@@ -2306,7 +2317,7 @@ def build_graph(df, dataset):
                         step=es,
                         storage_type=storage_type,
                     )
-                if isZveto and not args.noGenMatchMC and not args.noVetoSF:
+                if isZ and not args.noGenMatchMC and not args.noVetoSF:
                     df = systematics.add_muon_efficiency_veto_unc_hists(
                         results,
                         df,
@@ -2349,7 +2360,7 @@ def build_graph(df, dataset):
                 args,
                 dataset.name,
                 corr_helpers,
-                theory_helpers,
+                helicity_smoothing_helpers,
                 axes,
                 cols,
                 for_wmass=True,

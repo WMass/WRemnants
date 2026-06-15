@@ -4,6 +4,7 @@ import hist
 import numpy as np
 
 from wremnants.postprocessing import syst_tools
+from wremnants.postprocessing.rabbit_helpers import decorrelateByAxes
 from wremnants.postprocessing.theory_variation_labels import (
     BC_QUARK_MASS_VARIATIONS,
     LATTICE_GAMMA_NP_UNCERTAINTIES,
@@ -87,6 +88,7 @@ class TheoryHelper(object):
         self.np_model = "Delta_Lambda"
         self.pdf_from_corr = False
         self.scale_pdf_unc = -1.0
+        self.scale_np_lambda4 = 1.0
         self.mirror_tnp = True
         self.minnlo_unc = "byHelicityPt"
         self.helicity_fit_unc = False
@@ -118,6 +120,7 @@ class TheoryHelper(object):
         pdf_operation=None,
         samples=[],
         scale_pdf_unc=-1.0,
+        scale_np_lambda4=1.0,
         minnlo_unc="byHelicityPt",
         minnlo_scale=1.0,
         from_hels=False,
@@ -137,6 +140,7 @@ class TheoryHelper(object):
         self.as_from_corr = pdf_from_corr or as_from_corr
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
+        self.scale_np_lambda4 = scale_np_lambda4
         self.samples = samples
         self.helicity_fit_unc = False
         self.minnlo_scale = minnlo_scale
@@ -830,7 +834,7 @@ class TheoryHelper(object):
             np_map = {
                 "lambda2": ["0.0", "0.5"],
                 "delta_lambda2": ["-0.02", "0.02"],
-                "lambda4": ["0.01", "0.16"],
+                "lambda4": ["0.01", "0.12"],
             }
         elif "Lambda" in self.np_model:
             np_map = {
@@ -866,6 +870,7 @@ class TheoryHelper(object):
         for nuisance, vals in np_map.items():
             entries = [nuisance + v for v in vals]
             rename = f"scetlibNP{nuisance}"
+            scale = self.scale_np_lambda4 if nuisance.lower() == "lambda4" else 1.0
             # operation = lambda h : h[{self.syst_ax : entries}]
             self.datagroups.addSystematic(
                 self.corr_hist_name,
@@ -876,6 +881,7 @@ class TheoryHelper(object):
                 preOp=operation,
                 preOpArgs=dict(entries=entries),
                 outNames=[f"{rename}Down", f"{rename}Up"],
+                scale=scale,
                 name=rename,
             )
 
@@ -884,7 +890,7 @@ class TheoryHelper(object):
             np_map = {
                 "lambda2": ["0.0", "0.5"],
                 "delta_lambda2": ["-0.02", "0.02"],
-                "lambda4": ["0.01", "0.16"],
+                "lambda4": ["0.01", "0.12"],
             }
         elif "Lambda" in self.np_model:
             np_map = {
@@ -951,6 +957,7 @@ class TheoryHelper(object):
             for nuisance, vals in np_map.items():
                 entries = [nuisance + v for v in vals]
                 rename = f"scetlibNP{label}{nuisance}"
+                scale = self.scale_np_lambda4 if nuisance.lower() == "lambda4" else 1.0
                 self.datagroups.addSystematic(
                     self.np_hist_name,
                     processes=[sample_group],
@@ -971,6 +978,7 @@ class TheoryHelper(object):
                         (entries[0], f"{rename}Down"),
                     ],
                     skipEntries=[{self.syst_ax: ["central", "pdf0"]}],
+                    scale=scale,
                     name=rename,
                 )
 
@@ -1072,7 +1080,14 @@ class TheoryHelper(object):
                     **tmp_pdf_args,
                 )
 
-    def add_pdf_alphas_variation(self, noi=False):
+    def add_pdf_alphas_variation(
+        self,
+        noi=False,
+        decorr_axes=[],
+        decorr_axlim=[],
+        decorr_rebin=[],
+        decorr_absval=[],
+    ):
         pdf = self.datagroups.args_from_metadata("pdfs")[0]
         pdfInfo = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf)
         pdfName = pdfInfo["name"]
@@ -1143,6 +1158,40 @@ class TheoryHelper(object):
         else:
             as_args["systNameReplace"] = as_replace
             as_args["skipEntries"] = [{"alphasVar": "as0118"}]
+
+        if decorr_axes:
+            missing = [a for a in decorr_axes if a not in self.datagroups.fit_axes]
+            if missing:
+                raise ValueError(
+                    f"Cannot decorrelate alphaS: axes {missing} not found in fit variables {self.datagroups.fit_axes}"
+                )
+            suffix = "".join([a.capitalize() for a in decorr_axes])
+            new_names = [f"{a}_decorr" for a in decorr_axes]
+            as_args["systAxes"] = [*as_args["systAxes"], *new_names]
+            as_args["name"] = f"pdfAlphaSDecorr{suffix}"
+            as_args["group"] = "pdfAlphaSDecorr"
+            as_args["isPoiHistDecorr"] = len(decorr_axes)
+            as_args["actionRequiresNomi"] = True
+            as_args["action"] = decorrelateByAxes
+            as_args["actionArgs"] = dict(
+                axesToDecorrNames=decorr_axes,
+                newDecorrAxesNames=new_names,
+                axlim=decorr_axlim,
+                rebin=decorr_rebin,
+                absval=decorr_absval,
+            )
+            # outNames is positional (fixed length 3) and can't handle the
+            # expanded decorrelation bins; switch to systNameReplace + skipEntries
+            # which work with any number of variations
+            if self.as_from_corr:
+                as_args.pop("outNames")
+                if as_range == "002":
+                    as_corr_replace = [("0116", "Down"), ("0120", "Up")]
+                elif as_range == "001":
+                    as_corr_replace = [("0117", "Down"), ("0119", "Up")]
+                as_args["systNameReplace"] = as_corr_replace
+                as_args["skipEntries"] = [{"vars": ".*0118"}]
+
         logger.info(f"Using alphaS variation {asname}, applying scaling of {scale}")
         self.datagroups.addSystematic(**as_args)
 

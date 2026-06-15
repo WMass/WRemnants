@@ -1,7 +1,7 @@
 import argparse
 import copy
-import os
 import re
+from contextlib import ExitStack
 
 import h5py
 from hist import Hist
@@ -14,6 +14,12 @@ parser.add_argument(
     "infile",
     type=str,
     help="hdf5 file.",
+)
+parser.add_argument(
+    "--fileUpdate",
+    type=str,
+    default=None,
+    help="hdf5 file where objects should be taken from. Histograms with the same name override those in infile; histograms present only in infile are preserved.",
 )
 parser.add_argument(
     "--noListHists",
@@ -76,9 +82,43 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-with h5py.File(args.infile, "r") as h5file:
+
+def merge_results(results, resUps):
+    """Merge resUps into results at the histogram level.
+
+    For samples present in both, histograms in resUps override those in results
+    and other (non-output) keys from resUps take precedence; histograms only in
+    results are preserved. Samples present only in one side are kept as-is.
+    """
+    for sample, sdata in resUps.items():
+        if (
+            sample in results
+            and isinstance(results[sample], dict)
+            and isinstance(sdata, dict)
+        ):
+            for key, val in sdata.items():
+                if key == "output":
+                    continue
+                results[sample][key] = val
+            if "output" in sdata:
+                results[sample].setdefault("output", {})
+                for hname, hval in sdata["output"].items():
+                    results[sample]["output"][hname] = hval
+        else:
+            results[sample] = sdata
+    return results
+
+
+with ExitStack() as stack:
+    h5file = stack.enter_context(h5py.File(args.infile, "r"))
     results = base_io.load_results_h5py(h5file)
     print(f"Samples in file: {results.keys()}\n")
+
+    if args.fileUpdate:
+        h5upd = stack.enter_context(h5py.File(args.fileUpdate, "r"))
+        resUps = base_io.load_results_h5py(h5upd)
+        print(f"Samples in update file: {resUps.keys()}\n")
+        merge_results(results, resUps)
 
     if args.path:
         cwp = results
@@ -89,13 +129,13 @@ with h5py.File(args.infile, "r") as h5file:
         for k in cwp.keys():
             print(k, str(cwp[k])[:1000])
 
+    h5out = None
     if args.outfile:
-        output = {}
+        h5out = stack.enter_context(h5py.File(args.outfile, "w"))
         if "meta_info" in results.keys():
-            output = copy.deepcopy(results["meta_info"])
-        mode = "r+" if os.path.isfile(args.outfile) else "w"
-        with h5py.File(args.outfile, mode) as h5out:
-            wums.ioutils.pickle_dump_h5py("meta_info", output, h5out)
+            wums.ioutils.pickle_dump_h5py(
+                "meta_info", copy.deepcopy(results["meta_info"]), h5out, override=True
+            )
 
     if not args.noListHists:
         for sample in results.keys():
@@ -113,9 +153,10 @@ with h5py.File(args.infile, "r") as h5file:
                 continue
             print(f"Sample: {sample}")
 
+            output = None
             if type(results[sample]) == dict:
                 print(sample, results[sample].keys())
-                hists = results[sample]["output"].keys()
+                hists = list(results[sample]["output"].keys())
 
                 if args.filterHists:
                     hists = [
@@ -142,7 +183,7 @@ with h5py.File(args.infile, "r") as h5file:
                     for h in hists:
                         print(h, "\n", results[sample]["output"][h].get(), "\n")
 
-                if args.outfile:
+                if h5out is not None:
                     output = {}
                     for key in results[sample].keys():
                         if key != "output":
@@ -157,11 +198,14 @@ with h5py.File(args.infile, "r") as h5file:
             elif type(results[sample]) == Hist:
                 if args.printHists:
                     print(results[sample])
+                if h5out is not None:
+                    output = copy.deepcopy(results[sample])
 
-            if args.outfile:
-                mode = "r+" if os.path.isfile(args.outfile) else "w"
-                with h5py.File(args.outfile, mode) as h5out:
-                    wums.ioutils.pickle_dump_h5py(sample, output, h5out)
-                print("Wrote selected histograms to ", args.outfile)
+            if h5out is not None and output is not None:
+                wums.ioutils.pickle_dump_h5py(sample, output, h5out, override=True)
+                print("Wrote selected histograms for sample", sample)
 
             print()
+
+    if h5out is not None:
+        print(f"Wrote output file: {args.outfile}")

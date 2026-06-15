@@ -22,6 +22,7 @@ def translate_html_to_latex(n):
             .replace(r"ε", r"\epsilon")
             .replace(" ", r"\ ")
         )
+        n = f"${n}$"
     return n
 
 
@@ -161,6 +162,9 @@ axis_labels = {
     "mtGen": {"label": r"$\mathit{m}_{T}^{\mu+MET}$", "unit": "GeV"},
     "ptll": {"label": r"$\mathit{p}_{\mathrm{T}}^{\mu\mu}$", "unit": "GeV"},
     "yll": r"$\mathit{y}^{\mu\mu}$",
+    "qT": {"label": r"$\mathit{p}_{T}^\mathrm{V}$", "unit": "GeV"},
+    "absY": r"$|\mathit{Y}^\mathrm{V}|$",
+    "Q": {"label": r"$\mathit{Q}$", "unit": "GeV"},
     "absYVGen": r"|$\mathit{Y}^\mathrm{V}$|",
     "mll": {"label": r"$\mathit{m}_{\mu\mu}$", "unit": "GeV"},
     "ewMll": {"label": r"$\mathit{m}^{\mathrm{EW}}_{\mu\mu}$", "unit": "GeV"},
@@ -193,7 +197,10 @@ axis_labels = {
     "etaDiff": r"$\mathit{\eta}^{\mu(+)} - \mathit{\eta}^{\mu(-)}$",
     "etaAbsEta": r"$\mathit{\eta}^{\mu[\mathrm{argmax(|\mathit{\eta}^{\mu}|)}]}$",
     "ewLogDeltaM": "ewLogDeltaM",
-    "dxy": r"$\mathit{d}_\mathrm{xy}$ (cm)",
+    "dxy": {"label": r"$\mathit{d}_\mathrm{xy}$", "unit": "cm"},
+    "dxybs": {"label": r"$\mathit{dxy}_\mathrm{bs}^{\mu}$", "unit": "cm"},
+    "muon_SV_dlenSig": r"Muon SV decay length significance",
+    "muon_sip3d": r"Muon IP 3D significance",
     "iso": {"label": r"$I$", "unit": "GeV"},
     "relIso": r"$I_\mathrm{rel}$",
     "run": r"Run range",
@@ -657,101 +664,14 @@ impact_labels = {
     "theory_ew": "Theory (EW)",
     "nlo_ew_virtual": "EW (virtual)",
     "pythia_shower_kt": "Pythia shower <i>k</i><sub>T</sub>",
-    "Scale_correction_unc117": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (117)",
-    "Scale_correction_unc128": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (128)",
-    "Scale_correction_unc129": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (129)",
-    "Scale_correction_unc137": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (137)",
-    "Scale_correction_unc138": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (138)",
-    "Scale_correction_unc139": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (139)",
-    "Scale_correction_unc140": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (140)",
-    "Scale_correction_unc141": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (141)",
-    "Scale_correction_unc142": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (142)",
-    "Scale_correction_unc143": "<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. (143)",
     "ScaleClosA_correction_unc0": "<i>p</i><sub>T</sub><sup>μ</sup> calib. Δ<i>m</i><sub>Z</sub><sup>PDG</sup>",
     "ScaleClos_correction_unc48": "<i>p</i><sub>T</sub><sup>μ</sup> calib. Z closure stat. (48)",
-    "FakeParam0var0": "Nonprompt syst. (0)",
-    "FakeParam1var0": "Nonprompt syst. (1)",
-    "FakeParam2var0": "Nonprompt syst. (2)",
-    "pdf1CT18ZSymAvg": "PDF (1) [avg.]",
-    "pdf2CT18ZSymAvg": "PDF (2) [avg.]",
-    "pdf3CT18ZSymAvg": "PDF (3) [avg.]",
-    "pdf4CT18ZSymAvg": "PDF (4) [avg.]",
-    "pdf5CT18ZSymAvg": "PDF (5) [avg.]",
-    "pdf6CT18ZSymAvg": "PDF (6) [avg.]",
-    "pdf7CT18ZSymAvg": "PDF (7) [avg.]",
-    "pdf8CT18ZSymAvg": "PDF (8) [avg.]",
-    "pdf9CT18ZSymAvg": "PDF (9) [avg.]",
-    "pdf10CT18ZSymAvg": "PDF (10) [avg.]",
-    "pdf11CT18ZSymAvg": "PDF (11) [avg.]",
-    "pdf12CT18ZSymAvg": "PDF (12) [avg.]",
-    "pdf13CT18ZSymAvg": "PDF (13) [avg.]",
-    "pdf14CT18ZSymAvg": "PDF (14) [avg.]",
-    "pdf15CT18ZSymAvg": "PDF (15) [avg.]",
-    "pdf16CT18ZSymAvg": "PDF (16) [avg.]",
-    "pdf17CT18ZSymAvg": "PDF (17) [avg.]",
-    "pdf18CT18ZSymAvg": "PDF (18) [avg.]",
-    "pdf19CT18ZSymAvg": "PDF (19) [avg.]",
-    "pdf20CT18ZSymAvg": "PDF (20) [avg.]",
-    "pdf21CT18ZSymAvg": "PDF (21) [avg.]",
-    "pdf22CT18ZSymAvg": "PDF (22) [avg.]",
-    "pdf23CT18ZSymAvg": "PDF (23) [avg.]",
-    "pdf24CT18ZSymAvg": "PDF (24) [avg.]",
-    "pdf25CT18ZSymAvg": "PDF (25) [avg.]",
-    "pdf26CT18ZSymAvg": "PDF (26) [avg.]",
-    "pdf27CT18ZSymAvg": "PDF (27) [avg.]",
-    "pdf28CT18ZSymAvg": "PDF (28) [avg.]",
-    "pdf29CT18ZSymAvg": "PDF (29) [avg.]",
-    "pdf1CT18ZSymDiff": "PDF (1) [diff.]",
-    "pdf2CT18ZSymDiff": "PDF (2) [diff.]",
-    "pdf3CT18ZSymDiff": "PDF (3) [diff.]",
-    "pdf4CT18ZSymDiff": "PDF (4) [diff.]",
-    "pdf5CT18ZSymDiff": "PDF (5) [diff.]",
-    "pdf6CT18ZSymDiff": "PDF (6) [diff.]",
-    "pdf7CT18ZSymDiff": "PDF (7) [diff.]",
-    "pdf8CT18ZSymDiff": "PDF (8) [diff.]",
-    "pdf9CT18ZSymDiff": "PDF (9) [diff.]",
-    "pdf10CT18ZSymDiff": "PDF (10) [diff.]",
-    "pdf11CT18ZSymDiff": "PDF (11) [diff.]",
-    "pdf12CT18ZSymDiff": "PDF (12) [diff.]",
-    "pdf13CT18ZSymDiff": "PDF (13) [diff.]",
-    "pdf14CT18ZSymDiff": "PDF (14) [diff.]",
-    "pdf15CT18ZSymDiff": "PDF (15) [diff.]",
-    "pdf16CT18ZSymDiff": "PDF (16) [diff.]",
-    "pdf17CT18ZSymDiff": "PDF (17) [diff.]",
-    "pdf18CT18ZSymDiff": "PDF (18) [diff.]",
-    "pdf19CT18ZSymDiff": "PDF (19) [diff.]",
-    "pdf20CT18ZSymDiff": "PDF (20) [diff.]",
-    "pdf21CT18ZSymDiff": "PDF (21) [diff.]",
-    "pdf22CT18ZSymDiff": "PDF (22) [diff.]",
-    "pdf23CT18ZSymDiff": "PDF (23) [diff.]",
-    "pdf24CT18ZSymDiff": "PDF (24) [diff.]",
-    "pdf25CT18ZSymDiff": "PDF (25) [diff.]",
-    "pdf26CT18ZSymDiff": "PDF (26) [diff.]",
-    "pdf27CT18ZSymDiff": "PDF (27) [diff.]",
-    "pdf28CT18ZSymDiff": "PDF (28) [diff.]",
-    "pdf29CT18ZSymDiff": "PDF (29) [diff.]",
     "pdfAlphaSSymAvg": "PDF <i>α</i><sub>S</sub> [avg.]",
     "pdfAlphaSSymDiff": "PDF <i>α</i><sub>S</sub> [diff.]",
     "pdfMSHT20mcrangeSymAvg": "PDF Δ<i>m</i><sub>c</sub> [avg.]",
     "pdfMSHT20mcrangeSymDiff": "PDF Δ<i>m</i><sub>c</sub> [diff.]",
     "pdfMSHT20mbrangeSymAvg": "PDF Δ<i>m</i><sub>b</sub> [avg.]",
     "pdfMSHT20mbrangeSymDiff": "PDF Δ<i>m</i><sub>b</sub> [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_0_SymAvg": "<i>A</i><sub>0</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_1_SymAvg": "<i>A</i><sub>1</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_2_SymAvg": "<i>A</i><sub>2</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_3_SymAvg": "<i>A</i><sub>3</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_4_SymAvg": "<i>A</i><sub>4</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_5_SymAvg": "<i>A</i><sub>5</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_6_SymAvg": "<i>A</i><sub>6</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_7_SymAvg": "<i>A</i><sub>7</sub> angular coeff., W, inc. [avg.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_0_SymDiff": "<i>A</i><sub>0</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_1_SymDiff": "<i>A</i><sub>1</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_2_SymDiff": "<i>A</i><sub>2</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_3_SymDiff": "<i>A</i><sub>3</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_4_SymDiff": "<i>A</i><sub>4</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_5_SymDiff": "<i>A</i><sub>5</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_6_SymDiff": "<i>A</i><sub>6</sub> angular coeff., W, inc. [diff.]",
-    "QCDscaleWinclusive_PtV0_13000helicity_7_SymDiff": "<i>A</i><sub>7</sub> angular coeff., W, inc. [diff.]",
     "scetlibNPgamma": "SCETLib γ",
     "chargeVgenNP0scetlibNPZLambda2": "SCETLib λ²(Z)",
     "chargeVgenNP1scetlibNPWLambda2": "SCETLib λ²(W⁻)",
@@ -781,6 +701,48 @@ impact_labels = {
     "resumTNP_h_qqV": "resum. TNP Hard func.",
     "resumTNP_s": "resum. TNP Soft func.",
 }
+
+
+# Index-driven impact labels, generated programmatically instead of being
+# spelled out one entry at a time.
+
+# pT muon calibration J/ψ statistical uncertainties (specific eigenvector subset)
+impact_labels.update(
+    {
+        f"Scale_correction_unc{i}": f"<i>p</i><sub>T</sub><sup>μ</sup> calib. J/ψ stat. ({i})"
+        for i in range(144)
+    }
+)
+
+# Nonprompt (fake) systematic shape parameters
+impact_labels.update({f"FakeParam{i}var0": f"Nonprompt syst. ({i})" for i in range(3)})
+
+# CT18Z PDF eigenvectors, symmetrized average and difference variations
+impact_labels.update(
+    {
+        f"pdf{i}CT18Z{suffix}": f"PDF ({i}) [{label}]"
+        for suffix, label in (("SymAvg", "avg."), ("SymDiff", "diff."))
+        for i in range(1, 30)
+    }
+)
+
+# QCD scale angular coefficients (A0-A7) per boson and pT(V) phase space.
+# Each phase space lists the bosons it applies to (W/Z/D, with D shown as DY).
+procs = {"W": "W", "Z": "Z", "D": "DY"}
+_qcdscale_helicity_phasespaces = (
+    ("inclusive_PtV0_13000", "inc.", procs),
+    ("fine_PtV40_13000", "40-13,000 GeV", procs),
+    ("fine_PtV27_40", "27-40 GeV", procs),
+)
+impact_labels.update(
+    {
+        f"QCDscale{b}{ps}helicity_{h}_{suffix}": f"<i>A</i><sub>{h}</sub>, {blabel}, {pslabel} [{label}]"
+        for ps, pslabel, bosons in _qcdscale_helicity_phasespaces
+        for b, blabel in bosons.items()
+        for suffix, label in (("SymAvg", "avg."), ("SymDiff", "diff."))
+        for h in range(8)
+    }
+)
 
 
 # same as impact labels but in latex format

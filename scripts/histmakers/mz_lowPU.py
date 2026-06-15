@@ -103,11 +103,13 @@ axis_wlike_met = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axes_mt = [axis_mt]
 cols_mt = ["transverseMass"]
 
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr
 )
-axis_ptVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["ptVgen"]
-axis_chargeVgen = theory_helpers_procs["Z"]["qcdScale"].hist.axes["chargeVgen"]
+axis_ptVgen = helicity_smoothing_helpers_procs["Z"]["qcdScale"].hist.axes["ptVgen"]
+axis_chargeVgen = helicity_smoothing_helpers_procs["Z"]["qcdScale"].hist.axes[
+    "chargeVgen"
+]
 
 if args.unfolding:
 
@@ -151,9 +153,9 @@ def build_graph(df, dataset):
 
     results = []
 
-    theory_helpers = None
+    helicity_smoothing_helpers = None
     if dataset.name in samples.vprocs:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -168,7 +170,7 @@ def build_graph(df, dataset):
 
     if args.unfolding and dataset.group == base_group:
         df = unfolder_z.add_gen_histograms(
-            args, df, results, dataset, corr_helpers, theory_helpers
+            args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
         )
 
         if not unfolder_z.poi_as_noi:
@@ -356,7 +358,11 @@ def build_graph(df, dataset):
 
         df = df.Define("exp_weight", "SFMC")
         df = theory_corrections.define_theory_weights_and_corrs(
-            df, dataset.name, corr_helpers, args, theory_helpers=theory_helpers
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
     else:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -539,7 +545,7 @@ def build_graph(df, dataset):
                     args,
                     dataset.name,
                     corr_helpers,
-                    theory_helpers,
+                    helicity_smoothing_helpers,
                     a,
                     c,
                     base_name=n,

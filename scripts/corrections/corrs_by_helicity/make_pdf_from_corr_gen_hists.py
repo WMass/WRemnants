@@ -16,6 +16,14 @@ THEORY_PREDS = {
     "scetlib_dyturbo_LatticeNP_CT18Z_N3p0LL_N2LO_pdfvars": {"pdf": "ct18z"},
     "scetlib_dyturbo_LatticeNP_CT18Z_N3p1LL_N2LO_pdfvars": {"pdf": "ct18z"},
     "scetlib_dyturbo_LatticeNP_CT18Z_N4p0LL_N2LO_pdfvars": {"pdf": "ct18z"},
+    "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N3p1LL_N3LO_pdfvars": {"pdf": "ct18z"},
+    "scetlib_nnlojet_LatticeNPCoarse_CT18Z_N4p0LL_N3LO_pdfvars": {"pdf": "ct18z"},
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N3p1LL_N3LO_pdfvars": {
+        "pdf": "msht20an3lo"
+    },
+    "scetlib_nnlojet_LatticeNPCoarse_MSHT20aN3LO_N4p0LL_N3LO_pdfvars": {
+        "pdf": "msht20an3lo"
+    },
     "scetlib_dyturbo_LatticeNP_CT18_N3p0LL_N2LO_pdfvars": {"pdf": "ct18"},
     "scetlib_dyturbo_LatticeNP_HERAPDF20_N3p0LL_N2LO_pdfvars": {
         "pdf": "herapdf20 herapdf20ext"
@@ -82,7 +90,7 @@ def main():
     filter_procs = []
     aggregate_groups = []
     if "Z" in args.bosons:
-        filter_procs.append("Zmumu_13TeVGen")
+        filter_procs.extend(["Zmumu_13TeVGen", "Zmumu10to50_13TeVGen"])
         aggregate_groups.append("Zmumu")
     if "W" in args.bosons:
         filter_procs.extend(["Wplusmunu_13TeVGen", "Wminusmunu_13TeVGen"])

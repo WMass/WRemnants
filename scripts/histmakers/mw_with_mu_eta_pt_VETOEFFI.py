@@ -39,6 +39,9 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
 args = parser.parse_args()
 
+if args.dxybsVeto > 0 and args.dxybsVeto < args.dxybs:
+    raise ValueError("When using together '--dxybsVeto X --dxybs Y' it must be X > Y.")
+
 thisAnalysis = ROOT.wrem.AnalysisType.Wmass
 
 era = args.era
@@ -214,6 +217,7 @@ def build_graph(df, dataset):
         etaCut=3.0,
         useGlobalOrTrackerVeto=False,
         tightGlobalOrTracker=True,
+        dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
     )
     # might have more veto muons, but will look for at least one gen matched to the only gen muon
     df = df.Define("oneOrMoreVetoMuons", "Sum(vetoMuons) > 0")

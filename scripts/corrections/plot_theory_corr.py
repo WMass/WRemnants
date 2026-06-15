@@ -75,6 +75,11 @@ parser.add_argument(
 args = parser.parse_args()
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
+
+def axis_label(name):
+    return plot_tools.get_axis_label(styles, name)
+
+
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
 colors = mpl.colormaps["gist_rainbow"]
@@ -115,11 +120,13 @@ def make_plot_2d(
     flow=True,
     density=False,
     log=False,
+    extra_text="",
+    outfile_suffix="",
 ):
     logger.info(f"Make 2d plot {name} with axes {axes[0]}, {axes[1]}")
 
-    xlabel = styles.axis_labels.get(axes[0], axes[0])
-    ylabel = styles.axis_labels.get(axes[1], axes[1])
+    xlabel = axis_label(axes[0])
+    ylabel = axis_label(axes[1])
 
     if flow:
         xedges, yedges = plot_tools.extendEdgesByFlow(h2d)
@@ -203,10 +210,13 @@ def make_plot_2d(
 
     cbar = fig.colorbar(colormesh, ax=ax)
 
+    title = styles.text_dict.get(proc, proc)
+    if extra_text:
+        title = f"{title}, {extra_text}"
     ax.text(
         0.02,
         0.98,
-        styles.text_dict.get(proc, proc),
+        title,
         transform=ax.transAxes,
         fontsize=30,
         verticalalignment="top",
@@ -215,7 +225,7 @@ def make_plot_2d(
 
     plot_tools.add_cms_decor(ax, args.cmsDecor, data=False, lumi=None, loc=args.logoPos)
 
-    outfile = f"hist2d_{'_'.join(axes)}_{proc}_{name}"
+    outfile = f"hist2d_{'_'.join(axes)}_{proc}{outfile_suffix}_{name}"
     if corr:
         outfile += f'_{corr.replace("(","").replace(")","")}'
     if args.postfix:
@@ -240,6 +250,8 @@ def make_plot_1d(
     flow=True,
     density=False,
     uncertainty_bands=False,
+    extra_text="",
+    outfile_suffix="",
 ):
     logger.info(
         f"Make 1D plot for corr {corr} with {len(names)} entries for axis {axis}"
@@ -277,7 +289,7 @@ def make_plot_1d(
             else min([min(h.values(flow=flow)[xmap]) for h in h1ds])
         )
         yrange = ymax - ymin
-        ymin = ymin if ymin == 0 else ymin - yrange * 0.3
+        ymin = ymin if ymin == 0 else ymin - yrange * 1.5
         ymax = ymax + yrange * 0.3
 
     if ratio:
@@ -287,10 +299,10 @@ def make_plot_1d(
 
     fig, ax = plot_tools.figure(
         h1ds[0],
-        xlabel=styles.axis_labels.get(axis, axis),
+        xlabel=axis_label(axis),
         ylabel=ylabel,
         automatic_scale=False,
-        width_scale=1.2,
+        width_scale=2.4,
         ylim=(ymin, ymax),
         xlim=(xmin, xmax),
     )
@@ -321,26 +333,32 @@ def make_plot_1d(
                 zorder=-1,
             )
 
+    fig.subplots_adjust(top=0.88)
+    title = styles.text_dict.get(proc, proc)
+    if extra_text:
+        title = f"{title}, {extra_text}"
     ax.text(
-        0.02,
-        0.98,
-        styles.text_dict.get(proc, proc),
+        0.5,
+        1.06,
+        title,
         transform=ax.transAxes,
-        fontsize=30,
-        verticalalignment="top",
-        horizontalalignment="left",
+        fontsize=18,
+        verticalalignment="bottom",
+        horizontalalignment="center",
     )
-    plot_tools.addLegend(ax, ncols=1 + int(len(names) / 7), text_size=12)
+    plot_tools.addLegend(
+        ax, ncols=max(1, 1 + len(names) // 20), text_size=12, loc="lower right"
+    )
 
     plot_tools.add_cms_decor(
         ax,
         args.cmsDecor,
         data=False,
         lumi=None,
-        loc=args.logoPos,
+        loc=0,
     )
 
-    outfile = f"hist_{axis}_{proc}"
+    outfile = f"hist_{axis}_{proc}{outfile_suffix}"
     if corr:
         outfile += f"_{corr}"
     if args.postfix:
@@ -353,8 +371,24 @@ for dataset, corr_hists in corr_dict.items():
     logger.info(f"Now at {dataset}")
     base_proc = dataset.replace("PostVFP", "")
 
+    # determine number of mass bins from the first corr hist (assumed shared across corrs)
+    first_corrh = next(iter(corr_hists.values()))
+    mass_axis_name = "Q" if "Q" in first_corrh.axes.name else None
+    n_mass_bins = first_corrh.axes[mass_axis_name].size if mass_axis_name else 1
+
     # loop over charge, if multiple charges exist make plots for each charge separately
-    for charge_idx in [0, 1]:
+    for charge_idx, mass_idx in [(c, m) for c in [0, 1] for m in range(n_mass_bins)]:
+
+        # filename suffix and display text for this mass bin (shared across corrs)
+        mass_axes_excluded = []
+        mass_suffix = ""
+        mass_text = ""
+        if mass_axis_name and n_mass_bins > 1:
+            mass_edges = first_corrh.axes[mass_axis_name].edges
+            lo, hi = int(mass_edges[mass_idx]), int(mass_edges[mass_idx + 1])
+            mass_suffix = f"_Q{lo}to{hi}GeV"
+            mass_text = rf"${lo} < Q < {hi}$ GeV"
+            mass_axes_excluded = [mass_axis_name]
 
         all_hists = []
         all_hists_num = []
@@ -399,6 +433,9 @@ for dataset, corr_hists in corr_dict.items():
                 if ("Wminus" not in proc) and ("Wplus" not in proc):
                     proc = f"{proc[0]}{'minus' if charge_idx==0 else 'plus'}{proc[1:]}"
 
+            if mass_axes_excluded and mass_axis_name in corrh.axes.name:
+                sel = {**sel, mass_axis_name: mass_idx}
+
             for systAxName in ["systIdx", "tensor_axis_0", "var", "vars", "weak"]:
                 if systAxName in corrh.axes.name:
                     syst_axis = systAxName
@@ -437,23 +474,27 @@ for dataset, corr_hists in corr_dict.items():
             # split hists into systematics
             corrh_systs = {idx: corrh[{**sel, syst_axis: idx}] for idx in idxs}
 
+            den_sel = {k: v for k, v in sel.items() if k in corrh_den.axes.name}
             if syst_axis in corrh_den.axes.name:
                 corrh_den_systs = {
-                    idx: corrh_den[{**sel, syst_axis: idx}]
+                    idx: corrh_den[{**den_sel, syst_axis: idx}]
                     for idx in idxs
                     if idx < len(corrh_den.axes[syst_axis])
                 }
             else:
-                corrh_den_systs = {1: corrh_den}
+                den_proj = corrh_den[den_sel] if den_sel else corrh_den
+                corrh_den_systs = {idx: den_proj for idx in idxs}
 
+            num_sel = {k: v for k, v in sel.items() if k in corrh_num.axes.name}
             if syst_axis in corrh_num.axes.name:
                 corrh_num_systs = {
-                    idx: corrh_num[{**sel, syst_axis: idx}]
+                    idx: corrh_num[{**num_sel, syst_axis: idx}]
                     for idx in idxs
                     if idx < len(corrh_num.axes[syst_axis])
                 }
             else:
-                corrh_num_systs = {1: corrh_num}
+                num_proj = corrh_num[num_sel] if num_sel else corrh_num
+                corrh_num_systs = {idx: num_proj for idx in idxs}
 
             hists = [hh.disableFlow(h) for h in corrh_systs.values()]
             hists_den = [hh.disableFlow(h) for h in corrh_den_systs.values()]
@@ -469,7 +510,7 @@ for dataset, corr_hists in corr_dict.items():
             axes = [
                 n
                 for n in corrh.axes.name
-                if n not in [syst_axis, *charge_axis_names]
+                if n not in [syst_axis, *charge_axis_names, *mass_axes_excluded]
                 and (args.axes is None or n in args.axes)
             ]
             all_axes += axes
@@ -486,6 +527,8 @@ for dataset, corr_hists in corr_dict.items():
                             corr=corr,
                             flow=not args.noFlow,
                             clim=args.clim,
+                            extra_text=mass_text,
+                            outfile_suffix=mass_suffix,
                         )
 
                         # h2d = hh.divideHists(h_num.project(*axes), h_den.project(*axes))
@@ -506,6 +549,8 @@ for dataset, corr_hists in corr_dict.items():
                                 corr=corr,
                                 flow=not args.noFlow,
                                 clim=args.clim,
+                                extra_text=mass_text,
+                                outfile_suffix=mass_suffix,
                             )
 
             # if "1d" in args.plots:
@@ -545,6 +590,8 @@ for dataset, corr_hists in corr_dict.items():
                     ymin=args.ylim[0] if args.ylim else None,
                     ymax=args.ylim[1] if args.ylim else None,
                     uncertainty_bands=args.showUncertainties,
+                    extra_text=mass_text,
+                    outfile_suffix=mass_suffix,
                 )
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:

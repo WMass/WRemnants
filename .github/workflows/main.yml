@@ -255,7 +255,7 @@ jobs:
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/WMass.hdf5'
-          -t -1 --doImpacts -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/'
+          -t -1 --doImpacts --globalImpacts -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/'
 
       - name: wmass rabbit impacts
         run: >-
@@ -281,6 +281,63 @@ jobs:
           ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix theoryAgnosticNormVar --scaleImpacts 100
+
+  w-abcd-fit:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis, w-fit]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=${LUMI_SCALE}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass setup lumi scale
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: |
+          echo "LUMI_SCALE=120" >> $GITHUB_ENV
+
+      - name: wmass abcd smoothing params
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/regen_smoothing_params.py
+          -i $HIST_FILE --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/simultaneousABCD
+
+      - name: wmass abcd rabbit setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py -i $HIST_FILE
+          --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/simultaneousABCD --fitvar eta-pt-charge-relIso-mt --fakeEstimation none
+
+      - name: wmass abcd rabbit fit
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          '$WREMNANTS_OUTDIR/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/WMass.hdf5'
+          --paramModel SmoothExtendedABCDIsoMT 'params:$WREMNANTS_OUTDIR/simultaneousABCD/params.hdf5' Fake ch0
+          -t -1 --doImpacts --globalImpacts -o '$WREMNANTS_OUTDIR/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/'
+
+      - name: wmass abcd impacts comparison
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
+          ${WREMNANTS_OUTDIR}/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/fitresults.hdf5
+          -r ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge/fitresults.hdf5
+          --name simultaneousABCD --refName nominal --impactType global
+          --showNumbers --oneSidedImpacts --grouping max --config wremnants/utilities/styles/styles.py
+          -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix simultaneousABCD --scaleImpacts 100
+          --title CMS --subtitle Preliminary
 
   w-bsm:
     # The type of runner that the job will run on
@@ -323,7 +380,7 @@ jobs:
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/WMass.hdf5 -o $WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/ 
           -t -1 --doImpacts --globalImpacts --saveHists --computeHistErrors --saveHistsPerProcess --computeVariations --computeHistImpacts
-          --allowNegativePOI --binByBinStatMode full -m Difference Wmunu_BSM_masked Wmunu_masked
+          --allowNegativeParam --binByBinStatMode full -m Difference Wmunu_BSM_masked Wmunu_masked
           -m Project ch0 pt -m Project ch0 eta -m Normalize ch0 pt 
 
       - name: bsm rabbit limits
@@ -341,7 +398,7 @@ jobs:
 
       # - name: bsm plot parameter correlations
       #   run: >- 
-      #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
+      #     scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py '$WREMNANTS_OUTDIR/WMass_eta_pt_charge_bsm/fitresults.hdf5' 
       #     -o $WEB_DIR/$PLOT_DIR/BSM --params 'WtoNMuMass50' massShiftW100MeV
       #     --title CMS --subtitle Preliminary --titlePos 0 --config 'wremnants/utilities/styles/styles.py' --correlation --showNumbers
 
@@ -475,14 +532,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/WMass_eta_pt_charge_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_mw --title CMS --subtitle Preliminary  --postfix poiAsNoi
           -m Project ch0_masked ptGen -m Project ch0_masked absEtaGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1099,14 +1156,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_poiAsNoi/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --title CMS --subtitle Preliminary --postfix poiAsNoi
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1187,7 +1244,7 @@ jobs:
       - name: unfolding plot pulls 
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py 
-          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 -m ungrouped --sortDescending -s constraint --debug --noImpacts
+          $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5 -m ungrouped --sortDescending -s constraint --debug --impactType none
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding -n 50 --otherExtensions png pdf
 
       - name: plot xsec
@@ -1206,14 +1263,14 @@ jobs:
 
       - name: plot xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py
       
       - name: plot xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py 
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll_yll_unfolding/fitresults.hdf5
           -o $WEB_DIR/$PLOT_DIR/unfolding_dilepton --postfix unfolding --title CMS --subtitle Preliminary 
           -m Project ch0_masked ptVGen -m Project ch0_masked absYVGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1306,7 +1363,8 @@ jobs:
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ZMassDilepton.hdf5 --saveHists --saveHistsPerProcess --computeHistErrors 
-          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 --externalPostfitResult uncorr --noPostfitProfileBB
+          --externalPostfit $WREMNANTS_OUTDIR/ZMassWLike_eta_pt_charge/fitresults_uncorr.hdf5 
+          --externalPostfitResult uncorr --noPostfitProfileBB --noFit
           -o $WREMNANTS_OUTDIR/ZMassDilepton_ptll/ --postfix from_ZMassWLike_eta_pt_charge --pseudoData uncorr
 
       - name: dilepton ptll from wlike postfit
@@ -1551,14 +1609,14 @@ jobs:
 
       - name: alphaS z gen-fit xsec covariance
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $ALPHAS_Z_GENFIT
           -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py
 
       - name: alphaS z gen-fit xsec corrrelation
         run: >-
-          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_hists_cov.py
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_cov.py
           $ALPHAS_Z_GENFIT
           -o $ALPHAS_PLOT_DIR --postfix z_genfit --title CMS --subtitle Preliminary
           -m Project chSigmaUL ptVGen -m Project chSigmaUL absYVGen --config wremnants/utilities/styles/styles.py --correlation
@@ -1613,7 +1671,7 @@ jobs:
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
+    needs: [setenv, w-analysis, w-fit, w-abcd-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
     if: always()
     steps:
       - env:

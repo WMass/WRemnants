@@ -175,7 +175,7 @@ axis_chargel_gen = hist.axis.Regular(
 
 # axis_massWgen = hist.axis.Variable([4.0, 13000.0], name="massVgen")
 axis_massWgen = hist.axis.Variable([0, 75, 80, 85, 120.0, 13000], name="massVgen")
-axis_massZgen = hist.axis.Variable([60.0, 120.0, 13000], name="massVgen")
+axis_massZgen = hist.axis.Variable([10, 60.0, 120.0, 13000], name="massVgen")
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 procsWithTheoryCorr = [d.name for d in datasets if d.name in samples.vprocs]
@@ -192,7 +192,7 @@ if args.helicity and args.propagatePDFstoHelicity:
     corrs.append("qcdScale")
 if args.centralBosonPDFWeight:
     corrs.append("pdf_central")
-theory_helpers_procs = theory_corrections.make_theory_helpers(
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
     args.pdfs, args.theoryCorr, procs=["Z", "W"], corrs=corrs
 )
 
@@ -215,9 +215,9 @@ def build_graph(df, dataset):
     ]  # in samples.zprocs
 
     if isW or isZ:
-        theory_helpers = theory_helpers_procs[dataset.name[0]]
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
     else:
-        theory_helpers = {}
+        helicity_smoothing_helpers = {}
 
     theoryAgnostic_axes, _ = binning.get_theoryAgnostic_axes(
         ptV_flow=True, absYV_flow=True, wlike="Z" in dataset.name
@@ -316,12 +316,10 @@ def build_graph(df, dataset):
     df = df.Define("isEvenEvent", "event % 2 == 0")
 
     df = theory_corrections.define_theory_weights_and_corrs(
-        df, dataset.name, corr_helpers, args, theory_helpers
+        df, dataset.name, corr_helpers, args, helicity_smoothing_helpers
     )
 
-    if isZ or dataset.group in [
-        "DYlowMass",
-    ]:
+    if isZ:
         nominal_axes = [
             axis_massZgen,
             axis_rapidity,
@@ -959,7 +957,7 @@ def build_graph(df, dataset):
             args,
             dataset.name,
             corr_helpers,
-            theory_helpers,
+            helicity_smoothing_helpers,
             nominal_axes,
             nominal_cols,
             base_name="nominal_gen",
@@ -1022,11 +1020,11 @@ def build_graph(df, dataset):
 
 
 resultdict = narf.build_and_run(datasets, build_graph)
+if not args.noScaleToData:
+    # weight to cross section / sum(weights) * lumi with lumi=1 w/o data
+    scale_to_data(resultdict)
+
 if len(args.aggregateGroups) > 0:
-    if not args.noScaleToData:
-        scale_to_data(
-            resultdict
-        )  # weight to cross section / sum(weights) * lumi with lumi=1 w/o data
     aggregate_groups(datasets, resultdict, args.aggregateGroups)
 write_analysis_output(
     resultdict, f"{os.path.basename(__file__).replace('py', 'hdf5')}", args

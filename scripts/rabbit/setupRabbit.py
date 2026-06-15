@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import math
+import re
 import sys
 
 import hist
@@ -374,7 +375,7 @@ def make_parser(parser=None, argv=None):
     parser.add_argument(
         "--lumiUncertainty",
         type=float,
-        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default",
+        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default; if 0, treat as unconstrained with the automatic uncertainty as the size of the variation",
         default=None,
     )
     parser.add_argument(
@@ -481,6 +482,13 @@ def make_parser(parser=None, argv=None):
         help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
     )
     parser.add_argument(
+        "--fitAlphasDecorr",
+        type=str,
+        default=[],
+        nargs="*",
+        help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
+    )
+    parser.add_argument(
         "--decorrRebin",
         type=int,
         nargs="*",
@@ -576,7 +584,15 @@ def make_parser(parser=None, argv=None):
         type=str,
         help="Set the mode for the fake estimation",
         default="extended1D",
-        choices=["mc", "closure", "simple", "extrapolate", "extended1D", "extended2D"],
+        choices=[
+            "none",
+            "mc",
+            "closure",
+            "simple",
+            "extrapolate",
+            "extended1D",
+            "extended2D",
+        ],
     )
     parser.add_argument(
         "--forceGlobalScaleFakes",
@@ -725,10 +741,53 @@ def make_parser(parser=None, argv=None):
         help="Scale the minnlo qcd scale uncertainties by this factor",
     )
     parser.add_argument(
+        "--scaleNPLambda4",
+        default=1.0,
+        type=float,
+        help="Scale the nonperturbative lambda4 uncertainty by this factor",
+    )
+    parser.add_argument(
         "--symmetrizeTheoryUnc",
         default="quadratic",
         type=str,
         help="Symmetrization type for minnlo scale variations",
+    )
+    parser.add_argument(
+        "--noSymmetrize",
+        nargs="*",
+        default=None,
+        metavar="REGEX",
+        help="Write shape systematics to the tensor as asymmetric "
+        "uncertainties, overriding any per-systematic symmetrize setting "
+        "(including --symmetrizeTheoryUnc and --symmetrizePdfUnc). "
+        "If passed with no argument, all systematics are forced asymmetric. "
+        "If one or more regex patterns are given, only nuisance names "
+        "matching any of the patterns (re.search) are forced asymmetric.",
+    )
+    parser.add_argument(
+        "--scaleParams",
+        nargs="*",
+        default=None,
+        metavar="REGEX=FACTOR",
+        help="Inflate the prior on shape systematics whose per-direction "
+        "name (e.g. <name>Up / <name>Down) matches REGEX (re.search) by "
+        "FACTOR. Equivalent to multiplying the systematic's kfactor by "
+        "FACTOR (same mechanism LatticeNoConstraints uses internally). "
+        "Multiple REGEX=FACTOR pairs may be supplied. Overlapping "
+        "patterns matching the same nuisance name raise an error. "
+        "Example: --scaleParams 'lambda4=5' 'mb_up|pdfMSHT20mbrange=10'",
+    )
+    parser.add_argument(
+        "--noConstrainParams",
+        nargs="*",
+        default=None,
+        metavar="REGEX",
+        help="Remove the Gaussian prior on shape systematics whose "
+        "per-direction name matches REGEX (re.search), turning them into "
+        "free-floating nuisances. Multiple regexes may be supplied. "
+        "Mirrors --scaleParams / --noSymmetrize wiring. "
+        "Example: --noConstrainParams 'scetlibNP' "
+        "(unconstrains all SCETlib NP nuisances).",
     )
     parser.add_argument(
         "--symmetrizePdfUnc",
@@ -1122,6 +1181,49 @@ def setup(
 
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
+    if args.noSymmetrize is None:
+        datagroups.force_asymmetric = False
+        datagroups.force_asymmetric_patterns = None
+    else:
+        datagroups.force_asymmetric = True
+        datagroups.force_asymmetric_patterns = (
+            [re.compile(p) for p in args.noSymmetrize] if args.noSymmetrize else None
+        )
+
+    # --scaleParams: list of (compiled regex, factor) pairs applied at
+    # add_systematic time. Mirrors the --noSymmetrize wiring.
+    scale_params_pairs = []
+    if args.scaleParams:
+        for s in args.scaleParams:
+            if "=" not in s:
+                raise ValueError(
+                    f"--scaleParams entries must be of form REGEX=FACTOR; got '{s}'"
+                )
+            regex_str, factor_str = s.rsplit("=", 1)
+            try:
+                factor = float(factor_str)
+            except ValueError:
+                raise ValueError(
+                    f"--scaleParams FACTOR must be a float; got '{factor_str}' in '{s}'"
+                )
+            scale_params_pairs.append((re.compile(regex_str), factor))
+        logger.info(
+            f"--scaleParams: {len(scale_params_pairs)} pattern(s) registered: "
+            + ", ".join(f"'{p.pattern}'×{f}" for p, f in scale_params_pairs)
+        )
+    datagroups.scale_params_patterns = scale_params_pairs
+
+    # --noConstrainParams: list of compiled regexes applied at
+    # add_systematic time. Mirrors --scaleParams.
+    no_constraint_patterns = []
+    if args.noConstrainParams:
+        no_constraint_patterns = [re.compile(p) for p in args.noConstrainParams]
+        logger.info(
+            f"--noConstrainParams: {len(no_constraint_patterns)} pattern(s) "
+            f"registered: "
+            + ", ".join(f"'{p.pattern}'" for p in no_constraint_patterns)
+        )
+    datagroups.no_constraint_patterns = no_constraint_patterns
 
     preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:
@@ -1321,13 +1423,13 @@ def setup(
     if args.qcdProcessName:
         datagroups.fakeName = args.qcdProcessName
 
-    abcdExplicitAxisEdges = {}
-    if len(args.ABCDedgesByAxis):
-        for item in args.ABCDedgesByAxis:
-            ax_name, ax_edges = item.split("=")
-            abcdExplicitAxisEdges[ax_name] = [float(x) for x in ax_edges.split(",")]
-
     if wmass and not datagroups.xnorm:
+        abcdExplicitAxisEdges = {}
+        if len(args.ABCDedgesByAxis):
+            for item in args.ABCDedgesByAxis:
+                ax_name, ax_edges = item.split("=")
+                abcdExplicitAxisEdges[ax_name] = [float(x) for x in ax_edges.split(",")]
+
         datagroups.fakerate_axes = args.fakerateAxes
         # datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
         # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
@@ -1347,7 +1449,7 @@ def setup(
             ),
             fakeTransferCorrFileName=args.fakeTransferCorrFileName,
             histAxesRemovedBeforeFakes=(
-                [str(x[0]) for x in args.presel] if args.presel else []
+                [str(x[0].split(":")[0]) for x in args.presel] if args.presel else []
             ),
         )
         datagroups.set_histselectors(
@@ -1383,6 +1485,7 @@ def setup(
 
     passSystToFakes = (
         wmass
+        and args.fakeEstimation not in ["none"]
         and not (datagroups.xnorm or args.skipSignalSystOnFakes)
         and datagroups.fakeName != "QCD"
         and (excludeGroup != None and datagroups.fakeName not in excludeGroup)
@@ -1407,12 +1510,6 @@ def setup(
         startsWith=ZMatch,
         excludeMatch=dibosonMatch,
     )
-    if wmass or wlike_vetoValidation:
-        datagroups.addProcessGroup(
-            "Zveto_samples",
-            startsWith=[*ZMatch, "DYlowMass"],
-            excludeMatch=dibosonMatch,
-        )
     if wmass:
         datagroups.addProcessGroup(
             "w_samples",
@@ -1772,6 +1869,7 @@ def setup(
             pdf_from_corr=args.pdfUncFromCorr,
             as_from_corr=not args.asUncFromUncorr,
             scale_pdf_unc=args.scalePdf,
+            scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
             minnlo_unc=args.minnloScaleUnc,
             minnlo_scale=args.scaleMinnloScale,
@@ -1782,6 +1880,10 @@ def setup(
 
         theory_helper.add_pdf_alphas_variation(
             noi="alphaS" in args.noi,
+            decorr_axes=args.fitAlphasDecorr,
+            decorr_axlim=args.decorrAxlim,
+            decorr_rebin=args.decorrRebin,
+            decorr_absval=args.decorrAbsval,
         )
 
         if not stat_only and not args.noTheoryUnc:
@@ -1853,6 +1955,14 @@ def setup(
 
     # Below: experimental uncertainties
 
+    # lumiUncertainty of 0 means unconstrained, with the automatic uncertainty as the size of the variation
+    lumi_unconstrained = args.lumiUncertainty == 0
+    lumi_uncertainty = (
+        datagroups.lumi_uncertainty
+        if args.lumiUncertainty is None or lumi_unconstrained
+        else args.lumiUncertainty
+    )
+
     if wmass:
         # mirror hist in linear scale, this was done in the old definition of luminosity uncertainty from a histogram
         if "lumi" in args.decorrSystByVar and decorr_syst_var in fitvar:
@@ -1871,13 +1981,8 @@ def setup(
                     newDecorrAxesNames=[f"{decorr_syst_var}_"],
                 ),
                 preOp=scale_hist_up_down,
-                preOpArgs={
-                    "scale": (
-                        datagroups.lumi_uncertainty
-                        if args.lumiUncertainty is None
-                        else args.lumiUncertainty
-                    )
-                },
+                preOpArgs={"scale": lumi_uncertainty},
+                noConstraint=lumi_unconstrained,
             )
         else:
             datagroups.addSystematic(
@@ -1889,13 +1994,8 @@ def setup(
                 systAxes=["downUpVar"],
                 labelsByAxis=["downUpVar"],
                 preOp=scale_hist_up_down,
-                preOpArgs={
-                    "scale": (
-                        datagroups.lumi_uncertainty
-                        if args.lumiUncertainty is None
-                        else args.lumiUncertainty
-                    )
-                },
+                preOpArgs={"scale": lumi_uncertainty},
+                noConstraint=lumi_unconstrained,
             )
     else:
         datagroups.addNormSystematic(
@@ -1903,11 +2003,8 @@ def setup(
             processes=["MCwithLumiNorm"],
             groups=[f"luminosity", "experiment", "expNoCalib"],
             passToFakes=passSystToFakes,
-            norm=(
-                datagroups.lumi_uncertainty
-                if args.lumiUncertainty is None
-                else args.lumiUncertainty
-            ),
+            norm=lumi_uncertainty,
+            noConstraint=lumi_unconstrained,
         )
 
     # add norm variations for decorrelated variable bins on each process
@@ -1980,14 +2077,28 @@ def setup(
                 norm=abs(args.logNormalWtaunu),
             )
 
-        if args.logNormalFake > 0.0 and datagroups.fakeName in datagroups.groups.keys():
+        if (
+            args.logNormalFake > 0.0
+            and datagroups.fakeName in datagroups.groups.keys()
+            and args.fakeEstimation != "none"
+        ):
+            # In the simultaneous (extended)ABCD fit (OnesSelector) the
+            # per-region polynomial coefficients are unconstrained, so a global
+            # log-normal on the fake process is fully degenerate with shifting
+            # each region's T_0 and carries no information.
             if "fakenorm" in args.decorrSystByVar and decorr_syst_var in fitvar:
                 datagroups.addSystematic(
-                    name=f"CMS_{datagroups.fakeName}",
+                    name=f"{datagroups.fakeName}Param0",
                     processes=[datagroups.fakeName],
-                    groups=["Fake", "experiment", "expNoLumi", "expNoCalib"],
+                    groups=[
+                        f"{datagroups.fakeName}Param0",
+                        "Fake",
+                        "experiment",
+                        "expNoLumi",
+                        "expNoCalib",
+                    ],
                     passToFakes=False,
-                    baseName=f"CMS_{datagroups.fakeName}_",
+                    baseName=f"{datagroups.fakeName}Param0_",
                     systAxes=[f"{decorr_syst_var}_", "downUpVar"],
                     labelsByAxis=[decorr_syst_var, "downUpVar"],
                     actionRequiresNomi=True,
@@ -2001,9 +2112,15 @@ def setup(
                 )
             else:
                 datagroups.addNormSystematic(
-                    name=f"CMS_{datagroups.fakeName}",
+                    name=f"{datagroups.fakeName}Param0",
                     processes=[datagroups.fakeName],
-                    groups=["Fake", "experiment", "expNoLumi", "expNoCalib"],
+                    groups=[
+                        f"{datagroups.fakeName}Param0",
+                        "Fake",
+                        "experiment",
+                        "expNoLumi",
+                        "expNoCalib",
+                    ],
                     passToFakes=False,
                     norm=args.logNormalFake,
                 )
@@ -2036,6 +2153,7 @@ def setup(
         (datagroups.fakeName != "QCD" and args.qcdProcessName != "QCD")
         and datagroups.fakeName in datagroups.groups.keys()
         and not datagroups.xnorm
+        and args.fakeEstimation not in ["none"]
         and (
             args.fakeSmoothingMode != "binned"
             or (args.fakeEstimation in ["extrapolate"] and "mt" in fitvar)
@@ -2271,6 +2389,69 @@ def setup(
                     systAxes=["downUpVar"],
                     labelsByAxis=["downUpVar"],
                 )
+
+    if (
+        args.fakeEstimation == "none"
+        and datagroups.fakeName in datagroups.groups.keys()
+        and not datagroups.xnorm
+    ):
+        # OnesSelector path: rabbit's per-region polynomial provides the shape;
+        # vary the k-th Chebyshev coefficient by reweighting the signal-region
+        # slice of the flat-ones template by exp(mag * T_k(pt_norm)).
+        onesselector = datagroups.groups[datagroups.fakeName].histselector
+
+        def fake_nonclosure_ones(
+            h,
+            *args,
+            param_idx=1,
+            variation_size=0.1,
+            order=2,
+            fakeselector=None,
+            **kwargs,
+        ):
+            if args:
+                raise TypeError(f"Unexpected positional arguments: {args}")
+            params = np.zeros(order + 1)
+            params[param_idx] = variation_size
+            fakeselector.external_params = params
+            hvar = fakeselector.get_hist(h, **kwargs)
+            fakeselector.external_params = None
+            hvar = hist.Hist(
+                *hvar.axes,
+                hist.axis.Integer(0, 1, name="var", underflow=False, overflow=False),
+                storage=hist.storage.Double(),
+                data=hvar.values(flow=True)[..., np.newaxis],
+            )
+            return hvar
+
+        # idx=0: signal-region norm uncertainty (T_0 = 1), magnitude = log(1.05)
+        # to match the historical 5% log-normal on the fake process.
+        for idx, mag in [(0, np.log(1.05)), (1, 0.1), (2, 0.1)]:
+            subgroup = f"{datagroups.fakeName}Param{idx}"
+            datagroups.addSystematic(
+                inputBaseName,
+                groups=[
+                    subgroup,
+                    "Fake",
+                    "experiment",
+                    "expNoLumi",
+                    "expNoCalib",
+                ],
+                name=subgroup,
+                baseName=subgroup,
+                processes=datagroups.fakeName,
+                noConstraint=False,
+                mirror=True,
+                scale=1,
+                applySelection=False,
+                action=fake_nonclosure_ones,
+                actionArgs=dict(
+                    param_idx=idx,
+                    variation_size=mag,
+                    fakeselector=onesselector,
+                ),
+                systAxes=["var"],
+            )
 
     if not args.noEfficiencyUnc:
 
@@ -2613,7 +2794,7 @@ def setup(
                         systAxes=axes,
                         labelsByAxis=axlabels,
                         baseName=name + "_",
-                        processes=["Zveto_samples"],
+                        processes=["z_samples"],
                         passToFakes=passSystToFakes if wmass else False,
                         systNameReplace=nameReplace,
                         scale=scale,

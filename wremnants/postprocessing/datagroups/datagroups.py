@@ -128,6 +128,29 @@ class Datagroups(object):
         # if the histograms should be normalized to cross section (otherwise expected events)
         self.xnorm = xnorm
 
+        # if True, force systematics added via addSystematic to be written
+        # to the tensor without symmetrization, regardless of the per-call
+        # `symmetrize` argument. If `force_asymmetric_patterns` is None, all
+        # systematics are affected; otherwise only nuisance names matched
+        # (via re.search) by any compiled pattern in the list are affected.
+        self.force_asymmetric = False
+        self.force_asymmetric_patterns = None
+
+        # List of (compiled regex, float factor) pairs. For each systematic
+        # variation written via addSystematic, if its per-direction name
+        # (e.g. <name>Up / <name>Down) matches a pattern (re.search), its
+        # kfactor is multiplied by the corresponding factor. At most one
+        # pattern may match a given var_name; overlapping matches raise
+        # ValueError.
+        self.scale_params_patterns = []
+
+        # List of compiled regex patterns. For each systematic variation
+        # written via addSystematic, if its per-direction name matches any
+        # pattern (re.search), the Gaussian prior on that nuisance is
+        # removed (noConstraint=True). Mirrors the --scaleParams /
+        # --noSymmetrize wiring.
+        self.no_constraint_patterns = []
+
         self.writer = None
 
     def get_members_from_results(self, startswith=[], not_startswith=[], is_data=False):
@@ -285,6 +308,21 @@ class Datagroups(object):
                 "histselectors only implemented for single lepton (with fakes)"
             )
             return  # histselectors only implemented for single lepton (with fakes)
+
+        if mode in ["none", None]:
+            g = self.fakeName
+            members = self.groups[g].members[:]
+            if len(members) == 0:
+                raise RuntimeError(f"No member found for group {g}")
+            base_member = members[0].name
+            h = self.results[base_member]["output"][histToRead].get()
+            if forceGlobalScaleFakes is not None:
+                scale = forceGlobalScaleFakes
+            else:
+                scale = 0.85
+            self.groups[g].histselector = sel.OnesSelector(h, global_scalefactor=scale)
+            return
+
         auxiliary_info = {"ABCDmode": mode}
         signalselector = sel.SignalSelectorABCD
         scale = 1
@@ -1375,7 +1413,9 @@ class Datagroups(object):
             else:
                 name = histname
 
-        logger.info(f"Now in channel {self.channel} at shape systematic group {name}")
+        logger.info(
+            f"Now in channel {self.channel} at shape systematic group {name} (constraint: {not noConstraint})"
+        )
 
         if self.isExcludedNuisance(name):
             return
@@ -1470,6 +1510,54 @@ class Datagroups(object):
 
                 logger.debug(f"Add systematic {var_name}")
 
+                effective_symmetrize = symmetrize
+                if self.force_asymmetric and effective_symmetrize is not None:
+                    patterns = getattr(self, "force_asymmetric_patterns", None)
+                    if patterns is None or any(p.search(var_name) for p in patterns):
+                        match_info = (
+                            "all systematics"
+                            if patterns is None
+                            else f"matched pattern(s) {[p.pattern for p in patterns if p.search(var_name)]}"
+                        )
+                        logger.info(
+                            f"force_asymmetric: overriding symmetrize="
+                            f"{effective_symmetrize!r} -> None for systematic "
+                            f"{var_name} ({match_info})"
+                        )
+                        effective_symmetrize = None
+
+                # --scaleParams: multiply kfactor for matching nuisances.
+                # At most one pattern may match a given var_name; overlap is
+                # an error (specify a more precise regex if needed).
+                effective_scale = scale
+                scale_patterns = getattr(self, "scale_params_patterns", [])
+                matched = [(p, f) for p, f in scale_patterns if p.search(var_name)]
+                if len(matched) > 1:
+                    raise ValueError(
+                        f"scaleParams: var_name {var_name!r} matched multiple "
+                        f"patterns: {[p.pattern for p, _ in matched]}. "
+                        "Tighten the regexes so each var_name matches at most one."
+                    )
+                if matched:
+                    pat, fac = matched[0]
+                    effective_scale = scale * fac
+                    logger.info(
+                        f"scaleParams: {var_name} kfactor {scale} -> "
+                        f"{effective_scale} (pattern '{pat.pattern}' x {fac})"
+                    )
+
+                # --noConstrainParams: remove Gaussian prior for matching
+                # nuisances. Mirrors --scaleParams / --noSymmetrize.
+                effective_noConstraint = noConstraint
+                no_const_patterns = getattr(self, "no_constraint_patterns", [])
+                nc_matched = [p for p in no_const_patterns if p.search(var_name)]
+                if nc_matched and not noConstraint:
+                    effective_noConstraint = True
+                    logger.info(
+                        f"noConstrainParams: removing prior on {var_name} "
+                        f"(pattern(s) {[p.pattern for p in nc_matched]})"
+                    )
+
                 if lastAction is not None:
                     if lastActionRequiresNomi:
                         hnom = self.groups[proc].hists[self.nominalName]
@@ -1491,10 +1579,10 @@ class Datagroups(object):
                     self.channel,
                     groups=matched_groups,
                     mirror=mirror,
-                    symmetrize=symmetrize,
-                    kfactor=scale,
+                    symmetrize=effective_symmetrize,
+                    kfactor=effective_scale,
                     noi=noi,
-                    constrained=not noConstraint,
+                    constrained=not effective_noConstraint,
                     add_to_data_covariance=self.isAbsorbedNuisance(name),
                 )
 

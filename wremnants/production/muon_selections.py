@@ -122,6 +122,7 @@ def select_good_muons(
     nonPromptFromLighMesonDecay=False,
     requirePixelHits=False,
     requireID=True,
+    dxybsCut=0.05,
 ):
 
     # requireID can be set to False to remove ID from the selection (it doesn't override the nonprompt control regions with light mesons decay though)
@@ -134,12 +135,13 @@ def select_good_muons(
         df = df.Define("Muon_category", "Muon_isGlobal && Muon_highPurity")
 
     goodMuonsSelection = f"Muon_correctedPt > {ptLow} && Muon_correctedPt < {ptHigh} && vetoMuons && Muon_category"
+    goodMuonsSelection += f" && abs(Muon_dxybs) < {dxybsCut}"  # apply here as well because threshold might differ from the one in vetoMuons
 
     if nonPromptFromSV:
         # medium ID added afterwards
         df = select_good_secondary_vertices(df)
         # match by index
-        # FIXME: result is not as expected, somthing might be wrong here (either in nanoAOD or in accessing it) disabled for now
+        # FIXME: result is not as expected, something might be wrong here (either in nanoAOD or in accessing it) disabled for now
         # df = df.Define("Muon_goodSV", "ROOT::VecOps::Take(goodSV, Muon_svIdx, 0)")
         # goodMuonsSelection += " && Muon_sip3d > 4.0 && Muon_goodSV"
 

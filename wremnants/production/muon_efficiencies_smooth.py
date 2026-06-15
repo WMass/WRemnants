@@ -20,7 +20,9 @@ narf.clingutils.Declare('#include "muon_efficiencies_smooth.hpp"')
 data_dir = common.data_dir
 
 
-def cloneAxis(ax, overflow=False, underflow=False, newName=None):
+def cloneAxis(
+    ax, overflow=False, underflow=False, newName=None, raiseNotImplemented=True
+):
     axName = newName if newName else ax.name
     if isinstance(ax, bh.axis.Regular):
         newax = hist.axis.Regular(
@@ -36,10 +38,15 @@ def cloneAxis(ax, overflow=False, underflow=False, newName=None):
             ax.edges, name=axName, overflow=overflow, underflow=underflow
         )
     else:
-        logger.error(
-            f"In cloneAxis(): only Regular and Variable axes are supported for now"
-        )
-        quit()
+        msg = "In cloneAxis(): only Regular and Variable axes are supported for now"
+        if raiseNotImplemented:
+            raise NotImplementedError(msg)
+        else:
+            logger.warning(msg)
+            logger.warning(
+                f"Returning original axis {ax.name} since raiseNotImplemented=False"
+            )
+            newax = ax
     return newax
 
 

@@ -4,6 +4,7 @@ import re
 
 import lz4.frame
 
+from wremnants.production import theory_corrections
 from wremnants.utilities import common, parsing
 from wums import logging, output_tools
 
@@ -14,6 +15,25 @@ def corr_name(corrf):
 
     match = re.match(r"(.*)Corr[Z|W]\.pkl\.lz4", os.path.basename(corrf))
     return match[1]
+
+
+def find_corr_hist_name(corr_dict, proc, corrf, suffix):
+    base = corr_name(corrf)
+    candidates = [
+        f"{base}{suffix}",
+        f"{base.rstrip('_')}_{suffix}",
+    ]
+    candidates = list(dict.fromkeys(candidates))
+
+    for candidate in candidates:
+        if candidate in corr_dict[proc]:
+            return candidate
+
+    available = [k for k in corr_dict[proc].keys() if k.endswith(suffix)]
+    raise KeyError(
+        f"Could not find histogram with suffix '{suffix}' for file {corrf}. "
+        f"Tried {candidates}. Available matches: {available}"
+    )
 
 
 def parse_args():
@@ -63,14 +83,24 @@ def main():
 
     proc = "Z" if "CorrZ" in args.refCorr else "W"
 
-    refcorr = ref[proc][corr_name(args.refCorr) + "_minnlo_ratio"]
+    refcorr_name = find_corr_hist_name(ref, proc, args.refCorr, "minnlo_ratio")
+    refcorr = ref[proc][refcorr_name]
 
     rescale_corr_name = (
-        f"{corr_name(args.rescaleCorr)}_minnlo_ratio"
+        find_corr_hist_name(rescale, proc, args.rescaleCorr, "minnlo_ratio")
         if "dataPtll" not in args.rescaleCorr
         else "MC_data_ratio"
     )
     rescale_corr = rescale[proc][rescale_corr_name]
+    try:
+        refcorr, rescale_corr = theory_corrections.rebin_corr_hists(
+            [refcorr, rescale_corr],
+            ndim=min(refcorr.ndim, rescale_corr.ndim) - 1,
+        )
+    except ValueError as e:
+        raise ValueError(
+            f"Could not rebin histograms {refcorr.shape} and {rescale_corr.shape} to a common binning"
+        ) from e
 
     if refcorr.shape[:-1] != rescale_corr.shape[:-1]:
         raise ValueError(
@@ -82,7 +112,7 @@ def main():
     # Broadcast syst axis
     new_corr[...] = (refcorr.view().T * central_val_corr.T).T
 
-    new_name = args.newCorrName + "_minnlo_ratio"
+    new_name = f"{args.newCorrName.rstrip('_')}_minnlo_ratio"
     if "dataPtll" in args.newCorrName:
         new_name = "MC_data_ratio"
         # Avoid overwriting

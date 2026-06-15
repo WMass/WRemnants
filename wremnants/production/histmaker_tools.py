@@ -353,6 +353,14 @@ def make_muon_phi_axis(phi_bins, ax_name="phi", flows=False):
     return phi_axis
 
 
+def make_muon_dxybs_axis(edges, ax_name="dxybs", overflow=True):
+    ret_axis = hist.axis.Variable(
+        np.array(edges), name=ax_name, underflow=False, overflow=overflow
+    )
+
+    return ret_axis
+
+
 def define_norm_weight_nRecoVtx(
     df, vtx_axis_edges, vtx_norm_weight, flows_to_unit=False
 ):

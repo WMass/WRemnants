@@ -54,10 +54,6 @@ def make_datagroups_2016(
             ),
         )
         dg.addGroup(
-            "DYlowMass",
-            members=dg.get_members_from_results(startswith=["DYJetsToMuMuMass10to50"]),
-        )
-        dg.addGroup(
             "Top",
             members=dg.get_members_from_results(startswith=["Top", "SingleT", "TT"]),
         )
