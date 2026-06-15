@@ -26,6 +26,21 @@ class PostfitPdfHelper(object):
         """
         raise NotImplementedError("Subclasses must implement get_pdf_covariance")
 
+    def _init_lhapdf_attributes(self, pdf_name):
+        """Initialize LHAPDF-derived attributes (n_hessian, symm_errors, etc.) from a PDF set name."""
+        self.pdf_name = pdf_name
+        pdf_set = lhapdf.getPDFSet(pdf_name)
+        error_info = pdf_set.errorInfo
+        if error_info.coreType not in ["hessian", "symmhessian"]:
+            raise ValueError(
+                f"Unsupported PDF error type: {error_info.coreType}. Only Hessian PDFs are supported."
+            )
+        self.symm_errors = error_info.coreType == "symmhessian"
+        self.n_hessian = error_info.nmemCore
+        flavors = pdf_set.mkPDF(0).flavors()
+        self.max_nf = max((abs(f) for f in flavors if abs(f) <= 6), default=5)
+        self.photon = 22 in flavors
+
     def get_postfit_eigenvectors(self):
         r"""
         Common logic for all fitters to compute scaled eigenvectors.
@@ -89,12 +104,21 @@ class PostfitPdfHelper(object):
         with open(central_pdf_path + ".info", "r") as inn, open(
             outbase + ".info", "w"
         ) as out:
+            in_setdesc = False
             for l in inn.readlines():
                 if l.find("SetDesc:") >= 0:
+                    in_setdesc = True
                     out.write(
                         f'SetDesc: "{self.pdf_name} modified by CMS mW postfit covariance, with prefit pdf unc scaled by {self.pdf_scale}. Produced by the command {" ".join(sys.argv)}"\n'
                     )
-                elif l.find("SetIndex:") >= 0:
+                    continue
+                if in_setdesc:
+                    # Skip continuation lines (start with space); stop when next key is reached
+                    if l and l[0] == " ":
+                        continue
+                    else:
+                        in_setdesc = False
+                if l.find("SetIndex:") >= 0:
                     out.write(f"SetIndex: {lhaid}\n")
                 elif l.find("NumMembers:") >= 0:
                     out.write(f"NumMembers: {postfit_matrix.shape[-1] + 1}\n")

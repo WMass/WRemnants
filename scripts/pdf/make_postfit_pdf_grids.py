@@ -56,6 +56,14 @@ parser.add_argument(
     default=None,
     help="Pseudo-data label to use (rabbit format only).",
 )
+parser.add_argument(
+    "--symmetrizePdf",
+    type=str,
+    choices=["quadratic", "average"],
+    default=None,
+    help="Symmetrization method for asymmetric Hessian PDF uncertainties. "
+    "Overrides the value stored in the fit result metadata.",
+)
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
@@ -85,11 +93,16 @@ else:
         logger.warning(
             "Input metadata does not contain PDF information. Using specified PDF name."
         )
-        pdf_helper.pdf_name = args.pdf_name
+        pdf_helper._init_lhapdf_attributes(
+            theory_utils.pdfMap[args.pdf_name]["lha_name"]
+        )
     elif args.pdf_name != "auto" and args.pdf_name != pdf_helper.pdf_name:
         raise ValueError(
             f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_helper.pdf_name}."
         )
+
+if args.symmetrizePdf is not None:
+    pdf_helper.pdf_symm = args.symmetrizePdf
 
 # TODO: Need to scale back at the end to get 95% CL for consistency?
 

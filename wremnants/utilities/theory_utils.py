@@ -445,32 +445,33 @@ def read_pdf_vals_and_errors(flavor, Q_scale, x_range, pdf_sets):
             # Standard symmetric Hessian
             err = np.sqrt(np.sum((variations - central) ** 2, axis=0)) * scale_err
             err_down = err_up = err
-        # Check if set is asymmetric Hessian (even/odd members)
-        # Common for CT, MSHT. Usually nmemCore is even.
+        # Check if set is asymmetric Hessian (eigenvector pairs)
+        # Common for CT, MSHT, HERAPDF. nmemCore is even: members 1,2 are pair 1, etc.
         elif (
             "hessian" in pdf_set.errorType.lower()
             and pdf_set.errorInfo.nmemCore % 2 == 0
         ):
-            # Odd indices (1, 3, 5...) are usually 'down', even (2, 4, 6...) are 'up'
-            # In vals[1:], index 0 is member 1, index 1 is member 2
-            down_vars = variations[0::2]
-            up_vars = variations[1::2]
+            # Members come in pairs: (2i-1, 2i) are the two variations for eigenvector i.
+            # In variations array: index 0 is member 1, index 1 is member 2, etc.
+            var_a = variations[0::2]  # members 1, 3, 5, ...
+            var_b = variations[1::2]  # members 2, 4, 6, ...
 
-            err_down = (
+            # Standard asymmetric Hessian: take the max excursion in each direction
+            err_up = (
                 np.sqrt(
                     np.sum(
-                        np.maximum(0, central - down_vars) ** 2
-                        + np.maximum(0, up_vars - central) ** 2,
+                        np.maximum(0, np.maximum(var_a - central, var_b - central))
+                        ** 2,
                         axis=0,
                     )
                 )
                 * scale_err
             )
-            err_up = (
+            err_down = (
                 np.sqrt(
                     np.sum(
-                        np.maximum(0, down_vars - central) ** 2
-                        + np.maximum(0, central - up_vars) ** 2,
+                        np.maximum(0, np.maximum(central - var_a, central - var_b))
+                        ** 2,
                         axis=0,
                     )
                 )
