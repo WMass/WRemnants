@@ -23,7 +23,7 @@ parser.add_argument(
     help="Make sparse tensor",
 )
 parser.add_argument(
-    "--rabbit-input",
+    "--rabbitInput",
     type=str,
     required=True,
     help="Rabbit input file for the reference fit",
@@ -39,16 +39,13 @@ parser.add_argument(
     "--noColorLogger", action="store_true", help="Disable colored logging output."
 )
 parser.add_argument(
-    "-l", "--fit-label", type=str, default="cmsmw", help="Label in the output PDF grids"
-)
-parser.add_argument(
     "-v", "--verbose", choices=[0, 1, 2, 3, 4], default=3, help="Set verbosity level."
 )
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
-indata = inputdata.FitInputData(args.rabbit_input)
+indata = inputdata.FitInputData(args.rabbitInput)
 
 # Build tensor
 writer = tensorwriter.TensorWriter(
@@ -74,7 +71,7 @@ logger.info(f"Scaling PDF uncertainties by {pdf_scale}")
 
 symHessian = pdfInfo["combine"] == "symHessian"
 symmetrize = indata.metadata["meta_info"]["args"]["symmetrizePdfUnc"]
-print(f"PDF symmetrization procedure: {symmetrize}")
+logger.info(f"PDF symmetrization procedure: {symmetrize}")
 
 if not symHessian:
     logger.info(f"Applying {symmetrize} symmetrization procedure")

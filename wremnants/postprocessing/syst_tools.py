@@ -5,7 +5,6 @@ import re
 import hist
 import lz4.frame
 import numpy as np
-import pandas as pd
 
 from wremnants.postprocessing import pdf_tools, rabbit_helpers
 from wremnants.utilities import binning, samples, theory_utils
@@ -977,9 +976,9 @@ def symmetrize_unc_matrix(matrix, labels, symm_type):
     if symm_type not in ["quadratic", "average"]:
         raise NotImplementedError(f"Symmetrization type {symm_type} not supported!")
 
-    if type(matrix) == pd.DataFrame:
+    if hasattr(matrix, "values") and not callable(matrix.values):
         values = matrix.values
-    elif type(matrix) == hist.Hist:
+    elif hasattr(matrix, "values") and callable(matrix.values):
         values = matrix.values()
     else:
         values = matrix

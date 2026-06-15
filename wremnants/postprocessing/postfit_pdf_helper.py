@@ -139,13 +139,13 @@ class PostfitPdfHelper(object):
 
 
 class RabbitPostfitPdfHelper(PostfitPdfHelper):
-    def __init__(self, fitresult_path, args=None, pseudoData=None):
+    def __init__(self, fitresult_path, pseudoData=None):
         super().__init__()
         self.fitresult = None
         self.pdf_nuisances = None
         self.pdf_pulls = None
         self.path = fitresult_path
-        self.pseudoData = args.pseudoData if args is not None else pseudoData
+        self.pseudoData = pseudoData
 
         # Rabbit-specific attributes
         self.meta = None

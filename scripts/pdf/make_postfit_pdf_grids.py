@@ -31,7 +31,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "-p",
-    "--pdf-name",
+    "--pdfName",
     type=str,
     required=False,
     choices=["auto", *theory_utils.pdfMap.keys()],
@@ -42,7 +42,7 @@ parser.add_argument(
     "-v", "--verbose", choices=[0, 1, 2, 3, 4], default=3, help="Set verbosity level."
 )
 parser.add_argument(
-    "-l", "--fit-label", type=str, default="cmsmw", help="Label in the output PDF grids"
+    "-l", "--fitLabel", type=str, default="cmsmw", help="Label in the output PDF grids"
 )
 parser.add_argument(
     "-i", "--lhaid", type=str, required=True, help="LHAPDF ID to give the new set"
@@ -78,15 +78,15 @@ def is_simple_format(path):
 if is_simple_format(args.fitresult):
     logger.info("Detected simple covariance HDF5 format.")
     pdf_helper = SimplePostfitPdfHelper(args.fitresult)
-    if args.pdf_name != "auto" and args.pdf_name != pdf_helper.pdf_name:
+    if args.pdfName != "auto" and args.pdfName != pdf_helper.pdfName:
         raise ValueError(
-            f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_helper.pdf_name}."
+            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdfName}."
         )
 else:
     logger.info("Detected rabbit HDF5 format.")
     pdf_helper = RabbitPostfitPdfHelper(args.fitresult, pseudoData=args.pseudoData)
-    if pdf_helper.pdf_name is None:
-        if args.pdf_name == "auto":
+    if pdf_helper.pdfName is None:
+        if args.pdfName == "auto":
             raise ValueError(
                 "PDF name must be specified if not present in fit result metadata."
             )
@@ -94,11 +94,11 @@ else:
             "Input metadata does not contain PDF information. Using specified PDF name."
         )
         pdf_helper._init_lhapdf_attributes(
-            theory_utils.pdfMap[args.pdf_name]["lha_name"]
+            theory_utils.pdfMap[args.pdfName]["lha_name"]
         )
-    elif args.pdf_name != "auto" and args.pdf_name != pdf_helper.pdf_name:
+    elif args.pdfName != "auto" and args.pdfName != pdf_helper.pdfName:
         raise ValueError(
-            f"Specified PDF name {args.pdf_name} does not match input PDF {pdf_helper.pdf_name}."
+            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdfName}."
         )
 
 if args.symmetrizePdf is not None:
@@ -110,7 +110,7 @@ postfit_matrix, new_central, central_pdf_path = pdf_helper.compute_postfit_matri
 pdf_helper.write_grids(
     central_pdf_path,
     args.outfolder,
-    args.fit_label,
+    args.fitLabel,
     args.lhaid,
     postfit_matrix,
     new_central,

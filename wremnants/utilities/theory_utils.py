@@ -426,12 +426,12 @@ def read_vals_and_errors_from_fit(fitresult_file, fit_types, chan):
     return values, errors
 
 
-def read_pdf_vals_and_errors(flavor, Q_scale, x_range, pdf_sets):
+def read_pdf_vals_and_errors(flavor, q_scale, x_range, pdf_sets):
     values = []
     errors = []
     for name in pdf_sets:
         pdf_set = lhapdf.getPDFSet(name)
-        vals = pdf_data_from_lhapdf(name, flavor, Q_scale, x_range)
+        vals = pdf_data_from_lhapdf(name, flavor, q_scale, x_range)
         central = vals[0]
         variations = vals[1:]  # All members except central
 
