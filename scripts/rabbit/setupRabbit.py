@@ -732,19 +732,19 @@ def make_parser(parser=None, argv=None):
         help="Scale the PDF hessian uncertainties by this factor (by default take the value in the pdfInfo map)",
     )
     parser.add_argument(
-        "--pdfUncFromUncorr",
+        "--pdfUncFromWeights",
         action="store_true",
-        help="Take PDF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+        help="Take PDF uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
-        "--asUncFromUncorr",
+        "--asUncFromWeights",
         action="store_true",
-        help="Take alpha_S uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+        help="Take alpha_S uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
-        "--minnloUncFromUncorr",
+        "--minnloUncFromWeights",
         action="store_true",
-        help="Take minnlo muR-muF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+        help="Take minnlo muR-muF uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--scaleMinnloScale",
@@ -1893,9 +1893,9 @@ def setup(
             np_model=args.npUnc,
             tnp_scale=args.scaleTNP,
             mirror_tnp=False,
-            pdf_from_corr=not args.pdfUncFromUncorr,
-            as_from_corr=not args.asUncFromUncorr,
-            minnlo_from_corr=not args.minnloUncFromUncorr,
+            pdf_from_corr=not args.pdfUncFromWeights,
+            as_from_corr=not args.asUncFromWeights,
+            minnlo_from_corr=not args.minnloUncFromWeights,
             scale_pdf_unc=args.scalePdf,
             scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,

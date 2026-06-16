@@ -36,14 +36,17 @@ def _select_baseline_variation(h, axis_name="vars", nominal_entry="pdf0"):
             f"Expected axis '{axis_name}' in theory histogram, found axes {h.axes.name}"
         )
 
-    try:
-        return h[{axis_name: nominal_entry}]
-    except Exception as exc:
-        available_entries = list(h.axes[axis_name])
-        raise KeyError(
-            f"Expected nominal entry '{nominal_entry}' in axis '{axis_name}', "
-            f"found entries {available_entries}"
-        ) from exc
+    for entry in [nominal_entry, "central"]:
+        try:
+            return h[{axis_name: entry}]
+        except KeyError:
+            continue
+
+    available_entries = list(h.axes[axis_name])
+    raise KeyError(
+        f"Expected nominal entry '{nominal_entry}' or 'central' in axis '{axis_name}', "
+        f"found entries {available_entries}"
+    )
 
 
 class SigmaULTheoryFitWriter(TensorWriter):
@@ -367,6 +370,18 @@ class SigmaULTheoryFitWriter(TensorWriter):
             self.add_channel(h_data.axes, self.sigmaul_channel)
             self.add_data(h_data, self.sigmaul_channel)
             self.set_reference(self.sigmaul_channel, h_data)
+            if infile:
+                import rabbit.io_tools
+
+                self.logger.info("Loading unfolding covariance from %s", infile)
+                fitresult, meta = rabbit.io_tools.get_fitresult(
+                    infile, result="asimov", meta=True
+                )
+                h_data_cov = fitresult["mappings"][fitresultMapping][
+                    "hist_postfit_inclusive_cov"
+                ].get()
+                self.add_data_covariance(h_data_cov)
+                return meta
             return None
 
         import rabbit.io_tools
@@ -492,6 +507,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         else:
             corr_np_uncs = STANDARD_CORRELATED_NP_UNCERTAINTIES
             gamma_np_uncs = STANDARD_GAMMA_NP_UNCERTAINTIES
+        print(corr_np_uncs, gamma_np_uncs)
 
         for up_var, down_var, nuisance_name in corr_np_uncs:
             self.add_systematic(
@@ -596,6 +612,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
                     f"pdf{int((ivar + 1) / 2)}{ext_suffix}",
                     self.process_name,
                     self.sigmaul_channel,
+                    # symmetrize=None,
                     symmetrize="quadratic",
                     kfactor=scale,
                     groups=pdf_groups,
@@ -609,7 +626,6 @@ class SigmaULTheoryFitWriter(TensorWriter):
                     f"pdf{n_asym_pairs + j + 1}{ext_suffix}",
                     self.process_name,
                     self.sigmaul_channel,
-                    symmetrize="quadratic",
                     kfactor=scale,
                     mirror=True,
                     groups=pdf_groups,
