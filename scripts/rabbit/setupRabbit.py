@@ -725,14 +725,19 @@ def make_parser(parser=None, argv=None):
         help="Scale the PDF hessian uncertainties by this factor (by default take the value in the pdfInfo map)",
     )
     parser.add_argument(
-        "--pdfUncFromCorr",
+        "--pdfUncFromUncorr",
         action="store_true",
-        help="Take PDF uncertainty from correction hist (requires having run that correction)",
+        help="Take PDF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--asUncFromUncorr",
         action="store_true",
         help="Take alpha_S uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+    )
+    parser.add_argument(
+        "--minnloUncFromUncorr",
+        action="store_true",
+        help="Take minnlo muR-muF uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--scaleMinnloScale",
@@ -1866,8 +1871,9 @@ def setup(
             np_model=args.npUnc,
             tnp_scale=args.scaleTNP,
             mirror_tnp=False,
-            pdf_from_corr=args.pdfUncFromCorr,
+            pdf_from_corr=not args.pdfUncFromUncorr,
             as_from_corr=not args.asUncFromUncorr,
+            minnlo_from_corr=not args.minnloUncFromUncorr,
             scale_pdf_unc=args.scalePdf,
             scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
@@ -1876,6 +1882,7 @@ def setup(
             from_hels=not args.noTheoryCorrsViaHelicities,
             theory_symmetrize=args.symmetrizeTheoryUnc,
             pdf_symmetrize=args.symmetrizePdfUnc,
+            helicity_fit_unc=args.helicityFitTheoryUnc,
         )
 
         theory_helper.add_pdf_alphas_variation(
@@ -1887,9 +1894,7 @@ def setup(
         )
 
         if not stat_only and not args.noTheoryUnc:
-            theory_helper.add_all_theory_unc(
-                helicity_fit_unc=args.helicityFitTheoryUnc,
-            )
+            theory_helper.add_all_theory_unc()
 
     if stat_only:
         # print a card with only mass weights
