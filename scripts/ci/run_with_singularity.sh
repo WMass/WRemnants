@@ -6,7 +6,7 @@ fi
 if [[ -d /ceph ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},/ceph"
 fi
-CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v57
+CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v61
 
 # Kerberos cache setup
 # Assuming kinit was already done on the host!
@@ -17,6 +17,9 @@ KRB5CC_CONTAINER_DIR="/tmp/krb5ccdir"
 if [[ -d "$KRB5CC_HOST_DIR" ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},${KRB5CC_HOST_DIR}:${KRB5CC_CONTAINER_DIR}"
     export KRB5CCNAME="DIR:${KRB5CC_CONTAINER_DIR}"
+elif [[ -S "/run/.heim_org.h5l.kcm-socket" ]]; then
+    # Heimdal KCM cache — socket is in /run which is already bound
+    export KRB5CCNAME="KCM:${UID}"
 else
     echo "⚠️ Warning: Kerberos cache directory $KRB5CC_HOST_DIR does not exist!"
 fi

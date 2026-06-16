@@ -121,6 +121,12 @@ def parse_args():
         help="Normalize the corrections",
     )
     parser.add_argument(
+        "--dyturboScale",
+        type=float,
+        default=1e-3,
+        help="Scale factor applied when reading DYTurbo text files (default 1e-3, the standard nb->pb conversion). Set to 1.0 if the file is already in the correct units.",
+    )
+    parser.add_argument(
         "--eras",
         type=str,
         nargs="+",
@@ -148,6 +154,7 @@ def read_corr(
     qt_cutoff=1.0,
     smooth=None,
     nnlojet_mass_edges=None,
+    dyturbo_scale=1.0,
 ):
     logger = logging.child_logger("read_corr")
     charge = 0 if procName[0] == "Z" else (1 if "Wplus" in procName else -1)
@@ -209,7 +216,9 @@ def read_corr(
             axnames = axes
             if not axnames:
                 axnames = ("Y", "qT") if "2d" in corr_file else ("qT")
-            h = input_tools.read_dyturbo_hist(corrFiles, axes=axnames, charge=charge)
+            h = input_tools.read_dyturbo_hist(
+                corrFiles, axes=axnames, charge=charge, scale=dyturbo_scale
+            )
             if "Y" in h.axes.name:
                 h = hh.makeAbsHist(h, "Y")
 
@@ -503,10 +512,14 @@ def main():
                     )
 
                     for varm, varn in zip(iminnloh.axes.name, inumh.axes.name):
+                        # Restrict both to common range in the axis being integrated over,
+                        # so the 1D projections integrate over the same physical region.
+                        mproj = hh.projectNoFlow(iminnloh, varm)
+                        nproj = hh.projectNoFlow(inumh, varn)
                         fig = plot_tools.makePlotWithRatioToRef(
                             [
-                                iminnloh.project(varm),
-                                inumh.project(varn),
+                                mproj,
+                                nproj,
                             ],
                             [
                                 "MiNNLO",
