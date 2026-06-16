@@ -325,7 +325,9 @@ def read_nnlojet_pty_hist(
     return h
 
 
-def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None, coeff=None):
+def read_dyturbo_hist(
+    filenames, path="", axes=("y", "pt"), charge=None, coeff=None, scale=1e-3
+):
     filenames = [os.path.expanduser(os.path.join(path, f)) for f in filenames]
 
     hists = []
@@ -338,11 +340,14 @@ def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None, coeff=N
                 raise ValueError(f"{f} is not a valid file!")
 
         if len(expandedf) == 1:
-            hs.append(read_dyturbo_file(fn, axes, charge, coeff))
+            hs.append(read_dyturbo_file(fn, axes, charge, coeff, scale=scale))
         elif len(expandedf) == 2:
             hs.append(
                 hh.concatenateHists(
-                    *[read_dyturbo_file(f, axes, charge, coeff) for f in expandedf]
+                    *[
+                        read_dyturbo_file(f, axes, charge, coeff, scale=scale)
+                        for f in expandedf
+                    ]
                 )
             )
         else:
@@ -446,7 +451,9 @@ def read_text_data(filename):
     return np.array(data, dtype=float)
 
 
-def read_dyturbo_file(filename, axnames=("Y", "qT"), charge=None, coeff=None):
+def read_dyturbo_file(
+    filename, axnames=("Y", "qT"), charge=None, coeff=None, scale=1e-3
+):
     if filename.endswith(".root"):
         import uproot
 
@@ -491,7 +498,7 @@ def read_dyturbo_file(filename, axnames=("Y", "qT"), charge=None, coeff=None):
     if charge is not None:
         h = binning.add_charge_axis(h, charge)
 
-    return h * 1 / 1000
+    return h * scale
 
 
 def read_scetlib_resum_and_fosing(
