@@ -114,6 +114,12 @@ def make_parser():
         action="store_true",
         help="Exclude the HERAPDF20EXT variations (only applicable if using a HERAPDF20-based PDF). Useful for comparing to simultaneous PDF and alphaS fit, where this parametrization isn't available.",
     )
+    parser.add_argument(
+        "--symmetrizePdfUnc",
+        default="quadratic",
+        type=str,
+        help="Symmetrization type for PDF variations (e.g. 'quadratic' or 'average').",
+    )
     return parser
 
 
@@ -152,6 +158,7 @@ def main():
         allow_negative_expectation=False,
         exclude_nuisances=exclude_nuisances,
         keep_nuisances=args.keepNuisances,
+        pdf_symmetrize=args.symmetrizePdfUnc,
     )
 
     input_meta = writer.load_sigmaul_data(
