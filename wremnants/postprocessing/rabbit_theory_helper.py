@@ -117,7 +117,6 @@ class TheoryHelper(object):
         mirror_tnp=True,
         as_from_corr=True,
         pdf_from_corr=False,
-        minnlo_from_corr=True,
         pdf_operation=None,
         samples=[],
         scale_pdf_unc=-1.0,
@@ -140,7 +139,6 @@ class TheoryHelper(object):
         self.mirror_tnp = mirror_tnp
         self.pdf_from_corr = pdf_from_corr
         self.as_from_corr = as_from_corr
-        self.minnlo_from_corr = minnlo_from_corr
         self.pdf_operation = pdf_operation
         self.scale_pdf_unc = scale_pdf_unc
         self.scale_np_lambda4 = scale_np_lambda4
@@ -330,7 +328,10 @@ class TheoryHelper(object):
         obs = self.datagroups.fit_axes
         pt_ax = "ptVgen" if "ptVgen" not in obs else "ptVgenAlt"
 
-        if self.minnlo_from_corr:
+        # from_hels selects the helicity-smoothed scale hist, which carries the
+        # muR/muF variations decomposed by helicity (UL + each A_i); otherwise use
+        # the raw MiNNLO event-weight grid and vary muR/muF one at a time below.
+        if self.from_hels:
             scale_hist = "qcdScaleByHelicity"
 
             syst_axes = ["vars"]
@@ -414,7 +415,7 @@ class TheoryHelper(object):
             logger.warning(
                 "Without pT or helicity splitting, only the SCETlib uncertainty will be applied!"
             )
-        elif self.minnlo_from_corr:
+        elif self.from_hels:
             # FIXME Maybe put W and Z nuisances in the same group
             group_name += f"MiNNLO"
             self.datagroups.addSystematic(

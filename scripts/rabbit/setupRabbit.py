@@ -735,11 +735,6 @@ def make_parser(parser=None, argv=None):
         help="Take alpha_S uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
-        "--minnloUncFromWeights",
-        action="store_true",
-        help="Take minnlo muR-muF uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
-    )
-    parser.add_argument(
         "--scaleMinnloScale",
         default=1.0,
         type=float,
@@ -1108,7 +1103,9 @@ def make_parser(parser=None, argv=None):
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
         action="store_true",
-        help="Don't use theory correction histograms produced via smoothing through helicites.",
+        help="Don't use theory correction histograms produced via smoothing through helicities. "
+        "Affects the PDF, alpha_S, quark-mass and MiNNLO muR/muF uncertainties: with this flag they "
+        "are taken from the raw MiNNLO event weights instead of the helicity-decomposed (ByHelicity) hists.",
     )
     parser.add_argument(
         "--breitwignerWMassWeights",
@@ -1873,7 +1870,6 @@ def setup(
             mirror_tnp=False,
             pdf_from_corr=not args.pdfUncFromWeights,
             as_from_corr=not args.asUncFromWeights,
-            minnlo_from_corr=not args.minnloUncFromWeights,
             scale_pdf_unc=args.scalePdf,
             scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
