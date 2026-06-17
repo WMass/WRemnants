@@ -725,14 +725,14 @@ def make_parser(parser=None, argv=None):
         help="Scale the PDF hessian uncertainties by this factor (by default take the value in the pdfInfo map)",
     )
     parser.add_argument(
-        "--pdfUncFromCorr",
+        "--pdfUncFromWeights",
         action="store_true",
-        help="Take PDF uncertainty from correction hist (requires having run that correction)",
+        help="Take PDF uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
-        "--asUncFromUncorr",
+        "--asUncFromWeights",
         action="store_true",
-        help="Take alpha_S uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+        help="Take alpha_S uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--scaleMinnloScale",
@@ -1103,7 +1103,9 @@ def make_parser(parser=None, argv=None):
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
         action="store_true",
-        help="Don't use theory correction histograms produced via smoothing through helicites.",
+        help="Don't use theory correction histograms produced via smoothing through helicities. "
+        "Affects the PDF, alpha_S, quark-mass and MiNNLO muR/muF uncertainties: with this flag they "
+        "are taken from the raw MiNNLO event weights instead of the helicity-decomposed (ByHelicity) hists.",
     )
     parser.add_argument(
         "--breitwignerWMassWeights",
@@ -1866,8 +1868,8 @@ def setup(
             np_model=args.npUnc,
             tnp_scale=args.scaleTNP,
             mirror_tnp=False,
-            pdf_from_corr=args.pdfUncFromCorr,
-            as_from_corr=not args.asUncFromUncorr,
+            pdf_from_corr=not args.pdfUncFromWeights,
+            as_from_corr=not args.asUncFromWeights,
             scale_pdf_unc=args.scalePdf,
             scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
@@ -1876,6 +1878,7 @@ def setup(
             from_hels=not args.noTheoryCorrsViaHelicities,
             theory_symmetrize=args.symmetrizeTheoryUnc,
             pdf_symmetrize=args.symmetrizePdfUnc,
+            helicity_fit_unc=args.helicityFitTheoryUnc,
         )
 
         theory_helper.add_pdf_alphas_variation(
@@ -1887,9 +1890,7 @@ def setup(
         )
 
         if not stat_only and not args.noTheoryUnc:
-            theory_helper.add_all_theory_unc(
-                helicity_fit_unc=args.helicityFitTheoryUnc,
-            )
+            theory_helper.add_all_theory_unc()
 
     if stat_only:
         # print a card with only mass weights
