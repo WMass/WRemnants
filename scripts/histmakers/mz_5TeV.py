@@ -335,16 +335,6 @@ def build_graph(df, dataset):
         theory_corr_name = theory_corrs[0]
         df = df.Define("nominal_weight", f"{theory_corr_name}Weight_tensor[0]")
 
-        for corr in theory_corrs[1:]:
-            if corr not in corr_helpers.get(dataset.name, {}):
-                continue
-            df = theory_corrections.define_theory_corr_weight_column(df, corr)
-            df = df.Define(
-                f"{corr}Weight_tensor",
-                corr_helpers[dataset.name][corr],
-                ["massVgen", "absYVgen", "ptVgen", "chargeVgen", f"{corr}_corr_weight"],
-            )
-
     # ---- Fill histograms ----
     hist_nLepton = df.HistoBoost(
         "nLepton", [axis_nLepton], ["nLepton", "nominal_weight"]
