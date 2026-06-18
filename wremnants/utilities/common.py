@@ -112,8 +112,7 @@ analysis_mode_map = {
     "mw_with_mu_eta_pt.py": "w_mass",
     "mw_lowPU.py": "w_lowpu",
     "mz_lowPU.py": "z_lowpu",
-    "mz_5TeV": "z_lowpu",
-    "mz_5TeV_rochester": "z_lowpu",
+    "mz_5TeV.py": "z_lowpu",
 }
 
 

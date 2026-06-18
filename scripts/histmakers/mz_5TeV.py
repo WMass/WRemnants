@@ -6,6 +6,19 @@ from wums import logging
 
 analysis_label = common.analysis_label(os.path.basename(__file__))
 parser, initargs = parsing.common_parser(analysis_label)
+parser.add_argument(
+    "--muonCorr",
+    default="none",
+    choices=["none", "rochester", "scarekit"],
+    help="Muon momentum correction to apply",
+)
+parser.add_argument(
+    "--corrStep",
+    default="1234",
+    choices=["0", "1", "123", "1234"],
+    help="Scarekit calibration stage (only with --muonCorr scarekit): "
+    "0 = no correction, 1 = scale only, 123 = scale+smearing, 1234 = full",
+)
 
 args = parser.parse_args()
 
@@ -21,6 +34,15 @@ from wremnants.production import (
 )
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import write_analysis_output
+
+if args.muonCorr == "rochester":
+    narf.clingutils.Load("libPhysics")
+    narf.clingutils.Load("libROOTVecOps")
+    narf.clingutils.Load("libROOTDataFrame")
+    narf.clingutils.Declare('#include "lowpu_rochester.hpp"')
+elif args.muonCorr == "scarekit":
+    narf.clingutils.Load("libROOTDataFrame")
+    narf.clingutils.Declare('#include "lowpu_muonscarekit.hpp"')
 
 datasets = getDatasets(
     maxFiles=args.maxFiles,
@@ -147,6 +169,57 @@ def build_graph(df, dataset):
 
     df = df.Define("isEvenEvent", f"event % 2 == 0")
 
+    # apply muon momentum corrections before selection
+    if args.muonCorr == "rochester":
+        if dataset.is_data:
+            df = df.Define(
+                "Muon_pt_corr",
+                "wrem::applyRochesterData(Muon_pt, Muon_eta, Muon_phi, ROOT::VecOps::RVec<float>(Muon_charge.begin(), Muon_charge.end()))",
+            )
+        else:
+            df = df.Define(
+                "Muon_pt_corr",
+                "wrem::applyRochesterMC(Muon_pt, Muon_eta, Muon_phi, ROOT::VecOps::RVec<float>(Muon_charge.begin(), Muon_charge.end()), Muon_genPartIdx, GenPart_pt, Muon_nTrackerLayers)",
+            )
+    elif args.muonCorr == "scarekit":
+        if args.corrStep == "0":
+            df = df.Alias("Muon_pt_corr", "Muon_pt")
+        elif args.corrStep == "1":
+            if dataset.is_data:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitData(Muon_pt, Muon_eta, Muon_phi, Muon_charge)",
+                )
+            else:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitMC_scaleOnly(Muon_pt, Muon_eta, Muon_phi, Muon_charge)",
+                )
+        elif args.corrStep == "123":
+            if dataset.is_data:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitData(Muon_pt, Muon_eta, Muon_phi, Muon_charge)",
+                )
+            else:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitMC_noKFactor(Muon_pt, Muon_eta, Muon_phi, Muon_charge, Muon_nTrackerLayers)",
+                )
+        else:  # "1234"
+            if dataset.is_data:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitData(Muon_pt, Muon_eta, Muon_phi, Muon_charge)",
+                )
+            else:
+                df = df.Define(
+                    "Muon_pt_corr",
+                    "wrem::applyMuonScarekitMC(Muon_pt, Muon_eta, Muon_phi, Muon_charge, Muon_nTrackerLayers, run, luminosityBlock)",
+                )
+    else:  # "none"
+        df = df.Alias("Muon_pt_corr", "Muon_pt")
+
     # filter events
     df = df.Filter("HLT_HIMu17")
 
@@ -158,7 +231,7 @@ def build_graph(df, dataset):
     # ---- Good muons (for Z->mumu selection) ----
     df = df.Define(
         "goodMu",
-        "Muon_pt > 18 && abs(Muon_eta) < 2.4 && Muon_mediumId && Muon_isGlobal",
+        "Muon_pt_corr > 18 && abs(Muon_eta) < 2.4 && Muon_mediumId && Muon_isGlobal",
     )
     df = df.Define("goodMu_idx", "ROOT::VecOps::Nonzero(goodMu)")
     df = df.Filter("goodMu_idx.size() == 2", "Exactly two good muons")
@@ -175,11 +248,11 @@ def build_graph(df, dataset):
     df = (
         df.Define(
             "mu0_p4",
-            f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i0], Muon_eta[i0], Muon_phi[i0], {MU_MASS})",
+            f"ROOT::Math::PtEtaPhiMVector(Muon_pt_corr[i0], Muon_eta[i0], Muon_phi[i0], {MU_MASS})",
         )
         .Define(
             "mu1_p4",
-            f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i1], Muon_eta[i1], Muon_phi[i1], {MU_MASS})",
+            f"ROOT::Math::PtEtaPhiMVector(Muon_pt_corr[i1], Muon_eta[i1], Muon_phi[i1], {MU_MASS})",
         )
         .Define("dimu_p4", "mu0_p4 + mu1_p4")
         .Define("mll", "dimu_p4.M()")
@@ -192,39 +265,39 @@ def build_graph(df, dataset):
 
     # ---- Rank muons: leading/trailing by pT; positive/negative by charge ----
     df = (
-        df.Define("i_lead", "Muon_pt[i0] >= Muon_pt[i1] ? i0 : i1")
-        .Define("i_trail", "Muon_pt[i0] >= Muon_pt[i1] ? i1 : i0")
+        df.Define("i_lead", "Muon_pt_corr[i0] >= Muon_pt_corr[i1] ? i0 : i1")
+        .Define("i_trail", "Muon_pt_corr[i0] >= Muon_pt_corr[i1] ? i1 : i0")
         .Define("i_pos", "Muon_charge[i0] > 0 ? i0 : i1")
         .Define("i_neg", "Muon_charge[i0] > 0 ? i1 : i0")
-        .Define("muleadpt", "Muon_pt[i_lead]")
-        .Define("mutrailpt", "Muon_pt[i_trail]")
+        .Define("muleadpt", "Muon_pt_corr[i_lead]")
+        .Define("mutrailpt", "Muon_pt_corr[i_trail]")
         .Define("muleadeta", "Muon_eta[i_lead]")
         .Define("mutraileta", "Muon_eta[i_trail]")
-        .Define("mupospt", "Muon_pt[i_pos]")
-        .Define("munegpt", "Muon_pt[i_neg]")
+        .Define("mupospt", "Muon_pt_corr[i_pos]")
+        .Define("munegpt", "Muon_pt_corr[i_neg]")
         .Define("muposeta", "Muon_eta[i_pos]")
         .Define("munegeta", "Muon_eta[i_neg]")
         .Define("muposphi", "Muon_phi[i_pos]")
         .Define("munegphi", "Muon_phi[i_neg]")
-        .Define("mupos_oneOverPt", "1.0/Muon_pt[i_pos]")
-        .Define("muneg_oneOverPt", "1.0/Muon_pt[i_neg]")
+        .Define("mupos_oneOverPt", "1.0/Muon_pt_corr[i_pos]")
+        .Define("muneg_oneOverPt", "1.0/Muon_pt_corr[i_neg]")
         .Define("muposcharge", "(double)Muon_charge[i_pos]")
         .Define("munegcharge", "(double)Muon_charge[i_neg]")
         .Define("mupos_nl", "(double)Muon_nTrackerLayers[i_pos]")
         .Define("muneg_nl", "(double)Muon_nTrackerLayers[i_neg]")
-        .Define("mupos_masspt", "mll * Muon_pt[i_pos]")
-        .Define("muneg_masspt", "mll * Muon_pt[i_neg]")
+        .Define("mupos_masspt", "mll * Muon_pt_corr[i_pos]")
+        .Define("muneg_masspt", "mll * Muon_pt_corr[i_neg]")
     )
 
     # ---- Build CS angles ----
     df = (
         df.Define(
             "mupos_p4",
-            f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i_pos], Muon_eta[i_pos], Muon_phi[i_pos], {MU_MASS})",
+            f"ROOT::Math::PtEtaPhiMVector(Muon_pt_corr[i_pos], Muon_eta[i_pos], Muon_phi[i_pos], {MU_MASS})",
         )
         .Define(
             "muneg_p4",
-            f"ROOT::Math::PtEtaPhiMVector(Muon_pt[i_neg], Muon_eta[i_neg], Muon_phi[i_neg], {MU_MASS})",
+            f"ROOT::Math::PtEtaPhiMVector(Muon_pt_corr[i_neg], Muon_eta[i_neg], Muon_phi[i_neg], {MU_MASS})",
         )
         .Define("csSineCosThetaPhill", "wrem::csSineCosThetaPhi(mupos_p4, muneg_p4)")
     )
@@ -241,24 +314,25 @@ def build_graph(df, dataset):
         df = df.DefinePerSample("central_pdf_weight", "1.0")
         df = df.Alias("nominal_weight_uncorr", "exp_weight")
         df = df.DefinePerSample("theory_weight_truncate", "10.0")
-        # df = theory_tools.define_theory_corr_weight_column(df, "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfas")
+        for theory_corr_name in theory_corrs:
+            if theory_corr_name not in corr_helpers[dataset.name]:
+                continue
+            df = theory_corrections.define_theory_corr_weight_column(
+                df, theory_corr_name
+            )
+            df = df.Define(
+                f"{theory_corr_name}Weight_tensor",
+                corr_helpers[dataset.name][theory_corr_name],
+                [
+                    "massVgen",
+                    "absYVgen",
+                    "ptVgen",
+                    "chargeVgen",
+                    f"{theory_corr_name}_corr_weight",
+                ],
+            )
+
         theory_corr_name = theory_corrs[0]
-        df = theory_corrections.define_theory_corr_weight_column(df, theory_corr_name)
-
-        df = df.Define(
-            # "scetlib_dyturboLatticeNP_CT18Z_N3p0LL_N2LO_pdfasWeight_tensor",
-            f"{theory_corr_name}Weight_tensor",
-            corr_helpers[dataset.name][theory_corr_name],
-            [
-                "massVgen",
-                "absYVgen",
-                "ptVgen",
-                "chargeVgen",
-                f"{theory_corr_name}_corr_weight",
-            ],
-        )
-
-        # df = df.Define("nominal_weight", "scetlib_dyturboN3p0LL_LatticeNP_pdfasWeight_tensor[0]")
         df = df.Define("nominal_weight", f"{theory_corr_name}Weight_tensor[0]")
 
         for corr in theory_corrs[1:]:
@@ -357,7 +431,7 @@ def build_graph(df, dataset):
         df = df.Define(
             "prefire_vector",
             """
-        auto res = std::vector<double>{L1PreFiringWeight_Muon_StatUp/L1PreFiringWeight_Muon_Nom, L1PreFiringWeight_Muon_StatDn/L1PreFiringWeight_Muon_Nom}; 
+        auto res = std::vector<double>{L1PreFiringWeight_Muon_StatUp/L1PreFiringWeight_Muon_Nom, L1PreFiringWeight_Muon_StatDn/L1PreFiringWeight_Muon_Nom};
         res[0] = nominal_weight * res[0];
         res[1] = nominal_weight * res[1];
         return res;
@@ -398,10 +472,10 @@ def build_graph(df, dataset):
             [axis_ptll, axis_absYll, axis_cosThetaStarll],
             ["ptll", "absYll", "cosThetaStarll"],
             corr_helpers[dataset.name],
-            # ["scetlib_dyturboN3p0LL_LatticeNP_pdfas"],
             theory_corrs,
             modify_central_weight=True,
             isW=False,
+            base_name="ptll",
         )
 
     results += [

@@ -346,8 +346,7 @@ void RoccoR::reset() {
 void RoccoR::init(std::string filename) {
   std::ifstream in(filename.c_str());
   if (in.fail())
-    throw std::invalid_argument(filename.c_str());
-
+    throw std::invalid_argument("RoccoR::init could not open file " + filename);
   int RMIN(0), RTRK(0), RETA(0);
   std::vector<double> BETA;
 
