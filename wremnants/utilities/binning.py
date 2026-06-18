@@ -448,6 +448,8 @@ def get_unfolding_dilepton_axes(
                     2, -2.0, 2.0, underflow=False, overflow=False, name="qVGen"
                 )
             )
+        elif v in ["massVGen"]:
+            axes.append(hist.axis.Regular(1, 60.0, 120.0, name="massVGen"))
         else:
             raise NotImplementedError(f"Unfolding dilepton axis {v} is not supported.")
 

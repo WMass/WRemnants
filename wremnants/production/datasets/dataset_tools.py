@@ -147,10 +147,10 @@ def makeFilelist(
             else:
                 if fallback:
                     logger.warning(f"Falling back to tag {prod_tag} with path {path}")
-                else:
-                    logger.info(
-                        f"Booking {maxFiles} of {len(files)} files with tag {prod_tag} with path {path}"
-                    )
+
+                logger.info(
+                    f"Booking {maxFiles} of {len(files)} files with tag {prod_tag} with path {path}"
+                )
                 break
 
         filelist.extend(files)

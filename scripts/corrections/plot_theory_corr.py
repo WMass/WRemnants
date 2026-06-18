@@ -80,6 +80,22 @@ def axis_label(name):
     return plot_tools.get_axis_label(styles, name)
 
 
+def match_flow(h1, h2):
+    # numerator and denominator can have different flow traits;
+    # drop flow bins on axes where they disagree so they can be divided
+    for n in h1.axes.name:
+        if n not in h2.axes.name:
+            continue
+        t1, t2 = h1.axes[n].traits, h2.axes[n].traits
+        under = t1.underflow and t2.underflow
+        over = t1.overflow and t2.overflow
+        if t1.underflow != under or t1.overflow != over:
+            h1 = hh.setFlow(h1, n, under=under, over=over)
+        if t2.underflow != under or t2.overflow != over:
+            h2 = hh.setFlow(h2, n, under=under, over=over)
+    return h1, h2
+
+
 outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
 colors = mpl.colormaps["gist_rainbow"]
@@ -406,6 +422,7 @@ for dataset, corr_hists in corr_dict.items():
             corrh_den, corrh_num = theory_corrections.rebin_corr_hists(
                 [corrh_den, corrh_num]
             )
+            corrh_num, corrh_den = match_flow(corrh_num, corrh_den)
 
             charge_axis_names = [n for n in corrh.axes.name if n.startswith("charge")]
             if (
@@ -496,9 +513,14 @@ for dataset, corr_hists in corr_dict.items():
                 num_proj = corrh_num[num_sel] if num_sel else corrh_num
                 corrh_num_systs = {idx: num_proj for idx in idxs}
 
-            hists = [hh.disableFlow(h) for h in corrh_systs.values()]
-            hists_den = [hh.disableFlow(h) for h in corrh_den_systs.values()]
-            hists_num = [hh.disableFlow(h) for h in corrh_num_systs.values()]
+            if args.noFlow:
+                hists = [hh.disableFlow(h) for h in corrh_systs.values()]
+                hists_den = [hh.disableFlow(h) for h in corrh_den_systs.values()]
+                hists_num = [hh.disableFlow(h) for h in corrh_num_systs.values()]
+            else:
+                hists = list(corrh_systs.values())
+                hists_den = list(corrh_den_systs.values())
+                hists_num = list(corrh_num_systs.values())
 
             all_hists += hists
             all_hists_den += hists_den
@@ -515,9 +537,9 @@ for dataset, corr_hists in corr_dict.items():
             ]
             all_axes += axes
             if "2d" in args.plots and len(axes) >= 2:
-                for n, (idx, h) in zip(names, corrh_systs.items()):
-                    h_den = hists_den[idx] if len(hists_den) > idx else hists_den[0]
-                    h_num = hists_num[idx] if len(hists_num) > idx else hists_num[0]
+                for i, (n, h) in enumerate(zip(names, corrh_systs.values())):
+                    h_den = hists_den[i] if len(hists_den) > i else hists_den[0]
+                    h_num = hists_num[i] if len(hists_num) > i else hists_num[0]
                     if len(axes) == 2:
                         make_plot_2d(
                             h,
@@ -545,7 +567,7 @@ for dataset, corr_hists in corr_dict.items():
                                 h2d,
                                 n,
                                 proc,
-                                axes,
+                                [ax1, ax2],
                                 corr=corr,
                                 flow=not args.noFlow,
                                 clim=args.clim,

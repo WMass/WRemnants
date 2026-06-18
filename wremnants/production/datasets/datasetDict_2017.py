@@ -69,12 +69,12 @@ dataDict = {
     },
     "Ztautau_2017": {  # this sample needs to be produced using old Mass fix one
         "filepaths": [
-            "{BASE_PATH}//DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_massWgtFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_{NANO_PROD_TAG}"
+            "{BASE_PATH}/DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_H2ErratumFix_PDF_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/NanoV9MC2017_{NANO_PROD_TAG}"
         ],
         # At least one tau->e or mu decay, so everything that's not all other decays
         "xsec": common.xsec_DYJetsToLL * common.Z_TAU_TO_LEP_RATIO,
         "group": "Ztautau",
-        "das_name": "/DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_massWgtFix_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL18NanoAODv9-106X_upgrade2017_realistic_v16_L1v1-v2/NANOAODSIM",
+        "das_name": "/DYJetsToTauTau_M-50_AtLeastOneEorMuDecay_H2ErratumFix_PDF_TuneCP5_13TeV-powhegMiNNLO-pythia8-photos/RunIISummer20UL17NanoAODv9-106X_upgrade2017_realistic_v16_L1v1-v2/NANOAODSIM",
     },
     "Wplusmunu_2017": {
         "filepaths": [
