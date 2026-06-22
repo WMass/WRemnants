@@ -108,7 +108,9 @@ def sparse_to_dense_tf(sigma_flat, flat_idx):
 # =============================================================================
 
 
-def q_integrate_weights(Q_grid, Q_lo, Q_hi, q0=MZ_S_DEP_WIDTH, Gamma=GAMMAZ_S_DEP_WIDTH):
+def q_integrate_weights(
+    Q_grid, Q_lo, Q_hi, q0=MZ_S_DEP_WIDTH, Gamma=GAMMAZ_S_DEP_WIDTH
+):
     """Simpson weights for integrating over Q ∈ [Q_lo, Q_hi] in arctan-Q² space.
 
     Implements the same change of variable as

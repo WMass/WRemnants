@@ -127,7 +127,9 @@ def extract_lambda_central(corr_dict, tag, proc):
         )
     basename, npert = _select_basename(sections, tag)
     eff_params, gnu_params = _parse_section(npert)
-    return dict(tag=tag, basename=basename, eff_params=eff_params, gnu_params=gnu_params)
+    return dict(
+        tag=tag, basename=basename, eff_params=eff_params, gnu_params=gnu_params
+    )
 
 
 def _correction_pkl_path(tag, proc, data_dir=None):

@@ -172,9 +172,7 @@ def _add_scetlib_np_lambda_central(meta_info, args):
         lc_meta = lambda_central.build_lambda_central_meta(theory_corr)
         if lc_meta:
             meta_info[lambda_central.META_KEY] = lc_meta
-            logger.info(
-                f"Stored scetlib_np_lambda_central for procs {sorted(lc_meta)}"
-            )
+            logger.info(f"Stored scetlib_np_lambda_central for procs {sorted(lc_meta)}")
     except Exception as exc:
         logger.warning(f"Could not extract scetlib_np_lambda_central: {exc}")
 
