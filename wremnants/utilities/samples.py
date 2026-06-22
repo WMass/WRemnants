@@ -9,6 +9,7 @@ supported_eras = eras_run2 + [
     "2023_PUAVE2",
     "2023_PUAVE5",
     "2023_PUAVE10",
+    "2026_LowPU",
     "13TeVGen",
 ]
 

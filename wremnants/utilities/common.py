@@ -112,6 +112,7 @@ analysis_mode_map = {
     "mw_with_mu_eta_pt.py": "w_mass",
     "mw_lowPU.py": "w_lowpu",
     "mz_lowPU.py": "z_lowpu",
+    "met_performance_lowpu.py": "met_lowpu",
 }
 
 
