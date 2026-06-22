@@ -1,20 +1,28 @@
-"""λ_central auto-detect from a fit-input hdf5.
+"""Central NP (lambda) parameters for the SCETlib ParamModel.
 
-The SCETlib correction's NP runcard is preserved in the upstream
-``*_Corr<proc>.pkl.lz4`` file (under ``file_meta_data.<basename>.config.Nonperturbative``),
-but it is **not** propagated through the histmaker into the fit-input hdf5. We
-read the correction tag from the hdf5 (``meta_info_input.args.theoryCorr``),
-resolve to the upstream pkl, and extract the Nonperturbative section.
+The SCETlib correction's Nonperturbative runcard lives in the upstream
+``*_Corr<proc>.pkl.lz4`` file under
+``file_meta_data.<basename>.config.Nonperturbative``. The histmaker reads that
+section when it applies the correction and writes the parsed values into its
+output metadata (key ``scetlib_np_lambda_central``); see
+:func:`build_lambda_central_meta`. The fit then reads them back from the
+metadata that rabbit propagates into the datacard / fitresults -- it never
+re-opens the upstream pkl.
 
-Single entry point:
+Write side (histmaker):
+    build_lambda_central_meta(theory_corr_tags, procs) -> {proc: lambda_central}
 
+Read side (fit / postprocessing):
     read_lambda_central(hdf5_path, proc="Z") -> dict
+    read_lambda_central_from_meta(meta, proc="Z") -> dict
+
+A ``lambda_central`` dict has keys ``tag``, ``basename``, ``eff_params`` (for
+NP_model_effective / F_eff) and ``gnu_params`` (for NP_model_gammanu).
 """
 
 import json
 import os
 import pickle
-import sys
 
 import h5py
 import lz4.frame
@@ -22,47 +30,35 @@ import lz4.frame
 from wremnants.utilities import common as wrem_common
 from wums import ioutils as wums_io
 
-# Names of the parameters the ParamModel cares about, split by which scetlib
-# C++ struct consumes them. Values in the Nonperturbative section are strings;
-# numeric ones get parsed to float, model names stay as strings.
+# Metadata key under which the histmaker stores the parsed central runcard.
+META_KEY = "scetlib_np_lambda_central"
+
+# Parameter names the ParamModel needs, split by the scetlib C++ struct that
+# consumes them. Nonperturbative values are strings; numeric ones get floated,
+# model names stay strings.
 GNU_NUMERIC = ("lambda2_nu", "lambda4_nu", "lambda_inf_nu")
 GNU_STRING = ("np_model_nu",)
 EFF_NUMERIC = ("lambda_inf", "lambda2", "lambda4", "lambda6", "delta_lambda2")
 EFF_STRING = ("np_model",)
 
 
-def _correction_pkl_path(tag, proc):
-    """Resolve a theoryCorr tag to its upstream pkl.lz4 path."""
-    return os.path.join(
-        wrem_common.data_dir, "TheoryCorrections", f"{tag}_Corr{proc}.pkl.lz4"
-    )
-
-
-def _load_correction_pkl(tag, proc):
-    path = _correction_pkl_path(tag, proc)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"SCETlib correction pkl not found: {path!r}. "
-            f"Cannot extract λ_central for theoryCorr={tag!r}."
-        )
-    with lz4.frame.open(path, "rb") as f:
-        return pickle.load(f)
+# =============================================================================
+# Parsing the Nonperturbative section out of an upstream correction pkl
+# (write side -- only the histmaker runs this, with the pkl already in hand).
+# =============================================================================
 
 
 def _find_nonperturbative(corr_dict):
-    """Search the upstream correction dict for ``Nonperturbative`` configs.
+    """Return [(basename, Nonperturbative dict)] for every basename in the pkl.
 
-    Returns a list of (basename, Nonperturbative dict) tuples. There are
-    typically multiple basenames (resummed-singular, fixed-order, etc.) — all
-    are expected to share the same Nonperturbative section since SCETlib runs
-    them with one runcard.
+    A correction pkl usually has several basenames (resummed-singular,
+    fixed-order, ...); they share one runcard so the Nonperturbative section is
+    the same, but we keep them all and pick below.
     """
     out = []
     meta = corr_dict.get("file_meta_data")
     if not isinstance(meta, dict):
-        raise KeyError(
-            "Correction pkl has no 'file_meta_data' entry — schema mismatch."
-        )
+        raise KeyError("Correction pkl has no 'file_meta_data' entry.")
     for basename, file_meta in meta.items():
         if not isinstance(file_meta, dict):
             continue
@@ -72,20 +68,14 @@ def _find_nonperturbative(corr_dict):
         npert = cfg.get("Nonperturbative")
         if isinstance(npert, dict):
             out.append((basename, npert))
-    if not out:
-        raise KeyError(
-            "No Nonperturbative section found in any basename of "
-            "file_meta_data — λ_central undefined."
-        )
     return out
 
 
 def _parse_section(npert):
-    """Parse one Nonperturbative dict into the two parameter groups.
+    """Split one Nonperturbative dict into the eff / gnu parameter groups.
 
-    Numeric params absent from the runcard default to 0 — SCETlib runcards
-    only set the keys relevant to the chosen np_model. e.g. tanh_2 setups
-    typically omit ``lambda6`` (the bT⁵ coefficient only used by tanh_6).
+    Numeric params absent from the runcard default to 0 -- runcards only set the
+    keys their np_model uses (e.g. tanh_2 omits ``lambda6``).
     """
     eff_params = {"np_model": npert[EFF_STRING[0]]}
     gnu_params = {"np_model_nu": npert[GNU_STRING[0]]}
@@ -96,38 +86,144 @@ def _parse_section(npert):
     return eff_params, gnu_params
 
 
-def read_lambda_central_from_meta(meta, proc="Z", _source="<meta>"):
-    """Same as :func:`read_lambda_central`, but takes the already-loaded
-    metadata dict (e.g. ``indata.metadata``) instead of an hdf5 path.
+def _select_basename(sections, tag):
+    """Pick the basename whose runcard to use when a pkl bundles several.
 
-    Avoids re-opening the input HDF5 when the caller already has the meta
-    in hand. ``_source`` is used only in error messages.
+    Some pkls carry multiple NP variants (e.g. a lattice central + a FranksVals
+    variant). Prefer a basename whose name shares a keyword with the tag, then
+    the resummed-singular file (it carries the full NP set).
     """
-    try:
-        theory_corr = meta["meta_info_input"]["args"]["theoryCorr"]
-    except (KeyError, TypeError) as exc:
+    tag_lower = tag.lower()
+    KEYWORDS = ("franksvals", "lattice", "newvars", "lambda6")
+    matched_kw = next((k for k in KEYWORDS if k in tag_lower), None)
+
+    def _score(name):
+        name_lower = name.lower()
+        score = 0
+        if matched_kw and matched_kw in name_lower:
+            score += 10
+        if (
+            "nnlo_sing" in name_lower
+            or "_sing_" in name_lower
+            or name_lower.endswith("sing.pkl")
+        ):
+            score += 1
+        return score
+
+    return sorted(sections, key=lambda item: -_score(item[0]))[0]
+
+
+def extract_lambda_central(corr_dict, tag, proc):
+    """Parse the central lambda parameters out of a loaded correction pkl dict.
+
+    Returns ``{tag, basename, eff_params, gnu_params}``. Raises if the pkl has
+    no Nonperturbative section.
+    """
+    sections = _find_nonperturbative(corr_dict)
+    if not sections:
         raise KeyError(
-            f"{_source}: meta_info_input.args.theoryCorr missing — "
-            "cannot identify the central SCETlib correction."
-        ) from exc
+            f"No Nonperturbative section in correction pkl for tag={tag!r}, "
+            f"proc={proc!r}."
+        )
+    basename, npert = _select_basename(sections, tag)
+    eff_params, gnu_params = _parse_section(npert)
+    return dict(tag=tag, basename=basename, eff_params=eff_params, gnu_params=gnu_params)
 
-    if not theory_corr:
-        raise ValueError(f"{_source}: theoryCorr list is empty.")
-    tag = theory_corr[0]  # first entry = central; rest are pdfvars/pdfas
 
-    return _resolve_tag_to_lambda(tag, proc)
+def _correction_pkl_path(tag, proc, data_dir=None):
+    data_dir = data_dir if data_dir is not None else wrem_common.data_dir
+    return os.path.join(data_dir, "TheoryCorrections", f"{tag}_Corr{proc}.pkl.lz4")
+
+
+def build_lambda_central_meta(theory_corr_tags, procs=("Z", "W"), data_dir=None):
+    """Build the ``scetlib_np_lambda_central`` metadata for the histmaker output.
+
+    Opens the central correction pkl (``theory_corr_tags[0]``) for each proc and
+    extracts its Nonperturbative runcard. Returns ``{proc: lambda_central}`` for
+    the procs whose pkl exists and carries an NP section; procs without one are
+    skipped silently (most analyses have no SCETlib NP correction). Returns an
+    empty dict if there are no tags.
+
+    This is the ONLY place the upstream pkl is read; the fit reads the result
+    back from metadata.
+    """
+    if not theory_corr_tags:
+        return {}
+    tag = theory_corr_tags[0]  # first entry = central; rest are pdfvars/pdfas
+    out = {}
+    for proc in procs:
+        path = _correction_pkl_path(tag, proc, data_dir=data_dir)
+        if not os.path.exists(path):
+            continue
+        try:
+            with lz4.frame.open(path, "rb") as f:
+                corr_dict = pickle.load(f)
+            out[proc] = extract_lambda_central(corr_dict, tag, proc)
+        except KeyError:
+            # pkl present but no Nonperturbative section -- not an NP correction.
+            continue
+    return out
+
+
+# =============================================================================
+# Reading the propagated metadata (read side -- fit / postprocessing).
+# =============================================================================
+
+
+def _iter_meta_levels(meta, max_depth=8):
+    """Yield ``meta``, then ``meta['meta_info_input']``, recursively.
+
+    The histmaker writes the key into ``meta_info``; rabbit nests that under
+    ``meta_info_input`` in the datacard, and again in the fitresults. Walking the
+    chain finds the key regardless of which file we were handed.
+    """
+    cur = meta
+    for _ in range(max_depth):
+        if not isinstance(cur, dict):
+            return
+        yield cur
+        nxt = cur.get("meta_info_input")
+        if not isinstance(nxt, dict) or nxt is cur:
+            return
+        cur = nxt
+
+
+def read_lambda_central_from_meta(meta, proc="Z", _source="<meta>"):
+    """Fetch the central lambda parameters from an already-loaded metadata dict.
+
+    Searches ``meta`` and any nested ``meta_info_input`` for the propagated
+    ``scetlib_np_lambda_central`` entry. Raises with a clear message if it is
+    absent -- old inputs produced before metadata propagation must be remade
+    (resolving the upstream pkl by filename is no longer supported).
+    """
+    for level in _iter_meta_levels(meta):
+        lc_all = level.get(META_KEY)
+        if not isinstance(lc_all, dict) or not lc_all:
+            continue
+        if proc in lc_all:
+            return dict(lc_all[proc])
+        if len(lc_all) == 1:
+            # single proc stored -- use it whatever its label
+            return dict(next(iter(lc_all.values())))
+        raise KeyError(
+            f"{_source}: {META_KEY!r} has no proc {proc!r} (have {sorted(lc_all)})."
+        )
+    raise KeyError(
+        f"{_source}: no {META_KEY!r} in metadata. The SCETlib NP runcard is "
+        f"propagated into the histmaker output since this version; remake the "
+        f"histmaker output (upstream-pkl resolution by filename was removed)."
+    )
 
 
 def load_lambda_central_file(path):
-    """Load a λ_central override from a JSON or YAML file.
+    """Load a lambda_central override from a JSON or YAML file.
 
     The file must decode to a dict with ``eff_params`` and ``gnu_params``
-    sub-dicts (same shape as :func:`read_lambda_central`). Format is chosen
-    by extension (``.yaml``/``.yml`` → YAML, else JSON); YAML's loader also
-    accepts JSON, so this is forgiving either way.
+    sub-dicts. Format is chosen by extension (``.yaml``/``.yml`` -> YAML, else
+    JSON; YAML also accepts JSON).
     """
     if not os.path.exists(path):
-        raise FileNotFoundError(f"λ_central file missing: {path!r}")
+        raise FileNotFoundError(f"lambda_central file missing: {path!r}")
     with open(path) as f:
         text = f.read()
     if path.lower().endswith((".yaml", ".yml")):
@@ -139,7 +235,7 @@ def load_lambda_central_file(path):
             data = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValueError(
-                f"λ_central file {path!r} is not valid JSON; got {exc}"
+                f"lambda_central file {path!r} is not valid JSON; got {exc}"
             ) from exc
     if (
         not isinstance(data, dict)
@@ -147,50 +243,32 @@ def load_lambda_central_file(path):
         or "gnu_params" not in data
     ):
         raise ValueError(
-            f"λ_central file {path!r} must decode to a dict with "
-            f"'eff_params' and 'gnu_params' keys; got {type(data).__name__} "
-            f"with keys {list(data) if isinstance(data, dict) else '<n/a>'}."
+            f"lambda_central file {path!r} must decode to a dict with "
+            f"'eff_params' and 'gnu_params' keys; got {type(data).__name__}."
         )
     return data
 
 
 def read_lambda_central(hdf5_path, proc="Z"):
-    """Extract λ_central from the SCETlib correction referenced by the hdf5.
+    """Read the central lambda parameters referenced by an hdf5.
 
-    Accepts either a fit-input datacard (setupRabbit output) OR a rabbit
-    ``fitresults*.hdf5``: rabbit propagates the whole datacard meta into the
-    fitresults as ``meta_info_input``, so for fitresults the lookup is the
-    same after unwrapping one level. Handy to answer "which λ_central was
-    this fit's ParamModel initialized with?" from the fit output alone.
+    Accepts a setupRabbit datacard or a rabbit ``fitresults*.hdf5`` (rabbit
+    nests the datacard meta one level down; the lookup handles both).
 
-    λ_central overrides: the override route is the ``lambda_central=<file>``
-    token in the ``--paramModel`` spec — the fit command (including the
-    token) is stored in the fitresults ``meta_info.args``, so this function
-    recovers the override automatically. A programmatic constructor-arg dict
-    is NOT visible in the fit output — for such fits the theoryCorr-tag
-    route below silently reports the auto-detect values (check the fit log
-    for "λ_central from" lines).
+    Order of preference:
+      1. a ``lambda_central=<file>`` token in the stored ``--paramModel`` spec
+         (an explicit override the fit command recorded);
+      2. the ``scetlib_np_lambda_central`` metadata propagated by the histmaker.
 
-    Returns a dict with:
-
-        tag         : the central theoryCorr tag (first entry of meta args)
-        pkl_path    : path to the upstream correction pkl
-        basename    : the file_meta basename whose runcard was used
-        eff_params  : dict for NP_model_effective (F_eff). Keys:
-                      np_model, lambda_inf, lambda2, lambda4, lambda6,
-                      delta_lambda2.
-        gnu_params  : dict for NP_model_gammanu (γ_ν^NP). Keys:
-                      np_model_nu, lambda_inf_nu, lambda2_nu, lambda4_nu.
-
-    Raises with a clear message if any link in the chain is missing.
+    Returns a dict with ``tag``, ``basename``, ``eff_params``, ``gnu_params``
+    and ``source``. Raises with a clear message if neither route resolves.
     """
     with h5py.File(hdf5_path, "r") as f:
         if "meta" not in f:
-            raise KeyError(f"{hdf5_path}: no 'meta' group — wrong file type?")
+            raise KeyError(f"{hdf5_path}: no 'meta' group -- wrong file type?")
         meta = wums_io.pickle_load_h5py(f["meta"])
 
-    # Preference 1 (fitresults): a lambda_central=<file> token in the stored
-    # --paramModel spec — the fit command records the override for free.
+    # Preference 1: an explicit lambda_central=<file> override.
     args_meta = (meta.get("meta_info") or {}).get("args") or {}
     for spec in args_meta.get("paramModel") or []:
         for tok in spec:
@@ -200,60 +278,10 @@ def read_lambda_central(hdf5_path, proc="Z"):
                 lc["source"] = f"cli-file:{path}"
                 return lc
 
-    # Fallback: resolve the datacard's theoryCorr tag. For fitresults this
-    # ASSUMES no env-var/constructor override was active (those are not
-    # visible in the output; check the fit log). fitresults nest the
-    # datacard meta (which itself carries meta_info_input) one level down —
-    # unwrap until the histmaker args are in view.
-    while (
-        isinstance(meta.get("meta_info_input"), dict)
-        and "args" not in meta.get("meta_info_input", {})
-        and "meta_info_input" in meta["meta_info_input"]
-    ):
-        meta = meta["meta_info_input"]
+    # Preference 2: the propagated histmaker metadata.
     lc = read_lambda_central_from_meta(meta, proc=proc, _source=hdf5_path)
-    lc["source"] = "theoryCorr-tag (assumes no runtime override)"
+    lc["source"] = "histmaker-metadata"
     return lc
-
-
-def _resolve_tag_to_lambda(tag, proc):
-    """Internal: given a theoryCorr tag, load the pkl and parse λ_central."""
-
-    corr_dict = _load_correction_pkl(tag, proc)
-    sections = _find_nonperturbative(corr_dict)
-
-    # Some correction pkls bundle multiple NP variants in one file (e.g. a
-    # "lattice" central + a "FranksVals" variant). We need to pick the
-    # basename that matches the analysis's NP tag. Heuristic: look for a
-    # substring in the basename that also appears in the tag (case-insensitive).
-    tag_lower = tag.lower()
-    KEYWORDS = ("franksvals", "lattice", "newvars", "lambda6")
-    matched_kw = next((k for k in KEYWORDS if k in tag_lower), None)
-
-    def _basename_score(name):
-        name_lower = name.lower()
-        score = 0
-        if matched_kw and matched_kw in name_lower:
-            score += 10  # strong preference: matches the analysis variant
-        if (
-            "nnlo_sing" in name_lower
-            or "_sing_" in name_lower
-            or name_lower.endswith("sing.pkl")
-        ):
-            score += 1  # weak preference: resummed-singular carries the full NP set
-        return score
-
-    sections_sorted = sorted(sections, key=lambda item: -_basename_score(item[0]))
-    basename, npert = sections_sorted[0]
-    eff_params, gnu_params = _parse_section(npert)
-
-    return dict(
-        tag=tag,
-        pkl_path=_correction_pkl_path(tag, proc),
-        basename=basename,
-        eff_params=eff_params,
-        gnu_params=gnu_params,
-    )
 
 
 if __name__ == "__main__":
@@ -267,7 +295,7 @@ if __name__ == "__main__":
         sys.exit(2)
     out = read_lambda_central(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "Z")
     print(f"tag      : {out['tag']}")
-    print(f"pkl_path : {out['pkl_path']}")
     print(f"basename : {out['basename']}")
+    print(f"source   : {out.get('source')}")
     print(f"eff_params: {out['eff_params']}")
     print(f"gnu_params: {out['gnu_params']}")

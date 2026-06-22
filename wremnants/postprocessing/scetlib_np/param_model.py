@@ -2,11 +2,9 @@
 
 This ParamModel scales the signal reco template by a per-bin ratio of the
 SCETlib nonperturbative (NP) prediction at the fitted λ vs. at λ_central. The
-prediction is built in THREE STEPS, written out in order below — read top to
-bottom for the full maths. This module docstring is the SINGLE SOURCE OF TRUTH:
-:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch_tf`,
-``sigma_reco_central.md``, and the development-tree numpy reference and
-validation scripts all point here rather than restate it.
+prediction is built in four steps, written out below; the related modules
+(:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch`, the validation
+scripts, ``sigma_reco_central.md``) refer here for the derivation.
 
 Pipeline at a glance (everything is a function of the NP parameters λ):
 
@@ -23,9 +21,9 @@ g = flattened gen bin (ptVGen, absYVGen); b = flattened reco bin (ptll, yll,
 cosThetaStarll_quantile, phiStarll_quantile). λ splits into λ_eff (for F_eff)
 and λ_ν (for γ_ν^NP) — the 8 differentiable parameters listed at the end.
 
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 Step 1 — σ_resum(λ; g): the resummed prediction from the bT grid
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 
 (1a) Per-(Q, Y, qT) bT-space (Hankel) integral — the NP parameters enter HERE:
 
@@ -79,9 +77,9 @@ transform flattens the Breit-Wigner Z peak). The result (Y, qT) is then rebinned
 Y axis folded into |Y| → absYVGen. The |Y| fold is valid because NP is
 Y-symmetric (F_eff depends on Y², γ_ν^NP doesn't depend on Y at all).
 
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 Step 2 — σ_gen(λ; g): add the NP-independent fixed-order nonsingular
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 
     σ_gen(λ; g) = σ_resum(λ; g) + σ_ns(g)
 
@@ -100,9 +98,9 @@ ratio (Step 3), σ_ns correctly DILUTES the NP variation where the FO dominates
 for resum-only diagnostics subtract the exposed ``sigma_ns`` from
 ``sigma_gen_central`` (and re-fold with ``R`` for reco level).
 
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 Step 3 — σ_reco(λ; b): fold gen → reco through the response matrix
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 
     P(b | g)     = R_raw(b, g) / N_gen(g)               (efficiency × migration)
     σ_reco(λ; b) = Σ_g  P(b | g) · σ_gen(λ; g)
@@ -147,9 +145,9 @@ theory-independent gen→reco map. Pre-FSR: σ_gen, R, and N_gen must all sit at
 the same QCD/boson gen level (the postfsr variants in the file close ~1% worse
 — FSR mismatch).
 
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 Step 4 — rnorm(b, proc): the per-reco-bin variation handed to rabbit
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 
     ratio(b)       = σ_reco(λ; b) / σ_reco(λ_central; b)
     rnorm(b, proc) = 1 + (ratio(b) − 1) · [proc is signal]   (1 in every other proc)
@@ -165,23 +163,23 @@ needs. σ_reco(λ_central) is precomputed once at construction as the denominato
 then σ_gen cancels in σ_reco(λ_c) = R_raw·1 and the λ_central closure can't test
 the integral.)
 
-─────────────────────────────────────────────────────────────────────────────
+-----------------------------------------------------------------------------
 Parameters and inputs
-─────────────────────────────────────────────────────────────────────────────
+-----------------------------------------------------------------------------
 
 The 8 v1 parameters λ (all factorisable through the current btgrid):
 
     γ_ν^NP (CS-side):       lambda2_nu, lambda4_nu, lambda_inf_nu
     F_eff  (TMD-effective): lambda2, lambda4, lambda6, delta_lambda2, lambda_inf
 
-λ_central is read from the fit-tensor's meta_info_input via the upstream
-SCETlib correction pkl (see :mod:`scetlib_lambda_central`). The np_model and
-np_model_nu strings are fixed at construction (from λ_central). All λ values
-are TF Variables — differentiable in the fit.
+λ_central is read from the fit-tensor's metadata, where the histmaker stored
+the SCETlib correction's NP runcard (see :mod:`scetlib_lambda_central`). The
+np_model and np_model_nu strings are fixed at construction (from λ_central).
+All λ values are TF Variables, differentiable in the fit.
 
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 Getting the postfit Hessian / covariance (uncertainties on λ)
-═════════════════════════════════════════════════════════════════════════════
+=============================================================================
 
 The fit floats λ fine, but rabbit's postfit covariance step
 ``loss_val_grad_hess`` → ``t2.jacobian(grad, x)`` differentiates through the bT

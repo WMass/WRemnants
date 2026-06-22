@@ -28,10 +28,13 @@ from wremnants.postprocessing.scetlib_np.btgrid_tf import (
     _as_dtype,
     simpson_weights,
 )
+from wremnants.utilities import common as wrem_common
 
-# Z resonance defaults (matches the numpy-reference integrate_over_Q).
-MZ_PDG = 91.1876
-GAMMAZ_PDG = 2.4952
+# Z resonance parameters for the Q-integration change of variable, in the
+# s-dependent-width scheme (see wremnants.utilities.common). Only set the centre
+# and scale of the arctan-Q^2 transform below; they do not change the physics.
+MZ_S_DEP_WIDTH = wrem_common.MZ_S_DEP_WIDTH
+GAMMAZ_S_DEP_WIDTH = wrem_common.GAMMAZ_S_DEP_WIDTH
 
 
 # =============================================================================
@@ -105,7 +108,7 @@ def sparse_to_dense_tf(sigma_flat, flat_idx):
 # =============================================================================
 
 
-def q_integrate_weights(Q_grid, Q_lo, Q_hi, q0=MZ_PDG, Gamma=GAMMAZ_PDG):
+def q_integrate_weights(Q_grid, Q_lo, Q_hi, q0=MZ_S_DEP_WIDTH, Gamma=GAMMAZ_S_DEP_WIDTH):
     """Simpson weights for integrating over Q ∈ [Q_lo, Q_hi] in arctan-Q² space.
 
     Implements the same change of variable as

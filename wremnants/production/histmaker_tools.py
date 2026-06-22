@@ -154,6 +154,31 @@ def analysis_debug_output(results):
     logger.debug("")
 
 
+def _add_scetlib_np_lambda_central(meta_info, args):
+    """Propagate the central SCETlib NP runcard into the output metadata.
+
+    The SCETlib ParamModel fit needs the central lambda parameters the
+    correction was generated with. We read them from the upstream theoryCorr pkl
+    here (where the correction is applied) and store them under
+    ``scetlib_np_lambda_central`` so the fit never re-opens the pkl by filename.
+    No-op for analyses whose correction has no Nonperturbative section.
+    """
+    theory_corr = getattr(args, "theoryCorr", None)
+    if not theory_corr:
+        return
+    try:
+        from wremnants.postprocessing.scetlib_np import lambda_central
+
+        lc_meta = lambda_central.build_lambda_central_meta(theory_corr)
+        if lc_meta:
+            meta_info[lambda_central.META_KEY] = lc_meta
+            logger.info(
+                f"Stored scetlib_np_lambda_central for procs {sorted(lc_meta)}"
+            )
+    except Exception as exc:
+        logger.warning(f"Could not extract scetlib_np_lambda_central: {exc}")
+
+
 def write_analysis_output(results, outfile, args, name_append=[]):
     analysis_debug_output(results)
 
@@ -203,11 +228,9 @@ def write_analysis_output(results, outfile, args, name_append=[]):
             ioutils.pickle_dump_h5py(k, v, f, override=open_as != "w")
 
         if "meta_info" not in f.keys():
-            ioutils.pickle_dump_h5py(
-                "meta_info",
-                output_tools.make_meta_info_dict(args=args, wd=common.base_dir),
-                f,
-            )
+            meta_info = output_tools.make_meta_info_dict(args=args, wd=common.base_dir)
+            _add_scetlib_np_lambda_central(meta_info, args)
+            ioutils.pickle_dump_h5py("meta_info", meta_info, f)
 
     logger.info(f"Writing output: {time.time()-time0}")
     logger.info(f"Output saved in {outfile}")
