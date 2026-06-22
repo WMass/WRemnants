@@ -902,6 +902,9 @@ def hist_to_variations(
         # all the axes have already been projected out, nothing else to do
         return hist_in
 
+    if "vars" not in hist_in.axes.name:
+        return hist_in
+
     nom_hist = hist_in[{"vars": 0}]
     nom_hist_sum = nom_hist[gen_sum_expr]
 
@@ -969,6 +972,49 @@ def scale_hist_up_down_corr_from_file(h, corr_file=None, corr_hist=None):
         [hDown.variances(flow=True), hUp.variances(flow=True)], axis=-1
     )
     return hVar
+
+
+# TODO: Integrate with rabbit to avoid code duplication
+def symmetrize_unc_matrix(matrix, labels, symm_type):
+    if symm_type not in ["quadratic", "average"]:
+        raise NotImplementedError(f"Symmetrization type {symm_type} not supported!")
+
+    if hasattr(matrix, "values") and not callable(matrix.values):
+        values = matrix.values
+    elif hasattr(matrix, "values") and callable(matrix.values):
+        values = matrix.values()
+    else:
+        values = matrix
+
+    # logkup = up - nominal
+    # logkdown = nominal - down
+    # Leads to a sign flip for down wrt rabbit
+    # Assyming the unc. are organized down,up,down,up,...
+    symm_avg = 0.5 * (-values[:, ::2] + values[:, 1::2])
+
+    if symm_type == "average":
+        if len(labels) * 2 != values.shape[-1]:
+            raise ValueError(
+                f"Number of nuisances should be half the number of eigenvectors when using average symmetrization! Found {len(labels)} nuisances and {values.shape[-1]} symmetric variations. Please check the input matrix and labels."
+            )
+
+        values[:, : len(labels)] = symm_avg
+
+        return matrix.iloc[:, : len(labels)]
+
+    avg_idx = np.char.find(labels, "Avg") != -1
+    symm_diff = 0.5 * np.sqrt(3) * (values[:, ::2] + values[:, 1::2])
+    symm_diff = 0
+
+    values[:, avg_idx] = symm_avg
+    values[:, ~avg_idx] = symm_diff
+
+    if np.count_nonzero(avg_idx) != symm_avg.shape[1]:
+        raise ValueError(
+            f"Found inconsistent number of Avg nuisances (Avg: {np.count_nonzero(avg_idx)}, Symm: {symm_avg.shape[1]}, Diff {symm_diff.shape[1]}) for quadratic symmetrization."
+        )
+
+    return matrix
 
 
 def fake_nonclosure_byAxis(

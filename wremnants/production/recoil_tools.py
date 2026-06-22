@@ -17,6 +17,15 @@ except:
 
     Interpreter = tf.lite.Interpreter
 
+# prefer newer package if available
+# (This avoids the requirement to rebuild the tensorflow python library to fix the symbol collisions)
+try:
+    from ai_edge_litert.interpreter import Interpreter
+except:
+    import tensorflow as tf
+
+    Interpreter = tf.lite.Interpreter
+
 ROOT.gInterpreter.Declare('#include "recoil_tools.hpp"')
 ROOT.gInterpreter.Declare('#include "recoil_helper.hpp"')
 logger = logging.getLogger("wremnants").getChild(__name__.split(".")[-1])

@@ -311,13 +311,13 @@ axis_mtCat = hist.axis.Variable(
     ),
     name="mt",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axis_isoCat = hist.axis.Variable(
     binning.get_binning_fakes_relIso(high_iso_bins=False),
     name="relIso",
     underflow=False,
-    overflow=True,
+    overflow=False,
 )
 axes_abcd = [axis_mtCat, axis_isoCat]
 
@@ -737,10 +737,11 @@ def build_graph(df, dataset):
         hist.storage.Double()
     )  # turn off sum weight square for systematic histograms
 
-    if isWorZ and dataset.name[0] in helicity_smoothing_helpers_procs.keys():
-        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
-    else:
-        helicity_smoothing_helpers = {}
+    helicity_smoothing_helpers = {}
+    if isWorZ:
+        label = dataset.name[0] if isW else "Z"
+        if label in helicity_smoothing_helpers_procs.keys():
+            helicity_smoothing_helpers = helicity_smoothing_helpers_procs[label]
 
     # disable auxiliary histograms when unfolding to reduce memory consumptions, or when doing the original theory agnostic without --poiAsNoi
     auxiliary_histograms = True
@@ -932,21 +933,19 @@ def build_graph(df, dataset):
                         cols = [*nominal_cols, *unfolding_cols[level]]
                         break
 
-        elif dataset.name == "Zmumu_2016PostVFP":
-            if args.unfolding and dataset.name == "Zmumu_2016PostVFP":
-                df = unfolder_z.add_gen_histograms(
-                    args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
-                )
-
-                if not unfolder_z.poi_as_noi:
-                    axes = [
-                        *nominal_axes,
-                        *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
-                    ]
-                    cols = [
-                        *nominal_cols,
-                        *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
-                    ]
+        elif isZmumu:
+            df = unfolder_z.add_gen_histograms(
+                args, df, results, dataset, corr_helpers, helicity_smoothing_helpers
+            )
+            if not unfolder_z.poi_as_noi:
+                axes = [
+                    *nominal_axes,
+                    *unfolder_z.unfolding_axes[unfolder_z.unfolding_levels[-1]],
+                ]
+                cols = [
+                    *nominal_cols,
+                    *unfolder_z.unfolding_cols[unfolder_z.unfolding_levels[-1]],
+                ]
 
     if isWorZ:
         df = generator_level_definitions.define_prefsr_vars(df)

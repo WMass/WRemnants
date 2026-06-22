@@ -210,14 +210,21 @@ def make_subparsers(parser, argv=None):
             help="Include underflow/overflow in masked channels (for iterative unfolding)",
         )
         parser.add_argument(
+            "--unfoldingFullPhaseSpace",
+            action="store_true",
+            help="Include masked channel with extrapolation to the full phase space",
+        )
+        parser.add_argument(
             "--unfoldSimultaneousWandZ",
             action="store_true",
             help="Simultaneously unfold W and Z and correlate Z background in W channel",
         )
         parser.add_argument(
             "--constrainNOIs",
-            action="store_true",
-            help="Constrain NOI variation",
+            type=str,
+            default=[],
+            nargs="+",
+            help="Constrain NOI variation for given groups",
         )
 
         parser = parsing.set_parser_default(parser, "massVariation", 10)
@@ -375,7 +382,7 @@ def make_parser(parser=None, argv=None):
     parser.add_argument(
         "--lumiUncertainty",
         type=float,
-        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default",
+        help=r"Uncertainty for luminosity in excess to 1 (e.g. 1.012 means 1.2%%); automatic by default; if 0, treat as unconstrained with the automatic uncertainty as the size of the variation",
         default=None,
     )
     parser.add_argument(
@@ -482,6 +489,13 @@ def make_parser(parser=None, argv=None):
         help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
     )
     parser.add_argument(
+        "--fitAlphasDecorr",
+        type=str,
+        default=[],
+        nargs="*",
+        help="Decorrelate POI for given axes, fit multiple POIs for the different POIs",
+    )
+    parser.add_argument(
         "--decorrRebin",
         type=int,
         nargs="*",
@@ -577,7 +591,15 @@ def make_parser(parser=None, argv=None):
         type=str,
         help="Set the mode for the fake estimation",
         default="extended1D",
-        choices=["mc", "closure", "simple", "extrapolate", "extended1D", "extended2D"],
+        choices=[
+            "none",
+            "mc",
+            "closure",
+            "simple",
+            "extrapolate",
+            "extended1D",
+            "extended2D",
+        ],
     )
     parser.add_argument(
         "--forceGlobalScaleFakes",
@@ -710,14 +732,14 @@ def make_parser(parser=None, argv=None):
         help="Scale the PDF hessian uncertainties by this factor (by default take the value in the pdfInfo map)",
     )
     parser.add_argument(
-        "--pdfUncFromCorr",
+        "--pdfUncFromWeights",
         action="store_true",
-        help="Take PDF uncertainty from correction hist (requires having run that correction)",
+        help="Take PDF uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
-        "--asUncFromUncorr",
+        "--asUncFromWeights",
         action="store_true",
-        help="Take alpha_S uncertainty from uncorrected hist (by default it reads it from the correction hist, but requires having run that correction)",
+        help="Take alpha_S uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
     parser.add_argument(
         "--scaleMinnloScale",
@@ -761,6 +783,18 @@ def make_parser(parser=None, argv=None):
         "Multiple REGEX=FACTOR pairs may be supplied. Overlapping "
         "patterns matching the same nuisance name raise an error. "
         "Example: --scaleParams 'lambda4=5' 'mb_up|pdfMSHT20mbrange=10'",
+    )
+    parser.add_argument(
+        "--noConstrainParams",
+        nargs="*",
+        default=None,
+        metavar="REGEX",
+        help="Remove the Gaussian prior on shape systematics whose "
+        "per-direction name matches REGEX (re.search), turning them into "
+        "free-floating nuisances. Multiple regexes may be supplied. "
+        "Mirrors --scaleParams / --noSymmetrize wiring. "
+        "Example: --noConstrainParams 'scetlibNP' "
+        "(unconstrains all SCETlib NP nuisances).",
     )
     parser.add_argument(
         "--symmetrizePdfUnc",
@@ -1076,7 +1110,9 @@ def make_parser(parser=None, argv=None):
     parser.add_argument(
         "--noTheoryCorrsViaHelicities",
         action="store_true",
-        help="Don't use theory correction histograms produced via smoothing through helicites.",
+        help="Don't use theory correction histograms produced via smoothing through helicities. "
+        "Affects the PDF, alpha_S, quark-mass and MiNNLO muR/muF uncertainties: with this flag they "
+        "are taken from the raw MiNNLO event weights instead of the helicity-decomposed (ByHelicity) hists.",
     )
     parser.add_argument(
         "--breitwignerWMassWeights",
@@ -1101,6 +1137,7 @@ def setup(
     fitresult_data=None,
     unfolding_scalemap=None,
     base_group=None,
+    unfolding_with_flow=False,
 ):
     isUnfolding = args.analysisMode == "unfolding"
     isTheoryAgnostic = args.analysisMode in [
@@ -1185,6 +1222,18 @@ def setup(
             + ", ".join(f"'{p.pattern}'×{f}" for p, f in scale_params_pairs)
         )
     datagroups.scale_params_patterns = scale_params_pairs
+
+    # --noConstrainParams: list of compiled regexes applied at
+    # add_systematic time. Mirrors --scaleParams.
+    no_constraint_patterns = []
+    if args.noConstrainParams:
+        no_constraint_patterns = [re.compile(p) for p in args.noConstrainParams]
+        logger.info(
+            f"--noConstrainParams: {len(no_constraint_patterns)} pattern(s) "
+            f"registered: "
+            + ", ".join(f"'{p.pattern}'" for p in no_constraint_patterns)
+        )
+    datagroups.no_constraint_patterns = no_constraint_patterns
 
     preselection_specs = _build_preselection_specs(args.presel, fitvar)
     if preselection_specs:
@@ -1367,7 +1416,7 @@ def setup(
             member_filter=lambda x: not x.name.endswith("OOA"),
             fitvar=fitvar,
             histToReadAxes=args.unfoldingLevel,
-            disable_flow_fit_axes=not (datagroups.xnorm and args.unfoldingWithFlow),
+            disable_flow_fit_axes=not (datagroups.xnorm and unfolding_with_flow),
         )
 
         # out of acceptance contribution
@@ -1384,13 +1433,13 @@ def setup(
     if args.qcdProcessName:
         datagroups.fakeName = args.qcdProcessName
 
-    abcdExplicitAxisEdges = {}
-    if len(args.ABCDedgesByAxis):
-        for item in args.ABCDedgesByAxis:
-            ax_name, ax_edges = item.split("=")
-            abcdExplicitAxisEdges[ax_name] = [float(x) for x in ax_edges.split(",")]
-
     if wmass and not datagroups.xnorm:
+        abcdExplicitAxisEdges = {}
+        if len(args.ABCDedgesByAxis):
+            for item in args.ABCDedgesByAxis:
+                ax_name, ax_edges = item.split("=")
+                abcdExplicitAxisEdges[ax_name] = [float(x) for x in ax_edges.split(",")]
+
         datagroups.fakerate_axes = args.fakerateAxes
         # datagroups.fakeTransferAxis = args.fakeTransferAxis if args.fakeTransferAxis in args.fakerateAxes else ""
         # datagroups.fakeTransferCorrFileName = args.fakeTransferCorrFileName
@@ -1446,6 +1495,7 @@ def setup(
 
     passSystToFakes = (
         wmass
+        and args.fakeEstimation not in ["none"]
         and not (datagroups.xnorm or args.skipSignalSystOnFakes)
         and datagroups.fakeName != "QCD"
         and (excludeGroup != None and datagroups.fakeName not in excludeGroup)
@@ -1483,6 +1533,7 @@ def setup(
                 startsWith=ZMatch,
                 excludeMatch=dibosonMatch,
             )
+
     datagroups.addProcessGroup(
         "single_vmu_samples",
         startsWith=[*WMatch, *ZMatch],
@@ -1612,12 +1663,14 @@ def setup(
                 args.pseudoDataProcsRegexp,
             )
 
+    if datagroups.xnorm and isUnfolding and unfolding_with_flow:
+        masked_flow_axes = ["ptGen", "ptVGen"]
+        if "_full" in datagroups.channel:
+            masked_flow_axes.extend(["absEtaGen", "absYVGen"])
+    else:
+        masked_flow_axes = []
+
     if args.correlateSignalMCstat and datagroups.xnorm:
-        masked_flow_axes = (
-            ["ptGen", "ptVGen"]
-            if (datagroups.xnorm and isUnfolding and args.unfoldingWithFlow)
-            else []
-        )
         rabbit_helpers.add_nominal_with_correlated_BinByBinStat(
             datagroups,
             wmass,
@@ -1626,20 +1679,21 @@ def setup(
             masked_flow_axes=masked_flow_axes,
         )
     else:
+        if isUnfolding:
+            bin_by_bin_stat_scale = 1.0
+        elif wmass:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForMW
+        elif dilepton:
+            bin_by_bin_stat_scale = args.binByBinStatScaleForDilepton
+        else:
+            bin_by_bin_stat_scale = 1.0
+
         datagroups.addNominalHistograms(
             real_data=args.realData,
-            bin_by_bin_stat_scale=(
-                args.binByBinStatScaleForMW
-                if wmass
-                else args.binByBinStatScaleForDilepton if dilepton else 1.0
-            ),
+            bin_by_bin_stat_scale=bin_by_bin_stat_scale,
             fitresult_data=fitresult_data,
             masked=datagroups.xnorm and fitresult_data is None,
-            masked_flow_axes=(
-                ["ptGen", "ptVGen"]
-                if (datagroups.xnorm and isUnfolding and args.unfoldingWithFlow)
-                else []
-            ),
+            masked_flow_axes=masked_flow_axes,
         )
 
     if stat_only and isUnfolding and not isPoiAsNoi:
@@ -1678,6 +1732,8 @@ def setup(
             decorwidth=decorwidth,
         )
 
+    add_theory_uncertainties = not stat_only and not args.noTheoryUnc
+
     # this appears within doStatOnly because technically these nuisances should be part of it
     if isPoiAsNoi:
         if isTheoryAgnostic:
@@ -1699,6 +1755,11 @@ def setup(
             theoryAgnostic_helper.add_theoryAgnostic_uncertainty()
 
         elif isUnfolding:
+            signal_groups = datagroups.expandProcesses("signal_samples")
+            if len(signal_groups) != 1:
+                raise NotImplementedError(
+                    f"noi variations currently only works for 1 signal group but got {len(signal_groups)}"
+                )
             rabbit_helpers.add_noi_unfolding_variations(
                 datagroups,
                 label,
@@ -1708,7 +1769,7 @@ def setup(
                 scale_norm=args.scaleNormXsecHistYields,
                 gen_level=args.unfoldingLevel,
                 fitresult=unfolding_scalemap,
-                constrained=args.constrainNOIs,
+                constrained=signal_groups[0] in args.constrainNOIs,
             )
 
     if args.muRmuFPolVar and not isTheoryAgnosticPolVar:
@@ -1724,7 +1785,10 @@ def setup(
 
     if args.correlateSignalMCstat and datagroups.xnorm and args.fitresult is None:
         # use variations from reco histogram and apply them to xnorm
-        source = ("nominal", f"{inputBaseName}_yieldsUnfolding_theory_weight")
+        source = (
+            "nominal",
+            f"{inputBaseName.replace('_full','')}_yieldsUnfolding_theory_weight",
+        )
         # need to find the reco variables that correspond to the reco fit, reco fit must be done with variables in same order as gen bins
         gen2reco = {
             "qGen": "charge",
@@ -1756,7 +1820,7 @@ def setup(
         )
 
     if ("zwidth" in args.noi and not wmass) or (
-        not datagroups.xnorm and not stat_only and not args.noTheoryUnc
+        not datagroups.xnorm and add_theory_uncertainties
     ):
         # Variation from EW fit (mostly driven by alphas unc.)
         datagroups.addSystematic(
@@ -1776,7 +1840,7 @@ def setup(
         )
 
     # TODO: move closer to W mass uncertainty?
-    if wmass and ("wwidth" in args.noi or (not stat_only and not args.noTheoryUnc)):
+    if wmass and ("wwidth" in args.noi or add_theory_uncertainties):
         rabbit_helpers.add_W_width_uncertainty(
             datagroups,
             signal_samples_forMass,
@@ -1785,7 +1849,7 @@ def setup(
             label=label,
         )
 
-    if "sin2thetaW" in args.noi or (not stat_only and not args.noTheoryUnc):
+    if "sin2thetaW" in args.noi or add_theory_uncertainties:
         datagroups.addSystematic(
             "sin2thetaWeightZ",
             name=f"Sin2thetaZ0p00003",
@@ -1802,7 +1866,7 @@ def setup(
             passToFakes=passSystToFakes,
         )
 
-    if "alphaS" in args.noi or (not stat_only and not args.noTheoryUnc):
+    if "alphaS" in args.noi or add_theory_uncertainties:
         theorySystSamples = ["signal_samples_inctau"]
         if wmass:
             if args.helicityFitTheoryUnc:
@@ -1826,8 +1890,8 @@ def setup(
             np_model=args.npUnc,
             tnp_scale=args.scaleTNP,
             mirror_tnp=False,
-            pdf_from_corr=args.pdfUncFromCorr,
-            as_from_corr=not args.asUncFromUncorr,
+            pdf_from_corr=not args.pdfUncFromWeights,
+            as_from_corr=not args.asUncFromWeights,
             scale_pdf_unc=args.scalePdf,
             scale_np_lambda4=args.scaleNPLambda4,
             samples=theorySystSamples,
@@ -1836,16 +1900,18 @@ def setup(
             from_hels=not args.noTheoryCorrsViaHelicities,
             theory_symmetrize=args.symmetrizeTheoryUnc,
             pdf_symmetrize=args.symmetrizePdfUnc,
+            helicity_fit_unc=args.helicityFitTheoryUnc,
         )
 
         theory_helper.add_pdf_alphas_variation(
             noi="alphaS" in args.noi,
+            decorr_axes=args.fitAlphasDecorr,
+            decorr_axlim=args.decorrAxlim,
+            decorr_rebin=args.decorrRebin,
+            decorr_absval=args.decorrAbsval,
         )
-
-        if not stat_only and not args.noTheoryUnc:
-            theory_helper.add_all_theory_unc(
-                helicity_fit_unc=args.helicityFitTheoryUnc,
-            )
+        if add_theory_uncertainties:
+            theory_helper.add_all_theory_unc()
 
     if stat_only:
         # print a card with only mass weights
@@ -1854,7 +1920,7 @@ def setup(
         )
         return datagroups
 
-    if not args.noTheoryUnc:
+    if add_theory_uncertainties:
         if wmass and not datagroups.xnorm:
             if args.massConstraintModeZ == "automatic":
                 constrainMassZ = True
@@ -1911,6 +1977,14 @@ def setup(
 
     # Below: experimental uncertainties
 
+    # lumiUncertainty of 0 means unconstrained, with the automatic uncertainty as the size of the variation
+    lumi_unconstrained = args.lumiUncertainty == 0
+    lumi_uncertainty = (
+        datagroups.lumi_uncertainty
+        if args.lumiUncertainty is None or lumi_unconstrained
+        else args.lumiUncertainty
+    )
+
     if wmass:
         # mirror hist in linear scale, this was done in the old definition of luminosity uncertainty from a histogram
         if "lumi" in args.decorrSystByVar and decorr_syst_var in fitvar:
@@ -1929,13 +2003,8 @@ def setup(
                     newDecorrAxesNames=[f"{decorr_syst_var}_"],
                 ),
                 preOp=scale_hist_up_down,
-                preOpArgs={
-                    "scale": (
-                        datagroups.lumi_uncertainty
-                        if args.lumiUncertainty is None
-                        else args.lumiUncertainty
-                    )
-                },
+                preOpArgs={"scale": lumi_uncertainty},
+                noConstraint=lumi_unconstrained,
             )
         else:
             datagroups.addSystematic(
@@ -1947,13 +2016,8 @@ def setup(
                 systAxes=["downUpVar"],
                 labelsByAxis=["downUpVar"],
                 preOp=scale_hist_up_down,
-                preOpArgs={
-                    "scale": (
-                        datagroups.lumi_uncertainty
-                        if args.lumiUncertainty is None
-                        else args.lumiUncertainty
-                    )
-                },
+                preOpArgs={"scale": lumi_uncertainty},
+                noConstraint=lumi_unconstrained,
             )
     else:
         datagroups.addNormSystematic(
@@ -1961,11 +2025,8 @@ def setup(
             processes=["MCwithLumiNorm"],
             groups=[f"luminosity", "experiment", "expNoCalib"],
             passToFakes=passSystToFakes,
-            norm=(
-                datagroups.lumi_uncertainty
-                if args.lumiUncertainty is None
-                else args.lumiUncertainty
-            ),
+            norm=lumi_uncertainty,
+            noConstraint=lumi_unconstrained,
         )
 
     # add norm variations for decorrelated variable bins on each process
@@ -2038,14 +2099,28 @@ def setup(
                 norm=abs(args.logNormalWtaunu),
             )
 
-        if args.logNormalFake > 0.0 and datagroups.fakeName in datagroups.groups.keys():
+        if (
+            args.logNormalFake > 0.0
+            and datagroups.fakeName in datagroups.groups.keys()
+            and args.fakeEstimation != "none"
+        ):
+            # In the simultaneous (extended)ABCD fit (OnesSelector) the
+            # per-region polynomial coefficients are unconstrained, so a global
+            # log-normal on the fake process is fully degenerate with shifting
+            # each region's T_0 and carries no information.
             if "fakenorm" in args.decorrSystByVar and decorr_syst_var in fitvar:
                 datagroups.addSystematic(
-                    name=f"CMS_{datagroups.fakeName}",
+                    name=f"{datagroups.fakeName}Param0",
                     processes=[datagroups.fakeName],
-                    groups=["Fake", "experiment", "expNoLumi", "expNoCalib"],
+                    groups=[
+                        f"{datagroups.fakeName}Param0",
+                        "Fake",
+                        "experiment",
+                        "expNoLumi",
+                        "expNoCalib",
+                    ],
                     passToFakes=False,
-                    baseName=f"CMS_{datagroups.fakeName}_",
+                    baseName=f"{datagroups.fakeName}Param0_",
                     systAxes=[f"{decorr_syst_var}_", "downUpVar"],
                     labelsByAxis=[decorr_syst_var, "downUpVar"],
                     actionRequiresNomi=True,
@@ -2059,9 +2134,15 @@ def setup(
                 )
             else:
                 datagroups.addNormSystematic(
-                    name=f"CMS_{datagroups.fakeName}",
+                    name=f"{datagroups.fakeName}Param0",
                     processes=[datagroups.fakeName],
-                    groups=["Fake", "experiment", "expNoLumi", "expNoCalib"],
+                    groups=[
+                        f"{datagroups.fakeName}Param0",
+                        "Fake",
+                        "experiment",
+                        "expNoLumi",
+                        "expNoCalib",
+                    ],
                     passToFakes=False,
                     norm=args.logNormalFake,
                 )
@@ -2094,6 +2175,7 @@ def setup(
         (datagroups.fakeName != "QCD" and args.qcdProcessName != "QCD")
         and datagroups.fakeName in datagroups.groups.keys()
         and not datagroups.xnorm
+        and args.fakeEstimation not in ["none"]
         and (
             args.fakeSmoothingMode != "binned"
             or (args.fakeEstimation in ["extrapolate"] and "mt" in fitvar)
@@ -2329,6 +2411,69 @@ def setup(
                     systAxes=["downUpVar"],
                     labelsByAxis=["downUpVar"],
                 )
+
+    if (
+        args.fakeEstimation == "none"
+        and datagroups.fakeName in datagroups.groups.keys()
+        and not datagroups.xnorm
+    ):
+        # OnesSelector path: rabbit's per-region polynomial provides the shape;
+        # vary the k-th Chebyshev coefficient by reweighting the signal-region
+        # slice of the flat-ones template by exp(mag * T_k(pt_norm)).
+        onesselector = datagroups.groups[datagroups.fakeName].histselector
+
+        def fake_nonclosure_ones(
+            h,
+            *args,
+            param_idx=1,
+            variation_size=0.1,
+            order=2,
+            fakeselector=None,
+            **kwargs,
+        ):
+            if args:
+                raise TypeError(f"Unexpected positional arguments: {args}")
+            params = np.zeros(order + 1)
+            params[param_idx] = variation_size
+            fakeselector.external_params = params
+            hvar = fakeselector.get_hist(h, **kwargs)
+            fakeselector.external_params = None
+            hvar = hist.Hist(
+                *hvar.axes,
+                hist.axis.Integer(0, 1, name="var", underflow=False, overflow=False),
+                storage=hist.storage.Double(),
+                data=hvar.values(flow=True)[..., np.newaxis],
+            )
+            return hvar
+
+        # idx=0: signal-region norm uncertainty (T_0 = 1), magnitude = log(1.05)
+        # to match the historical 5% log-normal on the fake process.
+        for idx, mag in [(0, np.log(1.05)), (1, 0.1), (2, 0.1)]:
+            subgroup = f"{datagroups.fakeName}Param{idx}"
+            datagroups.addSystematic(
+                inputBaseName,
+                groups=[
+                    subgroup,
+                    "Fake",
+                    "experiment",
+                    "expNoLumi",
+                    "expNoCalib",
+                ],
+                name=subgroup,
+                baseName=subgroup,
+                processes=datagroups.fakeName,
+                noConstraint=False,
+                mirror=True,
+                scale=1,
+                applySelection=False,
+                action=fake_nonclosure_ones,
+                actionArgs=dict(
+                    param_idx=idx,
+                    variation_size=mag,
+                    fakeselector=onesselector,
+                ),
+                systAxes=["var"],
+            )
 
     if not args.noEfficiencyUnc:
 
@@ -3364,7 +3509,24 @@ if __name__ == "__main__":
                 stat_only=args.doStatOnly or args.doStatOnlyMasked,
                 channel=f"{channel}_masked",
                 unfolding_scalemap=unfolding_scalemap,
+                unfolding_with_flow=args.unfoldingWithFlow,
             )
+
+            if args.unfoldingFullPhaseSpace:
+                # add masked channel in full phase space
+                datagroups_xnorm = setup(
+                    writer,
+                    args,
+                    ifile,
+                    f"{args.unfoldingLevel}_full",
+                    iLumiScale,
+                    genvar,
+                    genvar=genvar,
+                    stat_only=args.doStatOnly or args.doStatOnlyMasked,
+                    channel=f"{channel}_full_masked",
+                    unfolding_scalemap=unfolding_scalemap,
+                    unfolding_with_flow=True,
+                )
 
             if args.unfoldSimultaneousWandZ and datagroups.mode == "w_mass":
                 # for simultaneous unfolding of W and Z we need to add the noi variations on the Z background in the single lepton channel

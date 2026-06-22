@@ -325,11 +325,19 @@ def read_nnlojet_pty_hist(
     return h
 
 
-def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None, coeff=None):
+def read_dyturbo_hist(
+    filenames, path="", axes=("y", "pt"), charge=None, coeff=None, scale=1e-3
+):
     filenames = [os.path.expanduser(os.path.join(path, f)) for f in filenames]
 
     hists = []
     for fn in filenames:
+
+        if "-mur0p5-" in fn.split("/")[-1]:
+            fn = fn.replace("-mur0p5-", "-murH-")
+        if "-muf0p5-" in fn.split("/")[-1]:
+            fn = fn.replace("-muf0p5-", "-mufH-")
+
         expandedf = fn.split("+")
 
         hs = []
@@ -338,11 +346,14 @@ def read_dyturbo_hist(filenames, path="", axes=("y", "pt"), charge=None, coeff=N
                 raise ValueError(f"{f} is not a valid file!")
 
         if len(expandedf) == 1:
-            hs.append(read_dyturbo_file(fn, axes, charge, coeff))
+            hs.append(read_dyturbo_file(fn, axes, charge, coeff, scale=scale))
         elif len(expandedf) == 2:
             hs.append(
                 hh.concatenateHists(
-                    *[read_dyturbo_file(f, axes, charge, coeff) for f in expandedf]
+                    *[
+                        read_dyturbo_file(f, axes, charge, coeff, scale=scale)
+                        for f in expandedf
+                    ]
                 )
             )
         else:
@@ -446,7 +457,9 @@ def read_text_data(filename):
     return np.array(data, dtype=float)
 
 
-def read_dyturbo_file(filename, axnames=("Y", "qT"), charge=None, coeff=None):
+def read_dyturbo_file(
+    filename, axnames=("Y", "qT"), charge=None, coeff=None, scale=1e-3
+):
     if filename.endswith(".root"):
         import uproot
 
@@ -491,7 +504,7 @@ def read_dyturbo_file(filename, axnames=("Y", "qT"), charge=None, coeff=None):
     if charge is not None:
         h = binning.add_charge_axis(h, charge)
 
-    return h * 1 / 1000
+    return h * scale
 
 
 def read_scetlib_resum_and_fosing(
@@ -664,13 +677,16 @@ def read_matched_scetlib_hist(
         def translate_slice(ax, s):
             if not isinstance(s, slice):
                 return s
+            # values(flow=True) prepends the underflow bin (if present), so shift
+            # axis-coordinate indices by ax.traits.underflow to address real bins.
+            uflow = int(ax.traits.underflow)
             start = (
-                int(ax.index(s.start.imag) + s.start.real)
+                int(ax.index(s.start.imag) + s.start.real + uflow)
                 if isinstance(s.start, complex)
                 else s.start
             )
             stop = (
-                int(ax.index(s.stop.imag) + s.stop.real + 1)
+                int(ax.index(s.stop.imag) + s.stop.real + uflow)
                 if isinstance(s.stop, complex)
                 else s.stop
             )

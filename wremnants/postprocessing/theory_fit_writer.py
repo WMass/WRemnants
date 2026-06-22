@@ -36,14 +36,17 @@ def _select_baseline_variation(h, axis_name="vars", nominal_entry="pdf0"):
             f"Expected axis '{axis_name}' in theory histogram, found axes {h.axes.name}"
         )
 
-    try:
-        return h[{axis_name: nominal_entry}]
-    except Exception as exc:
-        available_entries = list(h.axes[axis_name])
-        raise KeyError(
-            f"Expected nominal entry '{nominal_entry}' in axis '{axis_name}', "
-            f"found entries {available_entries}"
-        ) from exc
+    for entry in [nominal_entry, "central"]:
+        try:
+            return h[{axis_name: entry}]
+        except KeyError:
+            continue
+
+    available_entries = list(h.axes[axis_name])
+    raise KeyError(
+        f"Expected nominal entry '{nominal_entry}' or 'central' in axis '{axis_name}', "
+        f"found entries {available_entries}"
+    )
 
 
 class SigmaULTheoryFitWriter(TensorWriter):
@@ -83,16 +86,18 @@ class SigmaULTheoryFitWriter(TensorWriter):
         return True
 
     def set_reference(self, channel, h, lumi=1.0, scale=1.0, postOp=None):
+        ptV_name = self.get_ptV_axis_name(h)
+        absYV_name = self.get_absYV_axis_name(h)
         self.ref[channel] = {
             "h": h,
             "lumi": lumi,
             "scale": scale,
             "postOp": postOp,
-            "ptV_name": self.get_ptV_axis_name(h),
-            "absYV_name": self.get_absYV_axis_name(h),
+            "ptV_name": ptV_name,
+            "absYV_name": absYV_name,
             "chargeV_name": self.get_charge_axis_name(h),
-            "ptV_bins": h.axes[self.get_ptV_axis_name(h)].edges,
-            "absYV_bins": h.axes[self.get_absYV_axis_name(h)].edges,
+            "ptV_bins": h.axes[ptV_name].edges,
+            "absYV_bins": h.axes[absYV_name].edges,
         }
         self.logger.debug("Initialized channel %s with parameters", channel)
         self.logger.debug(pprint.pformat(self.ref[channel]))
@@ -310,13 +315,13 @@ class SigmaULTheoryFitWriter(TensorWriter):
         for name in ["ptVgen", "ptVGen", "qT"]:
             if name in h.axes.name:
                 return name
-        self.logger.debug("Did not find pT axis. Available axes: %s", h.axes.name)
+        raise ValueError(f"Did not find pT axis. Available axes: {list(h.axes.name)}")
 
     def get_absYV_axis_name(self, h):
         for name in ["absYVgen", "absYVGen", "absY"]:
             if name in h.axes.name:
                 return name
-        self.logger.debug("Did not find absY axis. Available axes: %s", h.axes.name)
+        raise ValueError(f"Did not find absY axis. Available axes: {list(h.axes.name)}")
 
     def get_charge_axis_name(self, h):
         for name in ["chargeVgen", "charge", "qGen"]:
@@ -365,6 +370,18 @@ class SigmaULTheoryFitWriter(TensorWriter):
             self.add_channel(h_data.axes, self.sigmaul_channel)
             self.add_data(h_data, self.sigmaul_channel)
             self.set_reference(self.sigmaul_channel, h_data)
+            if infile:
+                import rabbit.io_tools
+
+                self.logger.info("Loading unfolding covariance from %s", infile)
+                fitresult, meta = rabbit.io_tools.get_fitresult(
+                    infile, result="asimov", meta=True
+                )
+                h_data_cov = fitresult["mappings"][fitresultMapping][
+                    "hist_postfit_inclusive_cov"
+                ].get()
+                self.add_data_covariance(h_data_cov)
+                return meta
             return None
 
         import rabbit.io_tools
@@ -490,6 +507,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         else:
             corr_np_uncs = STANDARD_CORRELATED_NP_UNCERTAINTIES
             gamma_np_uncs = STANDARD_GAMMA_NP_UNCERTAINTIES
+        print(corr_np_uncs, gamma_np_uncs)
 
         for up_var, down_var, nuisance_name in corr_np_uncs:
             self.add_systematic(
@@ -594,6 +612,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
                     f"pdf{int((ivar + 1) / 2)}{ext_suffix}",
                     self.process_name,
                     self.sigmaul_channel,
+                    # symmetrize=None,
                     symmetrize="quadratic",
                     kfactor=scale,
                     groups=pdf_groups,
@@ -607,7 +626,6 @@ class SigmaULTheoryFitWriter(TensorWriter):
                     f"pdf{n_asym_pairs + j + 1}{ext_suffix}",
                     self.process_name,
                     self.sigmaul_channel,
-                    symmetrize="quadratic",
                     kfactor=scale,
                     mirror=True,
                     groups=pdf_groups,

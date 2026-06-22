@@ -255,7 +255,7 @@ jobs:
         run: >- 
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py 
           '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/WMass.hdf5'
-          -t -1 --doImpacts -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/'
+          -t -1 --doImpacts --globalImpacts -o '$WREMNANTS_OUTDIR/WMass_eta_pt_charge/'
 
       - name: wmass rabbit impacts
         run: >-
@@ -281,6 +281,63 @@ jobs:
           ${WREMNANTS_OUTDIR}/theoryAgnosticNormVar_poisAsNoi/WMass_eta_pt_charge/fitresults.hdf5 --title CMS --subtitle Preliminary
           --showNumbers --pullrange '2.1' --config wremnants/utilities/styles/styles.py --oneSidedImpacts --grouping max 
           -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix theoryAgnosticNormVar --scaleImpacts 100
+
+  w-abcd-fit:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, x64]
+    needs: [setenv, w-analysis, w-fit]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - env:
+          WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
+          WEB_DIR: ${{ needs.setenv.outputs.WEB_DIR }}
+          PLOT_DIR: ${{ needs.setenv.outputs.PLOT_DIR }}
+          LUMI_SCALE: ${{ needs.setenv.outputs.LUMI_SCALE }}
+        run: |
+          echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+          echo "WEB_DIR=${WEB_DIR}" >> $GITHUB_ENV
+          echo "PLOT_DIR=${PLOT_DIR}" >> $GITHUB_ENV
+          echo "LUMI_SCALE=${LUMI_SCALE}" >> $GITHUB_ENV
+          echo "HIST_FILE=${WREMNANTS_OUTDIR}/${OUTFILE_WMASS}" >> $GITHUB_ENV
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
+          lfs: 'true'
+
+      - name: wmass setup lumi scale
+        if: github.event_name == 'pull_request' || github.event.schedule == '30 5 * * 1-5'
+        run: |
+          echo "LUMI_SCALE=120" >> $GITHUB_ENV
+
+      - name: wmass abcd smoothing params
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/regen_smoothing_params.py
+          -i $HIST_FILE --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/simultaneousABCD
+
+      - name: wmass abcd rabbit setup
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py -i $HIST_FILE
+          --lumiScale $LUMI_SCALE -o ${WREMNANTS_OUTDIR}/simultaneousABCD --fitvar eta-pt-charge-relIso-mt --fakeEstimation none
+
+      - name: wmass abcd rabbit fit
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_fit.py
+          '$WREMNANTS_OUTDIR/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/WMass.hdf5'
+          --paramModel SmoothExtendedABCDIsoMT 'params:$WREMNANTS_OUTDIR/simultaneousABCD/params.hdf5' Fake ch0
+          -t -1 --doImpacts --globalImpacts -o '$WREMNANTS_OUTDIR/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/'
+
+      - name: wmass abcd impacts comparison
+        run: >-
+          scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run.sh rabbit_plot_pulls_and_impacts.py
+          ${WREMNANTS_OUTDIR}/simultaneousABCD/WMass_eta_pt_charge_relIso_mt/fitresults.hdf5
+          -r ${WREMNANTS_OUTDIR}/WMass_eta_pt_charge/fitresults.hdf5
+          --name simultaneousABCD --refName nominal --impactType global
+          --showNumbers --oneSidedImpacts --grouping max --config wremnants/utilities/styles/styles.py
+          -o $WEB_DIR/$PLOT_DIR --otherExtensions pdf png -n 50 --postfix simultaneousABCD --scaleImpacts 100
+          --title CMS --subtitle Preliminary
 
   w-bsm:
     # The type of runner that the job will run on
@@ -763,7 +820,7 @@ jobs:
       - name: wlike rabbit setup
         run: >-
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py 
-          -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr
+          -i $HIST_FILE --lumiScale $LUMI_SCALE -o $WREMNANTS_OUTDIR --pseudoData uncorr --pdfUncFromWeights
 
       - name: wlike rabbit fit asimov
         run: >- 
@@ -997,8 +1054,7 @@ jobs:
           mkdir -p $ALPHAS_OUTDIR
           scripts/ci/run_with_singularity.sh scripts/ci/setup_and_run_python.sh scripts/rabbit/setupRabbit.py \
             -i $ALPHAS_HIST_FILE --fitvar "$ALPHAS_FITVAR" --lumiScale $LUMI_SCALE --realData \
-            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --pdfUncFromCorr \
-            --axlim ptll 0j 44j
+            -o $ALPHAS_OUTDIR --noi alphaS --npUnc LatticeEigvars --axlim ptll 0j 44j
 
       - name: alphaS Z reco fit (${{ matrix.mode }})
         run: >-
@@ -1421,7 +1477,7 @@ jobs:
   #           --fitvar "ptll-yll-cosThetaStarll_quantile-phiStarll_quantile" "eta-pt-charge" \
   #           --lumiScale $LUMI_SCALE $LUMI_SCALE \
   #           -o $ALPHAS_OUTDIR --noi alphaS wmass --postfix reco \
-  #           --npUnc LatticeEigvars --pdfUncFromCorr
+  #           --npUnc LatticeEigvars
 
   #     - name: alphaS WZ reco fit
   #       run: >-
@@ -1470,7 +1526,7 @@ jobs:
             --genAxes "ptVGen-absYVGen-helicitySig" \
             --scaleNormXsecHistYields "0.05" --allowNegativeExpectation \
             --realData --systematicType normal --postfix unfolding \
-            --npUnc LatticeEigvars --pdfUncFromCorr \
+            --npUnc LatticeEigvars \
             --rebin 2 2 # this is for CI only! needed for max_files=100
 
       - name: alphaS Z unfolding fit
@@ -1614,7 +1670,7 @@ jobs:
 
   copy-clean:
     runs-on: [self-hosted, linux, x64]
-    needs: [setenv, w-analysis, w-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
+    needs: [setenv, w-analysis, w-fit, w-abcd-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
     if: always()
     steps:
       - env:

@@ -448,6 +448,8 @@ def get_unfolding_dilepton_axes(
                     2, -2.0, 2.0, underflow=False, overflow=False, name="qVGen"
                 )
             )
+        elif v in ["massVGen"]:
+            axes.append(hist.axis.Regular(1, 60.0, 120.0, name="massVGen"))
         else:
             raise NotImplementedError(f"Unfolding dilepton axis {v} is not supported.")
 
@@ -536,7 +538,7 @@ axis_passMT = hist.axis.Boolean(name=passMTName)
 # axes with only a few bins for beyond simple ABCD methods
 axis_isoCat = hist.axis.Variable([0, 4, 8], name="iso", underflow=False, overflow=True)
 axis_relIsoCat = hist.axis.Variable(
-    [0, 0.15, 0.3], name="relIso", underflow=False, overflow=True
+    [0, 0.15, 0.3, np.inf], name="relIso", underflow=False, overflow=False
 )
 
 
@@ -578,6 +580,8 @@ def get_binning_fakes_mt(mt_cut=40, high_mt_bins=False, fine_mt_binning=False):
         edges = np.append(
             edges, np.linspace(mt_cut + step, end, int((end - mt_cut) / step))
         )
+    # last bin captures everything above the highest finite edge (no overflow needed)
+    edges = np.append(edges, np.inf)
     return edges
 
 
@@ -586,6 +590,8 @@ def get_binning_fakes_relIso(high_iso_bins=False):
     if high_iso_bins:
         # needed for extended 2D method
         edges.append(0.3)
+    # last bin captures everything above the highest finite edge (no overflow needed)
+    edges.append(np.inf)
     return edges
 
 
