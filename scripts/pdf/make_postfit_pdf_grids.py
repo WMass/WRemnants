@@ -78,14 +78,14 @@ def is_simple_format(path):
 if is_simple_format(args.fitresult):
     logger.info("Detected simple covariance HDF5 format.")
     pdf_helper = SimplePostfitPdfHelper(args.fitresult)
-    if args.pdfName != "auto" and args.pdfName != pdf_helper.pdfName:
+    if args.pdfName != "auto" and args.pdfName != pdf_helper.pdf_name:
         raise ValueError(
-            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdfName}."
+            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdf_name}."
         )
 else:
     logger.info("Detected rabbit HDF5 format.")
     pdf_helper = RabbitPostfitPdfHelper(args.fitresult, pseudoData=args.pseudoData)
-    if pdf_helper.pdfName is None:
+    if pdf_helper.pdf_name is None:
         if args.pdfName == "auto":
             raise ValueError(
                 "PDF name must be specified if not present in fit result metadata."
@@ -96,9 +96,9 @@ else:
         pdf_helper._init_lhapdf_attributes(
             theory_utils.pdfMap[args.pdfName]["lha_name"]
         )
-    elif args.pdfName != "auto" and args.pdfName != pdf_helper.pdfName:
+    elif args.pdfName != "auto" and args.pdfName != pdf_helper.pdf_name:
         raise ValueError(
-            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdfName}."
+            f"Specified PDF name {args.pdfName} does not match input PDF {pdf_helper.pdf_name}."
         )
 
 if args.symmetrizePdf is not None:
