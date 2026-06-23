@@ -10,15 +10,8 @@ import narf
 
 # Path / file-list helpers live in a ROOT/narf-free module so they can be
 # imported without pulling in ROOT (this package's __init__ imports ROOT and
-# narf). Re-exported here for backward compatibility.
-from wremnants.utilities.data_paths import (  # noqa: F401
-    appendFilesXrd,
-    buildFileList,
-    buildFileListPosix,
-    buildFileListXrd,
-    getDataPath,
-    makeFilelist,
-)
+# narf).
+from wremnants.utilities.data_paths import getDataPath, makeFilelist
 from wums import logging
 
 logger = logging.child_logger(__name__)
