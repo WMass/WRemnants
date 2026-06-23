@@ -1,16 +1,14 @@
-"""TensorFlow port of the bT-grid factorization library.
+"""TensorFlow bT-grid factorization library.
 
-Function-by-function TF port of a numpy reference implementation (itself a
-byte-for-byte transcription of SCETlib C++). The numpy reference and the
-parity tests that keep the two in sync live in the development tree; only
-the TF port is shipped here.
+Differentiable TF implementation of the SCETlib bT-space form factors and Hankel
+reconstruction (transcribed from the SCETlib C++).
 
 Design choices:
   * ``np_model`` / ``np_model_nu`` strings are fixed at trace time (the SCETlib
     runcard sets them once per fit). The TF functions dispatch on the string at
     Python level — no ``tf.cond``.
   * λ parameters are TF tensors (typically scalars, but broadcasting follows
-    the same rules as numpy).
+    the usual array rules).
   * All ops are differentiable in λ. Branches on λ values use ``tf.where``
     with a safe denominator to avoid NaN gradients.
   * ``b_star_global`` is not ported — the cached ``b_bar`` array in the bT-grid
@@ -24,8 +22,7 @@ from typing import Mapping
 import numpy as np
 import tensorflow as tf
 
-# Set the dtype used for all ops in this module. Match the numpy reference
-# (which uses ``float`` ≡ float64) to keep parity tight.
+# Set the dtype used for all ops in this module (float64 throughout).
 DTYPE = tf.float64
 
 
@@ -49,9 +46,8 @@ def _as_dtype(x, dtype=DTYPE):
 def simpson_weights(x):
     """Return weights ``w`` such that Simpson(y, x) == sum(w * y, axis=-1).
 
-    ``x`` is a numpy array with size ``N``. Implementation mirrors the numpy
-    ``simpson`` of the numpy reference (composite Simpson with
-    trapezoid fallback on the last segment when N-1 is odd).
+    ``x`` is a numpy array with size ``N``. Composite Simpson with a trapezoid
+    fallback on the last segment when N-1 is odd.
     """
     x = np.asarray(x, dtype=np.float64)
     n_intervals = x.size - 1
@@ -147,7 +143,7 @@ def _safe_div(num, den):
 
 
 def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_model):
-    """TF port of the numpy-reference ``F_eff`` for a fixed ``np_model``."""
+    """TMD-effective NP form factor F_eff(Y, bT) for a fixed ``np_model``."""
     if np_model not in EFF_MODELS:
         raise ValueError(f"F_eff_tf: unsupported np_model {np_model!r}")
 
@@ -169,8 +165,8 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
     if np_model == "identity":
         return tf.exp(-2.0 * bT * arg)
 
-    # lambda_inf == 0 returns ones (matches numpy short-circuit). We compute
-    # the full formula with a safe denominator and mask at the end.
+    # lambda_inf == 0 returns ones. We compute the full formula with a safe
+    # denominator and mask at the end.
     arg_inf = _safe_div(arg, lambda_inf)
     model = {"hyp_tangent": "tanh_2", "square_root": "frac_2"}.get(np_model, np_model)
 
@@ -203,7 +199,7 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
 
 
 def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
-    """TF port of the numpy-reference ``gamma_nu_NP`` for fixed ``np_model_nu``."""
+    """CS-side NP rapidity anomalous dimension γ_ν^NP(bT) for fixed ``np_model_nu``."""
     if np_model_nu not in GNU_MODELS:
         raise ValueError(f"gamma_nu_NP_tf: unsupported np_model_nu {np_model_nu!r}")
 
@@ -267,12 +263,12 @@ def reconstruct_batch_tf(
     Y_unique=None,
     Y_inverse_idx=None,
 ):
-    """TF port of the numpy-reference ``reconstruct_batch``.
+    """Reconstruct σ on a batch of (Q, Y, qT) grid points from the bT integrand.
 
     Implements the per-(Q, Y, qT) bT-space integrand. The full formula with
     every factor and its bare-bT / b*(bT) / (Q,Y,qT) / λ dependence is written
-    out once in the :mod:`param_model` module docstring (single source of
-    truth) — consult it rather than re-deriving the factors from this code.
+    out in the :mod:`param_model` module docstring — consult it rather than
+    re-deriving the factors from this code.
 
     All array-shape arguments are TF tensors or numpy arrays (will be cast).
     The λ values inside ``eff_params`` / ``gnu_params`` are the differentiable
@@ -360,7 +356,7 @@ def build_bT_J0_kernel(qT_per_bin, bT):
 #
 # The (Nbins, Nbt) layout of reconstruct_batch_tf needs several ~9 GB fp64
 # tensors (Nbins=546840, Nbt=2000) and OOMs a 32 GB GPU at construction. Two
-# exact observations shrink it (see scetlib_np/FACTORIZED_RECON.md):
+# exact observations shrink it:
 #
 #   1. qT enters the λ-dependent integrand ONLY through the bT·J0(qT·bT)
 #      kernel: the kernel needs the NqT *unique* qT values, not Nbins rows.
@@ -524,8 +520,7 @@ def reconstruct_batch_factorized_tf(
     weighted J0 kernel on the unique-qT grid, and a per-bin gather — no
     (Nbins, Nbt) tensor is ever materialized. Same integrand, weights and
     sampling as :func:`reconstruct_batch_tf`; only the floating-point
-    multiplication grouping and summation order differ (≲1e-14 relative —
-    see the parity script :mod:`scetlib_np_factorized_parity`).
+    multiplication grouping and summation order differ (≲1e-14 relative).
 
     Parameters
     ----------

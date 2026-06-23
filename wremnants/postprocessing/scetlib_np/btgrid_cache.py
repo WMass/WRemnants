@@ -1,8 +1,8 @@
 """One-shot pickle cache for the combined SCETlib bT-grid.
 
-Loading the fineall btgrid as 1519 individual shards takes ~110s. After the
-first call, this module writes a single ``combined_btgrid.pkl`` in the btgrid
-directory; subsequent calls load that in a few seconds.
+Assembling the bT-grid from its individual shards is slow. On the first call
+this module writes a single ``combined_btgrid.pkl`` in the btgrid directory;
+subsequent calls load that combined file directly, which is much faster.
 
 Usage:
     from wremnants.postprocessing.scetlib_np import btgrid_cache

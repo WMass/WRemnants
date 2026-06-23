@@ -51,9 +51,11 @@ EFF_STRING = ("np_model",)
 def _find_nonperturbative(corr_dict):
     """Return [(basename, Nonperturbative dict)] for every basename in the pkl.
 
-    A correction pkl usually has several basenames (resummed-singular,
-    fixed-order, ...); they share one runcard so the Nonperturbative section is
-    the same, but we keep them all and pick below.
+    A correction pkl carries several basenames (the resummed SCETlib file, the
+    fixed-order singular file, the gen hist, ...). The resummed and singular
+    files can have DIFFERENT Nonperturbative runcards (e.g. the FranksVals
+    correction), so we keep all NP-bearing basenames and let
+    :func:`_select_resummed` pick the central one.
     """
     out = []
     meta = corr_dict.get("file_meta_data")
@@ -86,31 +88,28 @@ def _parse_section(npert):
     return eff_params, gnu_params
 
 
-def _select_basename(sections, tag):
-    """Pick the basename whose runcard to use when a pkl bundles several.
+def _select_resummed(sections):
+    """Pick the resummed prediction's runcard from the NP-bearing basenames.
 
-    Some pkls carry multiple NP variants (e.g. a lattice central + a FranksVals
-    variant). Prefer a basename whose name shares a keyword with the tag, then
-    the resummed-singular file (it carries the full NP set).
+    A scetlib_dyturbo correction is built (in ``make_theory_corr.py``) from a
+    resummed SCETlib file plus a fixed-order *singular* file that is subtracted
+    in the matching. Only the resummed file's Nonperturbative runcard is the
+    central NP; the singular file's is not (it can differ, e.g. FranksVals).
+    ``make_theory_corr.py`` tells the two apart by the ``"sing"`` substring in
+    the filename, so we do the same: keep the basename without ``"sing"``.
     """
-    tag_lower = tag.lower()
-    KEYWORDS = ("franksvals", "lattice", "newvars", "lambda6")
-    matched_kw = next((k for k in KEYWORDS if k in tag_lower), None)
-
-    def _score(name):
-        name_lower = name.lower()
-        score = 0
-        if matched_kw and matched_kw in name_lower:
-            score += 10
-        if (
-            "nnlo_sing" in name_lower
-            or "_sing_" in name_lower
-            or name_lower.endswith("sing.pkl")
-        ):
-            score += 1
-        return score
-
-    return sorted(sections, key=lambda item: -_score(item[0]))[0]
+    resummed = [item for item in sections if "sing" not in item[0]]
+    if len(resummed) == 1:
+        return resummed[0]
+    if not resummed:
+        raise KeyError(
+            "No resummed (non-'sing') basename carries a Nonperturbative "
+            f"section; basenames seen: {[bn for bn, _ in sections]}."
+        )
+    raise KeyError(
+        "Multiple resummed basenames carry a Nonperturbative section "
+        f"({[bn for bn, _ in resummed]}); cannot pick the central runcard."
+    )
 
 
 def extract_lambda_central(corr_dict, tag, proc):
@@ -125,7 +124,7 @@ def extract_lambda_central(corr_dict, tag, proc):
             f"No Nonperturbative section in correction pkl for tag={tag!r}, "
             f"proc={proc!r}."
         )
-    basename, npert = _select_basename(sections, tag)
+    basename, npert = _select_resummed(sections)
     eff_params, gnu_params = _parse_section(npert)
     return dict(
         tag=tag, basename=basename, eff_params=eff_params, gnu_params=gnu_params

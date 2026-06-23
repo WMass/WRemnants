@@ -17,8 +17,6 @@ Three pieces:
 3. :func:`rebin_weights` — given a fine source grid and a coarser target-bin
    edge list, builds a ``(N_target, N_source)`` Simpson weight matrix.
    Apply via ``tf.tensordot``.
-
-Parity-tested against the numpy reference implementation (development tree).
 """
 
 import numpy as np
