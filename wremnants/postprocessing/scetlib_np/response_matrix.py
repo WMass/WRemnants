@@ -95,6 +95,32 @@ def _append_axis_overflow(h, axis_name):
     return np.concatenate([inr, over], axis=pos)
 
 
+def has_response(
+    unfolding_hdf5_path,
+    sample_key=DEFAULT_SAMPLE,
+    hist_name=DEFAULT_HIST,
+    gen_total_name=DEFAULT_GENTOTAL,
+):
+    """Cheap guard: does this histmaker output carry BOTH the reco x gen
+    response hist and the gen-total xnorm hist needed to build R *and* N_gen?
+
+    Used by setupRabbit to decide whether to embed the SCETlib-NP response in
+    the datacard (presence-based, *lenient* guard): returns True only when both
+    are present, so a generic unfolding run that has the response hist but not
+    the gen-total is a silent no-op rather than an error. Never raises (any
+    structural problem -> False); does not materialize any histogram.
+    """
+    try:
+        with h5py.File(unfolding_hdf5_path, "r") as f:
+            if sample_key not in f:
+                return False
+            sample = wums_io.pickle_load_h5py(f[sample_key])
+            output = sample["output"]
+            return hist_name in output and gen_total_name in output
+    except (OSError, KeyError, TypeError):
+        return False
+
+
 def load_R(
     unfolding_hdf5_path,
     sample_key=DEFAULT_SAMPLE,

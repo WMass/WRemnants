@@ -1,13 +1,21 @@
-"""SCETlib NP continuous-λ param model and its bT-grid factorisation port.
+"""SCETlib-NP postprocessing package.
 
-The fit-time rabbit ParamModel lives in :mod:`.param_model`; the supporting
-bT-grid numpy/TF code, Q-integration, caching, response-matrix loader and
-λ_central reader are the sibling modules. ``SCETlibNPParamModel`` is
-re-exported here so it can be referenced by the short dotted path:
-
-    --paramModel wremnants.postprocessing.scetlib_np.SCETlibNPParamModel
+``SCETlibNPParamModel`` (and its TensorFlow / btgrid dependencies) is imported
+lazily so that lightweight submodules — e.g. :mod:`response_matrix`, used by
+setupRabbit to embed the response matrix in the datacard — can be imported
+without pulling in TensorFlow. The package-level re-export
+``wremnants.postprocessing.scetlib_np.SCETlibNPParamModel`` (used by rabbit's
+``--paramModel`` loader) still works, resolved on first access via PEP 562.
 """
 
-from wremnants.postprocessing.scetlib_np.param_model import SCETlibNPParamModel
-
 __all__ = ["SCETlibNPParamModel"]
+
+
+def __getattr__(name):
+    if name == "SCETlibNPParamModel":
+        from wremnants.postprocessing.scetlib_np.param_model import (
+            SCETlibNPParamModel,
+        )
+
+        return SCETlibNPParamModel
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

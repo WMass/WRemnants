@@ -4,7 +4,7 @@ This ParamModel scales the signal reco template by a per-bin ratio of the
 SCETlib nonperturbative (NP) prediction at the fitted λ vs. at λ_central. The
 prediction is built in four steps, written out below; the related modules
 (:mod:`response_matrix`, :func:`btgrid_tf.reconstruct_batch`, the validation
-scripts, ``sigma_reco_central.md``) refer here for the derivation.
+scripts) refer here for the derivation.
 
 Pipeline at a glance (everything is a function of the NP parameters λ):
 
@@ -64,8 +64,7 @@ The default evaluation uses the memory-factorized layout (deduplicated
 (I_pert, C_ν) rows + J₀ kernel on the unique-qT grid + Simpson-as-matmul),
 which is numerically equivalent to the per-bin (Nbins, Nbt) layout (≲1e-14
 rel., floating-point summation order only) but ~6× smaller — required to fit
-a 32 GB GPU. See FACTORIZED_RECON.md in this directory; the legacy_recon=1
-spec token restores the legacy layout.
+a 32 GB GPU. The legacy_recon=1 spec token restores the legacy layout.
 
 (1b) Integrate over Q, then rebin onto the gen grid:
 
@@ -159,9 +158,6 @@ event-count↔cross-section scale and any overall normalization, so rnorm carrie
 purely the SHAPE of the NP variation per reco bin — Steps 1–3 build the absolute
 σ_reco(λ; b), and Step 4 reduces it to the bin-by-bin template scaling the fit
 needs. σ_reco(λ_central) is precomputed once at construction as the denominator.
-(If the gen-total hist is absent, σ_gen(λ_c) is used as a proxy for N_gen, but
-then σ_gen cancels in σ_reco(λ_c) = R_raw·1 and the λ_central closure can't test
-the integral.)
 
 -----------------------------------------------------------------------------
 Parameters and inputs
@@ -198,8 +194,7 @@ value is unchanged, but ∂d/∂λ = I, so ∂ratio~/∂λ = J and ∂²ratio~/�
 rabbit's jacobian gets the exact derivatives while the big slab stays inside
 stop_gradient and never enters the differentiated graph (33 TB → a few MB).
 Implemented in ``_ratio_straightthrough`` (+ ``_ratio_compact_jac``,
-``_ratio_compact_hess``); selected in ``compute()`` by env flags. Full
-derivation + validation in ``HESSIAN_PLAN.md``.
+``_ratio_compact_hess``); selected in ``compute()`` by env flags.
 
 Two-pass recipe (rabbit still computes the Hessian; NO rabbit changes):
 
@@ -224,8 +219,8 @@ fitresults meta_info.args, so the configuration is recorded in the output
 WARNING: hessian_straightthrough=1 WITHOUT hessian_gn=1 is full-K mode —
 correct in principle (needed for real/toy data) but currently INFEASIBLE at
 full grid scale (the 64 nested-FA passes unroll into one graph, ~TB peak →
-OOM-kill). Until HESSIAN_PLAN.md §9 (precomputed chunked K) is implemented,
-always pass hessian_gn=1 (exact for Asimov).
+OOM-kill). Until a precomputed chunked-K path is implemented, always pass
+hessian_gn=1 (exact for Asimov).
 
 GN vs full-K. The Poisson Hessian is
     H_ij = Σ_b [ (n_b/μ_b²) J_bi J_bj  +  (1 − n_b/μ_b) K_bij ].
@@ -240,7 +235,7 @@ nested-forward-mode autodiff. The culprit was the λ_inf==0 / den==0 masks in
 tangent into ``Equal`` without changing any value or derivative (the comparison
 is a measure-zero boundary ``tf.where`` never differentiates). Full-K now runs
 under @tf.function and matches the exact reverse-mode Hessian to machine
-precision (≤3e-16 rel; see HESSIAN_PLAN.md §7 + the isolation validation). So
+precision (≤3e-16 rel; verified by the isolation validation). So
 both GN and full-K are available; GN remains the default for Asimov (exact and
 cheaper — 8 vs 72 fold passes).
 
@@ -262,7 +257,6 @@ from wremnants.postprocessing.scetlib_np import (
 from wremnants.postprocessing.scetlib_np import btgrid_integrate as fz_int
 from wremnants.postprocessing.scetlib_np import btgrid_tf as fz_tf
 from wremnants.postprocessing.scetlib_np import lambda_central as scetlib_lambda_central
-from wremnants.postprocessing.scetlib_np import response_matrix as fz_R
 from wremnants.utilities import common as wrem_common
 from wremnants.utilities.data_paths import getDataPath
 
@@ -275,12 +269,6 @@ _NONSING_DYTURBO_DEFAULT = os.path.join(
     wrem_common.data_dir,
     "TheoryCorrections",
     "results_z-2d-nnlo-vj-CT18ZNNLO-{scale}-scetlibmatch.txt",
-)
-_UNFOLDING_HDF5_DEFAULT = os.path.join(
-    wrem_common.data_dir,
-    "TheoryCorrections",
-    "scetlib_np",
-    "mz_dilepton_unfolding_R_skim.hdf5",
 )
 _BTGRID_SUBDIR = ("scetlib_np", "Z_COM13_CT18Z_N3p0LL_btgrid_fineall")
 _DISCRETE_NP_SUBSTRING = "scetlibnp"
@@ -356,6 +344,43 @@ def _crop_R_to_fit(R, R_reco_axes, fit_reco_axes, tol=1e-9):
     # Keep all gen axes (the remaining axes of R).
     slices += (slice(None),) * (R.ndim - len(fit_reco_axes))
     return R[slices]
+
+
+def _R_info_from_auxiliary(indata):
+    """Reconstruct the response-matrix dict from the datacard's ``scetlib_np``
+    auxiliary bundle.
+
+    setupRabbit extracts R (and the gen-total N_gen, reco/gen axis names + edges)
+    once from the unfolding histmaker output and embeds it in the fit input via
+    rabbit's ``add_auxiliary``; rabbit exposes it as ``FitInputData.auxiliary``.
+    The model reads R ONLY from there — one source, one path — so R is always
+    consistent with the run that produced the datacard. The returned dict matches
+    :func:`response_matrix.load_R`'s shape for the keys this model consumes
+    (``R``, ``N_gen``, and ``reco_axes`` / ``gen_axes`` as ordered
+    ``(name, edges)`` lists).
+    """
+    aux = getattr(indata, "auxiliary", None) or {}
+    if "scetlib_np" not in aux:
+        raise ValueError(
+            "SCETlibNPParamModel: the datacard has no 'scetlib_np' auxiliary (the "
+            "reco×gen response matrix R). Rebuild the datacard with a setupRabbit "
+            "that embeds it from a mz_dilepton --unfolding input (it must carry "
+            "'nominal_prefsr_yieldsUnfolding' and the 'prefsr' gen-total)."
+        )
+    bundle = aux["scetlib_np"]
+    n_gen = bundle.get("N_gen")
+    return dict(
+        R=np.asarray(bundle["R"], dtype=np.float64),
+        N_gen=None if n_gen is None else np.asarray(n_gen, dtype=np.float64),
+        reco_axes=[
+            (name, np.asarray(bundle[f"edges__{name}"], dtype=np.float64))
+            for name in bundle["reco_axes"]
+        ],
+        gen_axes=[
+            (name, np.asarray(bundle[f"edges__{name}"], dtype=np.float64))
+            for name in bundle["gen_axes"]
+        ],
+    )
 
 
 def _bin_sum_matrix(src_centers, target_edges, tol=1e-6):
@@ -477,7 +502,6 @@ class SCETlibNPParamModel(ParamModel):
     def __init__(
         self,
         indata,
-        unfolding_hdf5_path: Optional[str] = None,
         btgrid_dir: Optional[str] = None,
         lambda_central=None,
         signal_proc: str = "Zmumu",
@@ -503,13 +527,13 @@ class SCETlibNPParamModel(ParamModel):
         Parameters
         ----------
         indata
-            rabbit's input-data structure (passed by ``ph.load_models``).
-        unfolding_hdf5_path
-            Path to the upstream histmaker output containing
-            ``nominal_prefsr_yieldsUnfolding`` for R (and the ``prefsr`` xnorm
-            hist for N_gen) — see :mod:`response_matrix` for the defaults.
-            Defaults (when None) to the skim shipped in wremnants-data
-            (``_UNFOLDING_HDF5_DEFAULT``); pass explicitly to override.
+            rabbit's input-data structure (passed by ``ph.load_models``). The
+            reco×gen response matrix R (and the gen-total N_gen, axis names +
+            edges) is read from ``indata.auxiliary["scetlib_np"]`` — embedded in
+            the datacard by setupRabbit from a ``mz_dilepton.py --unfolding``
+            histmaker output (see :func:`_R_info_from_auxiliary` and
+            :mod:`response_matrix`). One source, one path: there is no file-path
+            argument; R always comes from the fit input it is consistent with.
         btgrid_dir
             Directory holding the SCETlib bT-grid ``combined_btgrid.pkl``.
             Defaults (when None) to the shared data-area copy next to NanoAOD
@@ -571,7 +595,7 @@ class SCETlibNPParamModel(ParamModel):
         legacy_recon
             Use the legacy per-bin (Nbins, Nbt) reconstruction layout instead
             of the default memory-factorized one (numerically equivalent to
-            ≲1e-14 rel; for parity checks only). See FACTORIZED_RECON.md.
+            ≲1e-14 rel; for parity checks only).
         xparam_default
             Comma-separated ``name=value,...`` string shifting the fit START
             (and the prior mean) off the runcard's λ_central — for closure /
@@ -586,8 +610,6 @@ class SCETlibNPParamModel(ParamModel):
         """
         self.indata = indata
 
-        if unfolding_hdf5_path is None:
-            unfolding_hdf5_path = _UNFOLDING_HDF5_DEFAULT
         if btgrid_dir is None:
             btgrid_dir = _default_btgrid_dir()
 
@@ -737,8 +759,8 @@ class SCETlibNPParamModel(ParamModel):
             dtype=fz_tf.DTYPE,
         )
 
-        # ---- R matrix
-        R_info = fz_R.load_R(unfolding_hdf5_path)
+        # ---- R matrix (read from the datacard's scetlib_np auxiliary)
+        R_info = _R_info_from_auxiliary(indata)
         # The fit-tensor's reco binning may differ from R's by trailing
         # overflow bins (e.g. R has ptll [0, …, 44, 100] while the fit ends
         # at 44). Crop R's trailing bins so the reco shape matches.
@@ -754,19 +776,16 @@ class SCETlibNPParamModel(ParamModel):
         # Gen-total denominator N_gen(g) from the xnorm hist ("prefsr"): the
         # generated fiducial yield per gen bin (pre-reco-selection). Dividing R
         # by this gives the theory-independent efficiency×migration response.
-        # Falls back to the σ_gen(λ_c) proxy if the gen-total isn't in the file.
-        if R_info.get("N_gen") is not None:
-            self._N_gen_flat = tf.constant(
-                R_info["N_gen"].reshape(-1), dtype=fz_tf.DTYPE
+        # REQUIRED: setupRabbit only embeds the response when the gen-total is
+        # present, so N_gen should always be here; raise if not (a σ_gen(λ_c)
+        # proxy would make the central closure circular — see module docstring).
+        if R_info.get("N_gen") is None:
+            raise ValueError(
+                "SCETlibNPParamModel: the 'scetlib_np' auxiliary has no N_gen "
+                "(gen-total). Rebuild the datacard from a histmaker output that "
+                "carries the 'prefsr' xnorm hist."
             )
-        else:
-            self._N_gen_flat = None
-            print(
-                "[SCETlibNPParamModel] WARNING: no gen-total hist in unfolding "
-                "output; falling back to σ_gen(λ_c) as the response normalizer "
-                "(circular closure — see param_model docstring).",
-                flush=True,
-            )
+        self._N_gen_flat = tf.constant(R_info["N_gen"].reshape(-1), dtype=fz_tf.DTYPE)
         self._reco_axes_meta = [
             (name, fit_axes[1])
             for (name, fit_axes) in zip(
@@ -884,7 +903,7 @@ class SCETlibNPParamModel(ParamModel):
                 f"SCETlibNPParamModel: {n_bad} gen bins have non-positive "
                 f"σ_gen(λ_central); cannot normalize / fold the response."
             )
-        N_gen = self._N_gen_flat if self._N_gen_flat is not None else gen_flat
+        N_gen = self._N_gen_flat
         # Guard empty gen bins (no generated events): leave column at 0.
         safe_N_gen = tf.where(N_gen > 0, N_gen, tf.ones_like(N_gen))
         self.R = self._R_raw / safe_N_gen[tf.newaxis, :]  # P(b|g) = R_raw / N_gen
@@ -1089,7 +1108,7 @@ class SCETlibNPParamModel(ParamModel):
         SCETlib spectrum reference (curve 1) and the numpy `factorize` (curve 2)."""
         # 1. Reconstruct σ on the btgrid's flat (Nbins,) layout. Factorized
         # (default) and legacy layouts are numerically equivalent (≲1e-14
-        # rel.; summation order only — see FACTORIZED_RECON.md).
+        # rel.; summation order only).
         eff = {k: v for k, v in eff_params.items() if k != "np_model"}
         gnu = {k: v for k, v in gnu_params.items() if k != "np_model_nu"}
         if self.factorized:
@@ -1214,7 +1233,7 @@ class SCETlibNPParamModel(ParamModel):
 
         One JVP per parameter (nparam ≤ 8), each a single bT-fold pass — NOT
         tiled over params. This is the compact object the Hessian actually needs
-        from the fold (see HESSIAN_PLAN.md §2)."""
+        from the fold."""
         n = int(param.shape[0])
         cols = []
         for i in range(n):
