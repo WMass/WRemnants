@@ -215,7 +215,9 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
                 f"Scale variation {var} found for fo_sing piece but no corresponding variation for dyturbo"
             )
         dyturbo_scale = scales_map.get(var, "mur1-muf1")
+        print(var, dyturbo_scale)
         dyturbo_name = base_name.format(i=pdf_member, scale=dyturbo_scale)
+        print(dyturbo_name)
         h = read_dyturbo_hist([dyturbo_name], axes=axes, charge=charge)
         if not var_hist:
             var_hist = hist.Hist(*h.axes, var_axis, storage=h.storage_type())
@@ -333,10 +335,11 @@ def read_dyturbo_hist(
     hists = []
     for fn in filenames:
 
-        if "-mur0p5-" in fn.split("/")[-1]:
-            fn = fn.replace("-mur0p5-", "-murH-")
-        if "-muf0p5-" in fn.split("/")[-1]:
-            fn = fn.replace("-muf0p5-", "-mufH-")
+        # TODO the naming convention is unclear and inconsistent. These may be needed in the future.
+        # if "-mur0p5-" in fn.split("/")[-1]:
+        #     fn = fn.replace("-mur0p5-", "-murH-")
+        # if "-muf0p5-" in fn.split("/")[-1]:
+        #     fn = fn.replace("-muf0p5-", "-mufH-")
 
         expandedf = fn.split("+")
 
