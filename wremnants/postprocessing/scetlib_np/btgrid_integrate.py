@@ -102,7 +102,7 @@ def sparse_to_dense_tf(sigma_flat, flat_idx):
 
 
 # =============================================================================
-# Q-integration weights (arctan_Q² method, matches numpy integrate_over_Q)
+# Q-integration weights (arctan_Q² method, matches scetlib_run.factorize.integrate_over_Q)
 # =============================================================================
 
 
@@ -111,8 +111,8 @@ def q_integrate_weights(
 ):
     """Simpson weights for integrating over Q ∈ [Q_lo, Q_hi] in arctan-Q² space.
 
-    Implements the same change of variable as
-    the numpy-reference ``integrate_over_Q`` with ``method="arctan_Q2"``:
+    Implements the same change of variable as the external numpy reference
+    ``scetlib_run.factorize.integrate_over_Q`` with ``method="arctan_Q2"``:
     x = arctan((Q² - q0²) / (q0 Γ)) flattens the Breit-Wigner peak, then
     Simpson on x with the Jacobian dQ/dx.
 
@@ -155,8 +155,8 @@ def rebin_weights(source_grid, target_edges, name="axis", tol=1e-9):
     matrix; entries are 0 for source samples not contributing to a given
     target bin.
 
-    Mirrors the per-bin call pattern of
-    the numpy-reference ``integrate_over_axis_bin``.
+    Mirrors the per-bin call pattern of the external numpy reference
+    ``scetlib_run.factorize`` (``integrate_over_{qT,Y}_bin``).
     """
     source_grid = np.asarray(source_grid, dtype=np.float64)
     target_edges = np.asarray(target_edges, dtype=np.float64)

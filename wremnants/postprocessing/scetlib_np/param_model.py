@@ -225,19 +225,14 @@ hessian_gn=1 (exact for Asimov).
 GN vs full-K. The Poisson Hessian is
     H_ij = Σ_b [ (n_b/μ_b²) J_bi J_bj  +  (1 − n_b/μ_b) K_bij ].
 For ASIMOV data the residual (1 − n/μ) = 0, so the K term vanishes and GN (J
-only) is EXACT — drop the K term with hessian_gn=1. For real/toy data
-the K term is needed for the exact Hessian. The nested-forward-mode K
-(``_ratio_compact_hess``) USED to crash under rabbit's @tf.function: building the
-JVP of an ``Equal`` op that carries a tangent raised ``IndexError`` in TF's
-nested-forward-mode autodiff. The culprit was the λ_inf==0 / den==0 masks in
-:mod:`btgrid_tf` comparing a differentiated tensor; freezing the comparison input
-(``btgrid_tf._frozen_eq_zero`` = ``tf.equal(stop_gradient(x), 0)``) removes the
-tangent into ``Equal`` without changing any value or derivative (the comparison
-is a measure-zero boundary ``tf.where`` never differentiates). Full-K now runs
-under @tf.function and matches the exact reverse-mode Hessian to machine
-precision (≤3e-16 rel; verified by the isolation validation). So
-both GN and full-K are available; GN remains the default for Asimov (exact and
-cheaper — 8 vs 72 fold passes).
+only) is EXACT — drop the K term with hessian_gn=1. Real/toy data need the K
+term; full-K (``_ratio_compact_hess``) matches the exact reverse-mode Hessian.
+Full-K requires the ``btgrid_tf._frozen_eq_zero`` guard: the λ_inf==0 / den==0
+masks compare a differentiated tensor, which makes TF's nested-forward-mode AD
+raise ``IndexError`` on the ``Equal`` op; freezing the comparison input
+(``tf.equal(stop_gradient(x), 0)``) drops the tangent into ``Equal`` without
+changing any value or derivative (it is a measure-zero ``tf.where`` boundary).
+GN remains the default for Asimov (exact and cheaper — 8 vs 72 fold passes).
 
 WARNING: do NOT pass hessian_straightthrough=1 during the FIT. The
 surrogate recomputes J(/K) on every compute() call — fine for the one-shot
@@ -843,8 +838,8 @@ class SCETlibNPParamModel(ParamModel):
         # circular (σ_gen cancels to R_raw·1).
         # Native-binning Q-integrated reconstruction (NY, NqT) on the signed-Y /
         # qT grid, BEFORE the |Y|-fold and qT-rebin — exposed so the native-binning
-        # validation can compare it to the SCETlib reference / numpy factorize
-        # without the projection layer.
+        # validation can compare it to the SCETlib reference / external
+        # scetlib_run.factorize without the projection layer.
         self.sigma_YqT_central = self._sigma_YqT_native_at(
             self.eff_central, self.gnu_central
         )
@@ -1105,7 +1100,8 @@ class SCETlibNPParamModel(ParamModel):
         in the btgrid's *native* binning: shape (NY, NqT) on the signed-Y /
         qT grid (Y_unique, qT_unique), BEFORE the |Y|-fold and qT-rebin. This
         is the object that the native-binning validation compares against the
-        SCETlib spectrum reference (curve 1) and the numpy `factorize` (curve 2)."""
+        SCETlib spectrum reference (curve 1) and the external scetlib_run.factorize
+        (curve 2)."""
         # 1. Reconstruct σ on the btgrid's flat (Nbins,) layout. Factorized
         # (default) and legacy layouts are numerically equivalent (≲1e-14
         # rel.; summation order only).

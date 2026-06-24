@@ -215,9 +215,7 @@ def read_dyturbo_vars_hist(base_name, var_axis=None, axes=("Y", "qT"), charge=No
                 f"Scale variation {var} found for fo_sing piece but no corresponding variation for dyturbo"
             )
         dyturbo_scale = scales_map.get(var, "mur1-muf1")
-        print(var, dyturbo_scale)
         dyturbo_name = base_name.format(i=pdf_member, scale=dyturbo_scale)
-        print(dyturbo_name)
         h = read_dyturbo_hist([dyturbo_name], axes=axes, charge=charge)
         if not var_hist:
             var_hist = hist.Hist(*h.axes, var_axis, storage=h.storage_type())
