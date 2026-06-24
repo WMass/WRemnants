@@ -1,7 +1,5 @@
 import os
 
-import ROOT
-
 from wremnants.utilities import common, parsing
 from wums import logging
 
@@ -28,6 +26,7 @@ logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 import hist
 
 import narf
+import narf.clingutils
 from wremnants.production import muon_selections
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import (
@@ -36,27 +35,7 @@ from wremnants.production.histmaker_tools import (
     write_analysis_output,
 )
 
-# compute_recoil_from_met exists in recoil_tools.hpp but that header pulls in
-# tfliteutils.hpp; declare a lightweight equivalent here for this performance study
-ROOT.gInterpreter.Declare("""
-#ifndef WR_COMPUTE_RECOIL_DILEPTON_DEFINED
-#define WR_COMPUTE_RECOIL_DILEPTON_DEFINED
-namespace wrem {
-inline ROOT::VecOps::RVec<double> compute_recoil_dilepton(
-        float met_pt, float met_phi,
-        const ROOT::VecOps::RVec<float>& lep_pt,
-        const ROOT::VecOps::RVec<float>& lep_phi,
-        double v_pt, double v_phi) {
-    double pUx = met_pt*std::cos(met_phi) + lep_pt[0]*std::cos(lep_phi[0]) + lep_pt[1]*std::cos(lep_phi[1]);
-    double pUy = met_pt*std::sin(met_phi) + lep_pt[0]*std::sin(lep_phi[0]) + lep_pt[1]*std::sin(lep_phi[1]);
-    ROOT::VecOps::RVec<double> res(2);
-    res[0] = -(pUx*std::cos(v_phi) + pUy*std::sin(v_phi));
-    res[1] = -(-pUx*std::sin(v_phi) + pUy*std::cos(v_phi));
-    return res;
-}
-}
-#endif
-""")
+narf.clingutils.Declare('#include "recoil_tools.hpp"')
 
 flavor = args.flavor
 met_type = args.met
@@ -181,7 +160,7 @@ def build_graph(df, dataset):
 
     df = df.Define(
         "recoil",
-        f"wrem::compute_recoil_dilepton({met_type}_pt, {met_type}_phi, Lep_pt, Lep_phi, ptll, phill)",
+        f"wrem::compute_recoil_from_met({met_type}_pt, {met_type}_phi, Lep_pt, Lep_phi, ptll, phill)",
     )
     df = df.Define("recoil_para", "recoil[0]")
     df = df.Define("recoil_perp", "recoil[1]")
