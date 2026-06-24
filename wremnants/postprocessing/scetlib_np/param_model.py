@@ -512,6 +512,7 @@ class SCETlibNPParamModel(ParamModel):
         xparam_default: Optional[str] = None,
         hessian_straightthrough: bool = False,
         hessian_gn: bool = False,
+        gen_level: bool = False,
         **kwargs,
     ):
         """Construct the ParamModel.
@@ -602,6 +603,15 @@ class SCETlibNPParamModel(ParamModel):
         hessian_gn
             With ``hessian_straightthrough``: Gauss-Newton, keep J and drop
             the K term (exact for Asimov, where the residual vanishes).
+        gen_level
+            Gen-level σUL fit mode (spec token ``gen_level=1``). The fit channel
+            IS the gen (ptVGen, |Y|) binning, so there is NO response matrix and
+            NO gen→reco fold (Step 3 is skipped): compute() returns the
+            per-GEN-bin ratio σ_gen(λ) / σ_gen(λ_central) from Steps 1–2. The
+            gen binning is read from the single fit channel's axes, so no
+            ``scetlib_np`` auxiliary / R / N_gen is needed. Used for the
+            direct-theory σUL closure (this ParamModel as the λ model, fit
+            against an injected gen-level σUL pseudodata).
         """
         self.indata = indata
 
@@ -663,6 +673,24 @@ class SCETlibNPParamModel(ParamModel):
 
         # ---- btgrid + dense layout
         grid = btgrid_cache.load(btgrid_dir)
+        # Sanitize non-finite bt-grid cells. Kinematically-forbidden points
+        # (x = (Q/Ecm)·e^|Y| ≥ 1, e.g. extreme forward Y near the Z peak) can
+        # come back as NaN from SCETlib instead of the physical 0. Their true
+        # cross section is zero, so replace NaN/inf with 0 → harmless zero-rows.
+        # Without this, dedup_grid_rows' hash-group verification fails (NaN !=
+        # NaN). (For grids produced as condor shards the forbidden cells are
+        # simply absent and dense_index_map 0-fills them; a single-process local
+        # run instead writes them in as NaN, which is what this handles.)
+        for _key in ("I_pert", "C_nu"):
+            _arr = grid[_key]
+            if not np.isfinite(_arr).all():
+                _nbad = int((~np.isfinite(_arr)).any(axis=-1).sum())
+                np.nan_to_num(_arr, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+                print(
+                    f"[SCETlibNPParamModel] sanitized {_nbad} non-finite "
+                    f"{_key} bt-grid rows -> 0 (kinematically-forbidden cells)",
+                    flush=True,
+                )
         idx_map = fz_int.dense_index_map(grid["bins"])
         self.Q_unique = idx_map["Q_unique"]
         self.Y_unique = idx_map["Y_unique"]
@@ -754,41 +782,65 @@ class SCETlibNPParamModel(ParamModel):
             dtype=fz_tf.DTYPE,
         )
 
-        # ---- R matrix (read from the datacard's scetlib_np auxiliary)
-        R_info = _R_info_from_auxiliary(indata)
-        # The fit-tensor's reco binning may differ from R's by trailing
-        # overflow bins (e.g. R has ptll [0, …, 44, 100] while the fit ends
-        # at 44). Crop R's trailing bins so the reco shape matches.
-        fit_reco_axes = self._fit_reco_axes(indata)
-        R_arr = _crop_R_to_fit(R_info["R"], R_info["reco_axes"], fit_reco_axes)
-        # Tighten the metadata to match the cropped R.
-        self.reco_shape = R_arr.shape[: len(fit_reco_axes)]
-        self.gen_shape = R_arr.shape[len(fit_reco_axes) :]
-        N_reco = int(np.prod(self.reco_shape))
-        N_gen = int(np.prod(self.gen_shape))
-        # Raw response counts; normalized to a response below.
-        self._R_raw = tf.constant(R_arr.reshape(N_reco, N_gen), dtype=fz_tf.DTYPE)
-        # Gen-total denominator N_gen(g) from the xnorm hist ("prefsr"): the
-        # generated fiducial yield per gen bin (pre-reco-selection). Dividing R
-        # by this gives the theory-independent efficiency×migration response.
-        # REQUIRED: setupRabbit only embeds the response when the gen-total is
-        # present, so N_gen should always be here; raise if not (a σ_gen(λ_c)
-        # proxy would make the central closure circular — see module docstring).
-        if R_info.get("N_gen") is None:
-            raise ValueError(
-                "SCETlibNPParamModel: the 'scetlib_np' auxiliary has no N_gen "
-                "(gen-total). Rebuild the datacard from a histmaker output that "
-                "carries the 'prefsr' xnorm hist."
+        # ---- Gen/reco binning + (reco mode) the response matrix R.
+        # gen_level=1: the fit channel IS the gen (ptVGen, absY) binning, so
+        # there is NO response matrix and NO gen→reco fold — compute() returns
+        # the per-GEN-bin ratio σ_gen(λ)/σ_gen(λ_central) (Steps 1–2 only), and
+        # the scetlib_np auxiliary / N_gen are not required.
+        self.gen_level = bool(gen_level)
+        if self.gen_level:
+            gen_axes = self._fit_reco_axes(indata)
+            if len(gen_axes) != 2:
+                raise NotImplementedError(
+                    "gen_level SCETlibNPParamModel expects a single fit channel "
+                    "with 2 gen axes (ptVGen, absY); got "
+                    f"{[n for n, _ in gen_axes]}"
+                )
+            self.R = None
+            self._R_raw = None
+            self._N_gen_flat = None
+            self.reco_shape = None
+            self._reco_axes_meta = None
+            self._gen_axes_meta = gen_axes
+            self.gen_shape = tuple(len(e) - 1 for (_, e) in gen_axes)
+        else:
+            # ---- R matrix (read from the datacard's scetlib_np auxiliary)
+            R_info = _R_info_from_auxiliary(indata)
+            # The fit-tensor's reco binning may differ from R's by trailing
+            # overflow bins (e.g. R has ptll [0, …, 44, 100] while the fit ends
+            # at 44). Crop R's trailing bins so the reco shape matches.
+            fit_reco_axes = self._fit_reco_axes(indata)
+            R_arr = _crop_R_to_fit(R_info["R"], R_info["reco_axes"], fit_reco_axes)
+            # Tighten the metadata to match the cropped R.
+            self.reco_shape = R_arr.shape[: len(fit_reco_axes)]
+            self.gen_shape = R_arr.shape[len(fit_reco_axes) :]
+            N_reco = int(np.prod(self.reco_shape))
+            N_gen = int(np.prod(self.gen_shape))
+            # Raw response counts; normalized to a response below.
+            self._R_raw = tf.constant(R_arr.reshape(N_reco, N_gen), dtype=fz_tf.DTYPE)
+            # Gen-total denominator N_gen(g) from the xnorm hist ("prefsr"): the
+            # generated fiducial yield per gen bin (pre-reco-selection). Dividing R
+            # by this gives the theory-independent efficiency×migration response.
+            # REQUIRED: setupRabbit only embeds the response when the gen-total is
+            # present, so N_gen should always be here; raise if not (a σ_gen(λ_c)
+            # proxy would make the central closure circular — see module docstring).
+            if R_info.get("N_gen") is None:
+                raise ValueError(
+                    "SCETlibNPParamModel: the 'scetlib_np' auxiliary has no N_gen "
+                    "(gen-total). Rebuild the datacard from a histmaker output that "
+                    "carries the 'prefsr' xnorm hist."
+                )
+            self._N_gen_flat = tf.constant(
+                R_info["N_gen"].reshape(-1), dtype=fz_tf.DTYPE
             )
-        self._N_gen_flat = tf.constant(R_info["N_gen"].reshape(-1), dtype=fz_tf.DTYPE)
-        self._reco_axes_meta = [
-            (name, fit_axes[1])
-            for (name, fit_axes) in zip(
-                [a[0] for a in R_info["reco_axes"]],
-                fit_reco_axes,
-            )
-        ]
-        self._gen_axes_meta = R_info["gen_axes"]
+            self._reco_axes_meta = [
+                (name, fit_axes[1])
+                for (name, fit_axes) in zip(
+                    [a[0] for a in R_info["reco_axes"]],
+                    fit_reco_axes,
+                )
+            ]
+            self._gen_axes_meta = R_info["gen_axes"]
 
         # ---- Rebin weights: btgrid (NY signed) → (NabsYVGen) via |Y| folding
         # and (NqT) → (NptVGen).
@@ -898,21 +950,30 @@ class SCETlibNPParamModel(ParamModel):
                 f"SCETlibNPParamModel: {n_bad} gen bins have non-positive "
                 f"σ_gen(λ_central); cannot normalize / fold the response."
             )
-        N_gen = self._N_gen_flat
-        # Guard empty gen bins (no generated events): leave column at 0.
-        safe_N_gen = tf.where(N_gen > 0, N_gen, tf.ones_like(N_gen))
-        self.R = self._R_raw / safe_N_gen[tf.newaxis, :]  # P(b|g) = R_raw / N_gen
-        # Free the raw counts: only the normalized response self.R is used from
-        # here on (compute() never touches _R_raw) — no need to hold both.
-        del self._R_raw
-        self.sigma_reco_central = tf.linalg.matvec(self.R, gen_flat)  # Σ_g P·σ_gen(λ_c)
-        if tf.reduce_any(self.sigma_reco_central <= 0).numpy():
-            n_bad = int(tf.reduce_sum(tf.cast(self.sigma_reco_central <= 0, tf.int32)))
-            raise ValueError(
-                f"SCETlibNPParamModel: {n_bad} reco bins have non-positive "
-                f"σ_reco(λ_central). Likely a binning mismatch between R and "
-                f"the fit-tensor reco axes."
-            )
+        if self.gen_level:
+            # Gen-level σUL fit: the fit bins ARE the gen bins, so the per-bin
+            # ratio denominator is σ_gen(λ_central) directly (no reco fold).
+            self.sigma_gen_central_flat = gen_flat
+        else:
+            N_gen = self._N_gen_flat
+            # Guard empty gen bins (no generated events): leave column at 0.
+            safe_N_gen = tf.where(N_gen > 0, N_gen, tf.ones_like(N_gen))
+            self.R = self._R_raw / safe_N_gen[tf.newaxis, :]  # P(b|g) = R_raw / N_gen
+            # Free the raw counts: only the normalized response self.R is used from
+            # here on (compute() never touches _R_raw) — no need to hold both.
+            del self._R_raw
+            self.sigma_reco_central = tf.linalg.matvec(
+                self.R, gen_flat
+            )  # Σ_g P·σ_gen(λ_c)
+            if tf.reduce_any(self.sigma_reco_central <= 0).numpy():
+                n_bad = int(
+                    tf.reduce_sum(tf.cast(self.sigma_reco_central <= 0, tf.int32))
+                )
+                raise ValueError(
+                    f"SCETlibNPParamModel: {n_bad} reco bins have non-positive "
+                    f"σ_reco(λ_central). Likely a binning mismatch between R and "
+                    f"the fit-tensor reco axes."
+                )
 
         # ---- Process index: signal column gets the ratio, others get 1.
         procs = [p.decode() if isinstance(p, bytes) else str(p) for p in indata.procs]
@@ -1215,8 +1276,12 @@ class SCETlibNPParamModel(ParamModel):
         eff_params, gnu_params = self._unpack_params(param)
         sigma_gen = self._sigma_gen_at(eff_params, gnu_params)
         gen_flat = tf.reshape(sigma_gen, [-1])
-        sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
-        ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
+        if self.gen_level:
+            # Gen-level σUL fit: the fit bins ARE the gen bins — no reco fold.
+            ratio = gen_flat / self.sigma_gen_central_flat  # (N_gen,)
+        else:
+            sigma_reco = tf.linalg.matvec(self.R, gen_flat)  # (N_reco,)
+            ratio = sigma_reco / self.sigma_reco_central  # (N_reco,)
         scale = tf.constant(RATIO_FLOOR_SCALE, dtype=ratio.dtype)
         ratio = tf.maximum(
             scale * tf.math.softplus(ratio / scale),
