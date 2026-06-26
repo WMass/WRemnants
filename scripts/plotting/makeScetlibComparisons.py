@@ -3,7 +3,7 @@ import pickle
 
 import hist
 import lz4.frame
-from matplotlib import cm
+from matplotlib import colormaps
 
 from wremnants.production import helicity_utils
 from wremnants.utilities import parsing
@@ -217,7 +217,7 @@ if not args.scetlib_files:
         {"massVgen": s[0 : x.axes["massVgen"].size : hist.sum]}
     ]
 
-cmap = cm.get_cmap("tab10")
+cmap = colormaps["tab10"]
 lookup["minnlo"]["colors"] = ["red"] + [
     cmap(i) for i in range(len(args.minnlo_files) - 1)
 ]
