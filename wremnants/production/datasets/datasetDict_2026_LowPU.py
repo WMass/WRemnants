@@ -1,15 +1,15 @@
 from wremnants.utilities import common
 
 # TODO: update lumi JSON and CSV paths once 2026 low-PU run files are available
-lumijson = f"{common.data_dir}/lowPU/TODO_Cert_2026_LowPU_JSON.txt"
-lumicsv_mu = f"{common.data_dir}/lowPU/TODO_bylsoutput_HLT_Mu_2026.csv"
+lumijson = f"{common.data_dir}/lowPU/lowpu_certified_lumis_normtag_filtered.json"
+lumicsv_mu = f"{common.data_dir}/lowPU/bylsoutput_2026_LowPU.csv"
 lumicsv_el = f"{common.data_dir}/lowPU/TODO_bylsoutput_HLT_EG_2026.csv"
 
 dataDict = {
     # TODO: update filepaths once dataset locations are known
     "Muon_2026_LowPU": {
         "filepaths": [
-            "{BASE_PATH}/TODO/Muon",
+            "/eos/cms/store/cmst3/group/wmass/LowPU2026/Data/Muon",
         ],
         "group": "Data",
         "lumicsv": lumicsv_mu,
