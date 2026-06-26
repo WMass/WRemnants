@@ -6,7 +6,7 @@ fi
 if [[ -d /ceph ]]; then
     export APPTAINER_BIND="${APPTAINER_BIND},/ceph"
 fi
-CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v61
+CONTAINER=/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling\:v67
 
 # Kerberos cache setup
 # Assuming kinit was already done on the host!

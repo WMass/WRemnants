@@ -5,7 +5,7 @@ import os
 import h5py
 import hist
 import numpy as np
-from matplotlib import cm
+from matplotlib import colormaps
 
 from wremnants.postprocessing import pdf_tools
 from wremnants.utilities import theory_utils
@@ -112,7 +112,7 @@ for dataset in args.datasets:
         pdfInfo[pdf]["scale"] if "scale" in pdfInfo[pdf] else 1.0 for pdf in args.pdfs
     ]
     names = [[pdfName + r" $\pm1\sigma$", "", ""] for pdfName in pdfNames]
-    cmap = cm.get_cmap("tab10")
+    cmap = colormaps["tab10"]
     colors = [[cmap(i)] * 3 for i in range(len(args.pdfs))]
 
     if "unrolled_gen_hel" in args.obs:

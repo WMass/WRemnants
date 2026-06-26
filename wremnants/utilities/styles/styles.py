@@ -1,6 +1,6 @@
 import copy
 
-import matplotlib.cm as cm
+from matplotlib import colormaps
 
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -818,7 +818,7 @@ def get_labels_colors_procs_sorted(procs):
         "Rare",
     ][::-1]
 
-    cmap = cm.get_cmap("tab10")
+    cmap = colormaps["tab10"]
 
     procs = sorted(
         procs, key=lambda x: procs_sort.index(x) if x in procs_sort else len(procs_sort)
