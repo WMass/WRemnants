@@ -1,15 +1,15 @@
 from wremnants.utilities import common
 
 # TODO: update lumi JSON and CSV paths once 2026 low-PU run files are available
-lumijson = f"{common.data_dir}/lowPU/TODO_Cert_2026_LowPU_JSON.txt"
-lumicsv_mu = f"{common.data_dir}/lowPU/TODO_bylsoutput_HLT_Mu_2026.csv"
+lumijson = f"{common.data_dir}/lowPU/lowpu_certified_lumis_normtag_filtered.json"
+lumicsv_mu = f"{common.data_dir}/lowPU/bylsoutput_2026_LowPU.csv"
 lumicsv_el = f"{common.data_dir}/lowPU/TODO_bylsoutput_HLT_EG_2026.csv"
 
 dataDict = {
     # TODO: update filepaths once dataset locations are known
     "Muon_2026_LowPU": {
         "filepaths": [
-            "{BASE_PATH}/TODO/Muon",
+            "{BASE_PATH}/LowPU2026/Data/Muon",
         ],
         "group": "Data",
         "lumicsv": lumicsv_mu,
@@ -25,28 +25,28 @@ dataDict = {
     },
     "Zmumu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_DYJetsToMuMu",
+            "{BASE_PATH}/LowPU2023_studies/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
-        "xsec": common.xsec_DYJetsToLL,
+        "xsec": 2103.8,
         "group": "Zmumu",
     },
     "Zee": {
         "filepaths": [
             "{BASE_PATH}/{ERA}/TODO_DYJetsToEE",
         ],
-        "xsec": common.xsec_DYJetsToLL,
+        "xsec": 9134.3,
         "group": "Zee",
     },
     "Wplusmunu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_WplusJetsToMuNu",
+            "{BASE_PATH}/LowPU2023_studies/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
-        "xsec": common.xsec_WplusJetsToLNu,
+        "xsec": 12293.0,
         "group": "Wmunu",
     },
     "Wminusmunu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_WminusJetsToMuNu",
+            "{BASE_PATH}/LowPU2023_studies/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
         "xsec": common.xsec_WminusJetsToLNu,
         "group": "Wmunu",

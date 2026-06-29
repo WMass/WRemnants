@@ -138,6 +138,19 @@ def build_graph(df, dataset):
 
     df = muon_selections.apply_met_filters(df)
 
+    # NanoAODv12 for Run 3 uses RawPFMET; older productions use RawMET
+    if not df.HasColumn(f"{met_type}_pt"):
+        fallback = met_type.replace("RawPFMET", "RawMET")
+        if not df.HasColumn(f"{fallback}_pt"):
+            raise RuntimeError(
+                f"Neither {met_type}_pt nor {fallback}_pt found in dataset {dataset.name}"
+            )
+        logger.warning(
+            f"Branch {met_type}_pt not found in {dataset.name}, falling back to {fallback}_pt"
+        )
+        df = df.Define(f"{met_type}_pt", f"{fallback}_pt")
+        df = df.Define(f"{met_type}_phi", f"{fallback}_phi")
+
     # W-like selection: randomly assign one lepton as the "trigger lepton" by even/odd event
     df = df.Define("TrigLep_charge", "isEvenEvent ? -1 : 1")
     df = df.Define("NonTrigLep_charge", "-TrigLep_charge")
