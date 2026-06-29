@@ -9,7 +9,7 @@ dataDict = {
     # TODO: update filepaths once dataset locations are known
     "Muon_2026_LowPU": {
         "filepaths": [
-            "/eos/cms/store/cmst3/group/wmass/LowPU2026/Data/Muon",
+            "{BASE_PATH}/LowPU2026/Data/Muon",
         ],
         "group": "Data",
         "lumicsv": lumicsv_mu,
@@ -25,28 +25,28 @@ dataDict = {
     },
     "Zmumu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_DYJetsToMuMu",
+            "{BASE_PATH}/LowPU2023_studies/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
-        "xsec": common.xsec_DYJetsToLL,
+        "xsec": 2103.8,
         "group": "Zmumu",
     },
     "Zee": {
         "filepaths": [
             "{BASE_PATH}/{ERA}/TODO_DYJetsToEE",
         ],
-        "xsec": common.xsec_DYJetsToLL,
+        "xsec": 9134.3,
         "group": "Zee",
     },
     "Wplusmunu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_WplusJetsToMuNu",
+            "{BASE_PATH}/LowPU2023_studies/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
-        "xsec": common.xsec_WplusJetsToLNu,
+        "xsec": 12293.0,
         "group": "Wmunu",
     },
     "Wminusmunu": {
         "filepaths": [
-            "{BASE_PATH}/{ERA}/TODO_WminusJetsToMuNu",
+            "{BASE_PATH}/LowPU2023_studies/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
         "xsec": common.xsec_WminusJetsToLNu,
         "group": "Wmunu",

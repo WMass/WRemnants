@@ -12,58 +12,40 @@ def make_datagroups_lowPU(dg, excludeGroups=None, filterGroups=None):
     # reset datagroups
     dg.groups = {}
 
+    def add_if_nonempty(name, **kwargs):
+        members = dg.get_members_from_results(**kwargs)
+        if members:
+            dg.addGroup(name, members=members)
+
     dg.addGroup(
         "Data",
         members=dg.get_members_from_results(is_data=True),
     )
-    dg.addGroup(
-        "Ztautau",
-        members=dg.get_members_from_results(startswith="Ztautau"),
-    )
+    add_if_nonempty("Ztautau", startswith="Ztautau")
 
     if dg.flavor in ["mu", "mumu"]:
-        dg.addGroup(
-            "Zmumu",
-            members=dg.get_members_from_results(startswith="Zmumu"),
-        )
-        if dg.mode == "w_lowpu":
-            dg.addGroup(
+        add_if_nonempty("Zmumu", startswith="Zmumu")
+        if dg.mode in ["w_lowpu", "met_lowpu"]:
+            add_if_nonempty(
                 "Wmunu",
-                members=dg.get_members_from_results(
-                    startswith=["Wplusmunu", "Wminusmunu"]
-                ),
+                startswith=["Wplusmunu", "Wminusmunu", "Wmunu"],
             )
 
     if dg.flavor in ["e", "ee"]:
-        dg.addGroup(
-            "Zee",
-            members=dg.get_members_from_results(startswith="Zee"),
-        )
-        if dg.mode == "w_lowpu":
-            dg.addGroup(
+        add_if_nonempty("Zee", startswith="Zee")
+        if dg.mode in ["w_lowpu", "met_lowpu"]:
+            add_if_nonempty(
                 "Wenu",
-                members=dg.get_members_from_results(
-                    startswith=["Wplusenu", "Wminusenu"]
-                ),
+                startswith=["Wplusenu", "Wminusenu", "Wenu"],
             )
 
-    if dg.mode == "w_lowpu":
-        dg.addGroup(
+    if dg.mode in ["w_lowpu", "met_lowpu"]:
+        add_if_nonempty(
             "Wtaunu",
-            members=dg.get_members_from_results(
-                startswith=["Wplustaunu", "Wminustaunu"]
-            ),
+            startswith=["Wplustaunu", "Wminustaunu", "Wtaunu"],
         )
-        dg.addGroup(
-            "Top",
-            members=dg.get_members_from_results(startswith=["Top", "SingleT", "TT"]),
-        )
-        dg.addGroup(
-            "Diboson",
-            members=dg.get_members_from_results(
-                startswith=["Diboson", "WW", "WZ", "ZZ"]
-            ),
-        )
+        add_if_nonempty("Top", startswith=["Top", "SingleT", "TT"])
+        add_if_nonempty("Diboson", startswith=["Diboson", "WW", "WZ", "ZZ"])
     else:
         dg.addGroup(
             "Other",
