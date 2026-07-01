@@ -728,6 +728,7 @@ def common_parser(analysis_label=""):
                 "qVGen",
                 "ptVGen",
                 "absYVGen",
+                "massVGen",
                 "helicitySig",
             ],
             help="Generator level variable",

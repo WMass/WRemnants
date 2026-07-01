@@ -114,6 +114,7 @@ analysis_mode_map = {
     "mw_lowPU.py": "w_lowpu",
     "mz_lowPU.py": "z_lowpu",
     "met_performance_lowpu.py": "met_lowpu",
+    "mz_5TeV.py": "z_lowpu",
 }
 
 
