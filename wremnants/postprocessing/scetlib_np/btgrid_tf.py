@@ -19,6 +19,16 @@ from typing import Mapping
 import numpy as np
 import tensorflow as tf
 
+# Valid-name sets + alias maps from the numpy-only params module (single source).
+# The form branches below must read exactly the λ each model lists in the params
+# registry (EFF_MODEL_PARAMS / GNU_MODEL_PARAMS).
+from wremnants.postprocessing.scetlib_np.params import (
+    EFF_MODELS,
+    GNU_MODELS,
+    _EFF_MODEL_ALIASES,
+    _GNU_MODEL_ALIASES,
+)
+
 # float64 throughout this module.
 DTYPE = tf.float64
 
@@ -85,30 +95,7 @@ def simpson_tf(y, weights):
 # F_eff and gamma_nu^NP — TF transcriptions
 # =============================================================================
 
-EFF_MODELS = {
-    "identity",
-    "tanh_2",
-    "tanh_6",
-    "tanh_4",
-    "frac_2",
-    "frac_4",
-    "exp_2",
-    "exp_4",
-    "signed_lambda",
-    "hyp_tangent",
-    "square_root",
-}
-GNU_MODELS = {
-    "tanh_1",
-    "tanh_2",
-    "tanh_6",
-    "frac_1",
-    "frac_2",
-    "exp_1",
-    "exp_2",
-    "hyp_tangent",
-    "linear",
-}
+# EFF_MODELS / GNU_MODELS (valid np_model names) come from params (imported above).
 
 
 def _frozen_eq_zero(x):
@@ -138,24 +125,27 @@ def _safe_div(num, den):
     return num / den_safe
 
 
-def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_model):
-    """TMD-effective NP form factor F_eff(Y, bT) for a fixed ``np_model``."""
+def F_eff_tf(Y, bT, values, *, np_model):
+    """TMD-effective NP form factor F_eff(Y, bT) for a fixed ``np_model``.
+
+    ``values`` maps λ name -> value (TF scalar / Variable / constant, or python
+    float). Each ``np_model`` branch reads ONLY the λ its formula uses — a missing
+    one raises ``KeyError`` (fail out; no fabricated default). Extra keys (e.g.
+    ``np_model``) are ignored. The λ each model reads is declared in
+    :data:`params.EFF_MODEL_PARAMS`; keep the two in sync."""
     if np_model not in EFF_MODELS:
         raise ValueError(f"F_eff_tf: unsupported np_model {np_model!r}")
 
     bT = _as_dtype(bT)
     Y = _as_dtype(Y)
-    lambda_inf = _as_dtype(lambda_inf)
-    lambda2 = _as_dtype(lambda2)
-    lambda4 = _as_dtype(lambda4)
-    lambda6 = _as_dtype(lambda6)
-    delta_lambda2 = _as_dtype(delta_lambda2)
+    lambda2 = _as_dtype(values["lambda2"])
+    lambda4 = _as_dtype(values["lambda4"])
+    delta_lambda2 = _as_dtype(values["delta_lambda2"])
+    lambda2_Y = lambda2 + delta_lambda2 * Y * Y
 
     if np_model == "signed_lambda":
-        lambda2_Y = lambda2 + delta_lambda2 * Y * Y
         return (1.0 + lambda2_Y * bT**2) ** 2 * tf.exp(-2.0 * lambda4 * bT**4)
 
-    lambda2_Y = lambda2 + delta_lambda2 * Y * Y
     arg = (lambda2_Y + lambda4 * bT**2) * bT
 
     if np_model == "identity":
@@ -163,13 +153,15 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
 
     # lambda_inf == 0 returns ones: compute the full formula with a safe
     # denominator, mask at the end.
+    lambda_inf = _as_dtype(values["lambda_inf"])
     arg_inf = _safe_div(arg, lambda_inf)
-    model = {"hyp_tangent": "tanh_2", "square_root": "frac_2"}.get(np_model, np_model)
+    model = _EFF_MODEL_ALIASES.get(np_model, np_model)
 
     if model == "tanh_2":
         a = arg_inf + (1.0 / 3.0) * _safe_div(lambda2_Y * bT, lambda_inf) ** 3
         func = tf.tanh(a)
     elif model == "tanh_6":
+        lambda6 = _as_dtype(values["lambda6"])
         a = arg_inf + _safe_div(lambda6 * bT**5, lambda_inf)
         a = a + (1.0 / 3.0) * _safe_div(lambda2_Y * bT, lambda_inf) ** 3
         func = tf.tanh(a)
@@ -194,29 +186,26 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
     return tf.where(_frozen_eq_zero(lambda_inf), tf.ones_like(full), full)
 
 
-def gamma_nu_NP_tf(
-    bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, lambda6_nu=0.0, np_model_nu
-):
+def gamma_nu_NP_tf(bT, values, *, np_model_nu):
     """CS-side NP rapidity anomalous dimension γ_ν^NP(bT) for fixed ``np_model_nu``.
 
-    ``lambda6_nu`` is the b⁶ coefficient used only by the ``tanh_6`` model; other
-    models ignore it. It defaults to 0 (then tanh_6 reduces to tanh_2). SCETlib's
-    own ``NP_model_gammanu`` uses 0.0007 (Gamma_nu.hpp:102) — pass that to
-    reproduce SCETlib's regulated CS kernel.
+    ``values`` maps λ name -> value; each branch reads ONLY the λ its formula uses
+    (a missing one raises ``KeyError`` — fail out). Extra keys (e.g.
+    ``np_model_nu``) are ignored. The λ each model reads is declared in
+    :data:`params.GNU_MODEL_PARAMS`; keep the two in sync.
     """
     if np_model_nu not in GNU_MODELS:
         raise ValueError(f"gamma_nu_NP_tf: unsupported np_model_nu {np_model_nu!r}")
 
     bT = _as_dtype(bT)
-    lambda_inf_nu = _as_dtype(lambda_inf_nu)
-    lambda2_nu = _as_dtype(lambda2_nu)
-    lambda4_nu = _as_dtype(lambda4_nu)
-    lambda6_nu = _as_dtype(lambda6_nu)
+    lambda_inf_nu = _as_dtype(values["lambda_inf_nu"])
+    lambda2_nu = _as_dtype(values["lambda2_nu"])
+    lambda4_nu = _as_dtype(values["lambda4_nu"])
 
     bT2 = bT * bT
     arg = _safe_div((lambda2_nu + lambda4_nu * bT2) * bT2, lambda_inf_nu)
 
-    model = {"hyp_tangent": "tanh_2", "linear": "frac_1"}.get(np_model_nu, np_model_nu)
+    model = _GNU_MODEL_ALIASES.get(np_model_nu, np_model_nu)
 
     if model == "tanh_1":
         a = arg + (2.0 / 3.0) * _safe_div(lambda2_nu * bT2, lambda_inf_nu) ** 2
@@ -224,8 +213,8 @@ def gamma_nu_NP_tf(
     elif model == "tanh_2":
         func = tf.tanh(arg)
     elif model == "tanh_6":
-        # b⁶ term (SCETlib NP_model_gammanu uses lambda6_nu = 0.0007,
-        # Gamma_nu.hpp:102); here it is the fittable lambda6_nu (default 0).
+        # tanh_2 plus a b⁶ term with fittable coefficient lambda6_nu.
+        lambda6_nu = _as_dtype(values["lambda6_nu"])
         a = arg + _safe_div(lambda6_nu * bT2**3, lambda_inf_nu)
         func = tf.tanh(a)
     elif model == "frac_1":
@@ -306,13 +295,13 @@ def reconstruct_batch_tf(
         bT_simpson_weights = simpson_weights(np.asarray(bT))
     bT_simpson_weights = _as_dtype(bT_simpson_weights)  # (Nbt,)
 
-    g_NP = gamma_nu_NP_tf(b_bar, **gnu_params, np_model_nu=np_model_nu)  # (Nbt,)
+    g_NP = gamma_nu_NP_tf(b_bar, gnu_params, np_model_nu=np_model_nu)  # (Nbt,)
     exp_g_factor = tf.exp(C_nu * g_NP[tf.newaxis, :])  # (Nbins, Nbt)
 
     delta_l2_in = eff_params.get("delta_lambda2", 0.0)
     if isinstance(delta_l2_in, (int, float)) and float(delta_l2_in) == 0.0:
         # static fast path: F_eff has no Y dependence
-        Feff = F_eff_tf(0.0, b_bar, **eff_params, np_model=np_model)  # (Nbt,)
+        Feff = F_eff_tf(0.0, b_bar, eff_params, np_model=np_model)  # (Nbt,)
         Feff_b = Feff[tf.newaxis, :]
     elif Y_unique is not None and Y_inverse_idx is not None:
         # per-bin F_eff on the unique-Y rows, then gathered. Exact: identical Y
@@ -321,14 +310,14 @@ def reconstruct_batch_tf(
         # run on (NY, Nbt), not (Nbins, Nbt).
         Y_u = _as_dtype(Y_unique)[:, tf.newaxis]  # (NY, 1)
         b_b = b_bar[tf.newaxis, :]
-        Feff_u = F_eff_tf(Y_u, b_b, **eff_params, np_model=np_model)  # (NY, Nbt)
+        Feff_u = F_eff_tf(Y_u, b_b, eff_params, np_model=np_model)  # (NY, Nbt)
         Feff_b = tf.gather(Feff_u, Y_inverse_idx)  # (Nbins, Nbt)
     else:
         # per-bin F_eff (Y dependence via delta_lambda2 * Y^2): build
         # (Nbins, Nbt) by broadcasting Y_per_bin over bT
         Y_b = Y_per_bin[:, tf.newaxis]
         b_b = b_bar[tf.newaxis, :]
-        Feff_b = F_eff_tf(Y_b, b_b, **eff_params, np_model=np_model)  # (Nbins, Nbt)
+        Feff_b = F_eff_tf(Y_b, b_b, eff_params, np_model=np_model)  # (Nbins, Nbt)
 
     integrand = bT_J0_kernel * I_pert * exp_g_factor * Feff_b  # (Nbins, Nbt)
     sigma = simpson_tf(integrand, bT_simpson_weights)  # (Nbins,)
@@ -546,7 +535,7 @@ def reconstruct_batch_factorized_tf(
     I_pert_u = _as_dtype(I_pert_u)
     KwqT = _as_dtype(KwqT)
 
-    g_NP = gamma_nu_NP_tf(b_bar, **gnu_params, np_model_nu=np_model_nu)  # (Nbt,)
+    g_NP = gamma_nu_NP_tf(b_bar, gnu_params, np_model_nu=np_model_nu)  # (Nbt,)
     if C_nu_uu is not None and c_of_u is not None:
         # exp on the ~150x smaller C-row table, replicated by the gather.
         exp_g_uu = tf.exp(_as_dtype(C_nu_uu) * g_NP[tf.newaxis, :])  # (Ncu, Nbt)
@@ -563,7 +552,7 @@ def reconstruct_batch_factorized_tf(
     if isinstance(delta_l2_in, (int, float)) and float(delta_l2_in) == 0.0:
         # static fast path: F_eff has no Y dependence (matches the
         # reconstruct_batch_tf fast path bit-for-bit on the unique rows)
-        Feff = F_eff_tf(0.0, b_bar, **eff_params, np_model=np_model)  # (Nbt,)
+        Feff = F_eff_tf(0.0, b_bar, eff_params, np_model=np_model)  # (Nbt,)
         Feff_u = Feff[tf.newaxis, :]  # broadcast over Nu
     else:
         # F_eff on the unique-Y rows, gathered to the unique grid rows (same
@@ -571,7 +560,7 @@ def reconstruct_batch_factorized_tf(
         # bit-exactly, scatter-adds cotangents on the backward pass).
         Y_u = _as_dtype(Y_unique)[:, tf.newaxis]  # (NY, 1)
         Feff_rows = F_eff_tf(
-            Y_u, b_bar[tf.newaxis, :], **eff_params, np_model=np_model
+            Y_u, b_bar[tf.newaxis, :], eff_params, np_model=np_model
         )  # (NY, Nbt)
         Feff_u = tf.gather(Feff_rows, feff_idx_u)  # (Nu, Nbt)
 

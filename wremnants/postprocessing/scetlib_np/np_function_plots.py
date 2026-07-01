@@ -88,13 +88,20 @@ class Series:
 
 
 def gamma_nu_curve(bT, gnu):
-    """γ_ν^NP(b_T) for one gnu dict (CS sector)."""
-    return np.asarray(btgrid_tf.gamma_nu_NP_tf(bT, **gnu), dtype=float)
+    """γ_ν^NP(b_T) for one gnu dict (CS sector).
+
+    ``gnu`` carries the numeric λ plus the ``np_model_nu`` key; the form reads the
+    λ it needs and ignores the model key (passed explicitly as the selector)."""
+    return np.asarray(
+        btgrid_tf.gamma_nu_NP_tf(bT, gnu, np_model_nu=gnu["np_model_nu"]), dtype=float
+    )
 
 
 def f_eff_curve(bT, y, eff):
     """F_eff(y, b_T) for one eff dict at rapidity ``y`` (TMD sector)."""
-    return np.asarray(btgrid_tf.F_eff_tf(y, bT, **eff), dtype=float)
+    return np.asarray(
+        btgrid_tf.F_eff_tf(y, bT, eff, np_model=eff["np_model"]), dtype=float
+    )
 
 
 def _band(curves, pct):

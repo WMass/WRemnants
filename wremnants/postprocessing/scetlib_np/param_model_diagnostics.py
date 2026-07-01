@@ -80,8 +80,8 @@ def np_damping_ok(core, eff_params, gnu_params, b_probe=NP_PROBE_BT, gamma_tol=1
     b = np.asarray(b_probe, dtype=np.float64)
     eff = {k: v for k, v in eff_params.items() if k != "np_model"}
     gnu = {k: v for k, v in gnu_params.items() if k != "np_model_nu"}
-    g = fz_tf.gamma_nu_NP_tf(b, np_model_nu=core.np_model_nu, **gnu).numpy()
-    F = fz_tf.F_eff_tf(0.0, b, np_model=core.np_model, **eff).numpy()
+    g = fz_tf.gamma_nu_NP_tf(b, gnu, np_model_nu=core.np_model_nu).numpy()
+    F = fz_tf.F_eff_tf(0.0, b, eff, np_model=core.np_model).numpy()
     gamma_max = float(np.max(g))
     feff_growing = bool(F[-1] > F[0])
     return {
