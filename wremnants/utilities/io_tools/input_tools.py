@@ -333,10 +333,11 @@ def read_dyturbo_hist(
     hists = []
     for fn in filenames:
 
-        if "-mur0p5-" in fn.split("/")[-1]:
-            fn = fn.replace("-mur0p5-", "-murH-")
-        if "-muf0p5-" in fn.split("/")[-1]:
-            fn = fn.replace("-muf0p5-", "-mufH-")
+        # TODO the naming convention is unclear and inconsistent. These may be needed in the future.
+        # if "-mur0p5-" in fn.split("/")[-1]:
+        #     fn = fn.replace("-mur0p5-", "-murH-")
+        # if "-muf0p5-" in fn.split("/")[-1]:
+        #     fn = fn.replace("-muf0p5-", "-mufH-")
 
         expandedf = fn.split("+")
 

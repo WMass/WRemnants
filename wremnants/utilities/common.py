@@ -16,6 +16,13 @@ BR_TAUToMU = 0.1739
 BR_TAUToE = 0.1782
 Z_TAU_TO_LEP_RATIO = 1.0 - (1.0 - BR_TAUToMU - BR_TAUToE) ** 2
 
+# Z mass/width in the s-dependent-width ("running width") scheme used for the
+# gen Breit-Wigner lineshape and by SCETlib. These are NOT the PDG pole values
+# (mZ = 91.1876, GammaZ = 2.4952); they are the values fed to make_bw_binning in
+# the gen histmakers (w_z_gen_dists.py, mz_dilepton.py).
+MZ_S_DEP_WIDTH = 91.1535
+GAMMAZ_S_DEP_WIDTH = 2.4932
+
 # cross sections in pb at sqrt(s)=13TeV (TODO: add source information)
 xsec_DYJetsToLL = 2001.9
 xsec_WplusJetsToLNu = 11765.9

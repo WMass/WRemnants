@@ -18,6 +18,7 @@ from wremnants.postprocessing.datagroups import datagroups
 from wremnants.postprocessing.datagroups.datagroups import Datagroups
 from wremnants.postprocessing.histselections import FakeSelectorSimpleABCD
 from wremnants.postprocessing.regression import Regressor
+from wremnants.postprocessing.scetlib_np import response_matrix as scetlib_np_response
 from wremnants.postprocessing.syst_tools import (
     fake_nonclosure_byAxis,
     fake_transferFactor_ptSyst,
@@ -639,6 +640,11 @@ def make_parser(parser=None, argv=None):
         "--addCustomRecoilSyst",
         action="store_true",
         help="Add custom recoil systematic uncertainties from smearing met pt/phi and scaling met pt",
+    )
+    parser.add_argument(
+        "--storeResponseMatrix",
+        action="store_true",
+        help="Store response matrix for SCETlib-NP parameter model",
     )
 
     parser.add_argument(
@@ -3584,6 +3590,40 @@ if __name__ == "__main__":
         outfolder = f"{args.outfolder}/Combination_{''.join(unique_names)}{dir_append}/"
         outfile = "Combination"
     logger.info(f"Writing output to {outfile}")
+
+    # ---- SCETlib-NP response matrix R: embed it in the datacard so the
+    # SCETlibNPParamModel reads R (and the gen-total N_gen) from the fit input,
+    # consistent with the run that produced the card, rather than from a
+    # separate, independently-versioned file. Presence-based *lenient* guard
+    # (see response_matrix.has_response): embed only when an input carries BOTH
+    # the response hist and the gen-total, so generic unfolding runs that lack
+    # the gen-total are a no-op. A genuine NP card missing the gen-total simply
+    # won't embed and the SCETlibNPParamModel will then error clearly at fit
+    # time. One source, one path: the ParamModel reads R only from the datacard.
+    if args.storeResponseMatrix:
+        resp_inputs = [f for f in args.inputFile if scetlib_np_response.has_response(f)]
+        if len(resp_inputs) > 1:
+            raise RuntimeError(
+                "Multiple inputs carry the SCETlib-NP response (hist + gen-total): "
+                f"{resp_inputs}; expected at most one (the Z dilepton --unfolding run)."
+            )
+        if resp_inputs:
+            logger.info(f"Embedding SCETlib-NP response matrix from {resp_inputs[0]}")
+            R_info = scetlib_np_response.load_R(resp_inputs[0])
+            writer.add_auxiliary(
+                "scetlib_np",
+                {
+                    "R": R_info["R"],
+                    "N_gen": R_info["N_gen"],
+                    "reco_axes": [n for n, _ in R_info["reco_axes"]],
+                    "gen_axes": [n for n, _ in R_info["gen_axes"]],
+                    # one edges dataset per reco/gen axis (variable length)
+                    **{
+                        f"edges__{n}": e
+                        for n, e in R_info["reco_axes"] + R_info["gen_axes"]
+                    },
+                },
+            )
 
     # propagate meta info into result file
     meta = {

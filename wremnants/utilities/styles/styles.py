@@ -1,6 +1,6 @@
 import copy
 
-import matplotlib.cm as cm
+import matplotlib
 
 from wums import boostHistHelpers as hh
 from wums import logging
@@ -272,6 +272,7 @@ common_groups = [
     "ZmassAndWidth",
     "massAndWidth",
     "normXsecZ",
+    "resumNonpert",
 ]
 nuisance_grouping = {
     "super": [
@@ -818,7 +819,7 @@ def get_labels_colors_procs_sorted(procs):
         "Rare",
     ][::-1]
 
-    cmap = cm.get_cmap("tab10")
+    cmap = matplotlib.colormaps["tab10"]
 
     procs = sorted(
         procs, key=lambda x: procs_sort.index(x) if x in procs_sort else len(procs_sort)
