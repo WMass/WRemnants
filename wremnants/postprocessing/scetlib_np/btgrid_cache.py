@@ -1,8 +1,8 @@
 """One-shot pickle cache for the combined SCETlib bT-grid.
 
-Assembling the bT-grid from its individual shards is slow. On the first call
-this module writes a single ``combined_btgrid.pkl`` in the btgrid directory;
-subsequent calls load that combined file directly, which is much faster.
+Assembling the bT-grid from its shards is slow. The first call writes a single
+``combined_btgrid.pkl`` in the btgrid directory; later calls load it directly,
+much faster.
 
 Usage:
     from wremnants.postprocessing.scetlib_np import btgrid_cache
@@ -23,20 +23,20 @@ def load_btgrid_shards(submitdir_or_glob, runcard_basename=None):
     """Combine bT-grid shards produced by --bt-grid mode.
 
     `submitdir_or_glob` may be:
-      - a directory: we look for ``*_btgrid.pkl`` inside (recursively only
-        one level via scetlib_outputs/).
+      - a directory: looks for ``*_btgrid.pkl`` inside (one level deep via
+        scetlib_outputs/).
       - a glob pattern: used directly.
 
     Returns dict with:
         bT      : (Nbt,)
         b_bar   : (Nbt,)
         bins    : list of (Q, Y, qT, lep) bin centres, length Nbins
-        vars    : dict of variation index -> setting dict (copied from the
-                  first shard; all shards are expected to carry the same set)
+        vars    : dict variation index -> setting dict (from the first shard;
+                  all shards expected to carry the same set)
         I_pert  : (Nvars, Nbins, Nbt)
         C_nu   : (Nvars, Nbins, Nbt)
-        config  : dict from the first shard (perturbative configuration the
-                  grid was generated against)
+        config  : dict from the first shard (perturbative config the grid was
+                  generated against)
         n_shards: int
     """
     if os.path.isdir(submitdir_or_glob):
@@ -69,8 +69,8 @@ def load_btgrid_shards(submitdir_or_glob, runcard_basename=None):
     n_vars = len(varis)
     n_bt = bT.size
 
-    # We don't know Nbins ahead of time without scanning all shards. Walk them
-    # once: build a dict of bin -> (var_idx -> (I_pert_row, C_nu_row)).
+    # Nbins is unknown without scanning all shards. Walk once: dict of
+    # bin -> (var_idx -> (I_pert_row, C_nu_row)).
     bin_to_data = {}
     for path in files:
         with open(path, "rb") as f:
@@ -86,9 +86,8 @@ def load_btgrid_shards(submitdir_or_glob, runcard_basename=None):
             d["I_pert"], dtype=float
         )  # (Nvars_local, Nbins_local, Nbt)
         C_local = np.asarray(d["C_nu"], dtype=float)
-        # Map local variation indices to the union variation order. We assume
-        # all shards share the same vars dict (true when produced by the same
-        # condor submission).
+        # Map local variation indices to the union order. Assumes all shards
+        # share the same vars dict (true within one condor submission).
         var_order_local = list(d["vars"].keys())
         for b_idx, b_tup in enumerate(bins_local):
             slot = bin_to_data.setdefault(tuple(b_tup), {})
@@ -147,12 +146,10 @@ def _cache_is_fresh(combined, shards):
 def load(submitdir, rebuild=False, verbose=True):
     """Load the combined bT-grid for ``submitdir``.
 
-    On first call (or when ``rebuild=True``, or when any shard is newer than
-    the cached combined file), assembles the shards via
-    :func:`load_btgrid_shards`, writes ``combined_btgrid.pkl``, and returns
-    the dict.
-
-    On subsequent calls, loads the pickle directly.
+    On first call (or ``rebuild=True``, or any shard newer than the cached
+    combined file), assembles the shards via :func:`load_btgrid_shards`, writes
+    ``combined_btgrid.pkl``, returns the dict. Otherwise loads the pickle
+    directly.
     """
     if not os.path.isdir(submitdir):
         raise ValueError(f"{submitdir!r} is not a directory")
@@ -187,3 +184,17 @@ def load(submitdir, rebuild=False, verbose=True):
         pickle.dump(grid, f, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, combined)
     return grid
+
+
+def combined_path(submitdir):
+    """Path to the combined bT-grid pickle for ``submitdir`` (may not exist yet)."""
+    return _combined_path(submitdir)
+
+
+def is_combined_fresh(submitdir):
+    """True if ``combined_btgrid.pkl`` exists and is at least as new as every
+    shard, i.e. :func:`load` would read it directly rather than reassemble.
+
+    Exposed so a derived cache (e.g. the factorized layout in :mod:`sigma_gen`)
+    can key its own freshness on the combined pickle without loading it."""
+    return _cache_is_fresh(_combined_path(submitdir), _shard_glob(submitdir))

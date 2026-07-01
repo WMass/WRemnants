@@ -1,20 +1,17 @@
 """TensorFlow bT-grid factorization library.
 
-Differentiable TF implementation of the SCETlib bT-space form factors and Hankel
-reconstruction (transcribed from the SCETlib C++).
+Differentiable TF transcription of the SCETlib bT-space form factors and Hankel
+reconstruction (from the SCETlib C++).
 
-Design choices:
-  * ``np_model`` / ``np_model_nu`` strings are fixed at trace time (the SCETlib
-    runcard sets them once per fit). The TF functions dispatch on the string at
-    Python level — no ``tf.cond``.
-  * λ parameters are TF tensors (typically scalars, but broadcasting follows
-    the usual array rules).
-  * All ops are differentiable in λ. Branches on λ values use ``tf.where``
-    with a safe denominator to avoid NaN gradients.
-  * ``b_star_global`` is not ported — the cached ``b_bar`` array in the bT-grid
-    shards is precomputed and travels as a ``tf.constant``.
-  * Simpson weights are precomputed at trace time from the (static) bT, Y, qT
-    grids; the runtime cost is just ``tf.reduce_sum(w * y)``.
+  * ``np_model`` / ``np_model_nu`` fixed at trace time (set once per fit by the
+    runcard); functions dispatch on the string at Python level, not ``tf.cond``.
+  * λ parameters are TF tensors (typically scalars; usual broadcasting).
+  * All ops differentiable in λ; branches on λ use ``tf.where`` with a safe
+    denominator to avoid NaN gradients.
+  * ``b_star_global`` not ported: the precomputed ``b_bar`` shard array travels
+    as a ``tf.constant``.
+  * Simpson weights precomputed at trace time from the static bT, Y, qT grids;
+    runtime cost is ``tf.reduce_sum(w * y)``.
 """
 
 from typing import Mapping
@@ -22,16 +19,16 @@ from typing import Mapping
 import numpy as np
 import tensorflow as tf
 
-# Set the dtype used for all ops in this module (float64 throughout).
+# float64 throughout this module.
 DTYPE = tf.float64
 
 
 def _as_dtype(x, dtype=DTYPE):
     """Coerce ``x`` to ``dtype`` without losing precision on Python scalars.
 
-    ``tf.cast(0.4, tf.float64)`` round-trips through float32 (returning
-    ``0.4000000059604645``); ``tf.constant(0.4, dtype=tf.float64)`` does not.
-    Use this helper everywhere a possibly-Python-float input enters the graph.
+    ``tf.cast(0.4, tf.float64)`` round-trips through float32
+    (``0.4000000059604645``); ``tf.constant(0.4, dtype=tf.float64)`` does not.
+    Use wherever a possibly-Python-float input enters the graph.
     """
     if isinstance(x, (int, float)):
         return tf.constant(x, dtype=dtype)
@@ -44,10 +41,10 @@ def _as_dtype(x, dtype=DTYPE):
 
 
 def simpson_weights(x):
-    """Return weights ``w`` such that Simpson(y, x) == sum(w * y, axis=-1).
+    """Weights ``w`` such that Simpson(y, x) == sum(w * y, axis=-1).
 
-    ``x`` is a numpy array with size ``N``. Composite Simpson with a trapezoid
-    fallback on the last segment when N-1 is odd.
+    ``x`` is a size-``N`` numpy array. Composite Simpson, trapezoid fallback on
+    the last segment when N-1 is odd.
     """
     x = np.asarray(x, dtype=np.float64)
     n_intervals = x.size - 1
@@ -55,7 +52,7 @@ def simpson_weights(x):
         return np.zeros_like(x)
 
     if n_intervals % 2 == 1:
-        # leading n-1 intervals get Simpson, last segment gets trapezoid
+        # leading n-1 intervals Simpson, last segment trapezoid
         w_lead = simpson_weights(x[:-1])
         w = np.concatenate([w_lead, [0.0]])
         h_last = x[-1] - x[-2]
@@ -115,29 +112,28 @@ GNU_MODELS = {
 
 
 def _frozen_eq_zero(x):
-    """``x == 0`` as a gradient-frozen boolean condition for the NP-factor masks.
+    """``x == 0`` as a gradient-frozen condition for the NP-factor masks.
 
-    The comparison is a non-differentiable, measure-zero boundary that the
+    The comparison is a non-differentiable, measure-zero boundary the
     surrounding ``tf.where`` never differentiates through, so freezing its input
-    leaves both the value and every derivative unchanged. But it is REQUIRED for
-    the full-K Hessian: the straight-through ``K`` path nests two
-    ``ForwardAccumulator``s (forward-over-forward AD), and building the JVP of an
-    ``Equal`` op that receives a tangent-carrying input raises
-    ``IndexError: list index out of range`` under ``@tf.function`` (a TF
-    nested-forward-mode bug). With the input frozen no tangent ever reaches the
-    comparison, so the bug never triggers; the ``tf.where``'s own JVP with a
-    constant condition is fine. (The earlier GN/J-only path never hit this — it
-    uses a single ``ForwardAccumulator``, for which ``Equal``'s JVP is fine.)"""
+    changes no value or derivative. REQUIRED for the full-K Hessian: the
+    straight-through ``K`` path nests two ``ForwardAccumulator``s
+    (forward-over-forward AD), and the JVP of an ``Equal`` op fed a
+    tangent-carrying input raises ``IndexError: list index out of range`` under
+    ``@tf.function`` (a TF nested-forward-mode bug). Frozen input → no tangent
+    reaches the comparison; the ``tf.where`` JVP with a constant condition is
+    fine. (The GN/J-only path uses one ``ForwardAccumulator``, where ``Equal``'s
+    JVP is fine.)"""
     return tf.equal(tf.stop_gradient(x), 0)
 
 
 def _safe_div(num, den):
-    """``num / den`` with the denominator clamped to 1 where it is exactly zero.
+    """``num / den`` with the denominator clamped to 1 where exactly zero.
 
-    Equivalent to ``num / tf.where(den == 0, 1, den)``; the comparison input is
-    frozen (see :func:`_frozen_eq_zero`) so the full-K nested forward-mode
-    Hessian does not crash under ``@tf.function``. Keeps gradients finite; the
-    den==0 result is masked away by the caller's final ``tf.where``."""
+    Equivalent to ``num / tf.where(den == 0, 1, den)`` with a frozen comparison
+    input (see :func:`_frozen_eq_zero`) so the full-K nested forward-mode Hessian
+    doesn't crash under ``@tf.function``. Gradients stay finite; the den==0
+    result is masked away by the caller's final ``tf.where``."""
     den_safe = tf.where(_frozen_eq_zero(den), tf.ones_like(den), den)
     return num / den_safe
 
@@ -165,8 +161,8 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
     if np_model == "identity":
         return tf.exp(-2.0 * bT * arg)
 
-    # lambda_inf == 0 returns ones. We compute the full formula with a safe
-    # denominator and mask at the end.
+    # lambda_inf == 0 returns ones: compute the full formula with a safe
+    # denominator, mask at the end.
     arg_inf = _safe_div(arg, lambda_inf)
     model = {"hyp_tangent": "tanh_2", "square_root": "frac_2"}.get(np_model, np_model)
 
@@ -193,13 +189,21 @@ def F_eff_tf(Y, bT, *, lambda_inf, lambda2, lambda4, lambda6, delta_lambda2, np_
         raise ValueError(f"F_eff_tf: unsupported np_model {np_model!r}")
 
     full = tf.exp(-2.0 * lambda_inf * bT * func)
-    # lambda_inf == 0 -> 1 (NP off). Frozen comparison input so the full-K nested
-    # forward-mode Hessian doesn't crash under @tf.function (see _frozen_eq_zero).
+    # lambda_inf == 0 -> 1 (NP off); frozen comparison input (see
+    # _frozen_eq_zero) for the full-K @tf.function Hessian.
     return tf.where(_frozen_eq_zero(lambda_inf), tf.ones_like(full), full)
 
 
-def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
-    """CS-side NP rapidity anomalous dimension γ_ν^NP(bT) for fixed ``np_model_nu``."""
+def gamma_nu_NP_tf(
+    bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, lambda6_nu=0.0, np_model_nu
+):
+    """CS-side NP rapidity anomalous dimension γ_ν^NP(bT) for fixed ``np_model_nu``.
+
+    ``lambda6_nu`` is the b⁶ coefficient used only by the ``tanh_6`` model; other
+    models ignore it. It defaults to 0 (then tanh_6 reduces to tanh_2). SCETlib's
+    own ``NP_model_gammanu`` uses 0.0007 (Gamma_nu.hpp:102) — pass that to
+    reproduce SCETlib's regulated CS kernel.
+    """
     if np_model_nu not in GNU_MODELS:
         raise ValueError(f"gamma_nu_NP_tf: unsupported np_model_nu {np_model_nu!r}")
 
@@ -207,6 +211,7 @@ def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
     lambda_inf_nu = _as_dtype(lambda_inf_nu)
     lambda2_nu = _as_dtype(lambda2_nu)
     lambda4_nu = _as_dtype(lambda4_nu)
+    lambda6_nu = _as_dtype(lambda6_nu)
 
     bT2 = bT * bT
     arg = _safe_div((lambda2_nu + lambda4_nu * bT2) * bT2, lambda_inf_nu)
@@ -219,8 +224,9 @@ def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
     elif model == "tanh_2":
         func = tf.tanh(arg)
     elif model == "tanh_6":
-        # NP_model_gammanu hardcodes lambda6_nu = 0.0007 (Gamma_nu.hpp:102)
-        a = arg + _safe_div(0.0007 * bT2**3, lambda_inf_nu)
+        # b⁶ term (SCETlib NP_model_gammanu uses lambda6_nu = 0.0007,
+        # Gamma_nu.hpp:102); here it is the fittable lambda6_nu (default 0).
+        a = arg + _safe_div(lambda6_nu * bT2**3, lambda_inf_nu)
         func = tf.tanh(a)
     elif model == "frac_1":
         a = arg + _safe_div(lambda2_nu * bT2, lambda_inf_nu) ** 2
@@ -236,8 +242,8 @@ def gamma_nu_NP_tf(bT, *, lambda_inf_nu, lambda2_nu, lambda4_nu, np_model_nu):
         raise ValueError(f"gamma_nu_NP_tf: unsupported np_model_nu {np_model_nu!r}")
 
     full = -lambda_inf_nu * func
-    # lambda_inf_nu == 0 -> 0 (NP off). Frozen comparison input so the full-K nested
-    # forward-mode Hessian doesn't crash under @tf.function (see _frozen_eq_zero).
+    # lambda_inf_nu == 0 -> 0 (NP off); frozen comparison input (see
+    # _frozen_eq_zero) for the full-K @tf.function Hessian.
     return tf.where(_frozen_eq_zero(lambda_inf_nu), tf.zeros_like(full), full)
 
 
@@ -266,25 +272,23 @@ def reconstruct_batch_tf(
     """Reconstruct σ on a batch of (Q, Y, qT) grid points from the bT integrand.
 
     Implements the per-(Q, Y, qT) bT-space integrand. The full formula with
-    every factor and its bare-bT / b*(bT) / (Q,Y,qT) / λ dependence is written
-    out in the :mod:`param_model` module docstring — consult it rather than
-    re-deriving the factors from this code.
+    every factor and its bare-bT / b*(bT) / (Q,Y,qT) / λ dependence is in the
+    :mod:`param_model` module docstring.
 
-    All array-shape arguments are TF tensors or numpy arrays (will be cast).
-    The λ values inside ``eff_params`` / ``gnu_params`` are the differentiable
-    parameters — pass them as TF scalars (Variables or constants).
+    Array-shape arguments are TF tensors or numpy arrays (cast on entry). The λ
+    values in ``eff_params`` / ``gnu_params`` are the differentiable parameters;
+    pass them as TF scalars (Variables or constants).
 
     ``bT_simpson_weights`` and ``bT_J0_kernel`` are optional precomputed
-    constants. Pass them in the ParamModel to avoid recomputing per-step.
+    constants; pass them from the ParamModel to avoid recomputing per-step.
 
-    ``Y_unique`` / ``Y_inverse_idx`` are an optional precomputed unique-Y map
-    (``Y_unique`` = sorted distinct Y values, shape ``(NY,)``; ``Y_inverse_idx``
-    = per-bin index into ``Y_unique``, shape ``(Nbins,)``). ``F_eff`` depends on
-    the bin only through Y, so when this map is supplied the NP transcendentals
-    are evaluated on the ``NY`` unique rows and gathered back to ``(Nbins, Nbt)``
-    — bit-for-bit identical to the per-bin evaluation, but the expensive ops and
-    their λ-gradients run on ``NY`` rows instead of ``Nbins`` (Q and qT don't
-    enter ``F_eff``). Without the map it falls back to the full per-bin path.
+    ``Y_unique`` / ``Y_inverse_idx`` are an optional unique-Y map (``Y_unique`` =
+    sorted distinct Y, shape ``(NY,)``; ``Y_inverse_idx`` = per-bin index into
+    it, shape ``(Nbins,)``). ``F_eff`` depends on the bin only through Y, so the
+    NP transcendentals run on the ``NY`` unique rows and gather back to
+    ``(Nbins, Nbt)`` — bit-for-bit identical to per-bin, but with the expensive
+    ops and their λ-gradients on ``NY`` rows not ``Nbins`` (Q, qT don't enter
+    ``F_eff``). Without the map, falls back to the full per-bin path.
     """
     qT_per_bin = _as_dtype(qT_per_bin)  # (Nbins,)
     Y_per_bin = _as_dtype(Y_per_bin)  # (Nbins,)
@@ -298,7 +302,7 @@ def reconstruct_batch_tf(
     bT_J0_kernel = _as_dtype(bT_J0_kernel)  # (Nbins, Nbt)
 
     if bT_simpson_weights is None:
-        # bT is a tf.Tensor here; convert to numpy for the Python-side weights
+        # bT is a tf.Tensor; to numpy for the Python-side weights
         bT_simpson_weights = simpson_weights(np.asarray(bT))
     bT_simpson_weights = _as_dtype(bT_simpson_weights)  # (Nbt,)
 
@@ -311,17 +315,17 @@ def reconstruct_batch_tf(
         Feff = F_eff_tf(0.0, b_bar, **eff_params, np_model=np_model)  # (Nbt,)
         Feff_b = Feff[tf.newaxis, :]
     elif Y_unique is not None and Y_inverse_idx is not None:
-        # per-bin F_eff, but evaluated on the unique Y rows then gathered.
-        # Exact: identical Y -> identical F_eff row for any λ; the gather only
-        # replicates rows (its backward scatter-adds the cotangents, so λ-grads
-        # are unchanged). Transcendentals run on (NY, Nbt), not (Nbins, Nbt).
+        # per-bin F_eff on the unique-Y rows, then gathered. Exact: identical Y
+        # -> identical F_eff row for any λ; the gather only replicates rows
+        # (backward scatter-adds cotangents, λ-grads unchanged). Transcendentals
+        # run on (NY, Nbt), not (Nbins, Nbt).
         Y_u = _as_dtype(Y_unique)[:, tf.newaxis]  # (NY, 1)
         b_b = b_bar[tf.newaxis, :]
         Feff_u = F_eff_tf(Y_u, b_b, **eff_params, np_model=np_model)  # (NY, Nbt)
         Feff_b = tf.gather(Feff_u, Y_inverse_idx)  # (Nbins, Nbt)
     else:
-        # per-bin F_eff due to Y dependence (delta_lambda2 * Y^2)
-        # build (Nbins, Nbt) by broadcasting Y_per_bin over bT
+        # per-bin F_eff (Y dependence via delta_lambda2 * Y^2): build
+        # (Nbins, Nbt) by broadcasting Y_per_bin over bT
         Y_b = Y_per_bin[:, tf.newaxis]
         b_b = b_bar[tf.newaxis, :]
         Feff_b = F_eff_tf(Y_b, b_b, **eff_params, np_model=np_model)  # (Nbins, Nbt)
@@ -336,13 +340,12 @@ def reconstruct_batch_tf(
 def build_bT_J0_kernel(qT_per_bin, bT):
     """Precompute ``bT * J_0(qT*bT)`` on the (Nbins, Nbt) grid.
 
-    λ-independent — call once at ParamModel construction and pass into
+    λ-independent: call once at ParamModel construction, pass into
     :func:`reconstruct_batch_tf` as ``bT_J0_kernel``.
 
-    Note: in the factorized path (:func:`reconstruct_batch_factorized_tf`)
-    this is instead called with ``qT_unique`` (NqT distinct values, not the
-    per-bin expansion), giving a (NqT, Nbt) kernel — same numbers, ~4000×
-    smaller.
+    The factorized path (:func:`reconstruct_batch_factorized_tf`) instead calls
+    it with ``qT_unique`` (NqT distinct values, not the per-bin expansion),
+    giving a (NqT, Nbt) kernel: same numbers, ~4000× smaller.
     """
     qT_per_bin = _as_dtype(qT_per_bin)
     bT = _as_dtype(bT)
@@ -354,39 +357,39 @@ def build_bT_J0_kernel(qT_per_bin, bT):
 # Factorized reconstruction (GPU-memory-safe; exact)
 # =============================================================================
 #
-# The (Nbins, Nbt) layout of reconstruct_batch_tf needs several ~9 GB fp64
-# tensors (Nbins=546840, Nbt=2000) and OOMs a 32 GB GPU at construction. Two
-# exact observations shrink it:
+# reconstruct_batch_tf's (Nbins, Nbt) layout needs several ~9 GB fp64 tensors
+# (Nbins=546840, Nbt=2000) and OOMs a 32 GB GPU at construction. Two exact
+# observations shrink it:
 #
-#   1. qT enters the λ-dependent integrand ONLY through the bT·J0(qT·bT)
-#      kernel: the kernel needs the NqT *unique* qT values, not Nbins rows.
-#   2. SCETlib's profile scales are piecewise in x = qT/Q and exactly
-#      canonical (qT-independent) below the first transition point x1·Q, so
-#      the cached I_pert / C_nu rows are BIT-IDENTICAL across qT there. The
-#      dedup below discovers identical rows dynamically (byte-wise hashing +
-#      full verification) — no assumption about profiles or qT ranges.
+#   1. qT enters the λ-dependent integrand ONLY via the bT·J0(qT·bT) kernel,
+#      which needs the NqT *unique* qT values, not Nbins rows.
+#   2. SCETlib's profile scales are piecewise in x = qT/Q and exactly canonical
+#      (qT-independent) below the first transition x1·Q, so the cached
+#      I_pert / C_nu rows are BIT-IDENTICAL across qT there. The dedup below
+#      discovers identical rows dynamically (byte-wise hashing + full
+#      verification) — no assumption about profiles or qT ranges.
 #
-# The bT-Simpson reduction then becomes a (Nu, Nbt) @ (Nbt, NqT) matmul plus
-# a per-bin gather. Same integrand, same Simpson weights, same sampling; only
-# the floating-point grouping/summation order changes (≲1e-14 relative).
+# The bT-Simpson reduction then becomes a (Nu, Nbt) @ (Nbt, NqT) matmul plus a
+# per-bin gather. Same integrand, weights and sampling; only the floating-point
+# grouping/summation order changes (≲1e-14 relative).
 
 
 def dedup_grid_rows(I_pert, C_nu, feff_idx_per_bin, verbose=True):
     """Find bit-identical (I_pert, C_nu, F_eff-index) row triples.
 
-    Construction-time numpy helper (runs once, CPU). Rows are keyed by the
-    raw bytes of the I_pert row, the C_nu row and the per-bin F_eff Y-index,
-    so two bins share a unique id iff their λ-dependent integrand columns are
-    bit-for-bit identical for EVERY λ. The grouping is verified by direct
-    array comparison afterwards (no reliance on hash collision odds).
+    Construction-time numpy helper (runs once, CPU). Rows are keyed by the raw
+    bytes of the I_pert row, the C_nu row and the per-bin F_eff Y-index, so two
+    bins share a unique id iff their λ-dependent integrand columns are
+    bit-for-bit identical for EVERY λ. Grouping verified by direct array
+    comparison afterward, not hash-collision odds.
 
     Parameters
     ----------
     I_pert, C_nu : (Nbins, Nbt) float64 ndarrays
     feff_idx_per_bin : (Nbins,) int ndarray
-        Index into the unique-Y table used for the F_eff gather (Y enters
-        F_eff via delta_lambda2·Y²; keying on it keeps the per-unique-row
-        F_eff well-defined even when delta_lambda2 floats).
+        Index into the unique-Y table for the F_eff gather (Y enters F_eff via
+        delta_lambda2·Y²; keying on it keeps per-unique-row F_eff well-defined
+        even when delta_lambda2 floats).
 
     Returns
     -------
@@ -395,14 +398,12 @@ def dedup_grid_rows(I_pert, C_nu, feff_idx_per_bin, verbose=True):
         row_uid  : (Nbins,) int32, bin -> unique-row index
         feff_idx_u : (Nu,) int32, unique row -> unique-Y index
         n_unique : int
-        C_uu     : (Ncu, Nbt) second-level dedup of the C_u rows. C_nu is the
-                   ν-evolution coefficient — it depends on (Q, profile-qT)
-                   only, not Y, so its standalone unique-row count is ~150x
-                   smaller than Nu (1888 vs 284605 on the fineall grid). The
-                   exp(C·g) transcendentals run on these rows and are
-                   gathered back — bit-identical, ~150x fewer exp() calls,
-                   and the (Nu, Nbt) C constant never needs to exist on
-                   device.
+        C_uu     : (Ncu, Nbt) second-level dedup of C_u. C_nu depends on
+                   (Q, profile-qT) only, not Y, so its standalone unique-row
+                   count is ~150x smaller than Nu (1888 vs 284605 on fineall).
+                   The exp(C·g) transcendentals run on these rows, gathered
+                   back: bit-identical, ~150x fewer exp() calls, and the
+                   (Nu, Nbt) C constant never exists on device.
         c_of_u   : (Nu,) int32, unique row -> C_uu row index
         n_unique_C : int
     """
@@ -435,8 +436,8 @@ def dedup_grid_rows(I_pert, C_nu, feff_idx_per_bin, verbose=True):
     C_u = np.ascontiguousarray(C_nu[rep_rows])
     feff_idx_u = feff_idx_per_bin[rep_rows].astype(np.int32)
 
-    # Verify the grouping bit-exactly: every bin's rows must equal its
-    # representative's. Chunked to bound the temporary gather copies.
+    # Verify bit-exactly: every bin's rows must equal its representative's.
+    # Chunked to bound the temporary gather copies.
     chunk = 20000
     for k0 in range(0, n_bins, chunk):
         k1 = min(k0 + chunk, n_bins)
@@ -451,8 +452,8 @@ def dedup_grid_rows(I_pert, C_nu, feff_idx_per_bin, verbose=True):
                 f"[{k0}, {k1}) — this should be impossible; grid corrupt?"
             )
 
-    # Second-level dedup of the C rows (qT-and-Y-independent below the
-    # profile transition AND Y-independent everywhere → ~150x smaller).
+    # Second-level dedup of the C rows (qT-independent below the profile
+    # transition AND Y-independent everywhere → ~150x smaller).
     n_u = len(rep_rows)
     seen_c = {}
     c_of_u = np.empty(n_u, dtype=np.int32)
@@ -517,10 +518,10 @@ def reconstruct_batch_factorized_tf(
 
     Evaluates σ_i = qT_i Σ_b w_b·bT_b·J0(qT_i bT_b)·I_{u(i),b}·exp(C_{u(i),b}
     g_b)·F_{y(u(i)),b} as a (Nu, Nbt) elementwise block, a matmul against the
-    weighted J0 kernel on the unique-qT grid, and a per-bin gather — no
-    (Nbins, Nbt) tensor is ever materialized. Same integrand, weights and
-    sampling as :func:`reconstruct_batch_tf`; only the floating-point
-    multiplication grouping and summation order differ (≲1e-14 relative).
+    weighted J0 kernel on the unique-qT grid, and a per-bin gather; no
+    (Nbins, Nbt) tensor is materialized. Same integrand, weights and sampling as
+    :func:`reconstruct_batch_tf`; only the floating-point multiplication grouping
+    and summation order differ (≲1e-14 relative).
 
     Parameters
     ----------
@@ -528,13 +529,13 @@ def reconstruct_batch_factorized_tf(
     I_pert_u : (Nu, Nbt) — deduplicated grid rows
         (from :func:`dedup_grid_rows`)
     C_nu_u : (Nu, Nbt), optional
-        Per-unique-row C_ν. Either this OR (``C_nu_uu``, ``c_of_u``) must be
-        given; the latter is preferred (~150x fewer exp() calls and no
-        (Nu, Nbt) C constant on device — bit-identical results, since exp of
-        identical rows is identical and the gather only replicates rows).
+        Per-unique-row C_ν. Pass this OR (``C_nu_uu``, ``c_of_u``); the latter
+        is preferred (~150x fewer exp() calls, no (Nu, Nbt) C constant on
+        device). Bit-identical: exp of identical rows is identical, gather only
+        replicates rows.
     KwqT : (NqT, Nbt)
-        ``qT_u · bT · J0(qT_u·bT) · w_simpson`` on the unique-qT grid; the
-        per-bin qT prefactor of reconstruct_batch_tf is folded in here.
+        ``qT_u · bT · J0(qT_u·bT) · w_simpson`` on the unique-qT grid; folds in
+        reconstruct_batch_tf's per-bin qT prefactor.
     gather_idx : (Nbins, 2) int32 — per bin ``[u(i), qT_index(i)]``
     Y_unique : (NY,) — unique Y values for the F_eff evaluation
     feff_idx_u : (Nu,) int32 — unique row -> Y_unique index
@@ -565,9 +566,9 @@ def reconstruct_batch_factorized_tf(
         Feff = F_eff_tf(0.0, b_bar, **eff_params, np_model=np_model)  # (Nbt,)
         Feff_u = Feff[tf.newaxis, :]  # broadcast over Nu
     else:
-        # F_eff on the unique-Y rows, gathered to the unique grid rows. Same
-        # unique-Y trick as reconstruct_batch_tf — the gather replicates rows
-        # bit-exactly and scatter-adds cotangents in the backward pass.
+        # F_eff on the unique-Y rows, gathered to the unique grid rows (same
+        # unique-Y trick as reconstruct_batch_tf: gather replicates rows
+        # bit-exactly, scatter-adds cotangents on the backward pass).
         Y_u = _as_dtype(Y_unique)[:, tf.newaxis]  # (NY, 1)
         Feff_rows = F_eff_tf(
             Y_u, b_bar[tf.newaxis, :], **eff_params, np_model=np_model

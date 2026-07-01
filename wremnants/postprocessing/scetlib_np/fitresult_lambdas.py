@@ -1,30 +1,28 @@
 """Read SCETlib NP λ out of a rabbit fitresults HDF5 (table / curves / toys).
 
-The OUTPUT-side companion to :mod:`lambda_central` (which reads the INPUT-side
+OUTPUT-side companion to :mod:`lambda_central` (which reads the INPUT-side
 λ_central from the upstream correction pkl). Two responsibilities, kept apart
-from the plotting:
+from plotting:
 
-  * Tabulate the λ — prefit/postfit value, prefit/postfit 1σ constraint, and
-    whether each was frozen — and print it (``read_lambdas`` + the CLI here).
+  * Tabulate the λ (prefit/postfit value, prefit/postfit 1σ constraint, frozen
+    flag) and print it (``read_lambdas`` + the CLI).
   * Turn a fitresults into the λ sets / toy ensembles the pure plotter
     :mod:`np_function_plots` consumes (``lambdas_from_fitresult``,
     ``sample_lambda_toys``, ``plot_series_from_fitresult``).
 
-Two fit flavours are supported through SEPARATE readers, both emitting the same
-:class:`~np_function_plots.NPLambdas` interface so the plotter never learns
-which it came from:
+Two fit flavours, SEPARATE readers, both emitting the same
+:class:`~np_function_plots.NPLambdas` so the plotter never learns the source:
 
-  * NEW continuous-λ param model — λ stored PHYSICALLY in ``parms``
+  * NEW continuous-λ param model: λ stored PHYSICALLY in ``parms``
     (``allowNegativeParam=True``; no sqrt convention), covariance over the
     floating λ in ``cov``. ``lambdas_from_fitresult`` / ``sample_lambda_toys``.
-  * OLD template-based fit — discrete NP nuisances (``scetlibNPgamma*`` …)
-    whose pulls map to physical λ through a template/piecewise map.
+  * OLD template-based fit: discrete NP nuisances (``scetlibNPgamma*`` …) whose
+    pulls map to physical λ via a template/piecewise map.
     ``lambdas_from_template_fit`` (param-map driven).
 
 Units: the new-model λ are already physical (see ``param_model`` /
-``allowNegativeParam``); no conversion is applied. The ``np_model`` /
-``np_model_nu`` strings the curves need are recovered via
-:func:`lambda_central.read_lambda_central` (which reads them straight from a
+``allowNegativeParam``); no conversion. The ``np_model`` / ``np_model_nu`` strings
+the curves need come from :func:`lambda_central.read_lambda_central` (read off the
 fitresults), with a CLI/argument override.
 
 CLI (print the table)::
@@ -40,14 +38,8 @@ import numpy as np
 
 from rabbit import io_tools
 from wremnants.postprocessing.scetlib_np import lambda_central as _lc
-from wremnants.postprocessing.scetlib_np.np_function_plots import (
-    EFF_PARAMS,
-    GNU_PARAMS,
-    NPLambdas,
-    Series,
-)
-
-ALL_PARAMS = GNU_PARAMS + EFF_PARAMS
+from wremnants.postprocessing.scetlib_np.np_function_plots import NPLambdas, Series
+from wremnants.postprocessing.scetlib_np.params import ALL_PARAMS, EFF_PARAMS, GNU_PARAMS
 SECTOR = {
     **{p: "gamma_nu (CS)" for p in GNU_PARAMS},
     **{p: "F_eff (TMD)" for p in EFF_PARAMS},
@@ -261,9 +253,8 @@ def _flat_values(fitresult_path, which="postfit", result=None):
 
 
 def _resolve_models(fitresult_path, np_model=None, np_model_nu=None):
-    """np_model strings from lambda_central (reads them off the fitresults),
-    falling back to defaults if the upstream pkl is unreachable. Explicit
-    arguments win."""
+    """np_model strings from lambda_central (read off the fitresults), falling
+    back to defaults if the upstream pkl is unreachable. Explicit arguments win."""
     if np_model and np_model_nu:
         return np_model, np_model_nu
     eff_model, gnu_model = DEFAULT_NP_MODEL, DEFAULT_NP_MODEL_NU
@@ -292,10 +283,15 @@ def lambdas_from_fitresult(
 def read_lambda_covariance(fitresult_path, result=None, names=ALL_PARAMS):
     """(floating_names, mean, cov) over the FLOATING λ (variance > 0).
 
-    Frozen λ (variance 0, absent, or pinned) are excluded — they don't enter
-    the toy band. The submatrix keeps the full correlations among the floating
-    λ (these are strong: e.g. lambda2_nu↔lambda2 ≈ −1)."""
+    Frozen λ (variance 0, absent, or pinned) are excluded from the toy band. The
+    submatrix keeps the full correlations among the floating λ (strong: e.g.
+    lambda2_nu↔lambda2 ≈ −1).
+
+    Returns empties if the fitresults has no ``cov`` (e.g. a ``--noFit`` /
+    no-Hessian run); callers then skip the toy band."""
     fitresult = io_tools.get_fitresult(fitresult_path, result)
+    if "cov" not in fitresult.keys():
+        return [], np.zeros(0), np.zeros((0, 0))
     parms = fitresult["parms"].get()
     pnames = _names(parms)
     pvals = parms.values()
@@ -321,9 +317,8 @@ def sample_lambda_toys(
 ):
     """List of :class:`NPLambdas` toys sampled from the postfit MVN.
 
-    Floating λ are drawn jointly from their postfit covariance; frozen λ are
-    held at their postfit value. (For real/Asimov data the postfit point is the
-    correct band centre.)"""
+    Floating λ drawn jointly from their postfit covariance; frozen λ held at their
+    postfit value. (For real/Asimov data the postfit point is the band centre.)"""
     np_model, np_model_nu = _resolve_models(fitresult_path, np_model, np_model_nu)
     base = _flat_values(fitresult_path, which="postfit", result=result)
     floating, mean, cov = read_lambda_covariance(fitresult_path, result=result)
@@ -397,7 +392,11 @@ def _template_base_eff_gnu(param_map):
         delta_lambda2=0.0,
         np_model="tanh_6",
     )
-    gnu = dict(lambda_inf_nu=0.0, lambda2_nu=0.0, lambda4_nu=0.0, np_model_nu="tanh_6")
+    gnu = dict(
+        lambda_inf_nu=0.0, lambda2_nu=0.0, lambda4_nu=0.0,
+        lambda6_nu=0.0007,  # SCETlib NP_model_gammanu b⁶ coeff (Gamma_nu.hpp:102)
+        np_model_nu="tanh_6",
+    )
     return eff, gnu
 
 
@@ -420,16 +419,16 @@ def lambdas_from_template_fit(
 ):
     """Read an OLD template-based fit → (central :class:`NPLambdas`, toys list).
 
-    ``np_param_map`` is the JSON path (or already-loaded dict) describing each
-    discrete NP nuisance's template Up/Down and its physical AN parameter. The
-    discrete-nuisance pulls are mapped to physical λ via the same piecewise
-    linearization the template histograms were built with. ``kfactors`` scales
-    a nuisance's template delta (use when the workspace was built with
-    ``--scaleParams``); keyed by rabbit nuisance name or AN param name.
+    ``np_param_map`` is the JSON path (or loaded dict) describing each discrete NP
+    nuisance's template Up/Down and its physical AN parameter. The nuisance pulls
+    map to physical λ via the same piecewise linearization the template histograms
+    were built with. ``kfactors`` scales a nuisance's template delta (use when the
+    workspace was built with ``--scaleParams``); keyed by rabbit nuisance name or
+    AN param name.
 
     With ``n_toys>0`` the floating nuisances are sampled from their postfit
-    covariance (in NUISANCE space — the linearization is applied per toy), so
-    the band correctly reflects the nonlinear θ→λ map.
+    covariance in NUISANCE space (linearization applied per toy), so the band
+    reflects the nonlinear θ→λ map.
     """
     import json
 

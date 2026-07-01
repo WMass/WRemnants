@@ -1,14 +1,16 @@
 """SCETlib-NP postprocessing package.
 
-``SCETlibNPParamModel`` (and its TensorFlow / btgrid dependencies) is imported
-lazily so that lightweight submodules — e.g. :mod:`response_matrix`, used by
-setupRabbit to embed the response matrix in the datacard — can be imported
-without pulling in TensorFlow. The package-level re-export
-``wremnants.postprocessing.scetlib_np.SCETlibNPParamModel`` (used by rabbit's
-``--paramModel`` loader) still works, resolved on first access via PEP 562.
+``SCETlibNPParamModel`` (rabbit adapter) and ``SigmaGenModel`` (datacard-free
+σ_gen physics core), with their TensorFlow / btgrid dependencies, are imported
+lazily so lightweight submodules (e.g. :mod:`response_matrix`, used by setupRabbit
+to embed the response matrix in the datacard) import without pulling in
+TensorFlow. The package-level re-exports
+``wremnants.postprocessing.scetlib_np.SCETlibNPParamModel`` (rabbit's
+``--paramModel`` loader) and ``…​.SigmaGenModel`` still work, resolved on first
+access via PEP 562.
 """
 
-__all__ = ["SCETlibNPParamModel"]
+__all__ = ["SCETlibNPParamModel", "SigmaGenModel"]
 
 
 def __getattr__(name):
@@ -18,4 +20,8 @@ def __getattr__(name):
         )
 
         return SCETlibNPParamModel
+    if name == "SigmaGenModel":
+        from wremnants.postprocessing.scetlib_np.sigma_gen import SigmaGenModel
+
+        return SigmaGenModel
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
