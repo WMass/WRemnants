@@ -222,7 +222,7 @@ from wremnants.postprocessing.scetlib_np import lambda_central as scetlib_lambda
 # ``self.core``. The λ-name tuples, σ_ns builder, and default-btgrid helper are
 # re-exported here for backward compat (older imports referenced them on this
 # module). ``fz_tf`` is still needed for the reco-side tensor dtype (``fz_tf.DTYPE``).
-from wremnants.postprocessing.scetlib_np.params import DEFAULT_PRIOR_SIGMAS
+from wremnants.postprocessing.scetlib_np.params import active_params, param_defaults
 from wremnants.postprocessing.scetlib_np.sigma_gen import (  # noqa: F401
     ALL_PARAMS,
     EFF_PARAMS,
@@ -419,7 +419,9 @@ class SCETlibNPParamModel(ParamModel):
             Per-name override for the Gaussian prior σ on each parameter:
             a Mapping, or as spec token the comma-separated string form
             ``prior_sigmas=lambda2=0.3,delta_lambda2=nan`` (same format as
-            ``xparam_default``). Defaults come from ``DEFAULT_PRIOR_SIGMAS``
+            ``xparam_default``). Defaults come from the per-model registry
+            (``params.EFF_MODEL_PARAMS`` / ``GNU_MODEL_PARAMS``); a σ of ``None``
+            there floats the param free.
         nonsingular_fo_sing, nonsingular_dyturbo
             Paths to the σ_ns inputs (SCETlib singular pkl / DYTurbo
             scetlibmatch txt); default to the wremnants-data
@@ -691,8 +693,22 @@ class SCETlibNPParamModel(ParamModel):
         )
 
         # ---- ParamModel registration (POIs first, then NOUs).
+        # Fit only the λ the numerator forms use (registry active set); inert λ
+        # aren't registered, so they can't add a zero-derivative (singular) Hessian row.
         poi_params = tuple(poi_params or ())
-        nou_params = tuple(p for p in ALL_PARAMS if p not in poi_params)
+        active = active_params(
+            np_model=self._np_model_fit, np_model_nu=self._np_model_nu_fit
+        )
+        bad_pois = [p for p in poi_params if p not in active]
+        if bad_pois:
+            raise ValueError(
+                f"poi_params {bad_pois} are not used by the fit forms "
+                f"({self._np_model_fit}/{self._np_model_nu_fit}); "
+                f"active λ: {sorted(active)}"
+            )
+        nou_params = tuple(
+            p for p in ALL_PARAMS if p in active and p not in poi_params
+        )
         self._param_order = poi_params + nou_params
         self.npoi = len(poi_params)
         self.npou = len(nou_params)
@@ -712,21 +728,30 @@ class SCETlibNPParamModel(ParamModel):
         # grouped-impact bar directly comparable between the new param model and the
         # old NP variations. No collision with a syst group: the new-model datacard
         # excludes scetlibNP, so resumNonpert is absent from indata.systgroups.
+        # Intersect with the active params — a group must not name a non-fitted λ.
+        active_set = set(self._param_order)
         self.param_impact_groups = {
-            "resumNonpert": tuple(ALL_PARAMS),
-            "scetlibNPgammaNu": tuple(GNU_PARAMS),
-            "scetlibNPFeff": tuple(EFF_PARAMS),
+            "resumNonpert": tuple(p for p in ALL_PARAMS if p in active_set),
+            "scetlibNPgammaNu": tuple(p for p in GNU_PARAMS if p in active_set),
+            "scetlibNPFeff": tuple(p for p in EFF_PARAMS if p in active_set),
         }
 
-        # Defaults: λ_central values per parameter. Optionally overridden by the
-        # ``xparam_default=name=value,...`` spec token — comma-separated pairs (for
-        # closure tests where the data-generating / fit-start point should differ
-        # from the card's λ_central).
+        # Start value / prior mean per fitted λ, precedence:
+        #   xparam_default[user]  ▷  card λ_central (if the card carries it)  ▷
+        #   registry neutral value (transform-extension λ the card lacks; = 0).
+        # pdefs holds {name: {"value","sigma"}} for the fit forms' active λ.
+        pdefs = param_defaults(
+            np_model=self._np_model_fit, np_model_nu=self._np_model_nu_fit
+        )
         central_lookup = {**self.eff_central, **self.gnu_central}
         defaults = np.array(
-            [central_lookup[p] for p in self._param_order], dtype=np.float64
+            [central_lookup.get(p, pdefs[p]["value"]) for p in self._param_order],
+            dtype=np.float64,
         )
 
+        # ``xparam_default=name=value,...`` shifts the fit START (and prior mean),
+        # e.g. for closure / injection / transport tests. A name not used by the fit
+        # forms is warned-and-ignored; an unknown λ name is an error (typo guard).
         start_override = (xparam_default or "").strip()
         if start_override:
             overrides = dict(
@@ -734,8 +759,16 @@ class SCETlibNPParamModel(ParamModel):
             )
             for name, val in overrides.items():
                 name = name.strip()
-                if name not in self._param_order:
+                if name not in ALL_PARAMS:
                     raise KeyError(f"xparam_default: unknown param {name!r}")
+                if name not in self._param_order:
+                    print(
+                        f"[SCETlibNPParamModel] WARNING: xparam_default {name!r} is "
+                        f"not used by the fit forms "
+                        f"({self._np_model_fit}/{self._np_model_nu_fit}); ignoring.",
+                        flush=True,
+                    )
+                    continue
                 i = self._param_order.index(name)
                 defaults[i] = float(val)
             print(
@@ -765,9 +798,21 @@ class SCETlibNPParamModel(ParamModel):
                 tuple(s.split("=")) for s in prior_sigmas.split(",") if s.strip()
             )
         prior_sigmas = {k.strip(): v for k, v in dict(prior_sigmas or {}).items()}
-        for name in prior_sigmas:
-            if name not in self._param_order:
+        # A prior on a λ not used by the fit forms is warned-and-ignored; an unknown
+        # λ name is an error (typo guard).
+        _kept_prior_sigmas = {}
+        for name, v in prior_sigmas.items():
+            if name not in ALL_PARAMS:
                 raise KeyError(f"prior_sigmas: unknown param {name!r}")
+            if name not in self._param_order:
+                print(
+                    f"[SCETlibNPParamModel] WARNING: prior_sigmas {name!r} is not used "
+                    f"by the fit forms; ignoring.",
+                    flush=True,
+                )
+                continue
+            _kept_prior_sigmas[name] = v
+        prior_sigmas = _kept_prior_sigmas
         if self._use_priors:
             sigmas_arr = np.empty(self.nparams, dtype=np.float64)
             for i, p in enumerate(self._param_order):
@@ -775,10 +820,10 @@ class SCETlibNPParamModel(ParamModel):
                     sigmas_arr[i] = float(
                         prior_sigmas[p]
                     )  # explicit override (may be NaN)
-                elif p in DEFAULT_PRIOR_SIGMAS:
-                    sigmas_arr[i] = DEFAULT_PRIOR_SIGMAS[p]  # theorist recommendation
                 else:
-                    sigmas_arr[i] = np.nan  # free (expected to be frozen)
+                    # registry default sigma for this (fit-model, param); None = free
+                    s = pdefs[p]["sigma"]
+                    sigmas_arr[i] = np.nan if s is None else float(s)
             self.prior_sigmas = sigmas_arr
             # prior_means defaults to xparamdefault if not set, so don't store
             # redundantly — Fitter falls back to xparamdefault.

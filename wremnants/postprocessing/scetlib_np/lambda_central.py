@@ -185,17 +185,17 @@ def _iter_meta_levels(meta, max_depth=8):
 
 
 def _fill_missing_params(lc):
-    """Complete ``lc``'s eff/gnu sub-dicts for the model's full λ-vector — but
-    HARD-FAIL if the card omits a λ its OWN np_model uses.
+    """Validate that the card carries every λ its OWN np_model USES; return ``lc``
+    unchanged otherwise (the name is historical — it no longer fills).
 
     A λ the card's np_model does NOT use (e.g. ``lambda6`` / ``lambda6_nu`` under
-    tanh_2) is inert; the model still needs a vector slot for it, so it is filled
-    with 0.0 (correct, not a guess — the form ignores it). A λ the np_model DOES
-    use (per :func:`params.active_params`) but the metadata lacks means a
-    stale/corrupt card that cannot describe its own model → raise rather than
-    silently default it. Cards written before an *inert* param was added (e.g.
-    pre-``lambda6_nu`` tanh_2 cards) therefore still load."""
-    lc = dict(lc)
+    tanh_2) is simply absent: the de-hardcoded ``btgrid_tf`` form factors read only
+    the λ their branch needs, so no placeholder slot is required (previously such λ
+    were filled with 0.0). A λ the np_model DOES use (per
+    :func:`params.active_params`) but the metadata lacks means a stale/corrupt card
+    that cannot describe its own model → raise rather than silently default it.
+    Cards written before an *inert* λ was added (e.g. pre-``lambda6_nu`` tanh_2
+    cards) therefore still load — the λ is neither needed nor filled."""
     eff = dict(lc.get("eff_params", {}))
     gnu = dict(lc.get("gnu_params", {}))
     needed = active_params(
@@ -208,11 +208,6 @@ def _fill_missing_params(lc):
             f"({eff.get(EFF_MODEL_KEY)} / {gnu.get(GNU_MODEL_KEY)}) USES — the card "
             f"cannot describe its own model; remake the histmaker output."
         )
-    for k in EFF_PARAMS:
-        eff.setdefault(k, 0.0)  # inert under this np_model -> 0 (vector slot only)
-    for k in GNU_PARAMS:
-        gnu.setdefault(k, 0.0)
-    lc["eff_params"], lc["gnu_params"] = eff, gnu
     return lc
 
 
