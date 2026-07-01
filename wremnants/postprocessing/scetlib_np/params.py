@@ -17,19 +17,6 @@ GNU_PARAMS = ("lambda2_nu", "lambda4_nu", "lambda6_nu", "lambda_inf_nu")
 EFF_PARAMS = ("lambda2", "lambda4", "lambda6", "delta_lambda2", "lambda_inf")
 ALL_PARAMS = GNU_PARAMS + EFF_PARAMS
 
-# Recommended Gaussian prior widths per λ (theorist recommendations), applied by
-# SCETlibNPParamModel only when priors are enabled (priors=1); a λ absent here
-# floats free (NaN width). Lives in this config home keyed by the names above.
-DEFAULT_PRIOR_SIGMAS = {
-    "lambda2_nu": 0.10,
-    "lambda4_nu": 0.50,
-    "lambda6_nu": 0.10,
-    "lambda2": 0.50,  # 0.4 ⁺⁰·⁶₋₀.₄ -> symmetric average
-    "lambda4": 0.50,  # 0.4 ⁺⁰·⁶₋₀.₄ -> symmetric average
-    "delta_lambda2": 0.20,  # 0 ± 0.20 wide default (no theorist value yet)
-    "lambda6": 0.1,
-}
-
 # np_model selector keys carried alongside the numeric λ in a tune dict.
 EFF_MODEL_KEY = "np_model"
 GNU_MODEL_KEY = "np_model_nu"
@@ -38,38 +25,137 @@ GNU_MODEL_KEY = "np_model_nu"
 RECO_AXES = ("ptll", "yll", "cosThetaStarll_quantile", "phiStarll_quantile")
 GEN_AXES = ("ptVGen", "absYVGen")
 
-# Which λ each NP model actually uses. The form factors in btgrid_tf
-# (F_eff_tf / gamma_nu_NP_tf) read a fixed subset of the λ per model string; a λ
-# outside that subset is inert (e.g. lambda6 under tanh_2). Mirrored here as
-# plain data so this module stays TF-free — btgrid_tf is the source of truth.
+# np_model selector aliases -> canonical model name. The form-factor branches in
+# btgrid_tf and the registry below key on the canonical name.
 _EFF_MODEL_ALIASES = {"hyp_tangent": "tanh_2", "square_root": "frac_2"}
 _GNU_MODEL_ALIASES = {"hyp_tangent": "tanh_2", "linear": "frac_1"}
-# eff models with no lambda_inf damping (plain polynomial form factors).
-_EFF_NO_LAMBDA_INF = {"signed_lambda", "identity"}
+
+# ---- Model → λ registry (single source of truth) -----------------------------
+# Per model: the λ it uses and their fit defaults (value = neutral start fallback,
+# sigma = default prior width, None = free). Must stay in sync with the btgrid_tf
+# form branches, which read exactly these λ by name.
+EFF_MODEL_PARAMS = {
+    "identity": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+    },
+    "signed_lambda": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+    },
+    "tanh_2": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+    "tanh_4": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+    "tanh_6": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+        "lambda6": {"value": 0.0, "sigma": 0.10},
+    },
+    "frac_2": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+    "frac_4": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+    "exp_2": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+    "exp_4": {
+        "lambda2": {"value": 0.0, "sigma": 0.50},
+        "lambda4": {"value": 0.0, "sigma": 0.50},
+        "delta_lambda2": {"value": 0.0, "sigma": 0.20},
+        "lambda_inf": {"value": 0.0, "sigma": None},
+    },
+}
+GNU_MODEL_PARAMS = {
+    "tanh_1": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+    "tanh_2": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+    "tanh_6": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+        "lambda6_nu": {"value": 0.0, "sigma": 0.10},
+    },
+    "frac_1": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+    "frac_2": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+    "exp_1": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+    "exp_2": {
+        "lambda2_nu": {"value": 0.0, "sigma": 0.10},
+        "lambda4_nu": {"value": 0.0, "sigma": 0.50},
+        "lambda_inf_nu": {"value": 0.0, "sigma": None},
+    },
+}
+
+# Valid model names (canonical + aliases). The single validation set for both
+# btgrid_tf (``np_model not in EFF_MODELS``) and the param model. Re-exported by
+# btgrid_tf so it need not keep its own copy.
+EFF_MODELS = frozenset(EFF_MODEL_PARAMS) | frozenset(_EFF_MODEL_ALIASES)
+GNU_MODELS = frozenset(GNU_MODEL_PARAMS) | frozenset(_GNU_MODEL_ALIASES)
+
+
+def param_defaults(np_model=None, np_model_nu=None):
+    """``{name: {"value", "sigma"}}`` for the λ the given model(s) use.
+
+    Union of the F_eff (``np_model``) and γ_ν (``np_model_nu``) registry rows,
+    aliases resolved. Raises ``KeyError`` on an unknown model name."""
+    out = {}
+    if np_model is not None:
+        out.update(EFF_MODEL_PARAMS[_EFF_MODEL_ALIASES.get(np_model, np_model)])
+    if np_model_nu is not None:
+        out.update(GNU_MODEL_PARAMS[_GNU_MODEL_ALIASES.get(np_model_nu, np_model_nu)])
+    return out
 
 
 def active_params(np_model=None, np_model_nu=None):
-    """Names of the λ the chosen NP model(s) actually use.
+    """Names of the λ the chosen NP model(s) actually use (registry keys).
 
     Pass ``np_model`` for the F_eff (TMD) set, ``np_model_nu`` for the γ_ν (CS)
     set, or both for the union. A λ outside the returned set is inert for that
-    model (``lambda6``/``lambda6_nu`` are used only by ``tanh_6``); callers can
-    reject such λ instead of silently ignoring them. Source of truth:
-    ``btgrid_tf.F_eff_tf`` / ``btgrid_tf.gamma_nu_NP_tf``."""
-    out = set()
-    if np_model is not None:
-        m = _EFF_MODEL_ALIASES.get(np_model, np_model)
-        out |= {"lambda2", "lambda4", "delta_lambda2"}
-        if m not in _EFF_NO_LAMBDA_INF:
-            out.add("lambda_inf")
-        if m == "tanh_6":
-            out.add("lambda6")
-    if np_model_nu is not None:
-        m = _GNU_MODEL_ALIASES.get(np_model_nu, np_model_nu)
-        out |= {"lambda2_nu", "lambda4_nu", "lambda_inf_nu"}
-        if m == "tanh_6":
-            out.add("lambda6_nu")
-    return out
+    model and is NOT a fit parameter. Source of truth: :data:`EFF_MODEL_PARAMS` /
+    :data:`GNU_MODEL_PARAMS`, audited against the ``btgrid_tf`` form branches."""
+    return set(param_defaults(np_model=np_model, np_model_nu=np_model_nu))
 
 
 def parse_lambda_overrides(spec):
