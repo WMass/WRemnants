@@ -12,7 +12,7 @@ def make_datagroups_lowPU(dg, excludeGroups=None, filterGroups=None):
     # reset datagroups
     dg.groups = {}
 
-    def add_if_nonempty(name, **kwargs):
+    def add_group_if_nonempty(name, **kwargs):
         members = dg.get_members_from_results(**kwargs)
         if members:
             dg.addGroup(name, members=members)
@@ -21,31 +21,31 @@ def make_datagroups_lowPU(dg, excludeGroups=None, filterGroups=None):
         "Data",
         members=dg.get_members_from_results(is_data=True),
     )
-    add_if_nonempty("Ztautau", startswith="Ztautau")
+    add_group_if_nonempty("Ztautau", startswith="Ztautau")
 
     if dg.flavor in ["mu", "mumu"]:
-        add_if_nonempty("Zmumu", startswith="Zmumu")
+        add_group_if_nonempty("Zmumu", startswith="Zmumu")
         if dg.mode in ["w_lowpu", "met_lowpu"]:
-            add_if_nonempty(
+            add_group_if_nonempty(
                 "Wmunu",
                 startswith=["Wplusmunu", "Wminusmunu", "Wmunu"],
             )
 
     if dg.flavor in ["e", "ee"]:
-        add_if_nonempty("Zee", startswith="Zee")
+        add_group_if_nonempty("Zee", startswith="Zee")
         if dg.mode in ["w_lowpu", "met_lowpu"]:
-            add_if_nonempty(
+            add_group_if_nonempty(
                 "Wenu",
                 startswith=["Wplusenu", "Wminusenu", "Wenu"],
             )
 
     if dg.mode in ["w_lowpu", "met_lowpu"]:
-        add_if_nonempty(
+        add_group_if_nonempty(
             "Wtaunu",
             startswith=["Wplustaunu", "Wminustaunu", "Wtaunu"],
         )
-        add_if_nonempty("Top", startswith=["Top", "SingleT", "TT"])
-        add_if_nonempty("Diboson", startswith=["Diboson", "WW", "WZ", "ZZ"])
+        add_group_if_nonempty("Top", startswith=["Top", "SingleT", "TT"])
+        add_group_if_nonempty("Diboson", startswith=["Diboson", "WW", "WZ", "ZZ"])
     else:
         dg.addGroup(
             "Other",

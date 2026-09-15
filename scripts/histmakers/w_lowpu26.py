@@ -89,7 +89,7 @@ def build_graph(df, dataset):
     # Loose muon veto: exactly one loose muon to reject Z→μμ
     df = df.Define(
         "vetoMuons",
-        "Muon_looseId && Muon_pt > 15 && abs(Muon_eta) < 2.4 && abs(Muon_dxybs) < 0.05",
+        "Muon_looseId && Muon_pt > 10 && abs(Muon_eta) < 2.4 && abs(Muon_dxybs) < 0.05",
     )
     df = df.Filter("Sum(vetoMuons) == 1")
 
@@ -172,14 +172,21 @@ def build_graph(df, dataset):
         )
     )
 
-    # Signal-region-filtered observables; --selection none in the plotting script
-    # is correct here since the signal region is already applied.
-    df_sig = df.Filter("passMT && passIso")
+    # Keep passIso/passMT as axes (like `nominal`) rather than pre-filtering to the
+    # signal region, so the same plots can be made in other regions via --selection.
     results.append(
-        df_sig.HistoBoost("met", [axis_met], [f"{met_type}_pt", "nominal_weight"])
+        df.HistoBoost(
+            "met",
+            [axis_met, binning.axis_passIso, binning.axis_passMT],
+            [f"{met_type}_pt", "passIso", "passMT", "nominal_weight"],
+        )
     )
     results.append(
-        df_sig.HistoBoost("npv", [axis_npv], ["PV_npvsGood", "nominal_weight"])
+        df.HistoBoost(
+            "npv",
+            [axis_npv, binning.axis_passIso, binning.axis_passMT],
+            ["PV_npvsGood", "passIso", "passMT", "nominal_weight"],
+        )
     )
 
     return results, weightsum

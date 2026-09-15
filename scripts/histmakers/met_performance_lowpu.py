@@ -62,7 +62,7 @@ datasets = getDatasets(
 for d in datasets:
     logger.info(f"Dataset {d.name}")
 
-axis_ptl = hist.axis.Regular(100, 0.0, 200.0, name="ptl")
+axis_ptl = hist.axis.Regular(75, 0.0, 150.0, name="ptl")
 axis_etal = hist.axis.Regular(50, -2.5, 2.5, name="etal")
 axis_mll = hist.axis.Regular(60, 60, 120, name="mll")
 axis_ptll = hist.axis.Regular(150, 0, 150, name="ptll")
@@ -148,8 +148,8 @@ def build_graph(df, dataset):
         logger.warning(
             f"Branch {met_type}_pt not found in {dataset.name}, falling back to {fallback}_pt"
         )
-        df = df.Define(f"{met_type}_pt", f"{fallback}_pt")
-        df = df.Define(f"{met_type}_phi", f"{fallback}_phi")
+        df = df.Alias(f"{met_type}_pt", f"{fallback}_pt")
+        df = df.Alias(f"{met_type}_phi", f"{fallback}_phi")
 
     # W-like selection: randomly assign one lepton as the "trigger lepton" by even/odd event
     df = df.Define("TrigLep_charge", "isEvenEvent ? -1 : 1")
