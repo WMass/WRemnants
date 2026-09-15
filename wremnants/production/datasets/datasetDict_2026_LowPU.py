@@ -25,7 +25,7 @@ dataDict = {
     },
     "Zmumu": {
         "filepaths": [
-            "{BASE_PATH}/LowPU2023_studies/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+            "{BASE_PATH}/LowPU/2023_PUAVE5/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
         "xsec": 2103.8,
         "group": "Zmumu",
@@ -39,14 +39,14 @@ dataDict = {
     },
     "Wplusmunu": {
         "filepaths": [
-            "{BASE_PATH}/LowPU2023_studies/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+            "{BASE_PATH}/LowPU/2023_PUAVE5/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
         "xsec": 12293.0,
         "group": "Wmunu",
     },
     "Wminusmunu": {
         "filepaths": [
-            "{BASE_PATH}/LowPU2023_studies/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+            "{BASE_PATH}/LowPU/2023_PUAVE5/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
         ],
         "xsec": common.xsec_WminusJetsToLNu,
         "group": "Wmunu",
