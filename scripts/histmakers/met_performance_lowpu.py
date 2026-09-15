@@ -15,6 +15,10 @@ parser.add_argument(
 )
 parser = parsing.set_parser_default(parser, "met", "RawPFMET")
 parser = parsing.set_parser_default(parser, "era", "2026_LowPU")
+parser = parsing.set_parser_default(parser, "pdfs", ["nnpdf31"])
+parser = parsing.set_parser_default(
+    parser, "theoryCorr", ["scetlib_dyturbo_CT18Z_N3p0LL_N2LO"]
+)
 parser = parsing.set_parser_default(
     parser, "aggregateGroups", ["Diboson", "Top", "Wtaunu", "Wmunu", "Wenu"]
 )
@@ -27,17 +31,19 @@ import hist
 
 import narf
 import narf.clingutils
-from wremnants.production import muon_selections
+from wremnants.production import muon_selections, theory_corrections
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
     write_analysis_output,
 )
+from wremnants.utilities import samples
 
 narf.clingutils.Declare('#include "recoil_tools.hpp"')
 
 flavor = args.flavor
+theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
 met_type = args.met
 
 mass_min = 60
@@ -62,6 +68,10 @@ datasets = getDatasets(
 for d in datasets:
     logger.info(f"Dataset {d.name}")
 
+corr_helpers = theory_corrections.load_corr_helpers(
+    [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
+)
+
 axis_ptl = hist.axis.Regular(75, 0.0, 150.0, name="ptl")
 axis_etal = hist.axis.Regular(50, -2.5, 2.5, name="etal")
 axis_mll = hist.axis.Regular(60, 60, 120, name="mll")
@@ -79,6 +89,8 @@ def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
 
     results = []
+
+    helicity_smoothing_helpers = {}
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -181,6 +193,14 @@ def build_graph(df, dataset):
 
     if dataset.is_data:
         df = df.DefinePerSample("nominal_weight", "1.0")
+    elif dataset.name in samples.vprocs:
+        df = theory_corrections.define_theory_weights_and_corrs(
+            df,
+            dataset.name,
+            corr_helpers,
+            args,
+            helicity_smoothing_helpers=helicity_smoothing_helpers,
+        )
     else:
         df = df.Define("nominal_weight", "weight")
 
