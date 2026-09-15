@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
-
 import os
 import argparse
+import itertools
 
 import h5py
 import numpy as np
@@ -42,10 +41,18 @@ def make_parser():
     )
     p.add_argument("--fakeFloor", type=float, default=1e-6)
 
-    # Choose a representative outer bin.
-    # Example for mu_pt: --outerSelect eta:24 charge:0
-    # Example for w_pt with w_mt: --outerSelect eta:24 charge:0 w_mt:1
+    # Choose fixed outer-axis bins.
+    # Example for one eta bin:
+    #   --outerSelect eta:24 charge:0 w_mt:1
+    # Example integrated over eta:
+    #   --outerSelect charge:0 w_mt:1 --integrateOuter eta
     p.add_argument("--outerSelect", nargs="*", default=[])
+    p.add_argument(
+        "--integrateOuter",
+        nargs="*",
+        default=[],
+        help="Outer axes to sum over, e.g. --integrateOuter eta",
+    )
 
     return p
 
@@ -155,6 +162,49 @@ def get_outer_bins(outer_axes, outer_shape, outer_select):
     return tuple(bins)
 
 
+def get_outer_bin_combinations(
+    outer_axes,
+    outer_shape,
+    outer_select,
+    integrate_outer,
+):
+    integrate_outer = set(integrate_outer)
+
+    unknown_integrated = integrate_outer.difference(outer_axes)
+    if unknown_integrated:
+        raise RuntimeError(
+            f"Cannot integrate unknown outer axes {sorted(unknown_integrated)}; "
+            f"available outer axes are {outer_axes}"
+        )
+
+    overlap = integrate_outer.intersection(outer_select)
+    if overlap:
+        raise RuntimeError(
+            f"Axes cannot be both selected and integrated: {sorted(overlap)}"
+        )
+
+    choices = []
+
+    for ax, nbin in zip(outer_axes, outer_shape):
+        if ax in integrate_outer:
+            choices.append(range(nbin))
+            continue
+
+        if ax in outer_select:
+            b = outer_select[ax]
+        else:
+            b = nbin // 2
+
+        if b < 0 or b >= nbin:
+            raise RuntimeError(
+                f"Outer bin {ax}:{b} outside valid range [0,{nbin-1}]"
+            )
+
+        choices.append([b])
+
+    return list(itertools.product(*choices))
+
+
 def get_region(values, axes, smoothing_axis, outer_axes, outer_bins, dxy_axis, reliso_axis, region):
     slicer = [slice(None)] * len(axes)
 
@@ -180,6 +230,14 @@ def load_params(params_file):
         smoothing_axis = f["smoothing_axis_name"][()].decode()
         outer_shape = tuple(f["outer_shape"][()])
 
+        if "d_norm_factors" not in f:
+            raise RuntimeError(
+                "Params file does not contain d_norm_factors. "
+                "Regenerate it with the updated regen_smoothing_params_abcd.py."
+            )
+
+        d_norm_factors = np.asarray(f["d_norm_factors"][()], dtype=float)
+
     if not np.isfinite(params).all():
         raise RuntimeError(
             f"Params contain non-finite values: nan={np.isnan(params).sum()}, inf={np.isinf(params).sum()}"
@@ -189,9 +247,14 @@ def load_params(params_file):
     if params.shape[0] != expected:
         raise RuntimeError(f"Params length mismatch: got {params.shape[0]}, expected {expected}")
 
+    if d_norm_factors.shape != (n_outer,):
+        raise RuntimeError(
+            f"d_norm_factors shape mismatch: got {d_norm_factors.shape}, expected ({n_outer},)"
+        )
+
     q = params.reshape(3, n_outer, order + 1)
 
-    return q, order, n_outer, smoothing_axis, outer_shape
+    return q, order, n_outer, smoothing_axis, outer_shape, d_norm_factors
 
 
 def plot_region(outdir, x, target, reco, title, fname):
@@ -238,7 +301,7 @@ def main():
     axes = list(h_fake.axes.name)
     values = h_fake.view(flow=False).value
 
-    q, order, n_outer, params_smoothing_axis, outer_shape = load_params(args.params)
+    q, order, n_outer, params_smoothing_axis, outer_shape, d_norm_factors = load_params(args.params)
 
     if params_smoothing_axis != args.smoothingAxis:
         raise RuntimeError(
@@ -254,8 +317,31 @@ def main():
         )
 
     outer_select = parse_outer_select(args.outerSelect)
-    outer_bins = get_outer_bins(outer_axes, outer_shape, outer_select)
-    outer_flat = np.ravel_multi_index(outer_bins, outer_shape)
+    outer_bin_combinations = get_outer_bin_combinations(
+        outer_axes,
+        outer_shape,
+        outer_select,
+        args.integrateOuter,
+    )
+
+    outer_flat_indices = [
+        np.ravel_multi_index(outer_bins, outer_shape)
+        for outer_bins in outer_bin_combinations
+    ]
+
+    selected_d_norm_factors = np.asarray(
+        [d_norm_factors[iouter] for iouter in outer_flat_indices],
+        dtype=float,
+    )
+
+    if (
+        not np.isfinite(selected_d_norm_factors).all()
+        or np.any(selected_d_norm_factors <= 0.0)
+    ):
+        raise RuntimeError(
+            "Invalid D normalization factor(s) for selected outer bins: "
+            f"{selected_d_norm_factors}"
+        )
 
     x, T = make_chebyshev_matrix(h_fake.axes[args.smoothingAxis], order)
 
@@ -268,8 +354,22 @@ def main():
     print(f"smoothing axis: {args.smoothingAxis}")
     print(f"outer axes: {outer_axes}")
     print(f"outer shape: {outer_shape}")
-    print(f"chosen outer bins: {dict(zip(outer_axes, outer_bins))}")
-    print(f"outer flat index: {outer_flat}")
+    print(f"fixed outer selections: {outer_select}")
+    print(f"integrated outer axes: {args.integrateOuter}")
+    print(f"number of outer categories summed: {len(outer_bin_combinations)}")
+    if len(outer_bin_combinations) == 1:
+        print(
+            f"chosen outer bins: "
+            f"{dict(zip(outer_axes, outer_bin_combinations[0]))}"
+        )
+        print(f"outer flat index: {outer_flat_indices[0]}")
+        print(f"D normalization factor: {selected_d_norm_factors[0]}")
+    else:
+        print(
+            "D normalization factor min/max: "
+            f"{selected_d_norm_factors.min()} / "
+            f"{selected_d_norm_factors.max()}"
+        )
     print(f"order: {order}")
     print(f"T shape: {T.shape}")
     print(f"params shape: {q.shape}")
@@ -283,22 +383,49 @@ def main():
         ("C_model", 2),
     ]
 
-    print("\n=== Coefficients for chosen outer bin ===")
-    for model_name, idx in model_regions:
-        phys_name = MODEL_TO_PHYS[model_name]
-        coeff = q[idx, outer_flat, :]
-        print(f"{model_name} <- {phys_name}: {coeff}")
+    if len(outer_bin_combinations) == 1:
+        print("\n=== Coefficients for chosen outer bin ===")
+        outer_flat = outer_flat_indices[0]
+        for model_name, idx in model_regions:
+            phys_name = MODEL_TO_PHYS[model_name]
+            coeff = q[idx, outer_flat, :]
+            print(f"{model_name} <- {phys_name}: {coeff}")
+    else:
+        print(
+            "\n=== Coefficients ===\n"
+            "Multiple outer categories are being summed; "
+            "individual coefficient arrays are not printed."
+        )
 
     print("\n=== Region reconstruction ===")
     reconstructed = {}
 
+    selection_label = (
+        f"fixed={outer_select}, integrated={args.integrateOuter}"
+    )
+
     for model_name, idx in model_regions:
         phys_name = MODEL_TO_PHYS[model_name]
-        target = get_region(
-            values, axes, args.smoothingAxis, outer_axes, outer_bins,
-            args.dxyAxis, args.relIsoAxis, phys_name,
-        )
-        pred = np.exp(T @ q[idx, outer_flat, :])
+
+        target = np.zeros(len(x), dtype=float)
+        pred = np.zeros(len(x), dtype=float)
+
+        for outer_bins, outer_flat in zip(
+            outer_bin_combinations,
+            outer_flat_indices,
+        ):
+            target += get_region(
+                values,
+                axes,
+                args.smoothingAxis,
+                outer_axes,
+                outer_bins,
+                args.dxyAxis,
+                args.relIsoAxis,
+                phys_name,
+            )
+            pred += np.exp(T @ q[idx, outer_flat, :])
+
         reconstructed[model_name] = pred
 
         print(f"{model_name} <- {phys_name}")
@@ -311,32 +438,62 @@ def main():
             x,
             target,
             pred,
-            f"{model_name} from {phys_name}, outer={dict(zip(outer_axes, outer_bins))}",
+            f"{model_name} from {phys_name}, {selection_label}",
             f"{model_name}_{phys_name}.png",
         )
 
     # Predicted signal-like region from SmoothABCD:
     # D = A_model * C_model / B_model = B_phys * C_phys / A_phys
-    D_seed = get_region(
-        values, axes, args.smoothingAxis, outer_axes, outer_bins,
-        args.dxyAxis, args.relIsoAxis, "D_phys",
-    )
+    #
+    # When integrating over an outer axis, construct and normalize D
+    # separately in every outer category, then sum the resulting curves.
+    # This preserves the category-dependent ABCD relation and kappa_D.
+    D_seed = np.zeros(len(x), dtype=float)
+    D_pred_raw = np.zeros(len(x), dtype=float)
+    D_pred = np.zeros(len(x), dtype=float)
 
-    D_pred = reconstructed["A_model"] * reconstructed["C_model"] / np.maximum(
-        reconstructed["B_model"], 1e-12
-    )
+    for outer_bins, outer_flat, d_norm_factor in zip(
+        outer_bin_combinations,
+        outer_flat_indices,
+        selected_d_norm_factors,
+    ):
+        D_seed += get_region(
+            before_floor,
+            axes,
+            args.smoothingAxis,
+            outer_axes,
+            outer_bins,
+            args.dxyAxis,
+            args.relIsoAxis,
+            "D_phys",
+        )
+
+        A_model = np.exp(T @ q[0, outer_flat, :])
+        B_model = np.exp(T @ q[1, outer_flat, :])
+        C_model = np.exp(T @ q[2, outer_flat, :])
+
+        D_pred_raw_category = (
+            A_model
+            * C_model
+            / np.maximum(B_model, 1e-12)
+        )
+
+        D_pred_raw += D_pred_raw_category
+        D_pred += d_norm_factor * D_pred_raw_category
 
     print("\n=== ABCD-predicted D region ===")
     print(f"D seed integral: {D_seed.sum()}")
-    print(f"D ABCD pred integral: {D_pred.sum()}")
-    print(f"D pred / D seed: {D_pred.sum() / D_seed.sum()}")
+    print(f"Raw D ABCD pred integral: {D_pred_raw.sum()}")
+    print(f"Raw D pred / D seed: {D_pred_raw.sum() / D_seed.sum()}")
+    print(f"Normalized D pred integral: {D_pred.sum()}")
+    print(f"Normalized D pred / D seed: {D_pred.sum() / D_seed.sum()}")
 
     plot_region(
         args.outdir,
         x,
         D_seed,
         D_pred,
-        f"D_phys seed compared to ABCD prediction, outer={dict(zip(outer_axes, outer_bins))}",
+        f"D_phys seed compared to normalized ABCD prediction, {selection_label}",
         "D_phys_abcd_prediction.png",
     )
 
