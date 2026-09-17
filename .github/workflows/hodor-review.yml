@@ -88,7 +88,6 @@ jobs:
       # models.cern.json. Pinned by commit SHA.
       HODOR_SOURCE: https://github.com/WMass/hodor
       HODOR_COMMIT: 8bb33632a5fe059815cab669a176c40fed404a0b
-      GH_REPO: ${{ github.repository }}
       HODOR_MODEL: ${{ vars.HODOR_LLM_MODEL || 'Kimi-K3-FLATIRON' }}
       LLM_API_KEY: ${{ secrets.HODOR_LLM_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
