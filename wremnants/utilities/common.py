@@ -110,8 +110,10 @@ analysis_mode_map = {
     "mz_dilepton.py": "z_dilepton",
     "mz_wlike_with_mu_eta_pt.py": "z_wlike",
     "mw_with_mu_eta_pt.py": "w_mass",
+    "w_lowpu26.py": "w_lowpu",
     "mw_lowPU.py": "w_lowpu",
     "mz_lowPU.py": "z_lowpu",
+    "met_performance_lowpu.py": "met_lowpu",
     "mz_5TeV.py": "z_lowpu",
 }
 

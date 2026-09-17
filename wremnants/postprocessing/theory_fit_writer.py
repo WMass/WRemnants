@@ -61,6 +61,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         keep_nuisances="",
         process_name="Zmumu",
         sigmaul_channel="chSigmaUL",
+        pdf_symmetrize="quadratic",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -73,6 +74,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         self.nois = nois
         self.pdf = pdf
         self.pdf_name = theory_utils.pdfMap[pdf]["name"]
+        self.pdf_symmetrize = pdf_symmetrize
         self._exclude_nuisances = (
             re.compile(exclude_nuisances) if exclude_nuisances else None
         )
@@ -591,7 +593,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
                 f"pdf{int((ivar + 1) / 2)}{self.pdf.upper()}",
                 self.process_name,
                 self.sigmaul_channel,
-                symmetrize="quadratic",
+                symmetrize=self.pdf_symmetrize,
                 kfactor=scale,
                 groups=pdf_groups,
             )
@@ -612,8 +614,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
                     f"pdf{int((ivar + 1) / 2)}{ext_suffix}",
                     self.process_name,
                     self.sigmaul_channel,
-                    # symmetrize=None,
-                    symmetrize="quadratic",
+                    symmetrize=self.pdf_symmetrize,
                     kfactor=scale,
                     groups=pdf_groups,
                 )

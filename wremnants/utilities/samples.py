@@ -9,6 +9,7 @@ supported_eras = eras_run2 + [
     "2023_PUAVE2",
     "2023_PUAVE5",
     "2023_PUAVE10",
+    "2026_LowPU",
     "13TeVGen",
 ]
 
@@ -122,6 +123,19 @@ wprocs_bsm = [
     "WtoMuNuSMEFT_2016PostVFP",
 ]
 
+## Samples with sqrt{S} = 13.6 TeV (2026 LowPU)
+# NOTE: no dedicated 13.6 TeV correction files exist yet; the 13 TeV files are
+# used as a placeholder.  When 13.6 TeV corrections are available, add a new
+# --theoryCorr choice (e.g. scetlib_dyturbo_CT18Z_N3p0LL_N2LO_13p6TeV) and
+# new CorrW/CorrZ pkl files, then update the default in parsing.py.
+wprocs_emu_minnlo_2026LowPU = ["Wplusmunu", "Wminusmunu", "Wplusenu", "Wminusenu"]
+zprocs_emu_minnlo_2026LowPU = ["Zmumu", "Zee"]
+wprocs_tau_minnlo_2026LowPU = ["Wplustaunu", "Wminustaunu"]
+zprocs_tau_minnlo_2026LowPU = ["Ztautau"]
+wprocs_minnlo_2026LowPU = wprocs_emu_minnlo_2026LowPU + wprocs_tau_minnlo_2026LowPU
+zprocs_minnlo_2026LowPU = zprocs_emu_minnlo_2026LowPU + zprocs_tau_minnlo_2026LowPU
+vprocs_minnlo_2026LowPU = wprocs_minnlo_2026LowPU + zprocs_minnlo_2026LowPU
+
 ## Samples with sqrt{S} = 5020GeV
 wprocs_emu_minnlo_2017G = [
     "Wplusmunu_2017G",
@@ -146,8 +160,14 @@ zprocs_minnlo_2017G = zprocs_emu_minnlo_2017G + zprocs_tau_minnlo_2017G
 vprocs_minnlo_2017G = wprocs_minnlo_2017G + zprocs_minnlo_2017G
 
 # all W and Z samples
-wprocs = wprocs_minnlo + wprocs_alt + wprocs_bsm + wprocs_minnlo_2017G
-zprocs = zprocs_minnlo + zprocs_alt + zprocs_minnlo_2017G
+wprocs = (
+    wprocs_minnlo
+    + wprocs_alt
+    + wprocs_bsm
+    + wprocs_minnlo_2017G
+    + wprocs_minnlo_2026LowPU
+)
+zprocs = zprocs_minnlo + zprocs_alt + zprocs_minnlo_2017G + zprocs_minnlo_2026LowPU
 vprocs = wprocs + zprocs + vprocs_minnlo_2017G
 
 zprocs_recoil = ["Zmumu_2016PostVFP"]
