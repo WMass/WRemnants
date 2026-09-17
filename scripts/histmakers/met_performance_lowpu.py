@@ -31,7 +31,11 @@ import hist
 
 import narf
 import narf.clingutils
-from wremnants.production import muon_selections, theory_corrections
+
+# recoil_tools declares the recoil_tools.hpp C++ header (used unconditionally
+# below for compute_recoil_from_met/get_met_wlike, regardless of --noRecoil),
+# so it must be imported exactly once and not re-declared separately here.
+from wremnants.production import muon_selections, recoil_tools, theory_corrections
 from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import (
     aggregate_groups,
@@ -39,8 +43,6 @@ from wremnants.production.histmaker_tools import (
     write_analysis_output,
 )
 from wremnants.utilities import samples
-
-narf.clingutils.Declare('#include "recoil_tools.hpp"')
 
 flavor = args.flavor
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
@@ -72,12 +74,18 @@ corr_helpers = theory_corrections.load_corr_helpers(
     [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
 )
 
-axis_ptl = hist.axis.Regular(75, 0.0, 150.0, name="ptl")
+# Reuse the 2017 low-PU recoil calibration, same as w_lowpu26.py.
+if not args.noRecoil:
+    recoilHelper = recoil_tools.Recoil("lowPU", args, flavor)
+
+# ptl/ptll/MET binning matches mz_lowPU.py (2017) exactly so both eras can be
+# compared/overlaid directly.
+axis_ptl = hist.axis.Regular(100, 0.0, 200.0, name="ptl")
 axis_etal = hist.axis.Regular(50, -2.5, 2.5, name="etal")
 axis_mll = hist.axis.Regular(60, 60, 120, name="mll")
-axis_ptll = hist.axis.Regular(150, 0, 150, name="ptll")
+axis_ptll = hist.axis.Regular(300, 0, 300, name="ptll")
 axis_mt = hist.axis.Regular(200, 0.0, 200.0, name="mt", underflow=False)
-axis_met = hist.axis.Regular(100, 0, 100, name="MET")
+axis_met = hist.axis.Regular(200, 0, 200, name="MET")
 axis_met_wlike = hist.axis.Regular(200, 0, 200, name="WlikeMET")
 axis_recoil_para = hist.axis.Regular(150, -100, 50, name="recoil_para")
 axis_recoil_perp = hist.axis.Regular(100, -50, 50, name="recoil_perp")
@@ -169,27 +177,23 @@ def build_graph(df, dataset):
     df = df.Define("trigLeps", "Lep_charge == TrigLep_charge")
     df = df.Define("nonTrigLeps", "Lep_charge == NonTrigLep_charge")
     df = df.Define("TrigLep_pt", "Lep_pt[trigLeps][0]")
+    df = df.Define("TrigLep_eta", "Lep_eta[trigLeps][0]")
     df = df.Define("TrigLep_phi", "Lep_phi[trigLeps][0]")
     df = df.Define("NonTrigLep_pt", "Lep_pt[nonTrigLeps][0]")
+    df = df.Define("NonTrigLep_eta", "Lep_eta[nonTrigLeps][0]")
     df = df.Define("NonTrigLep_phi", "Lep_phi[nonTrigLeps][0]")
 
-    df = df.Define(
-        "transverseMass",
-        f"wrem::get_mt_wlike(TrigLep_pt, TrigLep_phi, NonTrigLep_pt, NonTrigLep_phi, {met_type}_pt, {met_type}_phi)",
-    )
-    df = df.Define(
-        "met_wlike_TV2",
-        f"wrem::get_met_wlike(NonTrigLep_pt, NonTrigLep_phi, {met_type}_pt, {met_type}_phi)",
-    )
-    df = df.Define("met_wlike_pt", "met_wlike_TV2.Mod()")
-
-    df = df.Define(
-        "recoil",
-        f"wrem::compute_recoil_from_met({met_type}_pt, {met_type}_phi, Lep_pt, Lep_phi, ptll, phill)",
-    )
-    df = df.Define("recoil_para", "recoil[0]")
-    df = df.Define("recoil_perp", "recoil[1]")
-    df = df.Define("recoil_para_qt", "recoil_para + ptll")
+    # recoil_tools.setup_MET() hardcodes the branch name "RawMET_pt"/"_phi" for
+    # met=="RawPFMET" (the 2017 low-PU NanoAOD convention); 2026's NanoAODv15
+    # instead stores it directly as RawPFMET_pt/_phi. Alias so recoil_tools
+    # finds a valid branch regardless of era.
+    if (
+        not args.noRecoil
+        and met_type == "RawPFMET"
+        and not df.HasColumn("RawMET_pt")
+    ):
+        df = df.Alias("RawMET_pt", f"{met_type}_pt")
+        df = df.Alias("RawMET_phi", f"{met_type}_phi")
 
     if dataset.is_data:
         df = df.DefinePerSample("nominal_weight", "1.0")
@@ -204,12 +208,51 @@ def build_graph(df, dataset):
     else:
         df = df.Define("nominal_weight", "weight")
 
+    # Recoil correction needs ptVgen/phiVgen (defined above by
+    # define_theory_weights_and_corrs for vprocs), so it must run after the
+    # theory-correction block.
+    if not args.noRecoil:
+        leps = [
+            "TrigLep_pt",
+            "TrigLep_eta",
+            "TrigLep_phi",
+            "TrigLep_charge",
+            "NonTrigLep_pt",
+            "NonTrigLep_eta",
+            "NonTrigLep_phi",
+            "NonTrigLep_charge",
+        ]
+        df = recoilHelper.recoil_Z(
+            df, results, dataset, samples.zprocs_recoil_lowpu, leps, leps
+        )
+    else:
+        df = df.Alias("MET_corr_rec_pt", f"{met_type}_pt")
+        df = df.Alias("MET_corr_rec_phi", f"{met_type}_phi")
+
+    df = df.Define(
+        "transverseMass",
+        "wrem::get_mt_wlike(TrigLep_pt, TrigLep_phi, NonTrigLep_pt, NonTrigLep_phi, MET_corr_rec_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define(
+        "met_wlike_TV2",
+        "wrem::get_met_wlike(NonTrigLep_pt, NonTrigLep_phi, MET_corr_rec_pt, MET_corr_rec_phi)",
+    )
+    df = df.Define("met_wlike_pt", "met_wlike_TV2.Mod()")
+
+    df = df.Define(
+        "recoil",
+        "wrem::compute_recoil_from_met(MET_corr_rec_pt, MET_corr_rec_phi, Lep_pt, Lep_phi, ptll, phill)",
+    )
+    df = df.Define("recoil_para", "recoil[0]")
+    df = df.Define("recoil_perp", "recoil[1]")
+    df = df.Define("recoil_para_qt", "recoil_para + ptll")
+
     results.append(df.HistoBoost("lep_pt", [axis_ptl], ["Lep_pt", "nominal_weight"]))
     results.append(df.HistoBoost("lep_eta", [axis_etal], ["Lep_eta", "nominal_weight"]))
     results.append(df.HistoBoost("mll", [axis_mll], ["mll", "nominal_weight"]))
     results.append(df.HistoBoost("ptll", [axis_ptll], ["ptll", "nominal_weight"]))
     results.append(
-        df.HistoBoost("met", [axis_met], [f"{met_type}_pt", "nominal_weight"])
+        df.HistoBoost("met", [axis_met], ["MET_corr_rec_pt", "nominal_weight"])
     )
     results.append(
         df.HistoBoost("transverseMass", [axis_mt], ["transverseMass", "nominal_weight"])
