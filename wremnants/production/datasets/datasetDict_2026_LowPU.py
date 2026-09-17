@@ -121,4 +121,63 @@ dataDict = {
         "xsec": 364.35,
         "group": "Top",
     },
+    # QCD-4Jets MadGraph MLM, binned in HT (GeV). Cross sections computed directly
+    # with GenXSecAnalyzer on the RunIII2026LowPUSummer26MiniAODv6 files (the same
+    # campaign as the NanoAOD copied locally), not taken from another era/binning.
+    "QCD-HT10to40": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-10to40_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 6.077e08,
+        "group": "QCD",
+    },
+    "QCD-HT40to70": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-40to70_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 3.118e08,
+        "group": "QCD",
+    },
+    "QCD-HT70to100": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 5.874e07,
+        "group": "QCD",
+    },
+    "QCD-HT100to200": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-100to200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 2.528e07,
+        "group": "QCD",
+    },
+    "QCD-HT200to400": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-200to400_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 1.962e06,
+        "group": "QCD",
+    },
+    "QCD-HT400to600": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-400to600_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 9.616e04,
+        "group": "QCD",
+    },
+    "QCD-HT600to800": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-600to800_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 1.350e04,
+        "group": "QCD",
+    },
+    "QCD-HT800to1000": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-800to1000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 3.056e03,
+        "group": "QCD",
+    },
 }

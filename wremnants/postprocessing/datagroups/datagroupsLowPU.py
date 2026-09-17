@@ -46,6 +46,7 @@ def make_datagroups_lowPU(dg, excludeGroups=None, filterGroups=None):
         )
         add_group_if_nonempty("Top", startswith=["Top", "SingleT", "TT"])
         add_group_if_nonempty("Diboson", startswith=["Diboson", "WW", "WZ", "ZZ"])
+        add_group_if_nonempty("QCD", startswith="QCD")
     else:
         dg.addGroup(
             "Other",
@@ -70,5 +71,18 @@ def make_datagroups_lowPU(dg, excludeGroups=None, filterGroups=None):
         )
         dg.filterGroups(filterGroups)
         dg.excludeGroups(excludeGroups)
+
+        # QCD MC and the data-driven nonprompt (Fake_mu/Fake_e) estimate both
+        # model the same physics (the data-driven estimate is not subtracting
+        # off QCD, see the exclusion above), so having both in the same plot
+        # or fit double-counts that background. Require the caller to pick one
+        # via --excludeProcs/--filterProcs rather than silently stacking both.
+        if "QCD" in dg.groups and dg.fakeName in dg.groups:
+            raise RuntimeError(
+                "Both 'QCD' (MC) and "
+                f"'{dg.fakeName}' (data-driven nonprompt) groups are present. "
+                "These are two alternative estimates of the same background and "
+                "must not be used together: exclude one with --excludeProcs."
+            )
 
     return dg
