@@ -911,7 +911,7 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                 regressor.force_positive(exclude_idx=0)
 
         # evaluate in range of original histogram
-        x_smooth_orig = self.get_bin_centers_smoothing(h, flow=True)
+        x_smooth_orig = self.get_bin_centers_smoothing(h, flow=flow)
         y_smooth_orig = regressor.evaluate(x_smooth_orig)
 
         if syst_variations:
@@ -1062,8 +1062,10 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
             logd = np.where(goodbin, np.log(sval), 0.0)
             logdvar = np.where(goodbin, svar / sval**2, np.inf)
 
+            # sval/svar have already had their flow bins trimmed off above (smoothslice),
+            # so the bin centers used for the regression must not include a flow placeholder either.
             x = self.get_bin_centers_smoothing(
-                h, flow=flow
+                h, flow=False
             )  # the bins where the smoothing is performed (can be different to the bins in h)
 
             sval, svar = self.smoothen(
@@ -1074,6 +1076,11 @@ class FakeSelectorSimpleABCD(HistselectorABCD):
                 regressor=self.spectrum_regressor,
                 syst_variations=syst_variations,
                 reduce=reduce,
+                # x above already excludes flow bins (they were trimmed from sval/svar
+                # earlier in this function), and the caller (get_smoothed_tensor) only
+                # assigns into the regular bins, leaving flow unchanged -- so the fit
+                # must not be evaluated on the flow-extended grid either.
+                flow=False,
             )
 
             logger.debug(
