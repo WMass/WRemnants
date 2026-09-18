@@ -28,6 +28,7 @@ from wremnants.production import (
     systematics,
     theory_corrections,
     theoryAgnostic_tools,
+    top_corrections,
     unfolding_tools,
     vertex,
 )
@@ -1407,6 +1408,11 @@ def build_graph(df, dataset):
             )
             weight_expr += "*weight_pixel_multiplicity"
 
+        if isTop:
+            # NNLO QCD + NLO EW over POWHEG+Pythia8, applied to the ttbar samples
+            df = top_corrections.define_top_pt_weight(df, dataset.name)
+            weight_expr += "*topPtWeight"
+
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
@@ -1478,6 +1484,17 @@ def build_graph(df, dataset):
         "transverseMass",
         "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_pt, MET_corr_rec_phi)",
     )
+
+    if not args.noRecoil and args.recoilQtMax is not None:
+        # recoil calibration evaluated at the uncapped boson pt, see recoil_tools.py
+        df = df.Define(
+            "transverseMass_recoilQtExtrap",
+            "wrem::mt_2(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_qtExtrap_pt, MET_corr_rec_qtExtrap_phi)",
+        )
+        df = df.Define(
+            "goodMuons_angleSignUt_recoilQtExtrap0",
+            "wrem::zqtproj0_angleSign(goodMuons_pt0, goodMuons_phi0, MET_corr_rec_qtExtrap_pt, MET_corr_rec_qtExtrap_phi)",
+        )
 
     # Define dedicated systematics from scaling/smearing met_pt and smearing met_phi.
     # The used values are derived looking at template variations, but not optimized.
@@ -2273,6 +2290,36 @@ def build_graph(df, dataset):
             axes,
             [*cols_smearMET_phi, "nominal_weight"],
         )
+
+        if isTop:
+            # the size of the top pt reweighting itself is taken as its uncertainty
+            df = df.Define("nominal_weight_noTopPt", "nominal_weight/topPtWeight")
+            systematics.add_syst_hist(
+                results,
+                df,
+                "nominal_topPtNNLO",
+                axes,
+                [*cols, "nominal_weight_noTopPt"],
+            )
+
+        if (
+            not args.noRecoil
+            and args.recoilQtMax is not None
+            and dataset.name in samples.wprocs_recoil
+        ):
+            cols_recoilQtExtrap = [
+                x.replace("transverseMass", "transverseMass_recoilQtExtrap").replace(
+                    "goodMuons_angleSignUt0", "goodMuons_angleSignUt_recoilQtExtrap0"
+                )
+                for x in cols
+            ]
+            systematics.add_syst_hist(
+                results,
+                df,
+                "nominal_recoilQtExtrap",
+                axes,
+                [*cols_recoilQtExtrap, "nominal_weight"],
+            )
 
         if args.makeMCefficiency:
             axes_WeffMC = [

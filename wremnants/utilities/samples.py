@@ -151,7 +151,17 @@ zprocs = zprocs_minnlo + zprocs_alt + zprocs_minnlo_2017G
 vprocs = wprocs + zprocs + vprocs_minnlo_2017G
 
 zprocs_recoil = ["Zmumu_2016PostVFP"]
-wprocs_recoil = ["Wplusmunu_2016PostVFP", "Wminusmunu_2016PostVFP"]
+# processes the recoil calibration is applied to in the W analysis: the signal and
+# the V+jets backgrounds, for which the recoil can be defined w.r.t. the gen boson
+wprocs_recoil = [
+    "Wplusmunu_2016PostVFP",
+    "Wminusmunu_2016PostVFP",
+    "Wplustaunu_2016PostVFP",
+    "Wminustaunu_2016PostVFP",
+    "Ztautau_2016PostVFP",
+    "Zmumu_2016PostVFP",
+    "Zmumu10to50_2016PostVFP",
+]
 
 zprocs_recoil_lowpu = ["Zmumu", "Zee"]
 wprocs_recoil_lowpu = ["Wminusmunu", "Wminusenu", "Wplusmunu", "Wplusenu"]

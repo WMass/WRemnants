@@ -5,6 +5,7 @@ import hist
 import numpy as np
 import ROOT
 
+from wremnants.production import generator_level_definitions
 from wremnants.utilities import binning, common
 from wremnants.utilities.io_tools import input_tools
 
@@ -29,6 +30,13 @@ except:
 ROOT.gInterpreter.Declare('#include "recoil_tools.hpp"')
 ROOT.gInterpreter.Declare('#include "recoil_helper.hpp"')
 logger = logging.getLogger("wremnants").getChild(__name__.split(".")[-1])
+
+# A charged particle inside the tracker acceptance leaves a track and is therefore part
+# of the PF MET, whether or not it is reconstructed as a muon: failing the global muon
+# reconstruction, the CVH refit or the veto selection does not remove it from the MET,
+# and neither does 2.4 < |eta| < 2.5, where there is a track but no muon.
+TRACK_MAX_ABSETA = 2.5
+TRACK_MIN_PT = 1.0
 
 
 def RecoilCalibrationHelper(fIn, args):
@@ -250,6 +258,9 @@ class Recoil:
         self.df = self.df.Alias("lep_corr_eta", "lep_uncorr_eta")
         self.df = self.df.Alias("lep_corr_phi", "lep_uncorr_phi")
         self.df = self.df.Alias("lep_corr_charge", "lep_uncorr_charge")
+        # both leptons are measured and subtracted from the MET to build the recoil
+        self.df = self.df.Alias("met_lep_pt", "lep_corr_pt")
+        self.df = self.df.Alias("met_lep_phi", "lep_corr_phi")
         # self.df = self.df.Define("lep_corr_pt", f"wrem::Vec_d{{ {leps_corr[0]}, {leps_corr[4]} }}")
         # self.df = self.df.Define("lep_corr_eta", f"wrem::Vec_d{{ {leps_corr[1]}, {leps_corr[5]} }}")
         # self.df = self.df.Define("lep_corr_phi", f"wrem::Vec_d{{ {leps_corr[2]}, {leps_corr[6]} }}")
@@ -995,7 +1006,7 @@ class Recoil:
 
             # select the gen variable
             self.df = self.df.Alias("v_gen_pt", "v_gen_pt_proxy_postfsr")
-            self.df = self.df.Alias("v_gen_phi", "v_gen_pt_proxy_postfsr")
+            self.df = self.df.Alias("v_gen_phi", "v_gen_phi_proxy_postfsr")
 
             # reweighthings
             if self.vpt_reweight_helper_mc_data != None:
@@ -1018,81 +1029,135 @@ class Recoil:
                 if self.storeHists:
                     self.add_histo(f"v_gen_pt{suffix}", [gen_pt], [self.axis_qt])
 
+            # for tau processes the reco muon comes from a tau decay, so the invisible
+            # momentum is the sum of all post-FSR neutrinos: for W->taunu the nu_tau from
+            # the W plus the nu_mu and nu_tau from the tau decay, for Z->tautau also the
+            # neutrinos of the second tau, whatever its decay mode. The charge partner
+            # used below would pick up the nu_mu only
+            isTau = "taunu" in self.dataset.name or "tautau" in self.dataset.name
+
             # pre-FSR
             self.df = self.df.Alias("v_gen_pt_prefsr", "ptVgen")
             self.df = self.df.Alias("v_gen_phi_prefsr", "phiVgen")
             gen_res_vars("_prefsr", "v_gen_pt_prefsr", "v_gen_phi_prefsr")
 
-            # post-FSR
-            if "postFSRleps" not in self.df.GetColumnNames():
-                self.df = self.df.Define(
-                    "postFSRleps",
-                    "GenPart_status == 1 && (GenPart_statusFlags&1 || GenPart_statusFlags&(1<<5)) && (GenPart_pdgId >= 11 && GenPart_pdgId <= 14)",
-                )
-                self.df = self.df.Define(
-                    "postFSRantileps",
-                    "GenPart_status == 1 && (GenPart_statusFlags&1 || GenPart_statusFlags&(1<<5)) && (GenPart_pdgId <= -11 && GenPart_pdgId >= -14)",
-                )
-                self.df = self.df.Define(
-                    "postFSRlepIdx", "ROOT::VecOps::ArgMax(GenPart_pt[postFSRleps])"
-                )
-                self.df = self.df.Define(
-                    "postFSRantilepIdx",
-                    "ROOT::VecOps::ArgMax(GenPart_pt[postFSRantileps])",
-                )
-                self.df = self.df.Define(
-                    "lepGen",
-                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], GenPart_mass[postFSRleps][postFSRlepIdx])",
-                )
-                self.df = self.df.Define(
-                    "antilepGen",
-                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], GenPart_mass[postFSRantileps][postFSRantilepIdx])",
-                )
-                self.df = self.df.Define(
-                    "VGen",
-                    "ROOT::Math::PxPyPzEVector(lepGen)+ROOT::Math::PxPyPzEVector(antilepGen)",
-                )
-            self.df = self.df.Define("v_gen_pt_postfsr", "VGen.pt()")
-            self.df = self.df.Define("v_gen_phi_postfsr", "VGen.Phi()")
-            gen_res_vars("_postfsr", "v_gen_pt_postfsr", "v_gen_phi_postfsr")
-
-            # proxy pre-FSR
+            # the reco muon that enters the recoil definition, see apply_recoil_W
             self.df = self.df.Define(
                 "trg_lep_mom4",
                 f"ROOT::Math::PtEtaPhiMVector(lep_corr_pt, lep_corr_eta, lep_corr_phi, wrem::muon_mass)",
             )
-            self.df = self.df.Define(
-                "proxy_gen_prefsr",
-                f"wrem::proxy_gen_v(genl, genlanti, trg_lep_mom4, lep_corr_charge)",
-            )
-            self.df = self.df.Define("v_gen_pt_proxy_prefsr", "proxy_gen_prefsr.pt()")
-            self.df = self.df.Define("v_gen_phi_proxy_prefsr", "proxy_gen_prefsr.Phi()")
-            gen_res_vars(
-                "_proxy_prefsr", "v_gen_pt_proxy_prefsr", "v_gen_phi_proxy_prefsr"
-            )
 
-            # proxy post-FSR
-            self.df = self.df.Define(
-                "proxy_gen_postfsr",
-                f"wrem::proxy_gen_v(lepGen, antilepGen, trg_lep_mom4, lep_corr_charge)",
-            )
+            if isTau:
+                # postfsrNeutrinos covers |pdgId| = 12, 14 and 16, i.e. also the tau
+                # neutrinos that the postFSR(anti)leps selection below would miss
+                self.df = generator_level_definitions.define_postfsr_vars(self.df)
+                self.df = self.df.Define(
+                    "proxy_gen_postfsr",
+                    "postfsrNeutrinos_mom4 + ROOT::Math::PxPyPzEVector(trg_lep_mom4)",
+                )
+                # the visible tau decay products are measured and are part of the recoil
+                self.df = self.df.Define("met_lep2_pt", "0.")
+                self.df = self.df.Define("met_lep2_phi", "0.")
+            else:
+                # post-FSR
+                if "postFSRleps" not in self.df.GetColumnNames():
+                    self.df = self.df.Define(
+                        "postFSRleps",
+                        "GenPart_status == 1 && (GenPart_statusFlags&1 || GenPart_statusFlags&(1<<5)) && (GenPart_pdgId >= 11 && GenPart_pdgId <= 14)",
+                    )
+                    self.df = self.df.Define(
+                        "postFSRantileps",
+                        "GenPart_status == 1 && (GenPart_statusFlags&1 || GenPart_statusFlags&(1<<5)) && (GenPart_pdgId <= -11 && GenPart_pdgId >= -14)",
+                    )
+                    self.df = self.df.Define(
+                        "postFSRlepIdx", "ROOT::VecOps::ArgMax(GenPart_pt[postFSRleps])"
+                    )
+                    self.df = self.df.Define(
+                        "postFSRantilepIdx",
+                        "ROOT::VecOps::ArgMax(GenPart_pt[postFSRantileps])",
+                    )
+                    self.df = self.df.Define(
+                        "lepGen",
+                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], GenPart_mass[postFSRleps][postFSRlepIdx])",
+                    )
+                    self.df = self.df.Define(
+                        "antilepGen",
+                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], GenPart_mass[postFSRantileps][postFSRantilepIdx])",
+                    )
+                    self.df = self.df.Define(
+                        "VGen",
+                        "ROOT::Math::PxPyPzEVector(lepGen)+ROOT::Math::PxPyPzEVector(antilepGen)",
+                    )
+                self.df = self.df.Define("v_gen_pt_postfsr", "VGen.pt()")
+                self.df = self.df.Define("v_gen_phi_postfsr", "VGen.Phi()")
+                gen_res_vars("_postfsr", "v_gen_pt_postfsr", "v_gen_phi_postfsr")
+
+                # proxy pre-FSR
+                self.df = self.df.Define(
+                    "proxy_gen_prefsr",
+                    f"wrem::proxy_gen_v(genl, genlanti, trg_lep_mom4, lep_corr_charge)",
+                )
+                self.df = self.df.Define(
+                    "v_gen_pt_proxy_prefsr", "proxy_gen_prefsr.pt()"
+                )
+                self.df = self.df.Define(
+                    "v_gen_phi_proxy_prefsr", "proxy_gen_prefsr.Phi()"
+                )
+                gen_res_vars(
+                    "_proxy_prefsr", "v_gen_pt_proxy_prefsr", "v_gen_phi_proxy_prefsr"
+                )
+
+                # proxy post-FSR: the post-FSR partner of the selected muon (the
+                # neutrino for W->munu, the second muon for Z->mumu, which is
+                # invisible to the MET when it is outside the muon acceptance)
+                # combined with the reco muon
+                self.df = self.df.Define(
+                    "proxy_gen_postfsr",
+                    f"wrem::proxy_gen_v(lepGen, antilepGen, trg_lep_mom4, lep_corr_charge)",
+                )
+
+                # The partner of the selected muon is a neutrino for W->munu, but the
+                # second muon for Z->mumu. A charged partner inside the tracker
+                # acceptance is in the MET and has to be subtracted from it like the
+                # selected muon, otherwise it is invisible and enters the proxy only.
+                self.df = self.df.Define(
+                    "gen_partner", "lep_corr_charge == 1 ? lepGen : antilepGen"
+                )
+                self.df = self.df.Define(
+                    "gen_partner_pdgId",
+                    "lep_corr_charge == 1 ? GenPart_pdgId[postFSRleps][postFSRlepIdx] : GenPart_pdgId[postFSRantileps][postFSRantilepIdx]",
+                )
+                self.df = self.df.Define(
+                    "gen_partner_in_met",
+                    f"(std::abs(gen_partner_pdgId) == 11 || std::abs(gen_partner_pdgId) == 13) && std::abs(gen_partner.eta()) < {TRACK_MAX_ABSETA} && gen_partner.pt() > {TRACK_MIN_PT}",
+                )
+                self.df = self.df.Define(
+                    "met_lep2_pt", "gen_partner_in_met ? gen_partner.pt() : 0."
+                )
+                self.df = self.df.Define(
+                    "met_lep2_phi", "gen_partner_in_met ? gen_partner.phi() : 0."
+                )
             self.df = self.df.Define("v_gen_pt_proxy_postfsr", "proxy_gen_postfsr.pt()")
             self.df = self.df.Define(
                 "v_gen_phi_proxy_postfsr", "proxy_gen_postfsr.Phi()"
             )
             gen_res_vars(
-                "_proxy_postfsr", "v_gen_pt_proxy_postfsr", "v_gen_phi_proxy_postfsr"
+                "_proxy_postfsr",
+                "v_gen_pt_proxy_postfsr",
+                "v_gen_phi_proxy_postfsr",
+            )
+
+            # leptons subtracted from the MET to build the hadronic recoil
+            self.df = self.df.Define(
+                "met_lep_pt", "wrem::Vec_d{lep_corr_pt, met_lep2_pt}"
+            )
+            self.df = self.df.Define(
+                "met_lep_phi", "wrem::Vec_d{lep_corr_phi, met_lep2_phi}"
             )
 
             # select the gen variable
-            if "taunu" in self.dataset.name or "tautau" in self.dataset.name:
-                self.df = self.df.Alias("v_gen_pt", "v_gen_pt_prefsr")
-                self.df = self.df.Alias("v_gen_phi", "v_gen_phi_prefsr")
-            else:
-                self.df = self.df.Alias("v_gen_pt", "v_gen_pt_proxy_postfsr")
-                self.df = self.df.Alias("v_gen_phi", "v_gen_phi_proxy_postfsr")
-                # self.df = self.df.Alias("v_gen_pt", "v_gen_pt_prefsr")
-                # self.df = self.df.Alias("v_gen_phi", "v_gen_phi_prefsr")
+            self.df = self.df.Alias("v_gen_pt", "v_gen_pt_proxy_postfsr")
+            self.df = self.df.Alias("v_gen_phi", "v_gen_phi_proxy_postfsr")
 
             # reweighthings
             if self.vpt_reweight_helper_mc_data != None:
@@ -1115,7 +1180,7 @@ class Recoil:
         # decompose MET and dilepton (for Z) or lepton (for W) along the generator boson direction
         self.df = self.df.Define(
             "recoil_corr_xy_gen",
-            "wrem::compute_recoil_from_met(met_corr_xy_pt, met_corr_xy_phi, lep_corr_pt, lep_corr_phi, v_gen_pt, v_gen_phi)",
+            "wrem::compute_recoil_from_met(met_corr_xy_pt, met_corr_xy_phi, met_lep_pt, met_lep_phi, v_gen_pt, v_gen_phi)",
         )  # both gen pt and phi
 
         self.df = self.df.Define("recoil_corr_xy_para_gen", "recoil_corr_xy_gen[0]")
@@ -1181,7 +1246,9 @@ class Recoil:
 
     def apply_recoil_Z(self):
 
-        doGEN = False
+        # apply the calibration along the gen boson proxy, as done for the W, instead of
+        # the reconstructed dilepton: closure test of the W application on Z events
+        doGEN = self.args.recoilGenProxy
         if self.dataset.name in self.datasets_to_apply:
 
             if doGEN:
@@ -1214,7 +1281,7 @@ class Recoil:
 
                 self.df = self.df.Define(
                     "met_corr_rec",
-                    "wrem::compute_met_from_recoil(recoil_corr_rec_para, recoil_corr_rec_perp, lep_corr_pt, lep_corr_phi, v_gen_pt, v_gen_phi)",
+                    "wrem::compute_met_from_recoil(recoil_corr_rec_para, recoil_corr_rec_perp, met_lep_pt, met_lep_phi, v_gen_pt, v_gen_phi)",
                 )
                 self.df = self.df.Define("met_corr_rec_pt", "met_corr_rec[0]")
                 self.df = self.df.Define("met_corr_rec_phi", "met_corr_rec[1]")
@@ -1314,11 +1381,22 @@ class Recoil:
             """
 
             if self.recoilHelper != None:
+                # The calibration is derived from Z events and has no statistics above
+                # ~150 GeV, where the model extrapolates (the response correction runs
+                # away and the resolution collapses). Optionally evaluate it at a capped
+                # boson pt, keeping the true one for the decomposition and for the MET.
+                if self.args.recoilQtMax is not None:
+                    self.df = self.df.Define(
+                        "v_gen_pt_recoil",
+                        f"std::min<double>(v_gen_pt, {self.args.recoilQtMax})",
+                    )
+                else:
+                    self.df = self.df.Alias("v_gen_pt_recoil", "v_gen_pt")
                 self.df = self.df.Define(
                     "recoil_corr",
                     self.recoilHelper,
                     [
-                        "v_gen_pt",
+                        "v_gen_pt_recoil",
                         "recoil_corr_xy_para_qt_gen",
                         "recoil_corr_xy_perp_gen",
                     ],
@@ -1342,7 +1420,7 @@ class Recoil:
 
             self.df = self.df.Define(
                 "met_corr_rec",
-                "wrem::compute_met_from_recoil(recoil_corr_rec_para_gen, recoil_corr_rec_perp_gen, lep_corr_pt, lep_corr_phi, v_gen_pt, v_gen_phi)",
+                "wrem::compute_met_from_recoil(recoil_corr_rec_para_gen, recoil_corr_rec_perp_gen, met_lep_pt, met_lep_phi, v_gen_pt, v_gen_phi)",
             )
             self.df = self.df.Define("met_corr_rec_pt", "met_corr_rec[0]")
             self.df = self.df.Define("met_corr_rec_phi", "met_corr_rec[1]")
@@ -1356,6 +1434,37 @@ class Recoil:
                 "met_corr_rec_y", "met_corr_rec_pt*sin(met_corr_rec_phi)"
             )
 
+            if self.args.recoilQtMax is not None and self.recoilHelper != None:
+                # the same calibration evaluated at the uncapped boson pt, stored as the
+                # systematic variation that covers the extrapolation
+                self.df = self.df.Define(
+                    "recoil_corr_qt_extrap",
+                    self.recoilHelper,
+                    [
+                        "v_gen_pt",
+                        "recoil_corr_xy_para_qt_gen",
+                        "recoil_corr_xy_perp_gen",
+                    ],
+                )
+                self.df = self.df.Define(
+                    "recoil_corr_rec_para_gen_qt_extrap",
+                    "recoil_corr_qt_extrap.ut_para_corr(0) - v_gen_pt",
+                )
+                self.df = self.df.Define(
+                    "recoil_corr_rec_perp_gen_qt_extrap",
+                    "recoil_corr_qt_extrap.ut_perp_corr(0)",
+                )
+                self.df = self.df.Define(
+                    "met_corr_rec_qt_extrap",
+                    "wrem::compute_met_from_recoil(recoil_corr_rec_para_gen_qt_extrap, recoil_corr_rec_perp_gen_qt_extrap, met_lep_pt, met_lep_phi, v_gen_pt, v_gen_phi)",
+                )
+                self.df = self.df.Define(
+                    "met_corr_rec_qt_extrap_pt", "met_corr_rec_qt_extrap[0]"
+                )
+                self.df = self.df.Define(
+                    "met_corr_rec_qt_extrap_phi", "met_corr_rec_qt_extrap[1]"
+                )
+
         else:
             self.df = self.df.Alias("met_corr_rec_pt", "met_corr_xy_pt")
             self.df = self.df.Alias("met_corr_rec_phi", "met_corr_xy_phi")
@@ -1364,6 +1473,20 @@ class Recoil:
 
         self.df = self.df.Alias("MET_corr_rec_pt", "met_corr_rec_pt")
         self.df = self.df.Alias("MET_corr_rec_phi", "met_corr_rec_phi")
+
+        if self.args.recoilQtMax is not None:
+            # no variation for the processes without a recoil calibration
+            if not self.df.HasColumn("met_corr_rec_qt_extrap_pt"):
+                self.df = self.df.Alias("met_corr_rec_qt_extrap_pt", "met_corr_rec_pt")
+                self.df = self.df.Alias(
+                    "met_corr_rec_qt_extrap_phi", "met_corr_rec_phi"
+                )
+            self.df = self.df.Alias(
+                "MET_corr_rec_qtExtrap_pt", "met_corr_rec_qt_extrap_pt"
+            )
+            self.df = self.df.Alias(
+                "MET_corr_rec_qtExtrap_phi", "met_corr_rec_qt_extrap_phi"
+            )
 
         self.recoil_vars_plots_W("uncorr")
         self.recoil_vars_plots_W("corr_lep")

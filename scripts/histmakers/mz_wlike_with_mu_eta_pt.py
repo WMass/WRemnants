@@ -24,6 +24,7 @@ from wremnants.production import (
     systematics,
     theory_corrections,
     theoryAgnostic_tools,
+    top_corrections,
     unfolding_tools,
     vertex,
 )
@@ -966,6 +967,11 @@ def build_graph(df, dataset):
             )
             weight_expr += "*weight_pixel_multiplicity"
 
+        if dataset.group == "Top":
+            # NNLO QCD + NLO EW over POWHEG+Pythia8, applied to the ttbar samples
+            df = top_corrections.define_top_pt_weight(df, dataset.name)
+            weight_expr += "*topPtWeight"
+
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
@@ -1314,8 +1320,23 @@ def build_graph(df, dataset):
 
     nominal = df.HistoBoost("nominal", axes, [*cols, "nominal_weight"])
     results.append(nominal)
-    nominal_noSF = df.HistoBoost("nominal_noSF", axes, [*cols, "nominal_weight_noSF"])
-    results.append(nominal_noSF)
+
+    if dataset.group == "Top":
+        # the size of the top pt reweighting itself is taken as its uncertainty
+        df = df.Define("nominal_weight_noTopPt", "nominal_weight/topPtWeight")
+        systematics.add_syst_hist(
+            results,
+            df,
+            "nominal_topPtNNLO",
+            axes,
+            [*cols, "nominal_weight_noTopPt"],
+        )
+    if not args.onlyMainHistograms:
+        # nominal_weight_noSF is only defined together with the auxiliary histograms
+        nominal_noSF = df.HistoBoost(
+            "nominal_noSF", axes, [*cols, "nominal_weight_noSF"]
+        )
+        results.append(nominal_noSF)
 
     if useTnpMuonVarForSF and not args.onlyMainHistograms and not args.unfolding:
         df = df.Define(
