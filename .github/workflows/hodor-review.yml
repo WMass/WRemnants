@@ -17,11 +17,15 @@ name: Hodor AI review
 # contributor's first merged commit, then automatic, as for main.yml).
 # Consequences, baked in below:
 #   - The workflow file is read from the base branch by GitHub; PRs cannot
-#     modify what runs. There is NO checkout of this repository at all
-#     (this is hodor's README flow): hodor clones the repo and checks out
-#     the PR head itself via gh, so its review state always keys on the
-#     real PR commit — base-or-merge-commit workspace confusion is
-#     impossible by construction.
+#     modify what runs. The job checks the PR head out itself, explicitly
+#     at refs/pull/N/head and with the code submodules populated from URLs
+#     pinned in the step below, and hodor's CI detection then adopts that
+#     workspace without performing any git operation of its own. Review
+#     state therefore keys on the real PR commit, never the synthetic merge
+#     commit. This used to be delegated to hodor (clone + gh pr checkout,
+#     its README flow), which left the submodule directories empty and sent
+#     the agent hunting for them with `find /` — that hung two reviews
+#     until the job timeout.
 #   - Trusted configuration comes from the WMass/hodor fork, pinned by
 #     commit SHA: the fork branch carries the custom-endpoint patch
 #     (upstream PR mr-karan/hodor#25) and models.cern.json (base URL,
@@ -94,6 +98,59 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PI_OFFLINE: "1" # never download rg/fd binaries mid-review
     steps:
+      # Check the PR out ourselves, with the code submodules populated, and
+      # let hodor's CI detection adopt this workspace as-is (it then performs
+      # no git operations of its own -- no clone, no `gh pr checkout`).
+      #
+      # refs/pull/N/head is the PR head commit, fetched from THIS repository,
+      # so it works identically for fork PRs and for workflow_dispatch, and it
+      # pins the real PR commit rather than the synthetic merge commit -- the
+      # property the previous clone-it-yourself flow was written to guarantee.
+      # fetch-depth 0 is load-bearing, not an optimisation: hodor builds its
+      # diff as `git diff origin/<base>...HEAD` (review-diff.ts) and only
+      # fetches the base itself under --full --target-branch, which this job
+      # does not pass. Depth 0 selects actions/checkout's all-history refspec
+      # (+refs/heads/*:refs/remotes/origin/*), which is what creates
+      # origin/<base>; at the default depth 1 an explicit ref fetches only
+      # refs/pull/N/head and the diff would fail.
+      - name: Check out the pull request
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository }}
+          ref: refs/pull/${{ github.event.pull_request.number || inputs.pr_number }}/head
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Only the three code submodules, and only from URLs fixed here rather
+      # than from the PR's own .gitmodules. Two deliberate differences from
+      # main.yml's `submodules: recursive` + `lfs: true`:
+      #   - wremnants-data is skipped. It clones fine anonymously, but it is
+      #     4+ GB of LFS data files with nothing in it for a code reviewer;
+      #     narf, rabbit and wums together are ~12 MB and take ~3 s.
+      #   - the URLs are pinned here instead of being read from .gitmodules.
+      #     main.yml runs on pull_request, where a fork PR gets no secrets;
+      #     this job runs on pull_request_target WITH the org LLM key, so a PR
+      #     must not get to choose which hosts the job fetches from.
+      #
+      # Populating them matters: left empty, the agent goes looking for the
+      # packages with `find /`, which on these runners walks AFS, CVMFS and EOS
+      # and never returns. Two reviews hung that way, for 26 min and 2h19.
+      - name: Populate code submodules
+        # Best effort on purpose, no `set -e`: a PR may point a submodule at a
+        # commit that is not pushed yet (stacked submodule work) or rename a
+        # path, and failing the job there would mean no review at all for
+        # exactly the PRs that were reviewed fine before. Empty directories
+        # are survivable -- REVIEW_NOTES tells the agent not to chase missing
+        # package directories -- so warn and review anyway.
+        run: |
+          git submodule init -- narf rabbit wums || true
+          git config submodule.narf.url https://github.com/bendavid/narf.git
+          git config submodule.rabbit.url https://github.com/WMass/rabbit.git
+          git config submodule.wums.url https://github.com/WMass/wums.git
+          git submodule update -- narf rabbit wums \
+            || echo "::warning::Could not populate all code submodules; reviewing with those directories empty."
+          git submodule status -- narf rabbit wums || true
+
       - name: Preflight configuration
         run: |
           if [ -z "$LLM_API_KEY" ]; then
@@ -161,24 +218,22 @@ jobs:
         run: |
           PR="${{ github.event.pull_request.number || inputs.pr_number }}"
           export HODOR_MODELS_JSON="$RUNNER_TEMP/hodor-src/models.cern.json"
-          # These self-hosted runners are shared and persistent, so
-          # GITHUB_WORKSPACE contains a STALE checkout of this repo left by
-          # other workflows. hodor's CI detection reuses any such checkout
-          # as the review workspace without fetching the PR head (observed:
-          # 0-byte embedded diffs and review state keyed to a stale commit).
-          # Point it at a fresh empty dir so detection declines and hodor
-          # clones + gh-pr-checkouts the real PR head instead.
-          export GITHUB_WORKSPACE="$RUNNER_TEMP/hodor-workspace"
-          # That clone is ~1 GB for this repository and lands in the system
-          # temp dir (hodor mkdtemps its workspace). Keep it off the shared
-          # CERN host's /tmp and on the runner volume, which is sized for
-          # this repo's checkouts and wiped between jobs.
+          # GITHUB_WORKSPACE is deliberately left alone: it holds the
+          # checkout made above, hodor's CI detection adopts it, and no clone
+          # happens. Should detection ever decline, hodor falls back to
+          # cloning ~1 GB into a mkdtemp workspace -- keep that off the shared
+          # CERN host's /tmp and on the runner volume, which is wiped between
+          # jobs.
           export TMPDIR="$RUNNER_TEMP"
+          # wremnants-data stays empty (see the submodule step); say so
+          # rather than let the agent go looking for it.
+          REVIEW_NOTES='The wremnants-data submodule is intentionally not checked out in this review workspace: it holds several GB of data files on CERN GitLab and the reviewer has no use for it. Its directory is empty and that is never a finding. Confine every search to the workspace directory; this runner mounts AFS, CVMFS and EOS, so a filesystem-wide search such as "find /" will hang until the job times out.'
           # "cern" selects the provider defined in models.cern.json
           # (HODOR_MODELS_JSON); the prefix is not a pi builtin.
           bun run "$RUNNER_TEMP/hodor-src/src/cli.ts" \
             "https://github.com/${{ github.repository }}/pull/$PR" \
             --model "cern/$HODOR_MODEL" \
             --reasoning-effort max \
+            --additional-instructions "$REVIEW_NOTES" \
             --post \
             --require-delivery
