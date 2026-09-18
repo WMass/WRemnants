@@ -20,6 +20,7 @@ def translate_html_to_latex(n):
             .replace("</sup>", "}")
             .replace(r"μ", r"\mu")
             .replace(r"ε", r"\epsilon")
+            .replace(r"η", r"\eta")
             .replace(" ", r"\ ")
         )
         n = f"${n}$"
@@ -741,6 +742,63 @@ impact_labels.update(
         for b, blabel in bosons.items()
         for suffix, label in (("SymAvg", "avg."), ("SymDiff", "diff."))
         for h in range(8)
+    }
+)
+
+# In-situ tag-and-probe muon efficiency Chebyshev coefficients. Name layout
+# mirrors insitu_parameter_labels() in
+# wremnants/production/muon_efficiencies_insitu.py: IDIP is 1D in pT and
+# charge-dependent; Trigger and Iso are 2D in (pT, uT), with Trigger
+# charge-dependent and Iso charge-inclusive. Decorrelated over the full 48-bin
+# probe-eta grid; pT Chebyshev order 3 (cPt 0-3), uT order 2 (cUt 0-2). The
+# coefficient label shows the step, eta bin, charge, and the Chebyshev
+# orders T_k(pT) [T_m(uT)].
+_insitu_n_eta = 48
+_insitu_charge_labels = {
+    "minus": "-",  # "<i>q</i><sup>−</sup>",
+    "plus": "+",  # "<i>q</i><sup>+</sup>",
+}
+_insitu_Tpt = "<i>T</i><sub>{k}</sub>(<i>p</i><sub>T</sub>)"
+_insitu_Tut = "<i>T</i><sub>{m}</sub>(<i>u</i><sub>T</sub>)"
+
+# IDIP: effInsituID_eta{b}_q{minus,plus}_cPt{k}
+impact_labels.update(
+    {
+        f"effInsituID_eta{b}_q{q}_cPt{k}": (
+            f"<i>ε</i><sup>ID</sup><sub>{b}{qlab}</sub> " + _insitu_Tpt.format(k=k)
+        )
+        for b in range(_insitu_n_eta)
+        for q, qlab in _insitu_charge_labels.items()
+        for k in range(4)
+    }
+)
+
+# Trigger: effInsituHLT_eta{b}_q{minus,plus}_cPt{k}_cUt{m}
+impact_labels.update(
+    {
+        f"effInsituHLT_eta{b}_q{q}_cPt{k}_cUt{m}": (
+            f"<i>ε</i><sup>trig</sup><sub>{b}{qlab}</sub>"
+            + _insitu_Tpt.format(k=k)
+            + _insitu_Tut.format(m=m)
+        )
+        for b in range(_insitu_n_eta)
+        for q, qlab in _insitu_charge_labels.items()
+        for k in range(4)
+        for m in range(3)
+    }
+)
+
+# Iso (charge-inclusive): effInsituIso_eta{b}_cPt{k}_cUt{m}
+impact_labels.update(
+    {
+        f"effInsituIso_eta{b}_cPt{k}_cUt{m}": (
+            f"<i>ε</i><sup>iso</sup><sub>{b}</sub> "
+            + _insitu_Tpt.format(k=k)
+            + _insitu_Tut.format(m=m)
+        )
+        for b in range(_insitu_n_eta)
+        for k in range(4)
+        for m in range(3)
     }
 )
 

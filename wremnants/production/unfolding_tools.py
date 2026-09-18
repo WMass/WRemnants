@@ -530,7 +530,9 @@ class UnfolderZ:
 
         return df
 
-    def add_poi_as_noi_histograms(self, df, results, nominal_axes, nominal_cols):
+    def add_poi_as_noi_histograms(
+        self, df, results, nominal_axes, nominal_cols, channel="nominal"
+    ):
 
         if self.add_helicity_axis:
             df = helicity_utils.define_helicity_weights(
@@ -538,7 +540,7 @@ class UnfolderZ:
             )
 
         for level in self.unfolding_levels:
-            noiAsPoiHistName = f"nominal_{level}_yieldsUnfolding"
+            noiAsPoiHistName = f"{channel}_{level}_yieldsUnfolding"
             logger.debug(
                 f"Creating special histogram '{noiAsPoiHistName}' for unfolding to treat POIs as NOIs"
             )

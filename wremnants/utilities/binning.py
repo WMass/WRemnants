@@ -288,7 +288,14 @@ eta_binning_unfolding = [
 
 
 def get_default_ptbins(analysis_label, unfolding=False, gen=False):
-    vals = [30, 26.0, 56.0] if analysis_label[0] == "w" else [34, 26.0, 60.0]
+    if analysis_label[0] == "w":
+        vals = [30, 26.0, 56.0]
+    elif analysis_label in [
+        "z_dilepton",
+    ]:
+        vals = [49, 26.0, 65.0]
+    else:
+        vals = [34, 26.0, 60.0]
     if unfolding and gen:
         raise ValueError(
             "Inconsistent arguments for 'unfolding' and 'gen.' Must be unique"

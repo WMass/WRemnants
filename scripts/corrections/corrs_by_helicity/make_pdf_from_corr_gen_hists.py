@@ -106,6 +106,7 @@ def main():
         command = f"""
         python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --theoryCorr {pred} \
         --filterProcs {filter_procs_arg} --aggregateGroups {aggregate_groups_arg} \
+        --dataPath 'root://eoscms.cern.ch//store/cmst3/group/wmass/w-mass-13TeV/NanoAOD/' \
         -o {args.outdir} --addHelicityAxis --pdf {pdf} --maxFiles '-1' -j 300
         """
         print(f"Running command: {command}")

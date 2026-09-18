@@ -432,6 +432,7 @@ def add_resolution_uncertainty(
     smearing_uncertainty_helper,
     reco_sel_GF,
     storage_type=hist.storage.Double(),
+    base_name="nominal",
 ):
 
     if smearing_uncertainty_helper is None:
@@ -451,7 +452,7 @@ def add_resolution_uncertainty(
     var_axes = smearing_uncertainty_helper.tensor_axes
 
     muonResolutionSyst_responseWeights = df.HistoBoost(
-        "nominal_muonResolutionSyst_responseWeights",
+        f"{base_name}_muonResolutionSyst_responseWeights",
         axes,
         [*nominal_cols, "muonResolutionSyst_weights"],
         tensor_axes=var_axes,
@@ -1702,7 +1703,7 @@ def make_pixel_multiplicity_helpers(
         res = pickle.load(fin)
 
     hNValidPixelHitsTrig_data = res["hNValidPixelHitsTrig_data"]
-    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsTrig_data"]
+    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsNonTrig_data"]
     hNValidPixelHitsTrig_mc = res["hNValidPixelHitsTrig_mc"]
     hNValidPixelHitsNonTrig_mc = res["hNValidPixelHitsNonTrig_mc"]
 

@@ -145,7 +145,7 @@ def build_graph(df, dataset):
         dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
     )
     df = muon_selections.select_good_muons(
-        df, ptLow=0.0, ptHigh=1e6, nMuons=-1, datasetGroup=None, dxybsCut=args.dxybs
+        df, ptLow=0.0, ptHigh=1e6, nMuons=-1, dxybsCut=args.dxybs
     )
 
     df = df.Define(

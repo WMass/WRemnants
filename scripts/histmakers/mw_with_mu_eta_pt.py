@@ -18,6 +18,7 @@ from wremnants.production import (
     muon_calibration,
     muon_efficiencies_binned,
     muon_efficiencies_cvh,
+    muon_efficiencies_insitu,
     muon_efficiencies_newVeto,
     muon_efficiencies_smooth,
     muon_efficiencies_veto,
@@ -32,9 +33,7 @@ from wremnants.production import (
     vertex,
 )
 from wremnants.production.datasets.dataset_tools import getDatasets
-from wremnants.production.helicity_utils_polvar import (
-    makehelicityWeightHelper_polvar,
-)
+from wremnants.production.helicity_utils_polvar import makehelicityWeightHelper_polvar
 from wremnants.production.histmaker_tools import (
     aggregate_groups,
     define_norm_weight_nRecoVtx,
@@ -54,6 +53,36 @@ parser.add_argument(
     "--makeMCefficiency",
     action="store_true",
     help="Save yields vs eta-pt-ut-passMT-passIso-passTrigger to derive 3D efficiencies for MC isolation and trigger (can run also with --onlyMainHistograms)",
+)
+parser.add_argument(
+    "--makeInsituEffMC",
+    action="store_true",
+    help="Emit the effMCprobe_{nominal,failIso,failHLT,failID} probe spectra "
+    "(eta,pt,charge,genUT) for the in-situ muon efficiency method, mirroring the "
+    "dilepton histmaker. The probe is the single prompt gen-matched veto muon and "
+    "the ID/HLT/Iso categories are defined on it. Returns early after these hists "
+    "(MC only); feed the output to scripts/corrections/make_insitu_effMC.py.",
+)
+parser.add_argument(
+    "--insituEffMCFile",
+    type=str,
+    default=None,
+    help="MC efficiency file (.pkl.lz4 from scripts/corrections/make_insitu_effMC.py) "
+    "enabling the in-situ muon efficiency for the single-muon analysis: the ID/HLT/Iso "
+    "scale factors are replaced by the single-leg in-situ helper (per-category "
+    "Chebyshev coefficient variations) and the external SF keeps only reco+tracking. "
+    "Without it the standard full muon SF is used.",
+)
+parser.add_argument(
+    "--insituSFFile",
+    type=str,
+    default=None,
+    help="Accumulated central in-situ Chebyshev coefficients (theta_central) "
+    ".pkl.lz4 from scripts/corrections/make_insitu_effSF.py, for the iterative "
+    "fit. The MC nominal is reweighted by the post-fit central SF before the "
+    "templates and syst tensors are filled, and the in-situ variations are "
+    "re-linearised around it. Default None = iteration 0 (theta_central=0, "
+    "== SF=1, current behaviour).",
 )
 parser.add_argument(
     "--onlyTheorySyst",
@@ -383,6 +412,21 @@ axis_uTAngleCosine = hist.axis.Regular(
     20, -1, 1, name="uTAngleCosine", overflow=False, underflow=False
 )
 
+if args.makeInsituEffMC:
+    # In-situ effMC probe spectra (--makeInsituEffMC): central (eta, pt, charge,
+    # genUT) binning shared with the dilepton histmaker so the single-leg in-situ
+    # helper reads effMC with the shared convention (make_insitu_effMC.py recombines
+    # the 4 categories, the helper looks up effMC via boost-hist axis.index()).
+    axes_insitu_effMC, cols_insitu_effMC = (
+        muon_efficiencies_insitu.make_insitu_effMC_axes(
+            args.eta[0], args.eta[1], args.eta[2]
+        )
+    )
+    # effMC probe pt window = the (fixed) effMC axis range, which spans the
+    # shared Chebyshev pt window insitu_pt_range
+    effMC_pt_lo = axes_insitu_effMC[1].edges[0]
+    effMC_pt_hi = axes_insitu_effMC[1].edges[-1]
+
 # sum those groups up in post processing
 groups_to_aggregate = args.aggregateGroups
 
@@ -545,6 +589,17 @@ elif args.binnedScaleFactors:
     )
 else:
     logger.info("Using smoothed scale factors and uncertainties")
+    # When floating ID/HLT/Iso in-situ, the external SF keeps only the
+    # reco+tracking steps (mirrors the dilepton histmaker); ID/HLT/Iso are
+    # provided by the single-leg in-situ helper built below. The same
+    # reco+tracking-only SF is used when measuring the in-situ effMC
+    # (--makeInsituEffMC), so the probe weight carries reco+tracking SF but
+    # not the ID/HLT/Iso steps that are being measured.
+    insitu_effSteps = (
+        dict(baseEff_types=["reco", "tracking"], trigEff_types=[], isoEff_types=[])
+        if (args.insituEffMCFile is not None or args.makeInsituEffMC)
+        else {}
+    )
     muon_efficiency_helper, muon_efficiency_helper_syst, muon_efficiency_helper_stat = (
         muon_efficiencies_smooth.make_muon_efficiency_helpers_smooth(
             filename=args.sfFile,
@@ -554,6 +609,7 @@ else:
             isoEfficiencySmoothing=args.isoEfficiencySmoothing,
             smooth3D=args.smooth3dsf,
             isoDefinition=args.isolationDefinition,
+            **insitu_effSteps,
         )
     )
     if not args.noVetoSF:
@@ -575,6 +631,20 @@ else:
             )
 
 logger.info(f"SF file: {args.sfFile}")
+
+# In-situ muon efficiency helpers (single-leg: ID/HLT/Iso floated as Chebyshev
+# polynomials for the single good muon). Built only when the MC-efficiency file
+# is provided; the first pass that produces it (--makeInsituEffMC) runs without.
+(
+    muon_insitu_efficiency_helper,
+    muon_insitu_central_helper,
+    insitu_parameter_labels,
+) = muon_efficiencies_insitu.setup_muon_insitu_helpers(
+    args.insituEffMCFile,
+    args.insituSFFile,
+    args.makeInsituEffMC,
+    single_leg=True,
+)
 
 muon_efficiency_helper_syst_altBkg = {}
 if not args.noScaleFactors:
@@ -991,7 +1061,7 @@ def build_graph(df, dataset):
     if args.xnormOnly:
         return results, weightsum
 
-    if not args.makeMCefficiency and not args.noTrigger:
+    if not args.makeMCefficiency and not args.makeInsituEffMC and not args.noTrigger:
         # remove trigger, it will be part of the efficiency selection for passing trigger
         df = df.Filter(muon_selections.hlt_string(era))
 
@@ -1017,13 +1087,202 @@ def build_graph(df, dataset):
 
     df = muon_selections.select_veto_muons(
         df,
-        nMuons=-1 if cvhVetoLeak else 1,
+        nMuons=-1 if args.makeInsituEffMC or cvhVetoLeak else 1,
         ptCut=args.vetoRecoPt,
         etaCut=args.vetoRecoEta,
         staPtCut=args.vetoRecoStaPt,
         dxybsCut=args.dxybsVeto if args.dxybsVeto > 0 else args.dxybs,
         useGlobalOrTrackerVeto=useGlobalOrTrackerVeto,
     )
+
+    # Build the event weight from the veto (probe) muon BEFORE the good-muon
+    # selection (mirrors the dilepton histmaker, which builds the muon SF weight
+    # from the veto-level muons). For a selected W event the single veto muon
+    # *is* the good muon, so the nominal weight is unchanged; doing it here makes
+    # the in-situ efficiency construction consistent -- the fail-ID probe in the
+    # extraction pass (--makeInsituEffMC) has no good muon at all.
+    makeInsituEff = args.insituEffMCFile is not None or args.makeInsituEffMC
+    if makeInsituEff and not dataset.is_data:
+        if args.makeInsituEffMC:
+            # Tag-and-probe-aligned probe collection for the in-situ efficiency method:
+            # the T&P IDIP denominator (Steve.py BasicProbe_Muons) is the good global
+            # muon WITHOUT the looseId / dxybs veto cuts, which belong to the IDIP
+            # numerator (mediumId embeds looseId). Muon_correctedCharge != -99 is kept
+            # as a technical exception: those muons have no valid corrected kinematics.
+            df = df.Define(
+                "insituProbeMuons",
+                f"Muon_isGoodGlobal && Muon_correctedCharge != -99 && Muon_correctedPt > 26 && abs(Muon_correctedEta) < 2.4",
+            )
+            # exactly one T&P-aligned probe (single-muon analog of the veto
+            # requirement); must come before any [0] indexing below
+            df = df.Filter("Sum(insituProbeMuons) == 1")
+            df = df.Define("probeMuons", "insituProbeMuons")
+        else:
+            df = df.Define("probeMuons", "vetoMuons")
+        df = muon_calibration.define_corrected_reco_muon_kinematics(
+            df, "probeMuons", ["pt", "eta", "phi", "charge"]
+        )
+        df = muon_selections.select_standalone_muons(
+            df, dataset, args.trackerMuons, "probeMuons"
+        )
+        if args.useTnpMuonVarForSF:
+            df = df.Define("probeMuons_tnpPt0", "Muon_pt[probeMuons][0]")
+            df = df.Define("probeMuons_tnpEta0", "Muon_eta[probeMuons][0]")
+            df = df.Define("probeMuons_tnpCharge0", "Muon_charge[probeMuons][0]")
+        else:
+            df = df.Alias("probeMuons_tnpPt0", "probeMuons_pt0")
+            df = df.Alias("probeMuons_tnpEta0", "probeMuons_eta0")
+            df = df.Alias("probeMuons_tnpCharge0", "probeMuons_charge0")
+        # gen-level uT (boson projection): needed by the in-situ helper and the
+        # effMC probe spectra; the reco+tracking SF itself does not use it.
+        df = muon_selections.define_muon_uT_variable(
+            df,
+            isWorZ,
+            smooth3dsf=True,
+            colNamePrefix="probeMuons",
+            addWithTnpMuonVar=args.useTnpMuonVarForSF,
+        )
+        if not args.useTnpMuonVarForSF:
+            df = df.Alias("probeMuons_tnpUT0", "probeMuons_uT0")
+        df = df.Define("probeMuons_relIso0", f"{isoBranch}[probeMuons][0]")
+        df = df.Define(
+            "probeMuons_passIso0",
+            f"probeMuons_relIso0 < {args.isolationThreshold}",
+        )
+
+    # In-situ MC efficiency pre-step (--makeInsituEffMC, MC only): emit the probe
+    # (eta, pt, charge, genUT) spectrum for each of the 4 ID/HLT/Iso categories,
+    # then return. A single-muon W has no tag leg (unlike the dilepton tag-and-
+    # probe), so the probe is the prompt gen-matched veto muon and the categories
+    # are defined purely by what it passes. make_insitu_effMC.py recombines them
+    # into the per-step MC efficiencies. This returns BEFORE select_good_muons so
+    # failID probes (which have no good muon) are kept.
+    if args.makeInsituEffMC:
+        if not dataset.is_data and not isQCDMC:
+            # goodMuons MASK only (nMuons=-1 -> no Sum(goodMuons)==1 filter), so
+            # the probe's ID decision survives even for failID events; the pt
+            # window follows the (wider) effMC axis so passID is a pure ID
+            # decision over the full effMC range
+            df = muon_selections.select_good_muons(
+                df,
+                effMC_pt_lo,
+                effMC_pt_hi,
+                nMuons=-1,
+                use_trackerMuons=args.trackerMuons,
+                use_isolation=False,
+                requirePixelHits=args.requirePixelHits,
+                dxybsCut=args.dxybs,
+            )
+            # keep probes inside the effMC pt window (wider than the analysis
+            # cut) so passID below reduces to the muon ID decision (goodMuons
+            # above uses the same window)
+            df = df.Filter(
+                f"probeMuons_pt0 > {effMC_pt_lo} && probeMuons_pt0 < {effMC_pt_hi}"
+            )
+            # unbiased denominator: the probe must be a prompt postFSR gen muon.
+            # The cone choice is not critical: tightening to DR < 0.1 (the T&P
+            # framework value) or adding a gen-pt compatibility cut changes
+            # eff_idip by <= 1e-3. The residual W-vs-T&P idip difference at
+            # high |eta| is understood instead: the T&P denominator is purified
+            # of (genuine, momentum-unreliable) PF-failure muons by the tag +
+            # mass-window requirement, and the PF-failure rate is itself
+            # process-dependent at the few-per-mille level.
+            if not args.noGenMatchMC:
+                df = generator_level_definitions.define_postfsr_vars(df)
+                df = df.Filter(
+                    "wrem::hasMatchDR2(probeMuons_eta0,probeMuons_phi0,"
+                    "GenPart_eta[postfsrMuons],GenPart_phi[postfsrMuons],0.09)"
+                )
+            # per-probe ID / HLT / Iso decisions (Iso defined in the probe block)
+            df = df.Define("probeMuons_passID0", "goodMuons[probeMuons][0]")
+            df = df.Define(
+                "GoodTrigObjs",
+                f"wrem::goodMuonTriggerCandidate<wrem::Era::Era_{era}>(TrigObj_id,TrigObj_filterBits)",
+            )
+            df = df.Define(
+                "probeMuons_passTrigger0",
+                f"({muon_selections.hlt_string(era)}) && wrem::hasTriggerMatch("
+                "probeMuons_eta0,probeMuons_phi0,"
+                "TrigObj_eta[GoodTrigObjs],TrigObj_phi[GoodTrigObjs])",
+            )
+            # Full analysis nominal weight on the probe (matches the dilepton
+            # effMC convention): the experimental part (pileup, prefiring,
+            # vertex, reco+tracking SF on the probe) folded with the theory
+            # central correction by define_theory_weights_and_corrs. Built here
+            # rather than reusing the later nominal_weight because the fill must
+            # precede the good-muon filter (failID probes have no good muon).
+            # genWeight sign is already carried by `weight`.
+            df = df.Define("weight_pu", pileup_helper, ["Pileup_nTrueInt"])
+            df = df.Define("weight_vtx", vertex_helper, ["GenVtx_z", "Pileup_nTrueInt"])
+            if era == "2016PostVFP":
+                df = df.Define(
+                    "weight_newMuonPrefiringSF",
+                    muon_prefiring_helper,
+                    [
+                        "Muon_correctedEta",
+                        "Muon_correctedPt",
+                        "Muon_correctedPhi",
+                        "Muon_correctedCharge",
+                        "Muon_looseId",
+                    ],
+                )
+                weight_expr = (
+                    "weight_pu*weight_newMuonPrefiringSF*L1PreFiringWeight_ECAL_Nom"
+                )
+            else:
+                weight_expr = (
+                    "weight_pu*L1PreFiringWeight_Muon_Nom*L1PreFiringWeight_ECAL_Nom"
+                )
+            if not args.noVertexWeight:
+                weight_expr += "*weight_vtx"
+            if not args.noScaleFactors:
+                df = df.Define(
+                    "weight_fullMuonSF_withTrackingReco",
+                    muon_efficiency_helper,
+                    [
+                        "probeMuons_tnpPt0",
+                        "probeMuons_tnpEta0",
+                        "probeMuons_SApt0",
+                        "probeMuons_SAeta0",
+                        "probeMuons_tnpCharge0",
+                    ],
+                )
+                weight_expr += "*weight_fullMuonSF_withTrackingReco"
+            df = df.Define("exp_weight", weight_expr)
+            df = theory_corrections.define_theory_weights_and_corrs(
+                df,
+                dataset.name,
+                corr_helpers,
+                args,
+                helicity_smoothing_helpers=helicity_smoothing_helpers,
+            )
+            # 0=nominal, 1=failIso, 2=failHLT, 3=failID
+            # (matches systematics.insitu_category_index)
+            df = df.Define(
+                "probeMuons_effMCcat",
+                "probeMuons_passID0 ? (probeMuons_passTrigger0 ? "
+                "(probeMuons_passIso0 ? 0 : 1) : 2) : 3",
+            )
+            # clamp uT into the flow-less genUT axis window so the
+            # (fail-enriched) tails land in the edge bins instead of dropping,
+            # matching the helper's evaluation-time clamp
+            df = df.Define(
+                "probeMuons_tnpUT0Clamped",
+                muon_efficiencies_insitu.insitu_ut_clamp_expr("probeMuons_tnpUT0"),
+            )
+            for _icat, _cat in enumerate(["nominal", "failIso", "failHLT", "failID"]):
+                results.append(
+                    df.Filter(f"probeMuons_effMCcat == {_icat}").HistoBoost(
+                        f"effMCprobe_{_cat}",
+                        axes_insitu_effMC,
+                        [
+                            *cols_insitu_effMC[:-1],
+                            "probeMuons_tnpUT0Clamped",
+                            "nominal_weight",
+                        ],
+                    )
+                )
+        return results, weightsum
     if cvhVetoLeak:
         df, _ = muon_efficiencies_cvh.define_cvh_veto_leak(df)
         df = df.Filter("Sum(vetoMuons) == 1", "oneVetoMuonAfterCvhLeak")
@@ -1032,7 +1291,6 @@ def build_graph(df, dataset):
         df,
         template_minpt,
         template_maxpt,
-        dataset.group,
         nMuons=1,
         use_trackerMuons=args.trackerMuons,
         use_isolation=False,
@@ -1060,7 +1318,7 @@ def build_graph(df, dataset):
         hltString = muon_selections.hlt_string(era)
         df = df.Define(
             "passTrigger",
-            f"{hltString} && wrem::hasTriggerMatch(goodMuons_eta0,goodMuons_phi0,TrigObj_eta[GoodTrigObjs],TrigObj_phi[GoodTrigObjs])",
+            f"({hltString}) && wrem::hasTriggerMatch(goodMuons_eta0,goodMuons_phi0,TrigObj_eta[GoodTrigObjs],TrigObj_phi[GoodTrigObjs])",
         )
     elif not args.noTrigger:
         df = muon_selections.apply_triggermatching_muon(
@@ -1302,15 +1560,29 @@ def build_graph(df, dataset):
             df = df.Alias("goodMuons_tnpEta0", "goodMuons_eta0")
             df = df.Alias("goodMuons_tnpCharge0", "goodMuons_charge0")
 
-        columnsForSF = [
-            "goodMuons_tnpPt0",
-            "goodMuons_tnpEta0",
-            "goodMuons_SApt0",
-            "goodMuons_SAeta0",
-            "goodMuons_tnpUT0",
-            "goodMuons_tnpCharge0",
-            "passIso",
-        ]
+        if makeInsituEff:
+            # reco+tracking-only SF evaluated on the probe (veto) muon, so the
+            # nominal weight is built consistently with the in-situ efficiency
+            # construction (ID/HLT/Iso are floated in-situ, not in the SF).
+            # The reco+tracking SF takes only [tnpPt0,tnpEta0,SApt0,SAeta0,
+            # tnpCharge0] -- no uT / passIso (those enter the floated steps).
+            columnsForSF = [
+                "probeMuons_tnpPt0",
+                "probeMuons_tnpEta0",
+                "probeMuons_SApt0",
+                "probeMuons_SAeta0",
+                "probeMuons_tnpCharge0",
+            ]
+        else:
+            columnsForSF = [
+                "goodMuons_tnpPt0",
+                "goodMuons_tnpEta0",
+                "goodMuons_SApt0",
+                "goodMuons_SAeta0",
+                "goodMuons_tnpUT0",
+                "goodMuons_tnpCharge0",
+                "passIso",
+            ]
 
         # define recoil uT, muon projected on boson pt, the latter is made using preFSR variables
         # TODO: fix it for not W/Z processes
@@ -1326,7 +1598,7 @@ def build_graph(df, dataset):
 
         # define_muon_uT_variable defined a uT variable using gen information, to get a more precise value for the purpose of applying scale factors
         # for using it as a fit observable we need another definition based only on reco observables, since it is also needed for data
-        if not args.smooth3dsf:
+        if not makeInsituEff and not args.smooth3dsf:
             columnsForSF.remove("goodMuons_tnpUT0")
 
         if not isQCDMC and not args.noScaleFactors:
@@ -1406,6 +1678,32 @@ def build_graph(df, dataset):
                 pixel_multiplicity_cols,
             )
             weight_expr += "*weight_pixel_multiplicity"
+
+        # Iterative in-situ SF (iteration >= 1): fold the post-fit central reweight
+        # W(theta_central) into the experimental weight here -- like the reco/tracking
+        # SF above -- so it is part of nominal_weight BEFORE
+        # define_theory_weights_and_corrs builds the pdf/scetlib/EW tensors (which bake
+        # in nominal_weight). The single good muon is the probe and always passes ID &
+        # HLT, so the category is simply nominal (isolated) or failIso. Gated on
+        # --insituSFFile (iteration 0 has theta_central=0 -> W=1, bit-identical run).
+        if args.insituSFFile is not None and muon_insitu_central_helper is not None:
+            df = df.Define(
+                "insituW_cat",
+                f"passIso ? {systematics.insitu_category_index['nominal']} "
+                f": {systematics.insitu_category_index['failIso']}",
+            )
+            df = df.Define(
+                "insituCentralW",
+                muon_insitu_central_helper,
+                [
+                    "goodMuons_pt0",
+                    "goodMuons_eta0",
+                    "goodMuons_charge0",
+                    "goodMuons_tnpUT0",
+                    "insituW_cat",
+                ],
+            )
+            weight_expr += "*insituCentralW"
 
         logger.debug(f"Exp weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
@@ -2367,7 +2665,6 @@ def build_graph(df, dataset):
                     axes,
                     cols,
                     what_analysis=thisAnalysis,
-                    smooth3D=args.smooth3dsf,
                     storage_type=storage_type,
                 )
                 for es in common.muonEfficiency_altBkgSyst_effSteps:
@@ -2379,6 +2676,23 @@ def build_graph(df, dataset):
                         cols,
                         what_analysis=thisAnalysis,
                         step=es,
+                        storage_type=storage_type,
+                    )
+                if muon_insitu_efficiency_helper is not None:
+                    # in-situ ID/HLT/Iso efficiency for the single good muon:
+                    # per-coefficient Chebyshev variations (unconstrained
+                    # nuisances). The muon passes ID & trigger in the nominal
+                    # selection; iso is a fit axis, so the category is nominal
+                    # when isolated and failIso otherwise.
+                    df = systematics.add_muon_insitu_efficiency_hists(
+                        results,
+                        df,
+                        muon_insitu_efficiency_helper,
+                        axes,
+                        cols,
+                        category_expr="passIso ? 0 : 1",
+                        single_leg=True,
+                        probe_collection="goodMuons",
                         storage_type=storage_type,
                     )
                 if isZ and not args.noGenMatchMC and not args.noVetoSF:

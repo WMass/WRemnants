@@ -656,7 +656,6 @@ def build_graph(df, dataset):
             df,
             args.vetoRecoPt,
             template_maxpt,
-            dataset.group,
             nMuons=2,
             condition="==",
             use_trackerMuons=args.trackerMuons,
@@ -667,7 +666,9 @@ def build_graph(df, dataset):
             requireID=False,
             dxybsCut=args.dxybs,
         )
-        df = muon_selections.define_trigger_muons(df)
+        df = muon_selections.define_two_muons(
+            df, name_first="trigMuons", name_second="nonTrigMuons", muons="goodMuons"
+        )
         # apply lower pt cut and medium ID on triggering muon
         df = df.Filter(
             f"trigMuons_pt0 > {template_minpt} && Muon_mediumId[trigMuons][0]"
@@ -681,7 +682,6 @@ def build_graph(df, dataset):
             df,
             template_minpt,
             template_maxpt,
-            dataset.group,
             nMuons=2,
             use_trackerMuons=args.trackerMuons,
             use_isolation=passIsoBoth,
@@ -690,9 +690,11 @@ def build_graph(df, dataset):
             requirePixelHits=args.requirePixelHits,
         )
 
-        df = muon_selections.define_trigger_muons(df)
+        df = muon_selections.define_two_muons(
+            df, name_first="trigMuons", name_second="nonTrigMuons", muons="goodMuons"
+        )
 
-        # iso cut applied here, if requested, because it needs the definition of trigMuons and nonTrigMuons from muon_selections.define_trigger_muons
+        # iso cut applied here, if requested, because it needs the definition of trigMuons and nonTrigMuons from muon_selections.define_two_muons
         if not passIsoBoth:
             df = muon_selections.apply_iso_muons(
                 df,
@@ -1447,7 +1449,6 @@ def build_graph(df, dataset):
                 cols,
                 what_analysis=thisAnalysis,
                 singleMuonCollection="trigMuons",
-                smooth3D=args.smooth3dsf,
             )
             for es in common.muonEfficiency_altBkgSyst_effSteps:
                 df = systematics.add_muon_efficiency_unc_hists_altBkg(

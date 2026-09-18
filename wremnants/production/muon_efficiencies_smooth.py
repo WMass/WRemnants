@@ -58,6 +58,10 @@ def make_muon_efficiency_helpers_smooth(
     isoEfficiencySmoothing=False,
     smooth3D=False,
     isoDefinition="iso04vtxAgn",
+    baseEff_types=["reco", "tracking", "idip"],
+    # antitrigger is P(failTrigger|IDIP), SF obtained from trigger SF as (1-SF*effMC)/(1-effMC), similarly to antiiso
+    trigEff_types=["trigger", "antitrigger"],
+    isoEff_types=["iso", "isonotrig", "antiiso", "isoantitrig"],
 ):
 
     logger.debug("Make efficiency helper smooth")
@@ -92,12 +96,13 @@ def make_muon_efficiency_helpers_smooth(
     axis_charge_inclusive = hist.axis.Regular(
         1, -2.0, 2.0, underflow=False, overflow=False, name="SF charge"
     )  # for isolation and effStat only
-    isoEff_types = ["iso", "isonotrig", "antiiso", "isoantitrig"]
-    trigEff_types = [
-        "trigger",
-        "antitrigger",
-    ]  # antitrigger is P(failTrigger|IDIP), SF obtained from trigger SF as (1-SF*effMC)/(1-effMC), similarly to antiiso
-    allEff_types = ["reco", "tracking", "idip"] + trigEff_types + isoEff_types
+
+    allEff_types = baseEff_types + trigEff_types + isoEff_types
+    # The in-situ efficiency path requests reco+tracking only (ID/HLT/Iso are
+    # floated in-situ), so use the reduced reco+tracking helpers (Sizes<2> syst
+    # tensor) instead of the full tag-and-probe ones, which require the 5-type
+    # (reco/tracking/idip/trigger/iso) histogram.
+    recotrack_only = set(allEff_types) == {"reco", "tracking"}
     eff_types_3D = (
         [] if not smooth3D else [x for x in trigEff_types] + [x for x in isoEff_types]
     )
@@ -430,21 +435,58 @@ def make_muon_efficiency_helpers_smooth(
         # case with only 2D histograms
         sf_syst_2D_pyroot = narf.hist_to_pyroot_boost(sf_syst_2D)
         # nomi and syst are stored in the same histogram, just use different helpers to override the () operator for now, until RDF is improved
-        helper = ROOT.wrem.muon_efficiency_smooth_helper[
-            templateAnalysisArg, Nsyst, type(sf_syst_2D_pyroot)
-        ](ROOT.std.move(sf_syst_2D_pyroot))
-        helper_syst = ROOT.wrem.muon_efficiency_smooth_helper_syst[
+        helper_class = (
+            ROOT.wrem.muon_efficiency_recotrack_helper
+            if recotrack_only
+            else ROOT.wrem.muon_efficiency_smooth_helper
+        )
+        helper_syst_class = (
+            ROOT.wrem.muon_efficiency_recotrack_helper_syst
+            if recotrack_only
+            else ROOT.wrem.muon_efficiency_smooth_helper_syst
+        )
+        helper = helper_class[templateAnalysisArg, Nsyst, type(sf_syst_2D_pyroot)](
+            ROOT.std.move(sf_syst_2D_pyroot)
+        )
+        helper_syst = helper_syst_class[
             templateAnalysisArg, Nsyst, type(sf_syst_2D_pyroot)
         ](helper)
+
+        eff_parts = baseEff_types[:]
+        if len(trigEff_types):
+            eff_parts.append("trigger")
+        if len(isoEff_types):
+            eff_parts.append("iso")
+        eff_name = "-".join(eff_parts)
+
         # define axis for syst variations with all steps
         axis_all = hist.axis.Integer(
-            0, 5, underflow=False, overflow=False, name="reco-tracking-idip-trigger-iso"
+            0, len(eff_parts), underflow=False, overflow=False, name=eff_name
         )
         axis_nsyst = hist.axis.Integer(
             0, Nsyst, underflow=False, overflow=False, name="n_syst_variations"
         )
         helper_syst.tensor_axes = [axis_all, axis_nsyst]
         #
+
+    is_dilepton = what_analysis == ROOT.wrem.AnalysisType.Dilepton
+    # Per-leg input variables of the nominal/syst operator() (column name =
+    # f"{collection}_{var}"), attached so callers (histmakers and
+    # systematics.add_muon_efficiency_unc_hists) can assemble the input columns
+    # without knowing the helper family (full vs reco+tracking), the 3D/2D
+    # dispatch, or the analysis type. Order matches the C++ signatures in
+    # muon_efficiencies_smooth.hpp.
+    syst_muon_vars = ["tnpPt0", "tnpEta0", "SApt0", "SAeta0"]
+    if len(eff_types_3D):
+        syst_muon_vars.append("tnpUT0")
+    syst_muon_vars.append("tnpCharge0")
+    if not recotrack_only:
+        # the reco+tracking helpers take no flags
+        syst_muon_vars.append("passIso0")
+        if is_dilepton:
+            syst_muon_vars.append("passTrigger0")
+    helper.muon_vars = syst_muon_vars
+    helper_syst.muon_vars = syst_muon_vars
 
     ##############
     ## now the EFFSTAT
@@ -457,70 +499,57 @@ def make_muon_efficiency_helpers_smooth(
 
     # when smooth3D = True we read histograms from root or boost depending on how they were made (some steps are still from previous root files since they have no uT dependence)
     # however, we always add the uT axis to the boost histogram in input to the tensor, to simplify the usage, but when is3D = False a dummy ut axis with 1 bin is created
-    effStat_manager = {
-        "sf_reco": {
+    effStat_manager = {}
+    for t in baseEff_types:
+        effStat_manager[f"sf_{t}"] = {
             "nPtEigenBins": None,
             "nCharges": None,
-            "axisLabels": ["reco"],
+            "axisLabels": [t],
             "boostHist": None,
             "helper": None,
             "is3D": False,
-        },
-        "sf_tracking": {
-            "nPtEigenBins": None,
-            "nCharges": None,
-            "axisLabels": ["tracking"],
-            "boostHist": None,
-            "helper": None,
-            "is3D": False,
-        },
-        "sf_idip": {
-            "nPtEigenBins": None,
-            "nCharges": None,
-            "axisLabels": ["idip"],
-            "boostHist": None,
-            "helper": None,
-            "is3D": False,
-        },
-        "sf_trigger": {
+        }
+
+    if len(trigEff_types):
+        effStat_manager["sf_trigger"] = {
             "nPtEigenBins": None,
             "nCharges": None,
             "axisLabels": ["trigger", "antitrigger"],
             "boostHist": None,
             "helper": None,
             "is3D": smooth3D,
-        },
-    }
-    if not isoEfficiencySmoothing:
-        effStat_manager["sf_iso"] = {
-            "nPtEigenBins": None,
-            "nCharges": None,
-            "axisLabels": ["iso", "isonotrig", "antiiso", "isoantitrig"],
-            "boostHist": None,
-            "helper": None,
-            "is3D": smooth3D,
         }
 
-    else:
-        # these were never done in 3D, so can stay with is3D = False
-        effStat_manager["sf_iso_effData"] = (
-            {
+    if len(isoEff_types):
+        if not isoEfficiencySmoothing:
+            effStat_manager["sf_iso"] = {
+                "nPtEigenBins": None,
+                "nCharges": None,
+                "axisLabels": ["iso", "isonotrig", "antiiso", "isoantitrig"],
+                "boostHist": None,
+                "helper": None,
+                "is3D": smooth3D,
+            }
+        else:
+            # these were never done in 3D, so can stay with is3D = False
+            effStat_manager["sf_iso_effData"] = (
+                {
+                    "nPtEigenBins": None,
+                    "nCharges": None,
+                    "axisLabels": ["iso", "isonotrig", "antiiso", "isoantitrig"],
+                    "boostHist": None,
+                    "helper": None,
+                    "is3D": False,
+                },
+            )
+            effStat_manager["sf_iso_effMC"] = {
                 "nPtEigenBins": None,
                 "nCharges": None,
                 "axisLabels": ["iso", "isonotrig", "antiiso", "isoantitrig"],
                 "boostHist": None,
                 "helper": None,
                 "is3D": False,
-            },
-        )
-        effStat_manager["sf_iso_effMC"] = {
-            "nPtEigenBins": None,
-            "nCharges": None,
-            "axisLabels": ["iso", "isonotrig", "antiiso", "isoantitrig"],
-            "boostHist": None,
-            "helper": None,
-            "is3D": False,
-        }
+            }
 
     for effStatKey in effStat_manager.keys():
         nom_up_effStat_axis = None
@@ -634,7 +663,7 @@ def make_muon_efficiency_helpers_smooth(
                         effStat_manager[effStatKey]["axisLabels"],
                         name=f"{effStatKey}_eff_type",
                     )
-                    if smooth3D:
+                    if is3D:
                         effStat_manager[effStatKey]["boostHist"] = hist.Hist(
                             axis_eta_eff,
                             axis_pt_eff,
@@ -657,45 +686,25 @@ def make_muon_efficiency_helpers_smooth(
                         )
 
                 # hist_hist may or may not have overflows, but the left-hand side histogram have them: read with flow=False to get only things in acceptance here
-                if smooth3D:
-                    if is3D:
-                        # hist_hist has dimension 4, ut as third axes
+                if is3D:
+                    # hist_hist has dimension 4, ut as third axes
+                    effStat_manager[effStatKey]["boostHist"].view(flow=False)[
+                        :,
+                        :,
+                        axis_charge_def.index(charge),
+                        axis_eff_type.index(eff_type),
+                        nom_up_effStat_axis.index(0),
+                        :,
+                    ] = hist_hist.view(flow=False)[:, :, :, 0]
+                    for iup in range(1, 1 + nPtEigenBins):
                         effStat_manager[effStatKey]["boostHist"].view(flow=False)[
                             :,
                             :,
                             axis_charge_def.index(charge),
                             axis_eff_type.index(eff_type),
-                            nom_up_effStat_axis.index(0),
+                            nom_up_effStat_axis.index(iup),
                             :,
-                        ] = hist_hist.view(flow=False)[:, :, :, 0]
-                        for iup in range(1, 1 + nPtEigenBins):
-                            effStat_manager[effStatKey]["boostHist"].view(flow=False)[
-                                :,
-                                :,
-                                axis_charge_def.index(charge),
-                                axis_eff_type.index(eff_type),
-                                nom_up_effStat_axis.index(iup),
-                                :,
-                            ] = hist_hist.view(flow=False)[:, :, :, iup]
-                    else:
-                        # hist_hist has dimension 3, no ut axis
-                        effStat_manager[effStatKey]["boostHist"].view(flow=False)[
-                            :,
-                            :,
-                            axis_charge_def.index(charge),
-                            axis_eff_type.index(eff_type),
-                            nom_up_effStat_axis.index(0),
-                            0,
-                        ] = hist_hist.view(flow=False)[:, :, 0]
-                        for iup in range(1, 1 + nPtEigenBins):
-                            effStat_manager[effStatKey]["boostHist"].view(flow=False)[
-                                :,
-                                :,
-                                axis_charge_def.index(charge),
-                                axis_eff_type.index(eff_type),
-                                nom_up_effStat_axis.index(iup),
-                                0,
-                            ] = hist_hist.view(flow=False)[:, :, iup]
+                        ] = hist_hist.view(flow=False)[:, :, :, iup]
                 else:
                     # boostHist has no ut axis
                     effStat_manager[effStatKey]["boostHist"].view(flow=False)[
@@ -731,7 +740,7 @@ def make_muon_efficiency_helpers_smooth(
         ] = effStat_manager[effStatKey]["boostHist"].view(flow=True)[
             :, axis_pt_eff.extent - 2, ...
         ]
-        if smooth3D:
+        if is3D:
             effStat_manager[effStatKey]["boostHist"].view(flow=True)[..., 0] = (
                 effStat_manager[effStatKey]["boostHist"].view(flow=True)[..., 1]
             )
@@ -746,7 +755,7 @@ def make_muon_efficiency_helpers_smooth(
         sf_stat_pyroot = narf.hist_to_pyroot_boost(
             effStat_manager[effStatKey]["boostHist"]
         )
-        if smooth3D:
+        if is3D:
             if "sf_iso" in effStatKey:
                 helper_stat = ROOT.wrem.muon_efficiency_smooth_helper_stat_iso_utDep[
                     templateAnalysisArg,
@@ -810,6 +819,18 @@ def make_muon_efficiency_helpers_smooth(
             axis_charge_def,
         ]
         helper_stat.tensor_axes = effStatTensorAxes
+        # per-leg input variables of this stat helper's operator() (see the
+        # nominal/syst muon_vars above); depends on the per-key 3D dispatch,
+        # the iso specialization, and the analysis type
+        stat_muon_vars = ["tnpPt0", "tnpEta0"]
+        if is3D:
+            stat_muon_vars.append("tnpUT0")
+        stat_muon_vars.append("tnpCharge0")
+        if "sf_iso" in effStatKey:
+            stat_muon_vars.append("passIso0")
+        if is_dilepton:
+            stat_muon_vars.append("passTrigger0")
+        helper_stat.muon_vars = stat_muon_vars
         effStat_manager[effStatKey]["helper"] = helper_stat
 
     fin.Close()

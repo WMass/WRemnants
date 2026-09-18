@@ -13,40 +13,40 @@ args = parser.parse_args()
 
 logger = logging.setup_logger("make_pixel_correctons", 4 if args.debug else 3)
 
+# The dilepton histmaker writes the per-leg valid-pixel-hit spectra named by
+# muon position (first/second) per category. The pixel-multiplicity correction
+# distinguishes triggering vs non-triggering muons; here the first (second) muon
+# fills the triggering (nonTriggering) slot positionally (kept for backward
+# compatibility, see the note in mz_dilepton.py).
 nominalName = "nominal"
-
-histnames = []
-histnames.append("hNValidPixelHitsTrig")
-histnames.append("hNValidPixelHitsNonTrig")
-
+firstHist = f"{nominalName}_hNValidPixelHitsFirst"
+secondHist = f"{nominalName}_hNValidPixelHitsSecond"
 
 datagroups = Datagroups(args.inputFile)
 
 if datagroups.mode != "z_dilepton":
     raise ValueError("Expected input is the output from the dilepton histmaker")
 
-for histname in histnames:
+for histname in [firstHist, secondHist]:
     datagroups.loadHistsForDatagroups(histname, syst="")
 
 
-groups = datagroups.getDatagroups()
+groups = datagroups.groups
 
 hNValidPixelHitsTrig_mc = (
-    groups["Zmumu"].hists["hNValidPixelHitsTrig"]
-    + groups["Ztautau"].hists["hNValidPixelHitsTrig"]
+    groups["Zmumu"].hists[firstHist] + groups["Ztautau"].hists[firstHist]
 )
 
 hNValidPixelHitsNonTrig_mc = (
-    groups["Zmumu"].hists["hNValidPixelHitsNonTrig"]
-    + groups["Ztautau"].hists["hNValidPixelHitsNonTrig"]
+    groups["Zmumu"].hists[secondHist] + groups["Ztautau"].hists[secondHist]
 )
 
 
 print(hNValidPixelHitsTrig_mc)
 
 res = {
-    "hNValidPixelHitsTrig_data": groups["Data"].hists["hNValidPixelHitsTrig"],
-    "hNValidPixelHitsNonTrig_data": groups["Data"].hists["hNValidPixelHitsNonTrig"],
+    "hNValidPixelHitsTrig_data": groups["Data"].hists[firstHist],
+    "hNValidPixelHitsNonTrig_data": groups["Data"].hists[secondHist],
     "hNValidPixelHitsTrig_mc": hNValidPixelHitsTrig_mc,
     "hNValidPixelHitsNonTrig_mc": hNValidPixelHitsNonTrig_mc,
 }
