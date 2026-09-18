@@ -78,10 +78,17 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        if len(corr_hists) > 1 and corr_hists[1].startswith(corr_hists[0] + "_"):
-            self._corr_sep = "_"
-        else:
-            self._corr_sep = ""
+        # The histmaker writes the correction hist as `f"{generator}_Corr"`
+        # UNCONDITIONALLY (production/systematics.py:706), so the separator is
+        # always "_". The heuristic this replaces inferred it from whether the
+        # SECOND --theoryCorr entry was a prefix-extension of the first, which
+        # breaks in two cases we need:
+        #   * a single-entry --theoryCorr list (len < 2), i.e. passing only the
+        #     central cache-derived correction with no pdfvars/pdfas siblings;
+        #   * a nominal whose name carries its own suffix, e.g.
+        #     `..._N2LO_adcorrY4` alongside `..._N2LO_pdfvars`.
+        # Both then resolve to `..._adcorrY4Corr`, which no histmaker emits.
+        self._corr_sep = "_"
         self.corr_hist_name = (
             (corr_hists[0] + self._corr_sep + "Corr") if corr_hists else None
         )
