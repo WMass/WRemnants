@@ -23,6 +23,7 @@ from wremnants.postprocessing.histselections import (
     should_store_smoothing_params,
 )
 from wremnants.postprocessing.regression import Regressor
+from wremnants.postprocessing.scetlib_ad import response_matrix as scetlib_np_response
 from wremnants.postprocessing.syst_tools import (
     fake_nonclosure_byAxis,
     fake_transferFactor_ptSyst,
@@ -33,6 +34,28 @@ from wremnants.production import helicity_utils
 from wremnants.utilities import binning, common, parsing, theory_utils
 from wums import boostHistHelpers as hh
 from wums import logging, output_tools
+
+
+def _parse_decorr_rebin(value):
+    """Parse one --decorrRebin token.
+
+    A bare integer merges that many bins (the historical behaviour). A
+    comma-separated list is taken as explicit bin edges in axis units, e.g.
+    ``0,10,44`` puts the decorrelated parameters in ptll [0,10) and [10,44).
+    Both forms are consumed by hh.rebinHistMultiAx, which switches on the type.
+    """
+    if "," in value:
+        edges = [float(v) for v in value.split(",")]
+        if len(edges) < 2:
+            raise argparse.ArgumentTypeError(
+                f"--decorrRebin edge list '{value}' needs at least two edges"
+            )
+        if any(b <= a for a, b in zip(edges[:-1], edges[1:])):
+            raise argparse.ArgumentTypeError(
+                f"--decorrRebin edge list '{value}' must be strictly increasing"
+            )
+        return edges
+    return int(value)
 
 
 def _parse_axis_range_specs(specs):
@@ -117,9 +140,20 @@ def apply_preselection(h, specs: tuple = ()):
             raise ValueError(
                 f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
             )
-        h = h[{axis_name: slice(low, hh.get_hist_slice_upper(h, axis_name, high))}]
+        upper = hh.get_hist_slice_upper(h, axis_name, high)
         if ":sum" in axis:
-            h = h[{axis_name: hist.sum}]
+            # Restrict to [low, high] and sum the axis away. The `sum` inside the
+            # slice sums ONLY the in-range bins, so out-of-range content is not
+            # folded back in. (A bare slice would push out-of-range content into
+            # the axis flow bins, which a later projection over the axis re-adds,
+            # silently undoing the preselection.)
+            h = h[{axis_name: slice(low, upper, sum)}]
+        else:
+            # Restrict to [low, high] but keep the axis. A bare slice moves the
+            # out-of-range content into this axis' flow bins; drop those bins so
+            # a later projection/sum over the axis cannot re-add the cut events.
+            h = h[{axis_name: slice(low, upper)}]
+            h = hh.disableFlow(h, axis_name)
     return h
 
 
@@ -502,10 +536,12 @@ def make_parser(parser=None, argv=None):
     )
     parser.add_argument(
         "--decorrRebin",
-        type=int,
+        type=_parse_decorr_rebin,
         nargs="*",
         default=[],
-        help="Rebin axis by this value (default, 1, does nothing)",
+        help="Binning of the decorrelated parameters, one entry per decorrelated axis. "
+        "An integer merges that many bins (default, 1, does nothing); a comma-separated "
+        "list gives explicit bin edges in axis units, e.g. '0,10,44'.",
     )
     parser.add_argument(
         "--decorrAbsval",
@@ -649,6 +685,22 @@ def make_parser(parser=None, argv=None):
         "--addCustomRecoilSyst",
         action="store_true",
         help="Add custom recoil systematic uncertainties from smearing met pt/phi and scaling met pt",
+    )
+    parser.add_argument(
+        "--storeResponseMatrix",
+        action="store_true",
+        help="Store response matrix for SCETlib-NP parameter model",
+    )
+    parser.add_argument(
+        "--responseMatrixGenBinning",
+        type=str,
+        default="unfolding",
+        choices=["unfolding", "response"],
+        help="Which gen binning to take the stored response matrix from: "
+        "'unfolding' (default) is 'nominal_prefsr_yieldsUnfolding', the gen "
+        "binning derived from the reco binning; 'response' is the parallel, "
+        "finer 'nominal_prefsr_yieldsResponse' written by mz_dilepton "
+        "--responseGenBinning, on the theory correction's own grid.",
     )
 
     parser.add_argument(
@@ -3508,22 +3560,15 @@ if __name__ == "__main__":
             "Fitting multiple channels with 'wwidth' or decorMassWidth is not currently supported since this can lead to inconsistent treatment of mass variations between channels."
         )
 
-    writer_kwargs = dict(
+    writer = tensorwriter.TensorWriter(
         sparse=args.sparse,
         allow_negative_expectation=args.allowNegativeExpectation,
         systematic_type=args.systematicType,
         add_bin_by_bin_stat_to_data_cov=args.addMCStatToCovariance,
+        clip_syst_variations=args.clipSystVariations,
+        zero_syst_low_neff=args.zeroSystLowNeff,
+        zero_syst_low_neff_procs=args.zeroSystLowNeffProcs,
     )
-    # Forward the empty-bin-systematic knobs only when actually requested, so
-    # this script stays compatible with rabbit versions predating them (both
-    # are off by default; using them requires a rabbit with these TensorWriter
-    # arguments).
-    if args.clipSystVariations:
-        writer_kwargs["clip_syst_variations"] = args.clipSystVariations
-    if args.zeroSystLowNeff:
-        writer_kwargs["zero_syst_low_neff"] = args.zeroSystLowNeff
-        writer_kwargs["zero_syst_low_neff_procs"] = args.zeroSystLowNeffProcs
-    writer = tensorwriter.TensorWriter(**writer_kwargs)
 
     if args.fitresult is not None:
         # set data from external fitresult file
@@ -3736,6 +3781,77 @@ if __name__ == "__main__":
         outfolder = f"{args.outfolder}/Combination_{''.join(unique_names)}{dir_append}/"
         outfile = "Combination"
     logger.info(f"Writing output to {outfile}")
+
+    # ---- SCETlib-NP response matrix R: embed it in the datacard so the
+    # SCETlibNPParamModel reads R (and the gen-total N_gen) from the fit input,
+    # consistent with the run that produced the card, rather than from a
+    # separate, independently-versioned file. Presence-based *lenient* guard
+    # (see response_matrix.has_response): embed only when an input carries BOTH
+    # the response hist and the gen-total, so generic unfolding runs that lack
+    # the gen-total are a no-op. A genuine NP card missing the gen-total simply
+    # won't embed and the SCETlibNPParamModel will then error clearly at fit
+    # time. One source, one path: the ParamModel reads R only from the datacard.
+    if args.storeResponseMatrix:
+        if args.responseMatrixGenBinning == "response":
+            resp_hist = scetlib_np_response.RESPONSE_HIST
+            resp_gentotal = scetlib_np_response.RESPONSE_GENTOTAL
+        else:
+            resp_hist = scetlib_np_response.DEFAULT_HIST
+            resp_gentotal = scetlib_np_response.DEFAULT_GENTOTAL
+        resp_inputs = [
+            f
+            for f in args.inputFile
+            if scetlib_np_response.has_response(
+                f, hist_name=resp_hist, gen_total_name=resp_gentotal
+            )
+        ]
+        if len(resp_inputs) > 1:
+            raise RuntimeError(
+                "Multiple inputs carry the SCETlib-NP response (hist + gen-total): "
+                f"{resp_inputs}; expected at most one (the Z dilepton --unfolding run)."
+            )
+        if not resp_inputs and args.responseMatrixGenBinning == "response":
+            # Explicitly asking for the finer response and not finding it is a
+            # mistake, not a no-op: the card would silently fall back to no
+            # response at all. (The default stays lenient, see above.)
+            raise RuntimeError(
+                "--responseMatrixGenBinning response: no input carries both "
+                f"{resp_hist!r} and {resp_gentotal!r}. Rerun the histmaker with "
+                "--responseGenBinning theoryCorr."
+            )
+        if resp_inputs:
+            logger.info(
+                f"Embedding SCETlib-NP response matrix ({resp_hist}) from "
+                f"{resp_inputs[0]}"
+            )
+            R_info = scetlib_np_response.load_R(
+                resp_inputs[0], hist_name=resp_hist, gen_total_name=resp_gentotal
+            )
+            writer.add_auxiliary(
+                "scetlib_np",
+                {
+                    "R": R_info["R"],
+                    "N_gen": R_info["N_gen"],
+                    "reco_axes": [n for n, _ in R_info["reco_axes"]],
+                    "gen_axes": [n for n, _ in R_info["gen_axes"]],
+                    # The correction whose grid the gen axes ARE (when the
+                    # histmaker ran --responseGenBinning theoryCorr). Carried so
+                    # that anything reading its binning out of this bundle --
+                    # notably the SCETlib cache builder, which writes these very
+                    # edges into the runcard -- can ASSERT the grid still matches
+                    # the correction instead of silently inheriting a mismatch.
+                    **(
+                        {"corr_generator": R_info["corr_generator"]}
+                        if R_info.get("corr_generator")
+                        else {}
+                    ),
+                    # one edges dataset per reco/gen axis (variable length)
+                    **{
+                        f"edges__{n}": e
+                        for n, e in R_info["reco_axes"] + R_info["gen_axes"]
+                    },
+                },
+            )
 
     # propagate meta info into result file
     meta = {
