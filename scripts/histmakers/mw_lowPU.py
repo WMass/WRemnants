@@ -139,7 +139,7 @@ columns_fakerate = [
 ]  ## was transverseMass
 
 helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
-    args.pdfs, args.theoryCorr
+    args.pdfs, args.theoryCorr, era=args.era
 )
 axis_ptVgen = helicity_smoothing_helpers_procs["W"]["qcdScale"].hist.axes["ptVgen"]
 axis_chargeVgen = helicity_smoothing_helpers_procs["W"]["qcdScale"].hist.axes[

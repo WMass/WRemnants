@@ -128,6 +128,12 @@ corr_helpers = theory_corrections.load_corr_helpers(
     [d.name for d in datasets if d.name in samples.vprocs], theory_corrs
 )
 
+# By-helicity smoothing of the QCD-scale/PDF theory uncertainty templates
+# (reduces their MC-statistical fluctuations), matching mw_lowPU.py.
+helicity_smoothing_helpers_procs = theory_corrections.make_helicity_smoothing_helpers(
+    args.pdfs, args.theoryCorr, era=args.era
+)
+
 # Reuse the 2017 low-PU recoil calibration (data/MC recoil response+resolution
 # tflite model, MET-XY correction, ptV reweighting). It was trained on 2017
 # low-PU Z data and isn't strictly validated for 13.6 TeV/2026 conditions, but
@@ -143,7 +149,9 @@ def build_graph(df, dataset):
 
     results = []
 
-    helicity_smoothing_helpers = {}
+    helicity_smoothing_helpers = None
+    if dataset.name in samples.vprocs:
+        helicity_smoothing_helpers = helicity_smoothing_helpers_procs[dataset.name[0]]
 
     if dataset.is_data:
         df = df.DefinePerSample("weight", "1.0")
@@ -275,24 +283,35 @@ def build_graph(df, dataset):
         )
     )
 
-    if dataset.name in samples.vprocs:
-        df = systematics.add_theory_hists(
-            results,
-            df,
-            args,
-            dataset.name,
-            corr_helpers,
-            helicity_smoothing_helpers,
-            nominal_axes,
-            nominal_cols,
-        )
-
     # Fine MT distribution; includes pt+eta+charge for per-bin fakerate in ABCD,
     # and passIso (not passMT) to show the full MT range with iso sideband.
+    axes_mt = [axis_mt, axis_pt, axis_eta, axis_charge, binning.axis_passIso]
+    cols_mt = ["transverseMass", "Lep_pt", "Lep_eta", "Lep_charge", "passIso"]
+
+    if dataset.name in samples.vprocs:
+        # Theory systematics (incl. massWeight/widthWeight, needed for a mW/Gamma_W
+        # fit) for both the nominal and the mt-differential histogram, matching
+        # mw_lowPU.py's ("nominal", ...), ("transverseMass", ...) loop.
+        for base_name, axes, cols in (
+            ("nominal", nominal_axes, nominal_cols),
+            ("transverseMass", axes_mt, cols_mt),
+        ):
+            df = systematics.add_theory_hists(
+                results,
+                df,
+                args,
+                dataset.name,
+                corr_helpers,
+                helicity_smoothing_helpers,
+                axes,
+                cols,
+                base_name=base_name,
+            )
+
     results.append(
         df.HistoBoost(
             "transverseMass",
-            [axis_mt, axis_pt, axis_eta, axis_charge, binning.axis_passIso],
+            axes_mt,
             [
                 "transverseMass",
                 "Lep_pt",
