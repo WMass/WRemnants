@@ -78,7 +78,15 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        if len(corr_hists) > 1 and corr_hists[1].startswith(corr_hists[0] + "_"):
+        if len(corr_hists) <= 1:
+            # No second entry (e.g. pdfvars) to compare against -- this happens
+            # when only the central correction is applied (e.g. 2026 low-PU,
+            # where pdfvars/pdfas replica weights aren't stored in the NanoAOD).
+            # Every correction file in current use follows the "_Corr" naming
+            # scheme, so default to that rather than the pre-"new naming scheme"
+            # separator.
+            self._corr_sep = "_"
+        elif corr_hists[1].startswith(corr_hists[0] + "_"):
             self._corr_sep = "_"
         else:
             self._corr_sep = ""
@@ -510,6 +518,21 @@ class TheoryHelper(object):
                 )
 
     def add_helicity_shower_kt_uncertainty(self):
+        hist_name = f"{self.datagroups.nominalName}_qcdScaleByHelicity"
+        processes_expanded = self.datagroups.expandProcesses(["single_v_samples"])
+        has_hist = any(
+            hist_name in self.datagroups.results[member.name]["output"]
+            for proc in processes_expanded
+            for member in self.datagroups.groups[proc].members
+            if member.name in self.datagroups.results
+            and "output" in self.datagroups.results[member.name]
+        )
+        if not has_hist:
+            logger.info(
+                f"Skip helicity_shower_kt systematic: histogram '{hist_name}' is not available"
+            )
+            return
+
         # select the proper variation and project over gen pt unless it is one of the fit variables
         if "ptVgen" in self.datagroups.fit_axes:
             op = lambda h: h[{self.syst_ax: ["pythia_shower_kt"]}]
