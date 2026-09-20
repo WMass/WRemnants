@@ -120,8 +120,8 @@ def split_batch_range(
 ) -> tuple[int, int]:
     """Return ``(start, stop)`` record-batch indices in
     ``[0, n_record_batches)`` for the requested split. Splits are
-    contiguous, disjoint, and cover the full range — train / val /
-    holdout sizes round down, holdout absorbs any rounding remainder
+    contiguous, disjoint, and cover the full range — val and holdout
+    round down, train (the leading range) absorbs any rounding remainder
     so the three together always sum to ``n_record_batches``.
 
     ``split="all"`` returns the full range. Any other value raises."""

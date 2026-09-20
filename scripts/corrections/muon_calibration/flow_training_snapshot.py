@@ -228,10 +228,9 @@ def parse_args():
         "ntuples (--input-paths); 'wz' enumerates W/Z MC datasets via "
         "wremnants getDatasets() (--data-path, --era). If neither this "
         "nor --shard-only is given, the script runs the full pipeline "
-        "end-to-end (jpsi snapshot, wz snapshot, then shard) by "
-        "re-invoking itself once per step in a subprocess (avoids the "
-        "pyarrow + pyxrootd OpenSSL ABI clash that segfaults when "
-        "both libraries coexist in one process).",
+        "end-to-end (jpsi snapshot, wz snapshot, then shard) directly "
+        "in this process (the pyxrootd/pyarrow OpenSSL ABI clash is "
+        "avoided by the XRootD.client-first imports and xrootd < 6).",
     )
     mode.add_argument(
         "--shard-only",
