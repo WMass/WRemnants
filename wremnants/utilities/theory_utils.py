@@ -2,7 +2,6 @@ import glob
 import os
 import re
 
-import lhapdf
 import numpy as np
 
 from rabbit import io_tools
@@ -384,6 +383,8 @@ def eval_pdf(pdf, flav, x, q):
 
 
 def pdf_data_from_lhapdf(pdf_name, flavor, Q, x_range):
+    import lhapdf
+
     pdf_set = lhapdf.getPDFSet(pdf_name)
     members = pdf_set.mkPDFs()
     # Calculate values for all members (exclude alpha_s members if present)
@@ -427,6 +428,8 @@ def read_vals_and_errors_from_fit(fitresult_file, fit_types, chan):
 
 
 def read_pdf_vals_and_errors(flavor, q_scale, x_range, pdf_sets):
+    import lhapdf
+
     values = []
     errors = []
     for name in pdf_sets:

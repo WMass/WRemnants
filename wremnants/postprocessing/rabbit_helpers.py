@@ -497,6 +497,9 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            # the nuisances are named from the axis label, so the two sets of
+            # variations need different ones, otherwise they collide
+            labelsByAxis=["recoil_stat"],
             passToFakes=passSystToFakes,
         )
         datagroups.addSystematic(
@@ -511,6 +514,7 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            labelsByAxis=["recoil_calibration_bkg"],
             passToFakes=passSystToFakes,
         )
 
@@ -527,6 +531,7 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            labelsByAxis=["recoil_calibration_bkg"],
             passToFakes=passSystToFakes,
         )
 
@@ -541,6 +546,7 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            labelsByAxis=["recoil_stat"],
             passToFakes=passSystToFakes,
         )
 

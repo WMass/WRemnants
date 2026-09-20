@@ -1062,14 +1062,39 @@ def make_corr_by_helicity(
     return corr_coeffs
 
 
+# Eras with sqrt(s) = 13.6 TeV (Run 3), which need the 13.6 TeV angular-coefficient
+# file rather than the default (13 TeV, Run 2) one. For now this is just the single
+# 2026 low-PU era; once more Run 3 eras are added, switch this to a year-based check
+# (era year >= 2022) instead of an explicit set.
+RUN3_ERAS = {"2026_LowPU"}
+
+
 def make_helicity_smoothing_helpers(
     pdfs,
     theory_corr=[],
     procs=["Z", "W"],
     corrs=["qcdScale", "pdf", "pdf_from_corr", "alphaS", "pdf_central"],
+    era=None,
 ):
 
     helicity_smoothing_helpers_procs = {p: {} for p in procs}
+
+    qcd_xsec_kwargs = {}
+    if era in RUN3_ERAS:
+        # TODO: switch to the dedicated 13.6 TeV file
+        # (f"{common.data_dir}/angularCoefficients/w_z_helicity_xsecs_13p6TeV.hdf5")
+        # once it's built from enough merged statistics to smooth the templates as
+        # well as the default file does -- it was produced from a single local
+        # campaign (100/91 files for W+/W-, no low-mass DY) rather than three
+        # merged Run 2 eras, and gives a *larger* uncertainty than the 13 TeV
+        # placeholder when tested, most likely from template stat noise rather
+        # than a genuine 13-vs-13.6 TeV physics effect. Fall back to the default
+        # (13 TeV) file for now; it's an acceptable approximation for a projection.
+        logger.warning(
+            f"Using the 13 TeV angular-coefficient file for Run 3 era '{era}'; "
+            "a dedicated 13.6 TeV version exists but isn't accurate enough yet "
+            "(see TODO in make_helicity_smoothing_helpers)."
+        )
 
     for proc in helicity_smoothing_helpers_procs.keys():
 
@@ -1079,6 +1104,7 @@ def make_helicity_smoothing_helpers(
                     is_z=proc == "Z",
                     rebin_ptVgen=False,
                     return_tensor=True,
+                    **qcd_xsec_kwargs,
                 )
             )
 

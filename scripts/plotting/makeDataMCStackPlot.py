@@ -218,6 +218,11 @@ parser.add_argument(
     help="Location in (x,y) for additional text, aligned to upper left",
 )
 parser.add_argument(
+    "--noPrefit",
+    action="store_true",
+    help="Suppress the 'Prefit' label in the extra text",
+)
+parser.add_argument(
     "--vertLineEdges",
     type=float,
     nargs="*",
@@ -545,10 +550,11 @@ prednames = list(
 logger.info(f"Stacked processes are {prednames}")
 
 text_pieces = []
-if args.normToData:
-    text_pieces.append("Prefit" + " (normalized)")
-else:
-    text_pieces.append("Prefit")
+if not args.noPrefit:
+    if args.normToData:
+        text_pieces.append("Prefit" + " (normalized)")
+    else:
+        text_pieces.append("Prefit")
 
 if args.channel != "all":
     text_pieces.append(

@@ -2,10 +2,7 @@ import os
 import sys
 
 import h5py
-import lhapdf
 import numpy as np
-from mc2hlib import lh
-from mc2hlib.common import load_pdf
 
 from rabbit import io_tools
 from wremnants.postprocessing import syst_tools
@@ -28,6 +25,8 @@ class PostfitPdfHelper(object):
 
     def _init_lhapdf_attributes(self, pdf_name):
         """Initialize LHAPDF-derived attributes (n_hessian, symm_errors, etc.) from a PDF set name."""
+        import lhapdf
+
         self.pdf_name = pdf_name
         pdf_set = lhapdf.getPDFSet(pdf_name)
         error_info = pdf_set.errorInfo
@@ -59,6 +58,10 @@ class PostfitPdfHelper(object):
         Load the base PDF grids, build the scaled Hessian difference matrix,
         and apply symmetrization if needed. Returns (matrix, grids, central_pdf_path).
         """
+        import lhapdf
+        from mc2hlib import lh
+        from mc2hlib.common import load_pdf
+
         central_pdf_path = "/".join([lhapdf.paths()[0], self.pdf_name, self.pdf_name])
         base_pdf, fl, xgrid = load_pdf(self.pdf_name, Q, self.max_nf, self.photon)
         headers, grids = lh.load_all_replicas(base_pdf, central_pdf_path)
@@ -88,6 +91,8 @@ class PostfitPdfHelper(object):
         self, central_pdf_path, outfolder, fitlabel, lhaid, postfit_matrix, central_grid
     ):
         """Write postfit PDF grids to disk in LHAPDF format."""
+        from mc2hlib import lh
+
         scale_label = (
             "unscaled"
             if self.pdf_scale == 1
@@ -170,6 +175,8 @@ class RabbitPostfitPdfHelper(PostfitPdfHelper):
         input_args = input_meta.get("meta_info_input", {}).get("args", {})
 
         if input_args and "pdfs" in input_args:
+            import lhapdf
+
             pdf_input = input_args["pdfs"][0]
             pdf_info = theory_utils.pdf_info_map("Zmumu_2016PostVFP", pdf_input)
             self.pdf_name = pdf_info["lha_name"]
@@ -279,6 +286,8 @@ class SimplePostfitPdfHelper(PostfitPdfHelper):
             self.pdf_symm = f.attrs["pdf_symm"]
 
         # Derive LHAPDF-dependent attributes from pdf_name
+        import lhapdf
+
         pdf_set = lhapdf.getPDFSet(self.pdf_name)
         error_info = pdf_set.errorInfo
         if error_info.coreType not in ["hessian", "symmhessian"]:

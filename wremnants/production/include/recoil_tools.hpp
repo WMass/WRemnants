@@ -11,9 +11,6 @@
 #include "defines.hpp"
 #include "utils.hpp"
 
-// from narf
-#include "tfliteutils.hpp"
-
 namespace wrem {
 
 using ROOT::VecOps::RVec;
@@ -57,6 +54,24 @@ Vec_d compute_recoil_from_met(const double met_pt, const double met_phi,
                lep_pt[1] * cos(lep_phi[1]); // recoil x in lab frame
   double pUy = met_pt * sin(met_phi) + lep_pt[0] * sin(lep_phi[0]) +
                lep_pt[1] * sin(lep_phi[1]); // recoil y in lab frame
+  double Upara = -(pUx * cos(v_phi) + pUy * sin(v_phi));
+  double Uperp = -(-pUx * sin(v_phi) + pUy * cos(v_phi));
+
+  Vec_d res(2, 0);
+  res[0] = Upara;
+  res[1] = Uperp;
+
+  return res;
+}
+
+Vec_d compute_recoil_from_met(const double met_pt, const double met_phi,
+                              const Vec_f lep_pt, const Vec_f lep_phi,
+                              const double v_pt, const double v_phi) {
+
+  double pUx = met_pt * cos(met_phi) + lep_pt[0] * cos(lep_phi[0]) +
+               lep_pt[1] * cos(lep_phi[1]);
+  double pUy = met_pt * sin(met_phi) + lep_pt[0] * sin(lep_phi[0]) +
+               lep_pt[1] * sin(lep_phi[1]);
   double Upara = -(pUx * cos(v_phi) + pUy * sin(v_phi));
   double Uperp = -(-pUx * sin(v_phi) + pUy * cos(v_phi));
 
