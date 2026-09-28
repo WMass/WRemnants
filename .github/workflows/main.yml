@@ -129,6 +129,7 @@ jobs:
       MAX_FILES: ${{steps.export.outputs.MAX_FILES}}
       LUMI_SCALE: ${{steps.export.outputs.LUMI_SCALE}}
       NOMINAL_FAKE_SMOOTHING: ${{steps.export.outputs.NOMINAL_FAKE_SMOOTHING}}
+      JOB_TIMEOUT: ${{steps.export.outputs.JOB_TIMEOUT}}
 
     steps:
       - uses: actions/checkout@v5
@@ -157,6 +158,8 @@ jobs:
           echo "MAX_FILES=-2" >> $GITHUB_ENV
           echo "LUMI_SCALE=1" >> $GITHUB_ENV
           echo "NOMINAL_FAKE_SMOOTHING=full" >> $GITHUB_ENV
+          # the histmakers on the full statistics take longer than the default 6 h job limit
+          echo "JOB_TIMEOUT=720" >> $GITHUB_ENV
 
       - name: setup kerberos
         run: |
@@ -189,11 +192,13 @@ jobs:
           echo "WREMNANTS_OUTDIR=$WREMNANTS_OUTDIR" >> $GITHUB_OUTPUT
           echo "WEB_DIR=$WEB_DIR" >> $GITHUB_OUTPUT
           echo "NOMINAL_FAKE_SMOOTHING=$NOMINAL_FAKE_SMOOTHING" >> $GITHUB_OUTPUT
+          echo "JOB_TIMEOUT=${JOB_TIMEOUT:-360}" >> $GITHUB_OUTPUT
 
   w-analysis:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -222,6 +227,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -286,6 +292,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis, w-fit]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -343,6 +350,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -417,6 +425,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -477,6 +486,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -569,6 +579,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:    
@@ -672,6 +683,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:    
@@ -736,6 +748,7 @@ jobs:
   lowpu-combined-unfolding:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, lowpu-w, lowpu-z]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -787,6 +800,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -860,6 +874,7 @@ jobs:
   wlike-plotting:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, wlike]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     steps:
       - env:
@@ -896,6 +911,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -965,6 +981,7 @@ jobs:
   alphas-z-histmaker:
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1006,6 +1023,7 @@ jobs:
   alphas-z-reco:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, alphas-z-histmaker]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     strategy:
       fail-fast: false
       matrix:
@@ -1077,6 +1095,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -1192,6 +1211,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -1300,6 +1320,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, dilepton, wlike]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -1376,6 +1397,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: [self-hosted, linux, x64]
     needs: setenv
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -1500,6 +1522,7 @@ jobs:
   alphas-z-unfolding:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, alphas-z-histmaker]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1544,6 +1567,7 @@ jobs:
   alphas-z-gen-fit:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, alphas-z-histmaker, alphas-z-unfolding]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1630,6 +1654,7 @@ jobs:
   combined-fit:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-fit, dilepton]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     steps:
       - env:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
@@ -1671,6 +1696,7 @@ jobs:
   copy-clean:
     runs-on: [self-hosted, linux, x64]
     needs: [setenv, w-analysis, w-fit, w-abcd-fit, w-plotting, w-bsm, lowpu-w, lowpu-z, lowpu-combined-unfolding, wlike, wlike-plotting, dilepton-mll, alphas-z-histmaker, alphas-z-reco, dilepton, dilepton-unfolding, dilepton-plotting, gen, alphas-z-unfolding, alphas-z-gen-fit, combined-fit]
+    timeout-minutes: ${{ fromJSON(needs.setenv.outputs.JOB_TIMEOUT) }}
     if: always()
     steps:
       - env:
