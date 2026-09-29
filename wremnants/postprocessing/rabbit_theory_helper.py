@@ -1075,13 +1075,11 @@ class TheoryHelper(object):
         pdf_hist_ext = None
 
         if self.pdf_from_corr:
-            pdf_corr_hist = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfvars' + self._corr_sep + 'Corr')}"
-            if pdf_corr_hist.replace(
-                self._corr_sep + "Corr", ""
-            ) not in self.datagroups.args_from_metadata("theoryCorr"):
+            pdf_corr_hist = self._sidecar_corr_hist("pdfvars")
+            if pdf_corr_hist is None:
                 raise RuntimeError(
-                    f"PDF correction histogram {pdf_corr_hist} not found in metadata. "
-                    "Cannot add PDF uncertainty from corrections!"
+                    f"No unique pdfvars sidecar of {self.corr_hist_name} in the "
+                    "theoryCorr metadata. Cannot add PDF uncertainty from corrections!"
                 )
             pdf_hist = pdf_corr_hist
         elif pdfName == "pdfHERAPDF20":
@@ -1160,6 +1158,28 @@ class TheoryHelper(object):
                     **tmp_pdf_args,
                 )
 
+    def _sidecar_corr_hist(self, kind):
+        """The `pdfvars` / `pdfas` sidecar of the nominal correction, as a hist name.
+
+        A sidecar is `<stem>_<kind>` where `<stem>` is the nominal correction's name
+        or a prefix of it, so a nominal carrying its own suffix still finds its
+        siblings: `..._MSHT20_N3p0LL_N2LO_adcorr` -> `..._MSHT20_N3p0LL_N2LO_pdfas`.
+        Another set's sidecar (`..._MSHT20mcrange_N3p0LL_N2LO_pdfvars`) is not a
+        prefix match, so it can never be picked up. None if there is not exactly one.
+        """
+        nominal = self.corr_hist_name.removesuffix(self._corr_sep + "Corr")
+        tail = self._corr_sep + kind
+        hits = [
+            c
+            for c in self.datagroups.args_from_metadata("theoryCorr")
+            if c.endswith(tail) and nominal.startswith(c[: -len(tail)])
+        ]
+        if len(hits) != 1:
+            if hits:
+                logger.warning(f"Ambiguous {kind} sidecars for {nominal}: {hits}")
+            return None
+        return hits[0] + self._corr_sep + "Corr"
+
     def add_pdf_alphas_variation(
         self,
         noi=False,
@@ -1174,12 +1194,10 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            asname = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfas' + self._corr_sep + 'Corr')}"
+            asname = self._sidecar_corr_hist("pdfas")
             # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
-            if asname.replace(
-                self._corr_sep + "Corr", ""
-            ) not in self.datagroups.args_from_metadata("theoryCorr"):
+            if asname is None:
                 if self._corr_sep == "_":
                     asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
                 else:
