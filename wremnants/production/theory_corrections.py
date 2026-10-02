@@ -52,6 +52,30 @@ def make_theory_corr_weight_info(pdf, *, alphas=False, renorm=False):
 
 
 theory_corr_weight_map = {
+    "scetlib_nnlojet_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20aN3LO_N4p0LL_N3LO_pdfvars": make_theory_corr_weight_info(
+        "msht20an3lo", renorm=True
+    ),
+    "scetlib_nnlojet_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20aN3LO_N4p0LL_N3LO_pdfas": make_theory_corr_weight_info(
+        "msht20an3lo", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_CT18Z_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20"
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "msht20", alphas=True, renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksVals_CT18Z_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "ct18z"
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksVals_CT18Z_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
+        "ct18z", alphas=True, renorm=True
+    ),
     "scetlib_dyturbo_MSHT20_N3p0LL_N2LO_pdfas": make_theory_corr_weight_info(
         "msht20", alphas=True
     ),
@@ -181,6 +205,12 @@ theory_corr_weight_map = {
     ),
     "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
         "msht20mcrange", renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20mcrange_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20mcrange", renorm=True
+    ),
+    "scetlib_dyturbo_LatticeNPLambda4Bugfix_FranksValsVars_MSHT20mbrange_N3p0LL_N2LO_pdfvars": make_theory_corr_weight_info(
+        "msht20mbrange", renorm=True
     ),
     # Tested this, better not to treat this way unless using MSHT20nnlo as central set
     # "scetlib_dyturboMSHT20mbrange" : expand_pdf_entries("msht20mbrange", renorm=True),
@@ -696,6 +726,193 @@ def load_corr_hist(filename, proc, histname):
             histname = histname.replace("N2LO", "N2L0")
             corrh = corr[proc][histname]
     return corrh
+
+
+def get_corr_grid_edges(
+    generator,
+    proc_label="Z",
+    base_dir=f"{common.data_dir}/TheoryCorrections/",
+    minnlo_ratio=True,
+):
+    """Bin edges of the grid a theory correction is defined on.
+
+    The correction is applied as a pure BIN LOOKUP on this grid
+    (`makeCorrectionsTensor`: "returns what is in the bin of the histogram", no
+    interpolation), so the per-event correction weight is piecewise constant on
+    these cells. A gen binning that refines them therefore reproduces the applied
+    weight exactly, bin by bin, which is why this is the natural target binning
+    for a response matrix that has to fold a prediction of the same correction.
+
+    Returns {axis_name: edges} for the kinematic axes of the correction
+    histogram (typically Q, absY, qT), reading the file rather than assuming.
+    """
+    candidate_fnames = [
+        f"{base_dir}/{generator}_Corr{proc_label}.pkl.lz4",
+        f"{base_dir}/{generator}Corr{proc_label}.pkl.lz4",
+    ]
+    fname = next((f for f in candidate_fnames if os.path.isfile(f)), None)
+    if fname is None:
+        raise FileNotFoundError(
+            f"No correction file for generator {generator}, process {proc_label}: "
+            f"tried {candidate_fnames}"
+        )
+    corrh = load_corr_hist(
+        fname, proc_label, get_corr_name(generator, minnlo_ratio=minnlo_ratio)
+    )
+    edges = {
+        ax.name: np.asarray(ax.edges, dtype=float)
+        for ax in corrh.axes
+        if hasattr(ax, "edges") and ax.name not in ("vars", "charge", "helicity")
+    }
+    logger.info(
+        f"Correction grid of {generator} ({os.path.basename(fname)}): "
+        + ", ".join(f"{k}: {len(v) - 1} bins up to {v[-1]:g}" for k, v in edges.items())
+    )
+    return edges
+
+
+# Response/unfolding gen axis name -> the correction histogram's axis name.
+GEN_TO_CORR_AXIS = {
+    "ptVGen": "qT",
+    "ptVgen": "qT",
+    "absYVGen": "absY",
+    "absYVgen": "absY",
+}
+
+
+def check_gen_grid_vs_correction(
+    gen_axes,
+    generator,
+    proc_label="Z",
+    base_dir=f"{common.data_dir}/TheoryCorrections/",
+    minnlo_ratio=True,
+    allow_uncorrected_above=False,
+    tol=1e-9,
+    raise_on_mismatch=True,
+):
+    """Assert a gen grid is CONSISTENT with the grid a correction is defined on.
+
+    The theory correction is applied to the MC as a pure bin lookup, so the
+    per-event weight is piecewise constant on the correction's cells, whereas the
+    differentiable model *computes* the same cross section on the gen grid it is
+    handed. The two sides therefore compute the same thing in a gen bin if and
+    only if that bin does not straddle a correction cell boundary and does not
+    extend beyond the correction's support (where the correction file's flow bins
+    are exactly 1, i.e. the MC is left uncorrected while the model would still
+    predict a corrected cross section).
+
+    Two conditions, checked here rather than left as a convention:
+
+    1. NESTING -- every gen edge inside the correction's range must BE a
+       correction edge. A gen bin that splits a correction cell makes the folded
+       prediction a bin-average of the applied weight; a gen bin that merges
+       whole cells is fine (and is what an unfolding-binned response does).
+    2. NO SILENT EXTRAPOLATION -- no gen edge may exceed the correction's last
+       edge unless ``allow_uncorrected_above`` says so explicitly. Those bins are
+       uncorrected in the templates and corrected in the model.
+
+    Truncating a gen axis BELOW the correction's last edge is allowed (it is a
+    sub-union: e.g. |Y| stops at the gen acceptance edge 2.5 while the correction
+    runs to 5.0) and only logged.
+
+    Parameters
+    ----------
+    gen_axes : sequence of (name, edges)
+        The gen grid to check, in any order. Names are mapped through
+        ``GEN_TO_CORR_AXIS``; a name that is neither a key there nor an axis of
+        the correction is skipped with a warning.
+    allow_uncorrected_above : bool
+        Permit gen edges above the correction's range (PROVISIONAL binning, to be
+        used only while the correction is being regenerated on the wider grid).
+
+    Returns
+    -------
+    dict  {axis_name: {"nests": bool, "above": [edges above the corr range],
+                       "truncated_at": float or None}}
+    """
+    corr_edges = get_corr_grid_edges(
+        generator,
+        proc_label=proc_label,
+        base_dir=base_dir,
+        minnlo_ratio=minnlo_ratio,
+    )
+    report = {}
+    problems = []
+    for name, edges in gen_axes:
+        cname = GEN_TO_CORR_AXIS.get(name, name)
+        if cname not in corr_edges:
+            logger.warning(
+                f"check_gen_grid_vs_correction: no axis {cname!r} in the "
+                f"correction (axes {list(corr_edges)}), skipping gen axis {name!r}"
+            )
+            continue
+        ce = np.asarray(corr_edges[cname], dtype=float)
+        ge = np.asarray(edges, dtype=float)
+        above = [float(e) for e in ge if e > ce[-1] + tol]
+        inside = ge[ge <= ce[-1] + tol]
+        missing = [
+            float(e)
+            for e in inside
+            if not np.any(np.abs(ce - e) <= tol * max(1.0, abs(e)))
+        ]
+        truncated_at = float(ge[-1]) if (not above and ge[-1] < ce[-1] - tol) else None
+        report[name] = {
+            "nests": not missing,
+            "above": above,
+            "truncated_at": truncated_at,
+            "corr_axis": cname,
+            "corr_last_edge": float(ce[-1]),
+        }
+        if missing:
+            problems.append(
+                f"gen axis {name!r}: edges {missing} are not edges of the "
+                f"correction's {cname!r} grid -- those gen bins straddle "
+                f"correction cells, so the folded prediction bin-averages the "
+                f"applied weight"
+            )
+        if above and not allow_uncorrected_above:
+            problems.append(
+                f"gen axis {name!r}: edges {above} are ABOVE the correction's "
+                f"{cname!r} range (last edge {ce[-1]:g}), where the correction "
+                f"file's flow bin is exactly 1 -- the MC is uncorrected there "
+                f"while the model would predict a corrected cross section. "
+                f"Regenerate the correction on this grid, or pass "
+                f"allow_uncorrected_above=True to accept a PROVISIONAL binning"
+            )
+        if truncated_at is not None:
+            logger.info(
+                f"gen axis {name!r} stops at {truncated_at:g} while the "
+                f"correction's {cname!r} runs to {ce[-1]:g}: a sub-union, "
+                f"phase space above is not folded"
+            )
+        if above and allow_uncorrected_above:
+            logger.warning(
+                f"PROVISIONAL gen binning: {name!r} edges {above} are above the "
+                f"correction's {cname!r} range ({ce[-1]:g}); the MC is "
+                f"UNCORRECTED there. Only valid until the correction is "
+                f"regenerated on this grid."
+            )
+    if problems:
+        msg = (
+            "gen grid is inconsistent with correction "
+            + generator
+            + ":\n  "
+            + "\n  ".join(problems)
+        )
+        if raise_on_mismatch:
+            raise ValueError(msg)
+        logger.error(msg)
+    else:
+        logger.info(
+            f"gen grid checked against correction {generator}: nests exactly, "
+            f"no bins beyond its support"
+            + (
+                " (except the PROVISIONAL ones above)"
+                if any(r["above"] for r in report.values())
+                else ""
+            )
+        )
+    return report
 
 
 def compute_envelope(
