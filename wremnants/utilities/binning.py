@@ -207,8 +207,19 @@ absYWgen_binning_corr = [
     4,
     5,
 ]
-# for the Z, based on reco binning, but including additional bins where reco binning is too coarse
-ptZgen_binning_corr = [*ptZ_binning[:-1], 54, 75, 100, 1300]
+# for the Z, based on reco binning, but including additional bins where reco binning is too coarse.
+#
+# The edges above 100 (110, 130, 250) exist so the theory corrections resolve the
+# region the response matrix now resolves. `make_theory_corr` rebins its inputs to
+# their COMMON binning, so a single [100, 1300] cell here collapses the whole
+# region no matter what the other inputs carry.
+#
+# 250 is where the yield stops RECONSTRUCTING, not where MiNNLO stops (which is
+# ~1 TeV): the analysis' own muon window pushes both muons past 60 GeV by
+# qT ~ 130, and reco efficiency is 0.019 at [100,110], 0.0011 at [120,130] and
+# exactly 0 above 250. The top edge stays 1300 so nothing is lost from the
+# normalisation. See studies/scetlib-ad-param-model/260826-response-above100/.
+ptZgen_binning_corr = [*ptZ_binning[:-1], 54, 75, 100, 110, 130, 250, 1300]
 absYZgen_binning_corr = [
     *yll_20quantiles_binning[10:-1],
     2.0,
@@ -396,6 +407,7 @@ def get_unfolding_dilepton_axes(
     add_out_of_acceptance_axis=False,
     flow_y=False,
     rebin_pt=None,
+    edges_override=None,
 ):
     """
     construct axes, columns, and selections for differential Z dilepton measurement from correponding reco edges. Currently supported: pT(Z), |yZ|
@@ -404,7 +416,13 @@ def get_unfolding_dilepton_axes(
     reco_edges (dict of lists): the key is the corresponding reco axis name and the values the edges
     gen_level (str): generator level definition (e.g. `prefsr`, `postfsr`)
     add_out_of_acceptance_axis (boolean): To add a boolean axis for the use of out of acceptance contribution
+    edges_override (dict of lists, optional): replace the edges derived from the
+        reco binning for the named gen axes (e.g. {"ptVGen": [...]}). Used to
+        build a SECOND, finer set of gen axes for a response matrix, without
+        touching the unfolding binning; None (default) leaves every axis exactly
+        as it is derived from `reco_edges`.
     """
+    edges_override = edges_override or {}
 
     axes = []
     cols = []
@@ -419,9 +437,12 @@ def get_unfolding_dilepton_axes(
         cols.append(f"{gen_level}V_{var}")
 
         if v == "ptVGen":
-            edges = reco_edges["ptll"]
-            if rebin_pt is not None:
-                edges = rebin_pt(edges)
+            if v in edges_override:
+                edges = np.asarray(edges_override[v], dtype=float)
+            else:
+                edges = reco_edges["ptll"]
+                if rebin_pt is not None:
+                    edges = rebin_pt(edges)
 
             axes.append(
                 hist.axis.Variable(
@@ -429,19 +450,23 @@ def get_unfolding_dilepton_axes(
                 ),
             )
         elif v == "absYVGen":
-            # 1 absYVGen for 2 yll bins (negative and positive)
-            edges = reco_edges["yll"]
-            if edges[len(edges) // 2] != 0:
-                raise RuntimeError("Central bin edge must be 0")
+            if v in edges_override:
+                abs_edges = np.asarray(edges_override[v], dtype=float)
+            else:
+                # 1 absYVGen for 2 yll bins (negative and positive)
+                edges = reco_edges["yll"]
+                if edges[len(edges) // 2] != 0:
+                    raise RuntimeError("Central bin edge must be 0")
+                abs_edges = np.asarray(edges[len(edges) // 2 :], dtype=float)
             axes.append(
                 hist.axis.Variable(
-                    edges[len(edges) // 2 :],
+                    abs_edges,
                     name="absYVGen",
                     underflow=False,
                     overflow=flow_y,
                 ),
             )
-            selections.append(f"{gen_level}V_absY < {edges[-1]}")
+            selections.append(f"{gen_level}V_absY < {abs_edges[-1]}")
         elif v in ["qVGen"]:
             axes.append(
                 hist.axis.Regular(

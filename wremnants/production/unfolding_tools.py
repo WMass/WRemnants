@@ -187,7 +187,23 @@ def add_xnorm_histograms(
     unfolding_cols,
     base_name="xnorm",
     add_helicity_axis=False,
+    selection=None,
 ):
+    """Fill a gen-level (xnorm) total and its theory systematics.
+
+    ``selection`` (optional) is applied AFTER the weight definitions and before
+    any histogram, and the RETURN VALUE is the weighted-but-UNSELECTED node. A
+    caller that needs a second gen total on a DIFFERENT selection can then hang
+    it off that node instead of redefining every theory weight: RDataFrame
+    evaluates a Define only for events some downstream node actually reaches, so
+    one definition serves both branches and nothing is computed for an event no
+    branch keeps. Passing an already-selected ``df`` and no ``selection`` (what
+    every other caller does) behaves exactly as before, return value included.
+
+    Used by UnfolderZ.add_gen_histograms, where the fiducial gen total takes the
+    acceptance flag while the response gen total takes the theory correction's
+    phase space -- two selections, one weight.
+    """
     # add histograms before any selection
     df_xnorm = df
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
@@ -201,6 +217,12 @@ def add_xnorm_histograms(
     )
 
     df_xnorm = df_xnorm.Define("xnorm", "0.5")
+
+    # Everything above is a Define; the selection goes here, so the returned node
+    # carries the weights but not the cut (see the docstring).
+    df_weighted = df_xnorm
+    if selection is not None:
+        df_xnorm = df_xnorm.Filter(selection)
 
     axis_xnorm = hist.axis.Regular(
         1, 0.0, 1.0, name="count", underflow=False, overflow=False
@@ -243,7 +265,7 @@ def add_xnorm_histograms(
         nhelicity=9,
     )
 
-    return df_xnorm
+    return df_weighted
 
 
 def reweight_to_fitresult(filename, result=None, mapping=None, channel=None):
@@ -349,6 +371,41 @@ def rebin_pt(edges):
     return new_edges
 
 
+def _corr_axis_gen_selection(corr_axis, edges, gen_level):
+    """Gen-level selection restricting the dataframe to a correction axis' range.
+
+    Used for the RESPONSE gen total N_gen. The response's R and its normalizer
+    N_gen have to refer to the same gen population, and that population is the
+    one sigma_gen predicts -- the theory correction's own grid -- because
+    R/N_gen is consumed as a yield per unit of that prediction. A correction axis
+    that IS a gen axis of the response needs no cut here: out-of-range events go
+    into that axis' overflow, and the overflow is dropped consistently from both
+    R and N_gen (see postprocessing/scetlib_ad/response_matrix.load_R). An axis
+    that is NOT a gen axis has no such bookkeeping and needs an explicit cut.
+
+    Keyed by the CORRECTION histogram's axis name (the values of
+    ``theory_corrections.GEN_TO_CORR_AXIS``). Today the only such axis is Q.
+    """
+    if corr_axis == "Q":
+        # Bin lookup, so the correction's support is [first edge, last edge];
+        # outside it the correction file's flow bins are exactly 1 and sigma_gen
+        # has no prediction at all.
+        return (
+            f"{gen_level}V_mass > {float(edges[0]):.10g} && "
+            f"{gen_level}V_mass < {float(edges[-1]):.10g}"
+        )
+    raise ValueError(
+        f"No gen-level selection is known for the theory correction's "
+        f"{corr_axis!r} axis, and it is not a gen axis of the response matrix "
+        f"either. The response gen total N_gen must count EXACTLY the phase "
+        f"space sigma_gen predicts, because R/N_gen is consumed as a yield per "
+        f"unit of that prediction -- so an unhandled correction axis is a WRONG "
+        f"NORMALISATION, not a small correction. Either add the translation in "
+        f"_corr_axis_gen_selection (see theory_corrections.GEN_TO_CORR_AXIS for "
+        f"the reverse map), or make that axis a gen axis of the response."
+    )
+
+
 class UnfolderZ:
     """
     To be used in histmakers to define columns and add histograms for unfolding of Z dilepton kinematics
@@ -365,6 +422,8 @@ class UnfolderZ:
         fitresult_mapping=f"Select",
         fitresult_channel="ch0_masked",
         low_pu=False,
+        response_gen_edges=None,
+        response_corr_edges=None,
     ):
         self.analysis_label = "z_lowpu" if low_pu else "z_dilepton"
         self.cutsmap = cutsmap
@@ -429,6 +488,101 @@ class UnfolderZ:
                             Found unfolding axis {ax}\n
                             And weightsByHelicity_helper axis {wbh_axis}
                             """)
+
+        # A SECOND, finer set of gen axes for a response matrix, in parallel to
+        # the unfolding axes and leaving them untouched. The unfolding binning is
+        # tied to the reco binning by construction (one gen bin per two reco
+        # bins, `rebin_pt`), which is coarser than the grid a theory correction
+        # is defined on; folding a prediction of that correction through a
+        # response that cannot resolve its cells costs a bin-averaging error the
+        # per-event reweighted templates do not pay. So this adds histograms,
+        # it does not redefine any.
+        #
+        # Deliberately: no helicity axis (the response is recovered by summing
+        # the helicity partition, so filling with `nominal_weight` gives the same
+        # matrix 9x smaller, and it avoids having to rebin the helicity-xsec
+        # helper onto the finer grid), and the acceptance flag and gen selections
+        # are the UNFOLDING ones, so "acceptance" means exactly what it means
+        # everywhere else.
+        self.response_gen_edges = response_gen_edges
+        self.response_axes = {}
+        self.response_cols = {}
+        if response_gen_edges:
+            names = [n for n in unfolding_axes_names if n != "helicitySig"]
+            for level in self.unfolding_levels:
+                a, c, _ = binning.get_unfolding_dilepton_axes(
+                    names,
+                    reco_axes_edges,
+                    level,
+                    flow_y=self.poi_as_noi,
+                    add_out_of_acceptance_axis=self.poi_as_noi,
+                    rebin_pt=rebin_pt,
+                    edges_override=response_gen_edges,
+                )
+                self.response_axes[level] = a
+                self.response_cols[level] = c
+                logger.info(
+                    f"Response-matrix gen axes ({level}): "
+                    + ", ".join(
+                        f"{ax.name} {ax.size} bins"
+                        + (f" up to {ax.edges[-1]:g}" if hasattr(ax, "edges") else "")
+                        for ax in a
+                    )
+                )
+
+        # The gen selection for the response gen total N_gen. It is DERIVED from
+        # the theory correction's own grid, not from the fiducial acceptance flag:
+        # R's binning comes from the correction, so its normalizer has to count
+        # the same gen population, or R/N_gen is not a yield per unit of what
+        # sigma_gen predicts. Normalising the correction-binned R by the fiducial
+        # selection was exactly that mismatch
+        # (studies/scetlib-ad-param-model/260908-acceptance-response).
+        #
+        # Computed rather than enumerated: subtract the correction axes that ARE
+        # gen axes of the response (handled by the binning -- out-of-range goes to
+        # overflow, dropped consistently from R and N_gen) from the correction's
+        # axes; whatever is left needs an explicit cut. Today that is exactly
+        # {"Q"} -> 60 < mass < 120. Anything unhandled raises, in __init__, before
+        # a single event is read.
+        self.response_gen_selections = {}
+        if self.response_axes:
+            if not self.poi_as_noi:
+                raise RuntimeError(
+                    "A response matrix on the theory correction's gen grid is "
+                    "only defined in poi-as-noi mode: without it the dataframe "
+                    "reaching the gen histograms is already acceptance-filtered, "
+                    "so the correction-grid selection below could not be applied "
+                    "and N_gen would silently be normalised to the fiducial "
+                    "volume instead of to sigma_gen's phase space."
+                )
+            if not response_corr_edges:
+                raise ValueError(
+                    "response_gen_edges was given without response_corr_edges. "
+                    "The response gen total's selection is derived from the "
+                    "correction's own grid (get_corr_grid_edges), so the full "
+                    "grid -- including the axes the response is not binned in -- "
+                    "has to be passed in; guessing it would put N_gen on a "
+                    "different phase space from sigma_gen."
+                )
+            gen_axis_names = {
+                theory_corrections.GEN_TO_CORR_AXIS.get(name, name)
+                for name in response_gen_edges
+            }
+            needs_cut = sorted(set(response_corr_edges) - gen_axis_names)
+            for level in self.unfolding_levels:
+                self.response_gen_selections[level] = [
+                    _corr_axis_gen_selection(c, response_corr_edges[c], level)
+                    for c in needs_cut
+                ]
+            logger.info(
+                "Response gen-total selection (correction axes "
+                f"{needs_cut} are not gen axes of the response, the rest are "
+                "handled by the binning): "
+                + (
+                    " && ".join(self.response_gen_selections[self.unfolding_levels[0]])
+                    or "none needed"
+                )
+            )
 
         self.unfolding_corr_helper = (
             reweight_to_fitresult(
@@ -506,14 +660,15 @@ class UnfolderZ:
                     base_name=f"{level}_full",
                 )
 
-                if self.poi_as_noi:
-                    df_xnorm = df.Filter(f"{level}_acceptance")
-                else:
-                    df_xnorm = df
-
-                add_xnorm_histograms(
+                # The gen-level weights are defined ONCE, on the unselected df,
+                # and the two gen totals then take their own selections off that
+                # same node (see add_xnorm_histograms' docstring): `{level}` the
+                # fiducial acceptance flag, because it defines the unfolded cross
+                # section, and `{level}_response` the theory correction's phase
+                # space, because it normalises a prediction.
+                df_weighted = add_xnorm_histograms(
                     results,
-                    df_xnorm,
+                    df,
                     args,
                     dataset.name,
                     corr_helpers,
@@ -526,7 +681,39 @@ class UnfolderZ:
                     ],
                     add_helicity_axis=self.add_helicity_axis,
                     base_name=level,
+                    selection=(f"{level}_acceptance" if self.poi_as_noi else None),
                 )
+
+                if self.response_axes:
+                    # N_gen on the response grid: the SAME gen-level weight and
+                    # the same node as `{level}` (no experimental scale factors),
+                    # but NOT the same selection. `{level}` keeps the fiducial
+                    # acceptance flag; this one counts the phase space sigma_gen
+                    # predicts, the correction's own grid. That is what makes
+                    # R_raw/N_gen a yield per unit of the prediction, and the
+                    # numerator correspondingly sums acceptance True + False in
+                    # response_matrix.load_R.
+                    df_response = df_weighted
+                    for selection in self.response_gen_selections[level]:
+                        df_response = df_response.Filter(selection)
+                    results.append(
+                        df_response.HistoBoost(
+                            f"{level}_response",
+                            [
+                                a
+                                for a in self.response_axes[level]
+                                if a.name != "acceptance"
+                            ],
+                            [
+                                *[
+                                    c
+                                    for c in self.response_cols[level]
+                                    if c != f"{level}_acceptance"
+                                ],
+                                "nominal_weight",
+                            ],
+                        )
+                    )
 
         return df
 
@@ -577,5 +764,22 @@ class UnfolderZ:
                         f"{noiAsPoiHistName}_theory_weight",
                         yield_axes,
                         [*yield_cols, f"theory_weight_{level}"],
+                    )
+                )
+
+            if self.response_axes:
+                # reco x gen on the finer response grid, in parallel to (and
+                # leaving untouched) the unfolding hist above. No helicity axis:
+                # filled with `nominal_weight`, which is what summing the
+                # helicity partition of the unfolding hist gives.
+                results.append(
+                    df.HistoBoost(
+                        f"nominal_{level}_yieldsResponse",
+                        [*nominal_axes, *self.response_axes[level]],
+                        [
+                            *nominal_cols,
+                            *self.response_cols[level],
+                            "nominal_weight",
+                        ],
                     )
                 )
