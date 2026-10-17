@@ -6,6 +6,7 @@ Each member typically represents the output from a single dataset from the histo
 New, manipulated datagroup objects with members can be constructed that are not bound to that logic.
 """
 
+import inspect
 import itertools
 import math
 import os
@@ -1276,7 +1277,13 @@ class Datagroups(object):
         fitresult_data=None,
         masked=False,
         masked_flow_axes=[],
+        mc_stat_folds=False,
     ):
+        """
+        'mc_stat_folds': also write the MC-stat fold templates of the simulated
+            processes (see loadMCStatFoldHistograms), for the two-half / k-fold
+            MC-stat de-biasing in rabbit
+        """
         if self.writer is None:
             raise RuntimeError("Writer must be defined to add nominal histograms")
 
@@ -1289,32 +1296,51 @@ class Datagroups(object):
             sumFakesPartial=True,
         )
 
+        fold_hists = (
+            self.loadMCStatFoldHistograms(forceNonzero=forceNonzero)
+            if mc_stat_folds
+            else {}
+        )
+
         for i, proc in enumerate(self.predictedProcesses()):
             logger.info(f"Add process {proc} in channel {self.channel}")
 
             # nominal histograms of prediction
             norm_proc_hist = self.groups[proc].hists[self.nominalName]
 
-            if norm_proc_hist.axes.name != self.fit_axes:
-                norm_proc_hist = norm_proc_hist.project(*self.fit_axes)
-
-            if (
-                exclude_bin_by_bin_stat is not None
-                and proc in self.procGroups[exclude_bin_by_bin_stat]
-            ):
-                norm_proc_hist.variances(flow=True)[...] *= 0
-            elif bin_by_bin_stat_scale != 1:
-                norm_proc_hist.variances(flow=True)[...] = (
-                    norm_proc_hist.variances(flow=True) * bin_by_bin_stat_scale**2
-                )
-
             if len(masked_flow_axes) > 0:
                 self.axes_disable_flow = [
                     n
-                    for n in norm_proc_hist.axes.name
+                    for n in self.fit_axes
                     if n not in masked_flow_axes and n != "helicitySig"
                 ]
-                norm_proc_hist = hh.disableFlow(norm_proc_hist, self.axes_disable_flow)
+
+            def prepare_hist(h, axes):
+                if h.axes.name != axes:
+                    h = h.project(*axes)
+
+                if (
+                    exclude_bin_by_bin_stat is not None
+                    and proc in self.procGroups[exclude_bin_by_bin_stat]
+                ):
+                    h.variances(flow=True)[...] *= 0
+                elif bin_by_bin_stat_scale != 1:
+                    h.variances(flow=True)[...] = (
+                        h.variances(flow=True) * bin_by_bin_stat_scale**2
+                    )
+
+                if len(masked_flow_axes) > 0:
+                    h = hh.disableFlow(h, self.axes_disable_flow)
+                return h
+
+            norm_proc_hist = prepare_hist(norm_proc_hist, self.fit_axes)
+
+            fold_proc_hist = None
+            if proc in fold_hists:
+                fold_proc_hist = prepare_hist(
+                    fold_hists[proc], [*self.fit_axes, common.mc_stat_fold_axis_name]
+                )
+                self.checkMCStatFoldHistogram(proc, fold_proc_hist, norm_proc_hist)
 
             if self.channel not in self.writer.channels:
                 self.writer.add_channel(
@@ -1324,12 +1350,22 @@ class Datagroups(object):
                     flow=len(masked_flow_axes) > 0,
                 )
 
-            self.writer.add_process(
-                norm_proc_hist,
-                proc,
-                self.channel,
-                signal=proc in self.unconstrainedProcesses,
-            )
+            if fold_proc_hist is None:
+                self.writer.add_process(
+                    norm_proc_hist,
+                    proc,
+                    self.channel,
+                    signal=proc in self.unconstrainedProcesses,
+                )
+            else:
+                # the writer derives the full template by summing the folds
+                self.writer.add_process(
+                    fold_proc_hist,
+                    proc,
+                    self.channel,
+                    signal=proc in self.unconstrainedProcesses,
+                    fold_axis=common.mc_stat_fold_axis_name,
+                )
 
         # add metadata to channel info
         self.writer.channels[self.channel].update(
@@ -1366,6 +1402,71 @@ class Datagroups(object):
         if data_obs_hist.axes.name != self.fit_axes:
             data_obs_hist = data_obs_hist.project(*self.fit_axes)
         self.writer.add_data(data_obs_hist, self.channel)
+
+    def loadMCStatFoldHistograms(self, forceNonzero=False):
+        """Nominal histograms with the MC-stat fold axis (histmaker --mcStatFolds)
+        of the predicted processes, as {process: hist}.
+
+        The data-driven fakes are not folded: their template is not a sum over
+        simulated events, and the fake estimate is not linear in its inputs. A
+        process without folds is written to rabbit as if its template had no MC
+        statistical fluctuations across the folds.
+        """
+        params = inspect.signature(self.writer.add_process).parameters
+        if "fold_axis" not in params and not any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        ):
+            raise NotImplementedError(
+                "The rabbit TensorWriter does not support MC-stat fold templates "
+                "(add_process(..., fold_axis=...)); update rabbit."
+            )
+
+        label = common.mc_stat_fold_syst_name
+        procs = [p for p in self.predictedProcesses() if p != self.fakeName]
+        self.loadHistsForDatagroups(
+            baseName=self.nominalName,
+            syst=label,
+            procsToRead=procs,
+            label=label,
+            nominalIfMissing=False,
+            forceNonzero=forceNonzero,
+            sumFakesPartial=False,
+        )
+
+        fold_hists = {
+            p: self.groups[p].hists[label]
+            for p in procs
+            if self.groups[p].hists.get(label) is not None
+        }
+        if not fold_hists:
+            raise RuntimeError(
+                f"No histogram '{common.hist_name(self.nominalName, label)}' found "
+                "for any process; produce the histograms with --mcStatFolds k."
+            )
+        unfolded = [p for p in self.predictedProcesses() if p not in fold_hists]
+        if unfolded:
+            logger.warning(
+                f"Processes {unfolded} are written without MC-stat folds, i.e. "
+                "without MC statistical fluctuations across the folds."
+            )
+        return fold_hists
+
+    def checkMCStatFoldHistogram(self, proc, fold_hist, norm_hist, rtol=1e-6):
+        """The folds must sum to the nominal template; they do not if a member
+        of the group lacks the fold histogram, or if an operation applied on
+        reading is not linear (e.g. clipping negative bins)."""
+        folds_sum = fold_hist.project(*norm_hist.axes.name)
+        for what in ("values", "variances"):
+            a = getattr(folds_sum, what)(flow=True)
+            b = getattr(norm_hist, what)(flow=True)
+            if not np.allclose(a, b, rtol=rtol, atol=rtol * np.max(np.abs(b))):
+                raise RuntimeError(
+                    f"The {what} of the MC-stat folds of process {proc} do not sum "
+                    f"to its nominal ones (largest difference "
+                    f"{np.max(np.abs(a - b))}); a member of the group may lack the "
+                    "fold histogram, or a non-linear operation (e.g. forceNonzero) "
+                    "is applied when reading the histograms."
+                )
 
     def addNormSystematic(self, norm, **kwargs):
         self.addSystematic(

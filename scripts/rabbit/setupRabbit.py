@@ -1120,6 +1120,15 @@ def make_parser(parser=None, argv=None):
         help="scaling of bin by bin statistical uncertainty for Z-dilepton analysis",
     )
     parser.add_argument(
+        "--mcStatFolds",
+        action="store_true",
+        help="Write the MC-stat fold templates of the simulated processes, from the "
+        "nominal histograms with a fold axis (histmaker --mcStatFolds), for the "
+        "two-half / k-fold MC-stat de-biasing in rabbit (--mcStatDebias twoHalf). "
+        "Data-driven processes (fakes) are written without folds. The systematic "
+        "variations are shared across the folds.",
+    )
+    parser.add_argument(
         "--angularCoeffs",
         action="store_true",
         help="convert helicity cross sections to angular coefficients",
@@ -1815,6 +1824,10 @@ def setup(
         masked_flow_axes = []
 
     if args.correlateSignalMCstat and datagroups.xnorm:
+        if args.mcStatFolds:
+            raise NotImplementedError(
+                "--mcStatFolds is not supported with --correlateSignalMCstat"
+            )
         rabbit_helpers.add_nominal_with_correlated_BinByBinStat(
             datagroups,
             wmass,
@@ -1838,6 +1851,7 @@ def setup(
             fitresult_data=fitresult_data,
             masked=datagroups.xnorm and fitresult_data is None,
             masked_flow_axes=masked_flow_axes,
+            mc_stat_folds=args.mcStatFolds and not datagroups.xnorm,
         )
 
     if stat_only and isUnfolding and not isPoiAsNoi:

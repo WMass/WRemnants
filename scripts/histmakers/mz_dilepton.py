@@ -13,6 +13,7 @@ import ROOT
 
 import narf
 from wremnants.production import (
+    mcstat_folds,
     muon_calibration,
     muon_efficiencies_binned,
     muon_efficiencies_cvh,
@@ -1080,6 +1081,15 @@ def build_graph(df, dataset):
             cols = [*cols, "jackknife_sample"]
 
         results.append(df.HistoBoost("nominal", axes, [*cols, "nominal_weight"]))
+        if args.mcStatFolds > 1:
+            mcstat_folds.add_mc_stat_fold_hist(
+                results,
+                df,
+                axes,
+                [*cols, "nominal_weight"],
+                args.mcStatFolds,
+                args.mcStatFoldSeed,
+            )
 
         if dataset.group == "Top":
             # the size of the top pt reweighting itself is taken as its uncertainty

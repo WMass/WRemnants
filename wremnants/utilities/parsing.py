@@ -396,6 +396,21 @@ def common_parser(analysis_label=""):
     parser.add_argument(
         "--randomSeedForToys", type=int, default=0, help="random seed for toys"
     )
+    parser.add_argument(
+        "--mcStatFolds",
+        type=int,
+        default=0,
+        help="If > 1, also store the nominal MC histograms with an extra axis that "
+        "splits the generated events into this many MC-stat folds (by a hash of "
+        "run, lumi and event number), for the two-half / k-fold MC-stat de-biasing "
+        "in rabbit (setupRabbit.py --mcStatFolds, rabbit --mcStatDebias twoHalf)",
+    )
+    parser.add_argument(
+        "--mcStatFoldSeed",
+        type=int,
+        default=0,
+        help="Seed of the hash that assigns the events to MC-stat folds",
+    )
 
     if for_reco_highPU:
         # additional arguments specific for histmaker of reconstructed objects at high pileup (mw, mz_wlike, and mz_dilepton)

@@ -15,6 +15,7 @@ import ROOT
 import narf
 from wremnants.production import (
     generator_level_definitions,
+    mcstat_folds,
     muon_calibration,
     muon_efficiencies_binned,
     muon_efficiencies_cvh,
@@ -2263,6 +2264,15 @@ def build_graph(df, dataset):
     else:
         nominal = df.HistoBoost("nominal", axes, [*cols, "nominal_weight"])
         results.append(nominal)
+        if args.mcStatFolds > 1:
+            mcstat_folds.add_mc_stat_fold_hist(
+                results,
+                df,
+                axes,
+                [*cols, "nominal_weight"],
+                args.mcStatFolds,
+                args.mcStatFoldSeed,
+            )
         results.append(
             df.HistoBoost(
                 "nominal_weight",
