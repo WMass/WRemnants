@@ -1894,7 +1894,13 @@ def transport_smearing_weights_to_reco(
                     *hist_gensmear.axes, storage=hist_gensmear.storage_type()
                 )
 
-                bin_ratio = hh.divideHists(hist_gensmear, nominal_gensmear)
+                # with MC-stat folds the ratio of the full sample, so that the
+                # folds of the transported variation sum to the one without folds
+                bin_ratio = hh.divideHists(
+                    common.sum_mc_stat_folds(hist_gensmear),
+                    common.sum_mc_stat_folds(nominal_gensmear),
+                )
+                bin_ratio = hh.broadcastSystHist(bin_ratio, hist_gensmear)
                 hist_reco = hh.multiplyHists(nominal_reco, bin_ratio)
                 proc_hists[reco_histname] = wums.ioutils.H5PickleProxy(hist_reco)
             else:
@@ -2039,7 +2045,7 @@ def make_pixel_multiplicity_helpers(
         res = pickle.load(fin)
 
     hNValidPixelHitsTrig_data = res["hNValidPixelHitsTrig_data"]
-    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsTrig_data"]
+    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsNonTrig_data"]
     hNValidPixelHitsTrig_mc = res["hNValidPixelHitsTrig_mc"]
     hNValidPixelHitsNonTrig_mc = res["hNValidPixelHitsNonTrig_mc"]
 

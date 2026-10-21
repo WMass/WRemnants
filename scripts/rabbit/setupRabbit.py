@@ -1182,6 +1182,26 @@ def make_parser(parser=None, argv=None):
         help="scaling of bin by bin statistical uncertainty for Z-dilepton analysis",
     )
     parser.add_argument(
+        "--mcStatFolds",
+        type=int,
+        nargs="?",
+        const=-1,
+        default=0,
+        help="Write the MC-stat fold templates of the simulated processes, from the "
+        "histograms with a fold axis (histmaker --mcStatFolds k), for the "
+        "two-half / k-fold MC-stat de-biasing in rabbit (--mcStatDebias kfold). "
+        "Without a value all k folds are written. With a value m (a divisor of k) "
+        "the folds are merged into m folds of k/m consecutive folds each, so fits "
+        "with fewer folds can be made from the same histograms; for even m the "
+        "halves of the de-biased objective stay those of the k folds. The "
+        "systematic variations are written per fold too (split logk), so that "
+        "their template noise is de-biased as well. A variation is shared across "
+        "the folds if its histograms have no folds, if its folds do not sum to "
+        "the variation (a non-linear operation on the way), or if rabbit does not "
+        "support its symmetrization with folds. Data-driven processes (fakes) are "
+        "written without folds.",
+    )
+    parser.add_argument(
         "--angularCoeffs",
         action="store_true",
         help="convert helicity cross sections to angular coefficients",
@@ -1332,6 +1352,9 @@ def setup(
 
     datagroups.fit_axes = fitvar
     datagroups.channel = channel
+    # MC-stat fold templates (two-half / k-fold de-biasing in rabbit), not for the
+    # masked gen-level channels
+    datagroups.mcStatFolds = 0 if datagroups.xnorm else args.mcStatFolds
 
     # older histmakers stored the open ended ABCD regions in the overflow bins, which
     # can not be used in the fit, turn them into explicit bins with an infinite outer edge
@@ -1877,6 +1900,10 @@ def setup(
         masked_flow_axes = []
 
     if args.correlateSignalMCstat and datagroups.xnorm:
+        if args.mcStatFolds:
+            raise NotImplementedError(
+                "--mcStatFolds is not supported with --correlateSignalMCstat"
+            )
         rabbit_helpers.add_nominal_with_correlated_BinByBinStat(
             datagroups,
             wmass,
@@ -3720,6 +3747,7 @@ if __name__ == "__main__":
             fitresult_data=fitresult_data,
             unfolding_scalemap=unfolding_scalemap,
         )
+        datagroups.logMCStatFoldSummary()
 
         if args.addBSMMixing is not None:
             # add masked channel for SM inclusive cross section with BSM variation

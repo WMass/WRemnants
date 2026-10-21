@@ -95,6 +95,19 @@ muonEfficiency_standaloneNumberOfValidHits = (
 )
 
 
+# nominal histogram with an extra MC-stat fold axis (histmaker --mcStatFolds),
+# read by setupRabbit.py --mcStatFolds
+mc_stat_fold_axis_name = "mcStatFold"
+mc_stat_fold_syst_name = "mcStatFolds"
+
+
+def sum_mc_stat_folds(h):
+    """`h` summed over its MC-stat fold axis, if it has one."""
+    if mc_stat_fold_axis_name in h.axes.name:
+        return h[{mc_stat_fold_axis_name: sum}]
+    return h
+
+
 def hist_name(baseName, syst=""):
     if baseName != "x" and (syst == ""):
         return baseName
