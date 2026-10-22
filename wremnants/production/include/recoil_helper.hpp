@@ -189,10 +189,57 @@ public:
     return ret;
   }
 
+  // The calibrated recoil only, from the model function without the
+  // uncertainty weights (which are set to 1).
+  out_t corrected(const double &pt, const double &ut_para,
+                  const double &ut_perp) {
+
+    Eigen::TensorFixedSize<double, Eigen::Sizes<>> pt_tensor;
+    Eigen::TensorFixedSize<double, Eigen::Sizes<>> ut_para_tensor;
+    Eigen::TensorFixedSize<double, Eigen::Sizes<>> ut_perp_tensor;
+    pt_tensor(0) = pt;
+    ut_para_tensor(0) = ut_para;
+    ut_perp_tensor(0) = ut_perp;
+
+    out_t ret;
+    auto const inputs = std::tie(pt_tensor, ut_para_tensor, ut_perp_tensor);
+    auto outputs = std::tie(ret.ut_para_corr, ret.ut_perp_corr);
+    (*helper_no_unc_)(inputs, outputs);
+    ret.unc_weights.setConstant(1.);
+    return ret;
+  }
+
 private:
   std::shared_ptr<narf::tflite_helper> helper_;
   std::shared_ptr<narf::tflite_helper> helper_no_unc_;
   bool do_unc;
+};
+
+// The calibration at the uncapped boson pt, for the variation that covers the
+// extrapolation beyond --recoilQtMax. Up to qt_max the capped evaluation has
+// the same inputs, so it is reused; above it the model is evaluated without the
+// uncertainty weights, which the variation does not use (about ten times
+// cheaper). Copies of the calibration helper share its models.
+template <size_t N_UNC> class RecoilCalibrationQtExtrapHelper {
+
+public:
+  using out_t = typename RecoilCalibrationHelper<N_UNC>::out_t;
+
+  RecoilCalibrationQtExtrapHelper(const RecoilCalibrationHelper<N_UNC> &helper,
+                                  const double qt_max)
+      : helper_(helper), qt_max_(qt_max) {}
+
+  out_t operator()(const double &pt, const double &ut_para,
+                   const double &ut_perp, const out_t &capped) {
+    if (pt <= qt_max_) {
+      return capped;
+    }
+    return helper_.corrected(pt, ut_para, ut_perp);
+  }
+
+private:
+  RecoilCalibrationHelper<N_UNC> helper_;
+  double qt_max_;
 };
 
 class RecoilCalibrationUncertaintyHelper {

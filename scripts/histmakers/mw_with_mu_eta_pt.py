@@ -163,11 +163,14 @@ parser.add_argument(
 parser.add_argument(
     "--recoilQtMax",
     type=float,
-    default=None,
-    help="Evaluate the recoil calibration at min(ptV, RECOILQTMAX): the calibration is derived from Z events and has no statistics above ~150 GeV, where the model extrapolates. The uncapped calibration is stored as a systematic variation (nominal_recoilQtExtrap)",
+    default=120.0,
+    help="Evaluate the recoil calibration at min(ptV, RECOILQTMAX): the calibration is derived from Z events and has no statistics above ~150 GeV, where the model extrapolates. The uncapped calibration is stored as a systematic variation (nominal_recoilQtExtrap). 0 or a negative value disables the cap",
 )
 
 args = parser.parse_args()
+
+if args.recoilQtMax is not None and args.recoilQtMax <= 0:
+    args.recoilQtMax = None
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 
