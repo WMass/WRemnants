@@ -150,7 +150,7 @@ jobs:
         # package directories -- so warn and review anyway.
         run: |
           git submodule init -- narf rabbit wums || true
-          git config submodule.narf.url https://github.com/bendavid/narf.git
+          git config submodule.narf.url https://github.com/WMass/narf.git
           git config submodule.rabbit.url https://github.com/WMass/rabbit.git
           git config submodule.wums.url https://github.com/WMass/wums.git
           git submodule update -- narf rabbit wums \
