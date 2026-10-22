@@ -19,6 +19,7 @@ from wremnants.production import (
     muon_efficiencies_smooth,
     muon_prefiring,
     muon_selections,
+    nano_compat,
     pileup,
     systematics,
     theory_corrections,
@@ -203,7 +204,7 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=args.excludeProcs,
     aux=args.auxiliaryProcs,
-    nanoVersion="v9",
+    nanoVersion=args.nanoVersion,
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,
     oneMCfileEveryN=args.oneMCfileEveryN,
@@ -644,6 +645,7 @@ if args.recoilHists and not args.noRecoil:
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
+    df = nano_compat.define_nano_compat(df, args.nanoVersion)
     isW = dataset.name in samples.wprocs
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
@@ -1611,35 +1613,37 @@ def build_graph(df, dataset):
                     df, axes, results, cols, smearing_uncertainty_helper, reco_sel_GF
                 )
 
-                # add pixel multiplicity uncertainties
-                df = df.Define(
-                    "nominal_pixelMultiplicitySyst_tensor",
-                    pixel_multiplicity_uncertainty_helper,
-                    [*pixel_multiplicity_cols, "nominal_weight"],
-                )
-                hist_pixelMultiplicitySyst = df.HistoBoost(
-                    "nominal_pixelMultiplicitySyst",
-                    axes,
-                    [*cols, "nominal_pixelMultiplicitySyst_tensor"],
-                    tensor_axes=pixel_multiplicity_uncertainty_helper.tensor_axes,
-                    storage=hist.storage.Double(),
-                )
-                results.append(hist_pixelMultiplicitySyst)
-
-                if args.pixelMultiplicityStat:
+                # pixel multiplicity uncertainties, only for the v9 CVH refit: the v15
+                # track fit fixes the pixel hit multiplicity
+                if args.nanoVersion == "v9":
                     df = df.Define(
-                        "nominal_pixelMultiplicityStat_tensor",
-                        pixel_multiplicity_uncertainty_helper_stat,
+                        "nominal_pixelMultiplicitySyst_tensor",
+                        pixel_multiplicity_uncertainty_helper,
                         [*pixel_multiplicity_cols, "nominal_weight"],
                     )
-                    hist_pixelMultiplicityStat = df.HistoBoost(
-                        "nominal_pixelMultiplicityStat",
+                    hist_pixelMultiplicitySyst = df.HistoBoost(
+                        "nominal_pixelMultiplicitySyst",
                         axes,
-                        [*cols, "nominal_pixelMultiplicityStat_tensor"],
-                        tensor_axes=pixel_multiplicity_uncertainty_helper_stat.tensor_axes,
+                        [*cols, "nominal_pixelMultiplicitySyst_tensor"],
+                        tensor_axes=pixel_multiplicity_uncertainty_helper.tensor_axes,
                         storage=hist.storage.Double(),
                     )
-                    results.append(hist_pixelMultiplicityStat)
+                    results.append(hist_pixelMultiplicitySyst)
+
+                    if args.pixelMultiplicityStat:
+                        df = df.Define(
+                            "nominal_pixelMultiplicityStat_tensor",
+                            pixel_multiplicity_uncertainty_helper_stat,
+                            [*pixel_multiplicity_cols, "nominal_weight"],
+                        )
+                        hist_pixelMultiplicityStat = df.HistoBoost(
+                            "nominal_pixelMultiplicityStat",
+                            axes,
+                            [*cols, "nominal_pixelMultiplicityStat_tensor"],
+                            tensor_axes=pixel_multiplicity_uncertainty_helper_stat.tensor_axes,
+                            storage=hist.storage.Double(),
+                        )
+                        results.append(hist_pixelMultiplicityStat)
 
                 # All J/psi-style scale-uncertainty Defines below pick up
                 # their per-helper column list via ``jpsi_style_cols`` --

@@ -12,6 +12,9 @@ supported_eras = eras_run2 + [
     "13TeVGen",
 ]
 
+# versions of the custom NanoAOD: v9 (TrackFitV722_NanoProdv6) and v15 (CMSSW_15_0, NanoV15_vX.Y)
+nano_versions = ["v9", "v15"]
+
 ## Samples with sqrt{S} = 13 TeV
 # central MiNNLO samples with muon decay
 wprocs_mu_minnlo_run2 = [f"Wplusmunu_{e}" for e in eras_run2] + [

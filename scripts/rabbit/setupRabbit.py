@@ -3446,31 +3446,39 @@ def setup(
                 scale=args.resolutionStatScaling,
             )
 
-    datagroups.addSystematic(
-        "pixelMultiplicitySyst",
-        mirror=True,
-        processes=["single_v_samples"],
-        groups=["pixelMultiplicitySyst", "muonCalibration", "experiment", "expNoLumi"],
-        baseName="pixel_multiplicity_syst_",
-        systAxes=["var"],
-        passToFakes=passSystToFakes,
-    )
-
-    if datagroups.args_from_metadata("pixelMultiplicityStat"):
+    # the pixel multiplicity uncertainties are only booked for the v9 CVH refit, the v15
+    # track fit fixes the pixel hit multiplicity (outputs without nanoVersion are v9)
+    if datagroups.getMetaInfo()["args"].get("nanoVersion", "v9") == "v9":
         datagroups.addSystematic(
-            "pixelMultiplicityStat",
+            "pixelMultiplicitySyst",
             mirror=True,
             processes=["single_v_samples"],
             groups=[
-                "pixelMultiplicityStat",
+                "pixelMultiplicitySyst",
                 "muonCalibration",
                 "experiment",
                 "expNoLumi",
             ],
-            baseName="pixel_multiplicity_stat_",
+            baseName="pixel_multiplicity_syst_",
             systAxes=["var"],
             passToFakes=passSystToFakes,
         )
+
+        if datagroups.args_from_metadata("pixelMultiplicityStat"):
+            datagroups.addSystematic(
+                "pixelMultiplicityStat",
+                mirror=True,
+                processes=["single_v_samples"],
+                groups=[
+                    "pixelMultiplicityStat",
+                    "muonCalibration",
+                    "experiment",
+                    "expNoLumi",
+                ],
+                baseName="pixel_multiplicity_stat_",
+                systAxes=["var"],
+                passToFakes=passSystToFakes,
+            )
 
     if dilepton and "run" in fitvar:
         # add ad-hoc normalization uncertainty uncorrelated across run bins
