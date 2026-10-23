@@ -207,8 +207,10 @@ absYWgen_binning_corr = [
     4,
     5,
 ]
-# for the Z, based on reco binning, but including additional bins where reco binning is too coarse
-ptZgen_binning_corr = [*ptZ_binning[:-1], 54, 75, 100, 1300]
+# for the Z, based on reco binning, but including additional bins where reco binning is too coarse.
+# The edges at 110, 130, 250 resolve the gen region above 100 GeV that still migrates
+# into the reco acceptance (none does above 250).
+ptZgen_binning_corr = [*ptZ_binning[:-1], 54, 75, 100, 110, 130, 250, 1300]
 absYZgen_binning_corr = [
     *yll_20quantiles_binning[10:-1],
     2.0,
