@@ -7,6 +7,38 @@ from wums import logging
 
 logger = logging.child_logger(__name__)
 
+# Groups of several processes, by the prefixes of their member names. They pool the
+# MC statistics of their components into one template per bin; each systematic keeps
+# acting on the components it is defined for (Datagroups.resolveProcesses).
+merged_groups = {
+    "Z": {"Zmumu": ["Zmumu"], "Ztautau": ["Ztautau"]},
+    "W": {
+        "Wmunu": ["Wplusmunu", "Wminusmunu", "Wmunu"],
+        "Wtaunu": ["Wplustaunu", "Wminustaunu"],
+    },
+    "TopVV": {
+        "Top": ["Top", "SingleT", "TT"],
+        "Diboson": ["Diboson", "WW", "WZ", "ZZ"],
+    },
+}
+
+
+def add_merged_group(dg, name, split=False):
+    """The group `name` of merged_groups, or with `split` its components as groups"""
+    components = {
+        c: dg.get_members_from_results(startswith=prefixes)
+        for c, prefixes in merged_groups[name].items()
+    }
+    if split:
+        for c, members in components.items():
+            dg.addGroup(c, members=members)
+        return
+    dg.addGroup(
+        name,
+        members={k: v for members in components.values() for k, v in members.items()},
+        components={c: list(members) for c, members in components.items() if members},
+    )
+
 
 def make_datagroups_2016(
     dg,
@@ -17,18 +49,21 @@ def make_datagroups_2016(
     # reset datagroups
     dg.groups = {}
 
+    # merged groups whose components are groups of their own: Datagroups splitGroups
+    # (True for all), e.g. in the fits where the muon channel is the signal and the tau
+    # one a background, and W and Z for the gen-level fits
+    to_split = dg.splitGroups if not isinstance(dg.splitGroups, bool) else []
+    split = lambda name: (
+        dg.splitGroups is True
+        or name in to_split
+        or (dg.mode == "vgen" and name in ["W", "Z"])
+    )
+
     dg.addGroup(
         "Data",
         members=dg.get_members_from_results(is_data=True),
     )
-    dg.addGroup(
-        "Zmumu",
-        members=dg.get_members_from_results(startswith=["Zmumu"]),
-    )
-    dg.addGroup(
-        "Ztautau",
-        members=dg.get_members_from_results(startswith=["Ztautau"]),
-    )
+    add_merged_group(dg, "Z", split=split("Z"))
     dg.addGroup(
         "PhotonInduced",
         members=dg.get_members_from_results(startswith=["GG", "QG"]),
@@ -41,28 +76,8 @@ def make_datagroups_2016(
             color="dimgray",
         )
     if dg.mode in ["vgen", "w_mass"]:
-        dg.addGroup(
-            "Wmunu",
-            members=dg.get_members_from_results(
-                startswith=["Wplusmunu", "Wminusmunu", "Wmunu"]
-            ),
-        )
-        dg.addGroup(
-            "Wtaunu",
-            members=dg.get_members_from_results(
-                startswith=["Wplustaunu", "Wminustaunu"]
-            ),
-        )
-        dg.addGroup(
-            "Top",
-            members=dg.get_members_from_results(startswith=["Top", "SingleT", "TT"]),
-        )
-        dg.addGroup(
-            "Diboson",
-            members=dg.get_members_from_results(
-                startswith=["Diboson", "WW", "WZ", "ZZ"]
-            ),
-        )
+        add_merged_group(dg, "W", split=split("W"))
+        add_merged_group(dg, "TopVV", split=split("TopVV"))
         dg.addGroup(
             "QCD",
             members=dg.get_members_from_results(startswith=["QCD"]),

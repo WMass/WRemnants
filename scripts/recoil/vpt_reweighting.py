@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--mode", type=str, help="Mode", default="mc_data")
     args = parser.parse_args()
 
-    groups = datagroups.Datagroups(args.input)
+    groups = datagroups.Datagroups(args.input, splitGroups=True)
     met, analysis, flavor = functions.get_meta(groups)
     fOut = (
         f"wremnants-data/data/recoil/{analysis}_{met}/vptrw_{args.mode}_{flavor}.json"

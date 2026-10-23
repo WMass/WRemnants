@@ -45,10 +45,12 @@ process_colors = {
     "Wenu": "#E42536",
     "WmunuOOA": "#2E9B92E6",
     "Wtaunu": "#F89C20",
+    "W": "#E42536",
     "DYlowMass": "deepskyblue",
     "PhotonInduced": "gold",
     "Top": "green",
     "Diboson": "#7A21DD",
+    "TopVV": "green",
     "Rare": "#7A21DD",
     "Other": "#7A21DD",
     "QCD": "#964A8B",
@@ -72,12 +74,15 @@ process_colors = {
 process_supergroups = {
     "sv": {
         "Prompt": [
+            "W",
             "Wmunu",
             "Wtaunu",
+            "Z",
             "Ztautau",
             "Zmumu",
             "DYlowMass",
             "PhotonInduced",
+            "TopVV",
             "Top",
             "Diboson",
         ],
@@ -87,17 +92,17 @@ process_supergroups = {
     "w_mass": {
         "Wmunu": ["Wmunu"],
         "Wtaunu": ["Wtaunu"],
-        "Z": ["Ztautau", "Zmumu", "DYlowMass"],
+        "Z": ["Z", "Ztautau", "Zmumu", "DYlowMass"],
         "Fake": ["Fake"],
-        "Rare": ["PhotonInduced", "Top", "Diboson"],
+        "Rare": ["PhotonInduced", "TopVV", "Top", "Diboson"],
     },
     "w_mass_ext": {
         "Wmunu": ["Wmunu"],
         "WmunuOOA": ["WmunuOOA"],
         "Wtaunu": ["Wtaunu"],
-        "Z": ["Ztautau", "Zmumu", "DYlowMass"],
+        "Z": ["Z", "Ztautau", "Zmumu", "DYlowMass"],
         "Fake": ["Fake"],
-        "Rare": ["PhotonInduced", "Top", "Diboson"],
+        "Rare": ["PhotonInduced", "TopVV", "Top", "Diboson"],
     },
     "z_dilepton": {
         "Zmumu": ["Zmumu"],
@@ -105,7 +110,7 @@ process_supergroups = {
     },
     "w_lowpu": {
         "Zll": ["Ztautau", "Zmumu", "Zee", "DYlowMass"],
-        "Rare": ["PhotonInduced", "Top", "Diboson"],
+        "Rare": ["PhotonInduced", "TopVV", "Top", "Diboson"],
     },
 }
 process_supergroups["z_wlike"] = process_supergroups["z_dilepton"]
@@ -126,10 +131,12 @@ process_labels = {
     "Wenu": r"W$^{\pm}\to e\nu$",
     "WmunuOOA": r"W$^{\pm}\to\mu\nu$ OOA",
     "Wtaunu": r"W$^{\pm}\to\tau\nu$",
+    "W": r"W$^{\pm}\to\mu\nu/\tau\nu$",
     "DYlowMass": r"Z/$\gamma^{\star}\to\mu\mu$, $10<m<50$ GeV",
     "PhotonInduced": r"$\gamma$-induced",
     "Top": "Top",
     "Diboson": "Diboson",
+    "TopVV": "Top, diboson",
     "QCD": "QCD MC",
     "Other": "Other",
     "Fake": "Nonprompt",

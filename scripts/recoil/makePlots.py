@@ -19,7 +19,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     suffix = "" if args.suffix == "" else f"_{args.suffix}"
 
-    groups = datagroups.Datagroups(args.input)
+    groups = datagroups.Datagroups(args.input, splitGroups=True)
     met, analysis, flavor, theoryCorr = functions.get_meta(groups)
 
     if theoryCorr != "":
@@ -179,7 +179,8 @@ if __name__ == "__main__":
                     "pre-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_prefsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_prefsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -189,7 +190,8 @@ if __name__ == "__main__":
                     "post-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_postfsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_postfsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -199,7 +201,8 @@ if __name__ == "__main__":
                     "proxy-reco",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_proxy_postfsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_proxy_postfsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -2688,7 +2691,8 @@ if __name__ == "__main__":
                     "pre-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_prefsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_prefsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -2698,7 +2702,8 @@ if __name__ == "__main__":
                     "post-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_postfsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_postfsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -2708,7 +2713,8 @@ if __name__ == "__main__":
                     "proxy-reco",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_proxy_postfsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mz_wlike_with_mu_eta_pt_DeepMETPVRobust_gen_proxy_postfsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -5197,7 +5203,8 @@ if __name__ == "__main__":
                     "pre-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mw_with_mu_eta_pt_DeepMETPVRobust_prefsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mw_with_mu_eta_pt_DeepMETPVRobust_prefsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )
@@ -5207,7 +5214,8 @@ if __name__ == "__main__":
                     "post-fsr",
                     expand_groups(
                         datagroups.Datagroups(
-                            "/scratch/submit/cms/jaeyserm/Recoil/mw_with_mu_eta_pt_DeepMETPVRobust_postfsr.hdf5"
+                            "/scratch/submit/cms/jaeyserm/Recoil/mw_with_mu_eta_pt_DeepMETPVRobust_postfsr.hdf5",
+                            splitGroups=True,
                         )
                     ),
                 )

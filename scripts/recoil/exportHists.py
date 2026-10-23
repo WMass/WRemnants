@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input", type=str, help="Input hdf5 file")
     args = parser.parse_args()
 
-    groups = datagroups.Datagroups(args.input)
+    groups = datagroups.Datagroups(args.input, splitGroups=True)
     met, analysis, flavor, theory = functions.get_meta(groups)
 
     savedict = {}

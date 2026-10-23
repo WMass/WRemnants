@@ -1316,13 +1316,27 @@ def setup(
     logger.debug(f"Filtering these groups of processes: {args.filterProcGroups}")
     logger.debug(f"Excluding these groups of processes: {args.excludeProcGroups}")
 
+    xnorm = any(
+        inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
+    )
+    # the fits where the muon component of W (Z) is the signal and the tau one a
+    # background keep them as separate groups instead of the merged W (Z)
+    splitSignalGroups = bool(
+        xnorm
+        or isUnfolding
+        or isTheoryAgnostic
+        or "xsec" in args.noi
+        or args.helicityFitTheoryUnc
+        or args.addTauToSignal
+        or args.addBSMProcess
+        or args.addBSMMixing is not None
+    )
     datagroups = Datagroups(
         inputFile,
         excludeGroups=excludeGroup,
         filterGroups=filterGroup,
-        xnorm=any(
-            inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
-        ),
+        xnorm=xnorm,
+        splitGroups=["W", "Z"] if splitSignalGroups else False,
     )
 
     bsm_signals = []
@@ -1790,10 +1804,10 @@ def setup(
         return [
             g
             for g in datagroups.procGroups["MCnoQCD"]
-            if len(datagroups.groups[g].members)
+            if len(datagroups.processMembers(g))
             and check(
                 histname in datagroups.results.get(m.name, {}).get("output", {})
-                for m in datagroups.groups[g].members
+                for m in datagroups.processMembers(g)
             )
         ]
 
@@ -2355,7 +2369,7 @@ def setup(
                     norm=args.logNormalFake,
                 )
 
-        if "Top" in datagroups.groups:
+        if datagroups.hasProcess("Top"):
             datagroups.addNormSystematic(
                 name="CMS_Top",
                 processes=["Top"],
@@ -2379,7 +2393,7 @@ def setup(
                 systAxes=[],
                 passToFakes=passSystToFakes,
             )
-        if "Diboson" in datagroups.groups:
+        if datagroups.hasProcess("Diboson"):
             datagroups.addNormSystematic(
                 name="CMS_VV",
                 processes=["Diboson"],

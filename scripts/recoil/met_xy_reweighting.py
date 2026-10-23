@@ -332,7 +332,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    groups = datagroups.Datagroups(args.input)
+    groups = datagroups.Datagroups(args.input, splitGroups=True)
     met, analysis, flavor, theory = functions.get_meta(groups)
     fOut = f"wremnants-data/data/recoil/{analysis}_{met}/met_xy_{flavor}.json"
     outDir = (

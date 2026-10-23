@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     outDir = f"/home/submit/jaeyserm/public_html/met_lepton_correction_RawPFMET/"
 
-    group = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5")
+    group = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5", splitGroups=True)
     lumi_label = functions.getLumiLabel(group)
 
     proc = "Data"  # Wmunu Data
@@ -224,9 +224,11 @@ if __name__ == "__main__":
 
     outDir = f"/home/submit/jaeyserm/public_html/test/"
 
-    group_new = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5")
-    group_old = datagroups.Datagroups("../old/WRemnants/mw_with_mu_eta_pt.hdf5")
-    # group_old = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5")
+    group_new = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5", splitGroups=True)
+    group_old = datagroups.Datagroups(
+        "../old/WRemnants/mw_with_mu_eta_pt.hdf5", splitGroups=True
+    )
+    # group_old = datagroups.Datagroups("mw_with_mu_eta_pt.hdf5", splitGroups=True)
 
     xMin, xMax, yMin, yMax = 40, 120, 0, -1
     hists = ["mt_uncorr", "mT_uncorr"]
@@ -292,8 +294,12 @@ if __name__ == "__main__":
 
     outDir = f"/home/submit/jaeyserm/public_html/recoil/highPU_DeepMETReso/gen_reco/"
 
-    group_def = datagroups.Datagroups("mz_wlike_with_mu_eta_pt_DeepMETReso.hdf5")
-    group = datagroups.Datagroups("mz_wlike_with_mu_eta_pt_postfsr.hdf5")
+    group_def = datagroups.Datagroups(
+        "mz_wlike_with_mu_eta_pt_DeepMETReso.hdf5", splitGroups=True
+    )
+    group = datagroups.Datagroups(
+        "mz_wlike_with_mu_eta_pt_postfsr.hdf5", splitGroups=True
+    )
     lumi_label = functions.getLumiLabel(group)
 
     xMin, xMax, yMin, yMax = 0, 50, 0, 6e5

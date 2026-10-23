@@ -40,7 +40,10 @@ class Datagroups(object):
         "2018": 1.025,
     }
 
-    def __init__(self, infile, mode=None, xnorm=False, **kwargs):
+    def __init__(self, infile, mode=None, xnorm=False, splitGroups=False, **kwargs):
+        """splitGroups: the components of the merged groups (W, Z, TopVV) as groups of
+        their own, True for all of them or a list of merged groups, e.g. for fits where
+        one component is the signal and another a background"""
         if infile.endswith(".pkl.lz4"):
             with lz4.frame.open(infile) as f:
                 self.results = pickle.load(f)
@@ -68,6 +71,7 @@ class Datagroups(object):
         self.lumi_uncertainty = Datagroups.lumi_uncertainties.get(self.era, None)
 
         self.groups = {}
+        self.splitGroups = splitGroups
         self.procGroups = {}  # groups of groups for convenent definition of systematics
         self.nominalName = "nominal"
         self.rebinOp = None
@@ -238,6 +242,21 @@ class Datagroups(object):
             )
         self.deleteGroups([g for g in groups_to_merge if g != new_name])
 
+    def splitComponents(self, names):
+        """The components of merged groups among `names` as groups of their own"""
+        for name in names:
+            group = self.componentGroups().get(name)
+            if group is None:
+                continue
+            keep = set(self.groups[group].components[name])
+            self.copyGroup(group, name, member_filter=lambda m: m.name in keep)
+            self.groups[name].components = None
+            self.groups[group].deleteMembers(
+                [m for m in self.groups[group].members if m.name in keep]
+            )
+            if not self.groups[group].members:
+                self.deleteGroup(group)
+
     def filterGroups(self, filters):
         if filters is None:
             return
@@ -246,6 +265,8 @@ class Datagroups(object):
             filters = [filters]
 
         if isinstance(filters, list):
+            # a component of a merged group is selected as a group of its own
+            self.splitComponents(filters)
             new_groupnames = self.selectGroups(filters)
         else:
             new_groupnames = list(filter(filters, self.groups.keys()))
@@ -271,6 +292,14 @@ class Datagroups(object):
             excludes = [excludes]
 
         if isinstance(excludes, list):
+            # the members of an excluded component leave its merged group
+            for name in excludes:
+                group = self.componentGroups().get(name)
+                if group is not None:
+                    drop = set(self.groups[group].components[name])
+                    self.groups[group].deleteMembers(
+                        [m for m in self.groups[group].members if m.name in drop]
+                    )
             new_groupnames = list(
                 filter(lambda x: x not in self.selectGroups(excludes), self.groups)
             )
@@ -516,7 +545,9 @@ class Datagroups(object):
         excludeProcs=None,
         forceToNominal=[],
         sumFakesPartial=True,
+        members=None,
     ):
+        """members: if given, only the group members of these names are read"""
         logger.debug("Calling loadHistsForDatagroups()")
         logger.debug(f"The basename and syst is: {baseName}, {syst}")
         logger.debug(
@@ -572,6 +603,8 @@ class Datagroups(object):
             group.hists[label] = None
 
             for i, member in enumerate(group.members):
+                if members is not None and member.name not in members:
+                    continue
                 if (
                     sumFakesPartial
                     and procName == self.fakeName
@@ -1170,12 +1203,61 @@ class Datagroups(object):
 
         return hh.flowToExplicitBins(h, self.flowToExplicitBinsAxes)
 
+    def componentGroups(self):
+        """{component: merged group} for the groups made of several processes"""
+        return {
+            c: g for g, group in self.groups.items() for c in (group.components or {})
+        }
+
+    def processNames(self):
+        """The group names, with each merged group replaced by its components"""
+        return [
+            n
+            for g, group in self.groups.items()
+            for n in (group.components.keys() if group.components else [g])
+        ]
+
+    def hasProcess(self, name):
+        """A group or a component of a merged group"""
+        return name in self.groups or name in self.componentGroups()
+
+    def processMembers(self, name):
+        """The members of a group or of a component of a merged group"""
+        if name in self.groups:
+            return self.groups[name].members
+        group = self.componentGroups()[name]
+        names = set(self.groups[group].components[name])
+        return [m for m in self.groups[group].members if m.name in names]
+
+    def resolveProcesses(self, processes):
+        """The groups for a list of groups and components of merged groups, and
+        {group: member names} for the merged groups of which only some components are
+        selected: a systematic for those varies only their members, the others enter
+        with their nominal."""
+        component_groups = self.componentGroups()
+        groups, selected = [], {}
+        for p in processes:
+            g = component_groups.get(p, p)
+            if g not in groups:
+                groups.append(g)
+            if g == p:
+                selected[g] = None
+            elif selected.get(g, set()) is not None:
+                selected.setdefault(g, set()).update(self.groups[g].components[p])
+        restricted = {
+            g: names
+            for g, names in selected.items()
+            if names is not None and len(names) < len(self.groups[g].members)
+        }
+        return groups, restricted
+
     def addProcessGroup(self, name, startsWith=[], excludeMatch=[]):
         procFilter = lambda x: (
             any(x.startswith(init) for init in startsWith) or len(startsWith) == 0
         ) and all(excl not in x for excl in excludeMatch)
 
-        self.procGroups[name] = self.filteredProcesses(procFilter)
+        # matched on the components of merged groups, e.g. Wmunu and Wtaunu for W
+        self.procGroups[name] = list(filter(procFilter, self.processNames()))
         if not self.procGroups[name]:
             logger.warning(
                 f"Did not match any processes to filter for group {name}! Valid procs are {self.groups.keys()}"
@@ -1195,7 +1277,12 @@ class Datagroups(object):
         for group in grouped_procs:
             procs = self.expandProcess(group)
             for ungrouped in procs:
-                expanded_procs.extend(self.getProcNames([ungrouped]))
+                # the members of a group or of a component of a merged group
+                expanded_procs.extend(
+                    m.name
+                    for m in self.processMembers(ungrouped)
+                    if m.name not in expanded_procs
+                )
 
         return expanded_procs
 
@@ -1262,10 +1349,17 @@ class Datagroups(object):
     def getHistsForProcAndSyst(self, proc, syst, nominal_name=None, **kwargs):
         if nominal_name is None:
             nominal_name = self.nominalName
+        # a component of a merged group: its members only
+        (group,), restricted = self.resolveProcesses([proc])
         self.loadHistsForDatagroups(
-            baseName=nominal_name, syst=syst, label="syst", procsToRead=[proc], **kwargs
+            baseName=nominal_name,
+            syst=syst,
+            label="syst",
+            procsToRead=[group],
+            members=restricted.get(group),
+            **kwargs,
         )
-        return self.groups[proc].hists["syst"]
+        return self.groups[group].hists["syst"]
 
     def addNominalHistograms(
         self,
@@ -1441,6 +1535,15 @@ class Datagroups(object):
             x for x in (self.allMCProcesses() if processes is None else processes)
         ]
         procs_to_add = self.expandProcesses(procs_to_add)
+        # a systematic for some components of a merged group varies only their
+        # members, the others enter with their nominal
+        procs_to_add, restricted = self.resolveProcesses(procs_to_add)
+        unvaried = [
+            m.name
+            for g, names in restricted.items()
+            for m in self.groups[g].members
+            if m.name not in names
+        ]
 
         if preOp:
             preOpMap = {
@@ -1449,6 +1552,8 @@ class Datagroups(object):
                     [m.name for g in procs_to_add for m in self.groups[g].members]
                 )
             }
+        if preOpMap and unvaried:
+            preOpMap = {k: v for k, v in preOpMap.items() if k not in unvaried}
 
         if passToFakes and self.fakeName not in procs_to_add:
             procs_to_add.append(self.fakeName)
@@ -1472,7 +1577,7 @@ class Datagroups(object):
                     if p != self.fakeName
                 ]
             )
-        ]
+        ] + unvaried
 
         self.loadHistsForDatagroups(
             nominalName,
