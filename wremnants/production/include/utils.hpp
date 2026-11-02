@@ -19,16 +19,6 @@ namespace wrem {
 constexpr double electron_mass = 5.110e-04;
 constexpr double muon_mass = 0.1056583745;
 constexpr double tau_mass = 1.77682;
-// quarks: MSbar masses, light quarks at 2 GeV
-constexpr double down_mass = 4.70e-03;
-constexpr double up_mass = 2.16e-03;
-constexpr double strange_mass = 0.0935;
-constexpr double charm_mass = 1.2730;
-constexpr double bottom_mass = 4.183;
-constexpr double pi0_mass = 0.1349768;
-constexpr double pion_mass = 0.13957039;
-constexpr double d0_mass = 1.86484;
-constexpr double dplus_mass = 1.86966;
 
 template <typename T>
 ROOT::VecOps::RVec<T> absVal(const ROOT::VecOps::RVec<T> &val) {
@@ -664,9 +654,9 @@ auto scalar_select(const ArgTypeIf &cond, const ArgTypeThen &arg0,
 }
 
 // Breit-Wigner mass weights
-// values in running width scheme, in MeV
-const double MZ_GEN_ = 91187.6;
-const double GAMMAZ_GEN_ = 2494.1;
+// values in running width scheme
+const double MZ_GEN_ = 911876;
+const double GAMMAZ_GEN_ = 24941;
 const double MW_GEN_ = 80379;
 const double GAMMAW_GEN_ = 2091.1;
 
@@ -750,7 +740,7 @@ double computeBreitWignerWeight(const double massVgen, const double offset_mass,
   // scheme
   const double target_mass = MV_GEN_ + offset_mass;
   const double target_Gamma =
-      (GAMMAV_GEN_ + offset_width) * std::pow(target_mass / MV_GEN_, 3);
+      (GAMMAW_GEN_ + offset_width) * std::pow(target_mass / MW_GEN_, 3);
   // convert shifted mass and width to fixed width scheme
   const double target_fixed_mass =
       convertRunningToFixedWidth(target_mass, target_mass, target_Gamma);
