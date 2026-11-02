@@ -55,7 +55,7 @@ source WRemnants/setup.sh
 
 ### Project overview
 The project contains several submodules that point to standalone repositories that may or may not be used also for other projects. Those are:
-* [narf](https://github.com/bendavid/narf): This provides the computational backand for the event processing and boost histogram production using Root Data Frames (RDF).
+* [narf](https://github.com/WMass/narf): This provides the computational backand for the event processing and boost histogram production using Root Data Frames (RDF).
 * [wums](https://github.com/WMass/wums): This is a pure python based submodule containing utility functions that can be more widely used such as the input/output tools, common plotting functions, and histogram manipulation.
 * [wremnants-data](https://gitlab.cern.ch/cms-wmass/wremnants-data): This repository contains resource files needed for the analysis, such as data quality .json and by lumisection .csv files, experimental scale factors such as for the efficiencies, theory correction files etc. . It is on CERN gitlab using the large file storage. 
 * [rabbit](https://github.com/WMass/rabbit): This is the fitting framework using tensorflow 2.x as backend.
