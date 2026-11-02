@@ -654,9 +654,9 @@ auto scalar_select(const ArgTypeIf &cond, const ArgTypeThen &arg0,
 }
 
 // Breit-Wigner mass weights
-// values in running width scheme
-const double MZ_GEN_ = 911876;
-const double GAMMAZ_GEN_ = 24941;
+// values in running width scheme, in MeV
+const double MZ_GEN_ = 91187.6;
+const double GAMMAZ_GEN_ = 2494.1;
 const double MW_GEN_ = 80379;
 const double GAMMAW_GEN_ = 2091.1;
 
@@ -740,7 +740,7 @@ double computeBreitWignerWeight(const double massVgen, const double offset_mass,
   // scheme
   const double target_mass = MV_GEN_ + offset_mass;
   const double target_Gamma =
-      (GAMMAW_GEN_ + offset_width) * std::pow(target_mass / MW_GEN_, 3);
+      (GAMMAV_GEN_ + offset_width) * std::pow(target_mass / MV_GEN_, 3);
   // convert shifted mass and width to fixed width scheme
   const double target_fixed_mass =
       convertRunningToFixedWidth(target_mass, target_mass, target_Gamma);
