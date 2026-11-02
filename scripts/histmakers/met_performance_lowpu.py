@@ -187,11 +187,7 @@ def build_graph(df, dataset):
     # met=="RawPFMET" (the 2017 low-PU NanoAOD convention); 2026's NanoAODv15
     # instead stores it directly as RawPFMET_pt/_phi. Alias so recoil_tools
     # finds a valid branch regardless of era.
-    if (
-        not args.noRecoil
-        and met_type == "RawPFMET"
-        and not df.HasColumn("RawMET_pt")
-    ):
+    if not args.noRecoil and met_type == "RawPFMET" and not df.HasColumn("RawMET_pt"):
         df = df.Alias("RawMET_pt", f"{met_type}_pt")
         df = df.Alias("RawMET_phi", f"{met_type}_phi")
 

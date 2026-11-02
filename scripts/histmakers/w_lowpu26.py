@@ -9,9 +9,9 @@ parser, initargs = parsing.common_parser(analysis_label)
 parser.add_argument(
     "--flavor",
     type=str,
-    choices=["mu", "e"],
+    choices=["mu"],
     default="mu",
-    help="Lepton flavor channel",
+    help="Lepton flavor channel (the electron selection is not implemented yet)",
 )
 parser = parsing.set_parser_default(parser, "met", "RawPFMET")
 parser = parsing.set_parser_default(parser, "era", "2026_LowPU")
@@ -38,6 +38,7 @@ from wremnants.production.datasets.dataset_tools import getDatasets
 
 if not args.noRecoil:
     from wremnants.production import recoil_tools
+
 from wremnants.production.histmaker_tools import (
     aggregate_groups,
     scale_to_data,
@@ -57,12 +58,7 @@ mtw_min = 40
 datasets = getDatasets(
     maxFiles=args.maxFiles,
     filt=args.filterProcs,
-    excl=list(
-        set(
-            args.excludeProcs
-            + ([f"EGamma_{args.era}"] if flavor == "mu" else [f"Muon_{args.era}"])
-        )
-    ),
+    excl=list(set(args.excludeProcs + [f"EGamma_{args.era}"])),
     aux=args.auxiliaryProcs,
     base_path=args.dataPath,
     era=args.era,
@@ -203,11 +199,7 @@ def build_graph(df, dataset):
     # met=="RawPFMET" (the 2017 low-PU NanoAOD convention); 2026's NanoAODv15
     # instead stores it directly as RawPFMET_pt/_phi. Alias so recoil_tools
     # finds a valid branch regardless of era.
-    if (
-        not args.noRecoil
-        and met_type == "RawPFMET"
-        and not df.HasColumn("RawMET_pt")
-    ):
+    if not args.noRecoil and met_type == "RawPFMET" and not df.HasColumn("RawMET_pt"):
         df = df.Alias("RawMET_pt", f"{met_type}_pt")
         df = df.Alias("RawMET_phi", f"{met_type}_phi")
 
