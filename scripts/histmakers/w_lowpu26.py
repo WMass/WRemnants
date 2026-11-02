@@ -13,6 +13,18 @@ parser.add_argument(
     default="mu",
     help="Lepton flavor channel (the electron selection is not implemented yet)",
 )
+parser.add_argument(
+    "--ptBins",
+    type=int,
+    default=4,
+    help="Number of lepton pt bins in the nominal/transverseMass histograms",
+)
+parser.add_argument(
+    "--etaBins",
+    type=int,
+    default=3,
+    help="Number of lepton eta bins in the nominal/transverseMass histograms",
+)
 parser = parsing.set_parser_default(parser, "met", "RawPFMET")
 parser = parsing.set_parser_default(parser, "era", "2026_LowPU")
 parser = parsing.set_parser_default(parser, "pdfs", ["nnpdf31"])
@@ -69,9 +81,11 @@ for d in datasets:
     logger.info(f"Dataset {d.name}")
 
 axis_pt = hist.axis.Regular(
-    4, lep_pt_min, lep_pt_max, name="pt", underflow=False, overflow=False
+    args.ptBins, lep_pt_min, lep_pt_max, name="pt", underflow=False, overflow=False
 )
-axis_eta = hist.axis.Regular(3, -2.4, 2.4, name="eta", underflow=False, overflow=False)
+axis_eta = hist.axis.Regular(
+    args.etaBins, -2.4, 2.4, name="eta", underflow=False, overflow=False
+)
 # Finer pt/eta binning for plotting (lep_pt_eta histogram below). Kept separate
 # from axis_pt/axis_eta above, which stay coarse to limit the dimensionality of
 # `nominal` (already carries ptW + the ABCD axes). No mt axis here either, so
