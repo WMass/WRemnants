@@ -280,16 +280,44 @@ public:
   }
 };
 
-double get_pdgid_mass(const int &pdgId) {
+// PDG mass of the particles whose mass NanoAOD does not store (GenPart_mass =
+// 0): quarks except top, leptons and neutrinos, gluons, pi0, pi+-, D0 and D+-,
+// and photons with mass < 1 GeV. Other particles get the fallback, e.g. the
+// stored mass.
+double get_pdgid_mass(const int &pdgId, const double fallback = 0.) {
   switch (std::abs(pdgId)) {
+  case 1:
+    return down_mass;
+  case 2:
+    return up_mass;
+  case 3:
+    return strange_mass;
+  case 4:
+    return charm_mass;
+  case 5:
+    return bottom_mass;
   case 11:
     return electron_mass;
   case 13:
     return muon_mass;
   case 15:
     return tau_mass;
+  case 12:
+  case 14:
+  case 16:
+  case 21:
+    return 0.;
+  case 111:
+    return pi0_mass;
+  case 211:
+    return pion_mass;
+  case 411:
+    return dplus_mass;
+  case 421:
+    return d0_mass;
   }
-  return 0;
+  // photons: 0 is stored below 1 GeV, the mass above
+  return fallback;
 }
 
 ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector>

@@ -215,11 +215,10 @@ def define_prefsr_vars(df):
     # leptons; with the stored 0 the boson mass would be biased by about -120 MeV for taus (Z, median) and -0.6 MeV
     # for muons (mean). BSM leptons keep the stored mass.
     for name, idx in [("genl", 0), ("genlanti", 1)]:
+        i = f"prefsrLeps[{idx}]"
         df = df.Define(
             name,
-            f"""const auto i = prefsrLeps[{idx}];
-            const double mass = std::abs(GenPart_pdgId[i]) <= 16 ? wrem::get_pdgid_mass(GenPart_pdgId[i]) : GenPart_mass[i];
-            return ROOT::Math::PtEtaPhiMVector(GenPart_pt[i], GenPart_eta[i], GenPart_phi[i], mass);""",
+            f"ROOT::Math::PtEtaPhiMVector(GenPart_pt[{i}], GenPart_eta[{i}], GenPart_phi[{i}], wrem::get_pdgid_mass(GenPart_pdgId[{i}], GenPart_mass[{i}]))",
         )
     df = df.Define(
         "genV", "ROOT::Math::PxPyPzEVector(genl)+ROOT::Math::PxPyPzEVector(genlanti)"
@@ -255,16 +254,13 @@ def define_prefsr_vars(df):
 
 def define_intermediate_gen_vars(df, label, statusMin, statusMax):
     # define additional variables corresponding to intermediate states in the pythia history
-    # The boson mass is stored with an 8-bit mantissa (steps of 0.25 GeV at the W and Z masses). It does not change
-    # along the Pythia history, so the mass of the pre-FSR lepton pair is used instead.
-    df = define_prefsr_vars(df)
     df = df.Define(
         f"idxV{label}",
         f"wrem::selectGenPart(GenPart_status, GenPart_pdgId, 23, 24, {statusMin}, {statusMax})",
     )
     df = df.Define(
         f"mom4V{label}",
-        f"ROOT::Math::PtEtaPhiMVector(GenPart_pt[idxV{label}], GenPart_eta[idxV{label}], GenPart_phi[idxV{label}], massVgen)",
+        f"ROOT::Math::PtEtaPhiMVector(GenPart_pt[idxV{label}], GenPart_eta[idxV{label}], GenPart_phi[idxV{label}], GenPart_mass[idxV{label}])",
     )
     df = df.Define(f"ptV{label}", f"mom4V{label}.pt()")
     df = df.Define(f"massV{label}", f"mom4V{label}.mass()")

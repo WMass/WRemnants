@@ -19,6 +19,16 @@ namespace wrem {
 constexpr double electron_mass = 5.110e-04;
 constexpr double muon_mass = 0.1056583745;
 constexpr double tau_mass = 1.77682;
+// quarks: MSbar masses, light quarks at 2 GeV
+constexpr double down_mass = 4.70e-03;
+constexpr double up_mass = 2.16e-03;
+constexpr double strange_mass = 0.0935;
+constexpr double charm_mass = 1.2730;
+constexpr double bottom_mass = 4.183;
+constexpr double pi0_mass = 0.1349768;
+constexpr double pion_mass = 0.13957039;
+constexpr double d0_mass = 1.86484;
+constexpr double dplus_mass = 1.86966;
 
 template <typename T>
 ROOT::VecOps::RVec<T> absVal(const ROOT::VecOps::RVec<T> &val) {
