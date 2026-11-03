@@ -112,7 +112,7 @@ def build_graph(df, dataset):
     if flavor == "mumu":
         df = df.Define(
             "goodLeptons",
-            f"Muon_mediumId && Muon_pt > {lep_pt_min} && Muon_pt < 150"
+            f"Muon_mediumId && Muon_pt > {lep_pt_min}"
             " && Muon_pfRelIso04_all < 0.15 && abs(Muon_eta) < 2.4 && abs(Muon_dxybs) < 0.05",
         )
         df = df.Filter("Sum(goodLeptons) == 2")
@@ -124,7 +124,7 @@ def build_graph(df, dataset):
     else:
         df = df.Define(
             "goodLeptons",
-            f"Electron_cutBased >= 3 && Electron_pt > {lep_pt_min} && Electron_pt < 150"
+            f"Electron_cutBased >= 3 && Electron_pt > {lep_pt_min}"
             " && Electron_pfRelIso04_all < 0.15 && abs(Electron_eta) < 2.4"
             " && !(abs(Electron_eta) > 1.4442 && abs(Electron_eta) < 1.566)"
             " && abs(Electron_dxy) < 0.05",
