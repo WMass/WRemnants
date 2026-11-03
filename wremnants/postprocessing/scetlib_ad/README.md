@@ -25,13 +25,42 @@ correction was computed at, read from the card metadata (`scetlib_corr_config`).
 | `corr_config.py` | record the correction's runcard in the histmaker metadata |
 | `scale_envelope.py` | the frozen mu_R / mu_F envelope nuisances |
 
+## Setting up SCETlib
+
+SCETlib is not a submodule of WRemnants. Clone `scetlib-cms` (branch `autodiff-sigmaul`) from
+`gitlab.cern.ch/scetlib/contrib/scetlib-cms` (not anonymously readable: use Kerberos, ssh or a token) and
+compile it inside the WRemnants singularity image, which has the clang/LLVM pair, CMake, GSL and LHAPDF it
+needs:
+
+```bash
+singularity run --bind /scratch/,/work/,/home/,/ceph/ \
+    /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/bendavid/cmswmassdocker/wmassdevrolling:latest
+git clone -b autodiff-sigmaul ssh://git@gitlab.cern.ch:7999/scetlib/contrib/scetlib-cms.git
+cd scetlib-cms && ./bootstrap.sh -j 32
+```
+
+`bootstrap.sh` builds the patched clad (a compile-time Clang plugin, pinned to a fixed commit) and then
+SCETlib into `scetlib-cms/build`. Before using this package, in the same container:
+
+```bash
+source <path-to>/scetlib-cms/setup.sh   # or SCETLIB_BUILD=<build dir> source .../setup.sh
+```
+
+It puts `scetlib_qT`, `scetlib_tf` and `scetlib_run` on `PYTHONPATH` and sets `LD_LIBRARY_PATH` and the
+stack limit. Without it the model fails at import with a message saying so.
+
+Which SCETlib to use is a property of the cache, not of this package: WRemnants only calls SCETlib's Python
+interface, and refuses a cache whose format differs from the one the loaded SCETlib reads. Use a SCETlib that
+reads the cache's format; the physics of a cache is fixed when it is built.
+
 ## Building a cache
 
 Inside the WRemnants container, after `source <scetlib-cms>/setup.sh`:
 
 - `scripts/rabbit/scetlib_ad/build_scetlib_ad_cache.py --base-conf <runcard> -o <dir>`
   builds a cache on an explicit gen grid (`--qt-edges`, `--y-edges`, `--q-edges`;
-  the defaults are the shipped theory corrections' grid). `--threads` sets the
+  the defaults are the `*Zgen_binning_scetlib` lists in `wremnants/utilities/binning.py`,
+  the grid the theory corrections are made on). `--threads` sets the
   parallelism; `--subset` builds part of the grid (test caches, crash
   granularity); `--dry-run` writes the runcard and reports the cost. Use an
   analysis runcard (see `scripts/rabbit/scetlib_ad/conf/`): the `[TNPs]` block is

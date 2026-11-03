@@ -41,6 +41,7 @@ from wremnants.postprocessing.scetlib_ad.xsec_backend import (  # noqa: F401
     bins_from_gen_axes,
     configure,
 )
+from wremnants.utilities import binning
 
 # The SCETlib build steps, exposed as attributes of this module (``__getattr__``)
 # so a caller can rebind one (``mod.plan_variations = ...``) and keep the rest.
@@ -119,102 +120,10 @@ def _resolve_steps():
     )
 
 
-# Default grid = the theory corrections' grid: one Q bin (the Z window), 17 |Y|
-# bins, 70 qT bins.
-DEFAULT_Q_EDGES = [60.0, 120.0]
-DEFAULT_Y_EDGES = [
-    0,
-    0.15,
-    0.3,
-    0.5,
-    0.7,
-    0.9,
-    1.1,
-    1.3,
-    1.5,
-    1.8,
-    2,
-    2.5,
-    2.75,
-    3,
-    3.25,
-    3.5,
-    4,
-    5,
-]
-DEFAULT_QT_EDGES = [
-    0,
-    0.5,
-    1,
-    1.5,
-    2,
-    2.5,
-    3,
-    3.5,
-    4,
-    4.5,
-    5,
-    5.5,
-    6,
-    6.5,
-    7,
-    7.5,
-    8,
-    8.5,
-    9,
-    9.5,
-    10,
-    10.5,
-    11,
-    11.5,
-    12,
-    12.5,
-    13,
-    13.5,
-    14,
-    14.5,
-    15,
-    16,
-    17,
-    18,
-    19,
-    20,
-    21,
-    22,
-    23,
-    24,
-    25,
-    26,
-    27,
-    28,
-    29,
-    30,
-    31,
-    32,
-    33,
-    34,
-    35,
-    36,
-    37,
-    38,
-    39,
-    40,
-    42,
-    44,
-    46,
-    48,
-    50,
-    52,
-    54,
-    56,
-    58,
-    60,
-    65,
-    70,
-    80,
-    90,
-    100,
-]
+# Default grid: the one the SCETlib theory corrections are made on.
+DEFAULT_Q_EDGES = binning.massZgen_binning_scetlib
+DEFAULT_Y_EDGES = binning.absYZgen_binning_scetlib
+DEFAULT_QT_EDGES = binning.ptZgen_binning_scetlib
 
 
 def write_runcard(base_conf, out_path, gen_axes, Q_lo, Q_hi):
