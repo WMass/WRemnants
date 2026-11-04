@@ -1010,11 +1010,11 @@ class Recoil:
                 )
                 self.df = self.df.Define(
                     "lepGen",
-                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], GenPart_mass[postFSRleps][postFSRlepIdx])",
+                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], wrem::get_pdgid_mass(GenPart_pdgId[postFSRleps][postFSRlepIdx]))",
                 )
                 self.df = self.df.Define(
                     "antilepGen",
-                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], GenPart_mass[postFSRantileps][postFSRantilepIdx])",
+                    "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], wrem::get_pdgid_mass(GenPart_pdgId[postFSRantileps][postFSRantilepIdx]))",
                 )
                 self.df = self.df.Define(
                     "VGen",
@@ -1126,11 +1126,11 @@ class Recoil:
                     )
                     self.df = self.df.Define(
                         "lepGen",
-                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], GenPart_mass[postFSRleps][postFSRlepIdx])",
+                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRleps][postFSRlepIdx], GenPart_eta[postFSRleps][postFSRlepIdx], GenPart_phi[postFSRleps][postFSRlepIdx], wrem::get_pdgid_mass(GenPart_pdgId[postFSRleps][postFSRlepIdx]))",
                     )
                     self.df = self.df.Define(
                         "antilepGen",
-                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], GenPart_mass[postFSRantileps][postFSRantilepIdx])",
+                        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[postFSRantileps][postFSRantilepIdx], GenPart_eta[postFSRantileps][postFSRantilepIdx], GenPart_phi[postFSRantileps][postFSRantilepIdx], wrem::get_pdgid_mass(GenPart_pdgId[postFSRantileps][postFSRantilepIdx]))",
                     )
                     self.df = self.df.Define(
                         "VGen",
