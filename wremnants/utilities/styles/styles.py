@@ -446,6 +446,14 @@ nuisance_grouping = {
     + [
         "pdfCT18ZNoAlphaS",
         "pdfHERAPDF20NoAlphaS",
+        # The scetlib_ad param model names its own groups: pdfEig for the
+        # eigenvector coefficients (deliberately NOT pdfCT18ZNoAlphaS -- that
+        # label would be a lie on a cache built from another PDF set) and the
+        # two scetlibNP* splits of the NP lambdas. Without these the largest
+        # systematic is silently ABSENT from the impacts plot.
+        "pdfEig",
+        "scetlibNPFeff",
+        "scetlibNPgammaNu",
         "resumTNP",
         "resumNonpert",
         "resumTransition",
