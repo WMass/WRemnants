@@ -292,8 +292,7 @@ class Datagroups(object):
             excludes = [excludes]
 
         if isinstance(excludes, list):
-            # the members of an excluded component leave its merged group, which is
-            # deleted once all its components are excluded
+            # the members of an excluded component leave its merged group
             for name in excludes:
                 group = self.componentGroups().get(name)
                 if group is not None:
@@ -301,11 +300,6 @@ class Datagroups(object):
                     self.groups[group].deleteMembers(
                         [m for m in self.groups[group].members if m.name in drop]
                     )
-                    if not self.groups[group].members:
-                        logger.info(
-                            f"Datagroups.excludeGroups: all components of {group} excluded, delete it"
-                        )
-                        self.deleteGroup(group)
             new_groupnames = list(
                 filter(lambda x: x not in self.selectGroups(excludes), self.groups)
             )
