@@ -163,8 +163,8 @@ jobs:
 
       - name: setup kerberos
         run: |
-          mkdir -p /run/user/$UID/krb5ccdir
-          export KRB5CCNAME=DIR:/run/user/$UID/krb5ccdir
+          mkdir -p ~/.krb5ccdir
+          export KRB5CCNAME=DIR:$HOME/.krb5ccdir
           kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
           klist -k -t -e ~/private/.keytab
           klist
