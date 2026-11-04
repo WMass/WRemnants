@@ -614,7 +614,11 @@ for h in args.hists:
             collapseSyst(x[select]), h, overflow_ax
         )
         action = base_action
-        href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
+        href = (
+            h
+            if h != "ptVgen"
+            else ("ptWgen" if {"W", "Wmunu"} & set(prednames) else "ptZgen")
+        )
 
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")

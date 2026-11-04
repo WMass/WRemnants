@@ -158,7 +158,7 @@ class TheoryAgnosticHelper(object):
         for g in self.datagroups.procGroups["signal_samples"]:
             if sign != "":
                 if sign is not None:
-                    for m in self.datagroups.groups[g].members:
+                    for m in self.datagroups.processMembers(g):
                         if sign in m.name:
                             scale_hist = scale_hists[m.name]
                             result[m.name] = (

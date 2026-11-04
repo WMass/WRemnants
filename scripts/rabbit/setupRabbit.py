@@ -1061,6 +1061,23 @@ def make_parser(parser=None, argv=None):
         type=float,
         help="Specify normalization uncertainty for Fake background (for W analysis). If negative, treat as free floating, if 0 nothing is added",
     )
+    parser.add_argument(
+        "--logNormalPhotonInducedQG",
+        default=1.25,
+        type=float,
+        help="Normalization uncertainty of the photon-induced gamma q -> V q' processes, "
+        "one nuisance for W and Z (same photon PDF, leading-order generator and "
+        "phase-space cuts): the photon PDF (LUXqed type) is known to a few percent, "
+        "the uncertainty is that of a leading-order prediction. If 0 nothing is added",
+    )
+    parser.add_argument(
+        "--logNormalPhotonInducedGG",
+        default=1.1,
+        type=float,
+        help="Normalization uncertainty of the photon-induced gamma gamma -> l l "
+        "processes, uncorrelated with the gamma q ones (no QCD at leading order, "
+        "photon-photon luminosity known to a few percent). If 0 nothing is added",
+    )
     # pseudodata
     parser.add_argument(
         "--pseudoData", type=str, nargs="+", help="Histograms to use as pseudodata"
@@ -1316,13 +1333,27 @@ def setup(
     logger.debug(f"Filtering these groups of processes: {args.filterProcGroups}")
     logger.debug(f"Excluding these groups of processes: {args.excludeProcGroups}")
 
+    xnorm = any(
+        inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
+    )
+    # the fits where the muon component of W (Z) is the signal and the tau one a
+    # background keep them as separate groups instead of the merged W (Z)
+    splitSignalGroups = bool(
+        xnorm
+        or isUnfolding
+        or isTheoryAgnostic
+        or "xsec" in args.noi
+        or args.helicityFitTheoryUnc
+        or args.addTauToSignal
+        or args.addBSMProcess
+        or args.addBSMMixing is not None
+    )
     datagroups = Datagroups(
         inputFile,
         excludeGroups=excludeGroup,
         filterGroups=filterGroup,
-        xnorm=any(
-            inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
-        ),
+        xnorm=xnorm,
+        splitGroups=["W", "Z"] if splitSignalGroups else False,
     )
 
     bsm_signals = []
@@ -1790,10 +1821,10 @@ def setup(
         return [
             g
             for g in datagroups.procGroups["MCnoQCD"]
-            if len(datagroups.groups[g].members)
+            if len(datagroups.processMembers(g))
             and check(
                 histname in datagroups.results.get(m.name, {}).get("output", {})
-                for m in datagroups.groups[g].members
+                for m in datagroups.processMembers(g)
             )
         ]
 
@@ -2263,14 +2294,18 @@ def setup(
         )
 
     # lowPU does not include PhotonInduced as a process. skip it:
-    if not lowPU and "PhotonInduced" in datagroups.groups:
-        datagroups.addNormSystematic(
-            name="CMS_PhotonInduced",
-            processes=["PhotonInduced"],
-            groups=[f"CMS_background", "experiment", "expNoLumi", "expNoCalib"],
-            passToFakes=passSystToFakes,
-            norm=2.0,
-        )
+    for proc, norm in (
+        ("PhotonInducedQG", args.logNormalPhotonInducedQG),
+        ("PhotonInducedGG", args.logNormalPhotonInducedGG),
+    ):
+        if not lowPU and norm != 0 and datagroups.hasProcess(proc):
+            datagroups.addNormSystematic(
+                name=f"CMS_{proc}",
+                processes=[proc],
+                groups=[f"CMS_background", "experiment", "expNoLumi", "expNoCalib"],
+                passToFakes=passSystToFakes,
+                norm=norm,
+            )
     if wmass:
         if args.logNormalWmunu != 0:
             datagroups.addNormSystematic(
@@ -2355,7 +2390,7 @@ def setup(
                     norm=args.logNormalFake,
                 )
 
-        if "Top" in datagroups.groups:
+        if datagroups.hasProcess("Top"):
             datagroups.addNormSystematic(
                 name="CMS_Top",
                 processes=["Top"],
@@ -2379,7 +2414,7 @@ def setup(
                 systAxes=[],
                 passToFakes=passSystToFakes,
             )
-        if "Diboson" in datagroups.groups:
+        if datagroups.hasProcess("Diboson"):
             datagroups.addNormSystematic(
                 name="CMS_VV",
                 processes=["Diboson"],

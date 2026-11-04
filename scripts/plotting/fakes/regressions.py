@@ -884,7 +884,7 @@ if __name__ == "__main__":
 
     outdir = output_tools.make_plot_dir(args.outpath, args.outfolder, eoscp=args.eoscp)
 
-    groups = Datagroups(args.infile, excludeGroups=None)
+    groups = Datagroups(args.infile, excludeGroups=None, splitGroups=True)
 
     logger.info(f"Load fakes")
     groups.loadHistsForDatagroups(
