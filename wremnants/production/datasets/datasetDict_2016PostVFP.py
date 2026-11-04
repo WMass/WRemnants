@@ -216,6 +216,17 @@ dataDict = {
         "xsec": common.xsec_GGtoMuMu,
         "group": "PhotonInduced",
     },
+    # unfiltered ee, mumu and tautau (366 pb of mumu, as GGToMuMu before its generator
+    # filter), auxiliary: the filtered GGToMuMu sample above has far more events at the
+    # muon pt of the analyses
+    "GGToLLMass5to50_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/GGToLL_M-5To50_TuneCP5_13TeV-pythia8/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": 9.448e02,
+        "group": "PhotonInduced",
+        "auxiliary": True,
+    },
     "GGToLL_2016PostVFP": {
         "filepaths": [
             "{BASE_PATH}/GGToLL_TuneCP5_13TeV-pythia8/NanoV9MCPostVFP_{NANO_PROD_TAG}",
@@ -223,12 +234,15 @@ dataDict = {
         "xsec": 14.93,
         "group": "PhotonInduced",
     },
+    # the inclusive (e, mu, tau) photon-induced V+q samples are auxiliary: the muon-only
+    # samples below have ~14x more events in the muon channels
     "QGToDYQTo2L_2016PostVFP": {
         "filepaths": [
             "{BASE_PATH}/QGToDYQTo2L_TuneCP5_13TeV-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
         ],
         "xsec": 1.373,
         "group": "PhotonInduced",
+        "auxiliary": True,
     },
     "QGToWQToLNu_2016PostVFP": {
         "filepaths": [
@@ -237,6 +251,29 @@ dataDict = {
         "xsec": 4.224e01,
         "xsec_up": 4.827e01,
         "xsec_dn": 3.588e01,
+        "group": "PhotonInduced",
+        "auxiliary": True,
+    },
+    # muon-only versions (SMP-RunIISummer20UL16GEN-00076/00077, 0.4M and 3.5M events) with
+    # a generator filter: a status-1 muon with pT > 15 GeV and |eta| < 2.6. Cross sections
+    # from GenXSecAnalyzer on the full MiniAOD: before the filter 0.4592 pb and 14.07 pb
+    # (one third of the inclusive samples), filter efficiency 0.7179 +- 0.0006 and
+    # 0.7337 +- 0.0002
+    "QGToDYQTo2Mu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/QGToDYQTo2Mu_TuneCP5_13TeV-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": 3.297e-01,
+        "group": "PhotonInduced",
+    },
+    "QGToWQToMuNu_2016PostVFP": {
+        "filepaths": [
+            "{BASE_PATH}/QGToWQToMuNu_TuneCP5_13TeV-pythia8-photos/NanoV9MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": 1.032e01,
+        # the relative variations of the inclusive sample
+        "xsec_up": 1.032e01 * 4.827 / 4.224,
+        "xsec_dn": 1.032e01 * 3.588 / 4.224,
         "group": "PhotonInduced",
     },
     "WtoNMuMass5_2016PostVFP": {
