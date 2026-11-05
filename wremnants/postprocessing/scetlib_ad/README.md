@@ -55,16 +55,26 @@ reads the cache's format; the physics of a cache is fixed when it is built.
 
 ## Building a cache
 
+The build is SCETlib's own, and a runcard is all it takes: the runcards in
+`scripts/rabbit/scetlib_ad/conf/` are complete, `[Grid_*]` included (the grid the
+theory corrections are made on, `*Zgen_binning_scetlib` in
+`wremnants/utilities/binning.py`). Pass the same runcard to the fit, which rebuilds the
+calculation from it. The `[TNPs]` block is what registers the TNPs.
+
 Inside the WRemnants container, after `source <scetlib-cms>/setup.sh`:
 
-- `scripts/rabbit/scetlib_ad/build_scetlib_ad_cache.py --base-conf <runcard> -o <dir>`
-  builds a cache on an explicit gen grid (`--qt-edges`, `--y-edges`, `--q-edges`;
-  the defaults are the `*Zgen_binning_scetlib` lists in `wremnants/utilities/binning.py`,
-  the grid the theory corrections are made on). `--threads` sets the
-  parallelism; `--subset` builds part of the grid (test caches, crash
-  granularity); `--dry-run` writes the runcard and reports the cost. Use an
-  analysis runcard (see `scripts/rabbit/scetlib_ad/conf/`): the `[TNPs]` block is
-  what registers the TNPs.
+- on one machine:
+  `python <scetlib-cms>/examples/matched_ad/prepare_cache.py --config <runcard> --out <cache> --threads N --n-train 9`.
+  `--threads` is the lever (the member stage is parallel over the nodes of all bins);
+  `--bins LO:HI` builds a slice of the bin list (test caches), and disjoint slices merge
+  with `scetlib_cache.merge_bin_caches`.
+- over HTCondor, one job per bin or bin group, then a merge:
+  `<scetlib-cms>/examples/matched_ad/condor_cache_build.py` (`submit`, `status`,
+  `resubmit`, `merge`; see its `--help`).
+
+Pass `--n-train` explicitly: `prepare_cache.py` defaults to `max(9, 1.5 n_params)`, the
+production caches used 9, and the rule solve costs roughly `n_train^2`.
+
 - `extract_cache_rules.py <cache>.npz` writes `<stem>.rules.bin` beside the
   cache, which `ScetlibADXsec` then loads with far less memory.
 - `backend_check.py --conf <runcard> --cache <cache>.npz` checks a cache without

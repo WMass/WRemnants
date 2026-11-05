@@ -223,10 +223,11 @@ absYZgen_binning_corr = [
     5,
 ]
 
-# Gen binning used to make the Z theory corrections from SCETlib, including the SCETlib
-# autodiff cache (scripts/rabbit/scetlib_ad/build_scetlib_ad_cache.py): one mass bin
-# around the Z, |Y| and qT. Before this, the binning only existed in the SCETlib and
-# DYTurbo cards used to make the theory corrections.
+# Gen binning used to make the Z theory corrections from SCETlib: one mass bin around
+# the Z, |Y| and qT. The SCETlib autodiff cache is built on the same grid, which the
+# runcard carries in its [Grid_*] sections
+# (scripts/rabbit/scetlib_ad/conf/Z_CT18Z_N3p0LL_FranksVals.conf); keep the
+# two identical.
 massZgen_binning_scetlib = [60, 120]
 absYZgen_binning_scetlib = [
     0,
