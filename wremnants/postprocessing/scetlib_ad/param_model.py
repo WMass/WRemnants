@@ -423,10 +423,11 @@ class SCETlibADParamModel(ParamModel):
             gen_axes = R_info["gen_axes"]
             if R_info.get("N_gen") is None:
                 raise ValueError(
-                    f"SCETlibADParamModel: the {self._response_group!r} "
+                    f"SCETlibADParamModel: the {R_info['group']!r} "
                     "auxiliary has no N_gen "
-                    "(gen-total). Rebuild the datacard from a histmaker output "
-                    "that carries the 'prefsr' xnorm hist."
+                    "(gen-total). Rebuild the datacard with setupRabbit "
+                    "--storeResponseMatrix from a histmaker output that carries "
+                    "the response's gen total."
                 )
             n_reco = int(np.prod(self.reco_shape))
             n_gen = int(np.prod([len(e) - 1 for _, e in gen_axes]))

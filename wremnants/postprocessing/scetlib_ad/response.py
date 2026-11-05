@@ -116,8 +116,8 @@ def R_info_from_auxiliary(indata, group=DEFAULT_RESPONSE_GROUP):
     The default group also matches cards written under the old name
     (``LEGACY_AUXILIARY_GROUPS``).
 
-    Returns ``R``, ``N_gen``, and ``reco_axes`` / ``gen_axes`` as ordered
-    ``(name, edges)`` lists.
+    Returns ``R``, ``N_gen``, ``reco_axes`` / ``gen_axes`` as ordered
+    ``(name, edges)`` lists, and ``group``, the group actually read.
     """
     aux = getattr(indata, "auxiliary", None) or {}
     if group not in aux and group == DEFAULT_RESPONSE_GROUP:
@@ -132,6 +132,7 @@ def R_info_from_auxiliary(indata, group=DEFAULT_RESPONSE_GROUP):
     bundle = aux[group]
     n_gen = bundle.get("N_gen")
     return dict(
+        group=group,
         R=np.asarray(bundle["R"], dtype=np.float64),
         N_gen=None if n_gen is None else np.asarray(n_gen, dtype=np.float64),
         reco_axes=[
