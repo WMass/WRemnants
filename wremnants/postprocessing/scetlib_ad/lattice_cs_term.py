@@ -130,7 +130,7 @@ def resolve_data_path(data=None):
         )
         raise FileNotFoundError(
             f"LatticeCSTerm: lattice data file not found: {path} ({origin}). The ASWZ lattice data are private author "
-            "files, not in the repository; they live on the group data area as a sibling of the NanoAOD directory "
+            "files, not in the repository; they live on the group data area as a sibling of the NanoAOD directory. "
             "Point WREMNANTS_DATA_PATH at a NanoAOD directory "
             "whose parent holds lattice/ASWZ2024/, or pass data=<path to lattice_aswz_data.npz> on the -r line."
         )
