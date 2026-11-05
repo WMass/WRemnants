@@ -188,6 +188,27 @@ theory_corr_weight_map = {
 }
 
 
+# Corrections derived from the events of a sample family itself, e.g. with a MiNNLO reference made of the Z -> tautau
+# samples (make_theory_corr.py --outLabel Ztautau). If such a file exists for a generator, these samples use it instead
+# of the correction of the boson.
+sample_corr_labels = {
+    "Ztautau": "Ztautau",
+    "Wplustaunu": "Wtaunu",
+    "Wminustaunu": "Wtaunu",
+}
+
+
+def sample_corr_label(proc):
+    return next(
+        (
+            label
+            for prefix, label in sample_corr_labels.items()
+            if proc.startswith(prefix)
+        ),
+        None,
+    )
+
+
 def load_corr_helpers(
     procs,
     generators,
@@ -204,16 +225,26 @@ def load_corr_helpers(
             else:
                 label = proc[0]
 
-            candidate_fnames = [
-                f"{base_dir}/{generator}_Corr{label}.pkl.lz4",
-                f"{base_dir}/{generator}Corr{label}.pkl.lz4",
+            labels = [label]
+            if (sample_label := sample_corr_label(proc)) is not None:
+                labels.insert(0, sample_label)
+            candidates = [
+                (lab, f)
+                for lab in labels
+                for f in (
+                    f"{base_dir}/{generator}_Corr{lab}.pkl.lz4",
+                    f"{base_dir}/{generator}Corr{lab}.pkl.lz4",
+                )
             ]
-            fname = next((f for f in candidate_fnames if os.path.isfile(f)), None)
-            if fname is None:
+            found = next(((lab, f) for lab, f in candidates if os.path.isfile(f)), None)
+            if found is None:
                 logger.warning(
-                    f"Did not find correction file {candidate_fnames[0]} for process {proc}, generator {generator}. No correction will be applied for this process!"
+                    f"Did not find correction file {base_dir}/{generator}_Corr{label}.pkl.lz4 for process {proc}, generator {generator}. No correction will be applied for this process!"
                 )
                 continue
+            label, fname = found
+            if label != labels[-1]:
+                logger.info(f"Using the {label} correction {fname} for process {proc}")
             logger.debug(f"Make theory correction helper for file: {fname}")
             corrh = load_corr_hist(
                 fname, label, get_corr_name(generator, minnlo_ratio=minnlo_ratio)
