@@ -159,5 +159,3 @@ cython_debug/
 *.png
 *.hdf5
 *.root
-
-rabbit_results

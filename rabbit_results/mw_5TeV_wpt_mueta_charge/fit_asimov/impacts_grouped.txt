@@ -1,0 +1,6 @@
+Now at pdfAlphaS
+Impact of all systematics on pdfAlphaS (unit)
+   binByBinStat: 0.03166
+   stat: 0.10699
+   pdfs: 0.43092
+   Total: 0.44513
