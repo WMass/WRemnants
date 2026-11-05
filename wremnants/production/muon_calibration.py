@@ -2216,3 +2216,59 @@ def make_pixel_multiplicity_helpers(
     helper_varstat.tensor_axes = [axis_varstat]
 
     return helper, helper_var, helper_varstat
+
+
+def define_pixel_multiplicity_cols_dimuon(df, cvh_name="cvhideal"):
+    """Inputs of the pixel multiplicity helpers for the non-triggering and the triggering
+    muon of the Z histmakers, from {nonTrig,trig}Muons_{eta,pt,charge}0 and
+    {nonTrig,trig}Muons_<cvh_name>NValidPixelHits0."""
+    df = df.DefinePerSample(
+        "MuonNonTrigTrig_triggerCat",
+        "ROOT::VecOps::RVec<wrem::TriggerCat>{wrem::TriggerCat::nonTriggering, wrem::TriggerCat::triggering}",
+    )
+    cols = ["MuonNonTrigTrig_triggerCat"]
+    for var, cpp_type in [
+        ("eta", "float"),
+        ("pt", "float"),
+        ("charge", "int"),
+        (f"{cvh_name}NValidPixelHits", "int"),
+    ]:
+        df = df.Define(
+            f"MuonNonTrigTrig_{var}",
+            f"ROOT::VecOps::RVec<{cpp_type}>{{nonTrigMuons_{var}0, trigMuons_{var}0}}",
+        )
+        cols.append(f"MuonNonTrigTrig_{var}")
+    return df, cols
+
+
+def add_pixel_multiplicity_uncertainty(
+    df,
+    axes,
+    results,
+    nominal_cols,
+    pixel_multiplicity_cols,
+    helper_syst,
+    helper_stat=None,
+    storage_type=hist.storage.Double(),
+):
+    """Variations of the pixel multiplicity correction, with the helpers of
+    make_pixel_multiplicity_helpers: systematic, and statistical if helper_stat is given.
+    """
+    for name, helper in [("Syst", helper_syst), ("Stat", helper_stat)]:
+        if helper is None:
+            continue
+        df = df.Define(
+            f"nominal_pixelMultiplicity{name}_tensor",
+            helper,
+            [*pixel_multiplicity_cols, "nominal_weight"],
+        )
+        results.append(
+            df.HistoBoost(
+                f"nominal_pixelMultiplicity{name}",
+                axes,
+                [*nominal_cols, f"nominal_pixelMultiplicity{name}_tensor"],
+                tensor_axes=helper.tensor_axes,
+                storage=storage_type,
+            )
+        )
+    return df

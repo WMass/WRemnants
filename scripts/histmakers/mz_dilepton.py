@@ -19,6 +19,7 @@ from wremnants.production import (
     muon_efficiencies_smooth,
     muon_prefiring,
     muon_selections,
+    nano_compat,
     pileup,
     systematics,
     theory_corrections,
@@ -203,7 +204,7 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=args.excludeProcs,
     aux=args.auxiliaryProcs,
-    nanoVersion="v9",
+    nanoVersion=args.nanoVersion,
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,
     oneMCfileEveryN=args.oneMCfileEveryN,
@@ -644,6 +645,7 @@ if args.recoilHists and not args.noRecoil:
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
+    df = nano_compat.define_nano_compat(df, args.nanoVersion)
     isW = dataset.name in samples.wprocs
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
@@ -1045,34 +1047,9 @@ def build_graph(df, dataset):
                 weight_expr += "*weight_cvhSF"
 
         # prepare inputs for pixel multiplicity helpers
-        df = df.DefinePerSample(
-            "MuonNonTrigTrig_triggerCat",
-            "ROOT::VecOps::RVec<wrem::TriggerCat>{wrem::TriggerCat::nonTriggering, wrem::TriggerCat::triggering}",
+        df, pixel_multiplicity_cols = (
+            muon_calibration.define_pixel_multiplicity_cols_dimuon(df, cvhName)
         )
-        df = df.Define(
-            "MuonNonTrigTrig_eta",
-            "ROOT::VecOps::RVec<float>{nonTrigMuons_eta0, trigMuons_eta0}",
-        )
-        df = df.Define(
-            "MuonNonTrigTrig_pt",
-            "ROOT::VecOps::RVec<float>{nonTrigMuons_pt0, trigMuons_pt0}",
-        )
-        df = df.Define(
-            "MuonNonTrigTrig_charge",
-            "ROOT::VecOps::RVec<int>{nonTrigMuons_charge0, trigMuons_charge0}",
-        )
-        df = df.Define(
-            f"MuonNonTrigTrig_{cvhName}NValidPixelHits",
-            f"ROOT::VecOps::RVec<int>{{nonTrigMuons_{cvhName}NValidPixelHits0, trigMuons_{cvhName}NValidPixelHits0}}",
-        )
-
-        pixel_multiplicity_cols = [
-            "MuonNonTrigTrig_triggerCat",
-            "MuonNonTrigTrig_eta",
-            "MuonNonTrigTrig_pt",
-            "MuonNonTrigTrig_charge",
-            f"MuonNonTrigTrig_{cvhName}NValidPixelHits",
-        ]
 
         if args.reweightPixelMultiplicity:
             df = df.Define(
@@ -1611,35 +1588,22 @@ def build_graph(df, dataset):
                     df, axes, results, cols, smearing_uncertainty_helper, reco_sel_GF
                 )
 
-                # add pixel multiplicity uncertainties
-                df = df.Define(
-                    "nominal_pixelMultiplicitySyst_tensor",
-                    pixel_multiplicity_uncertainty_helper,
-                    [*pixel_multiplicity_cols, "nominal_weight"],
-                )
-                hist_pixelMultiplicitySyst = df.HistoBoost(
-                    "nominal_pixelMultiplicitySyst",
-                    axes,
-                    [*cols, "nominal_pixelMultiplicitySyst_tensor"],
-                    tensor_axes=pixel_multiplicity_uncertainty_helper.tensor_axes,
-                    storage=hist.storage.Double(),
-                )
-                results.append(hist_pixelMultiplicitySyst)
-
-                if args.pixelMultiplicityStat:
-                    df = df.Define(
-                        "nominal_pixelMultiplicityStat_tensor",
-                        pixel_multiplicity_uncertainty_helper_stat,
-                        [*pixel_multiplicity_cols, "nominal_weight"],
-                    )
-                    hist_pixelMultiplicityStat = df.HistoBoost(
-                        "nominal_pixelMultiplicityStat",
+                # pixel multiplicity uncertainties, only for the v9 CVH refit: the v15
+                # track fit fixes the pixel hit multiplicity
+                if args.nanoVersion == "v9":
+                    df = muon_calibration.add_pixel_multiplicity_uncertainty(
+                        df,
                         axes,
-                        [*cols, "nominal_pixelMultiplicityStat_tensor"],
-                        tensor_axes=pixel_multiplicity_uncertainty_helper_stat.tensor_axes,
-                        storage=hist.storage.Double(),
+                        results,
+                        cols,
+                        pixel_multiplicity_cols,
+                        pixel_multiplicity_uncertainty_helper,
+                        (
+                            pixel_multiplicity_uncertainty_helper_stat
+                            if args.pixelMultiplicityStat
+                            else None
+                        ),
                     )
-                    results.append(hist_pixelMultiplicityStat)
 
                 # All J/psi-style scale-uncertainty Defines below pick up
                 # their per-helper column list via ``jpsi_style_cols`` --

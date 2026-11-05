@@ -399,6 +399,19 @@ def common_parser(analysis_label=""):
 
     if for_reco_highPU:
         # additional arguments specific for histmaker of reconstructed objects at high pileup (mw, mz_wlike, and mz_dilepton)
+        if analysis_label in ["w_mass", "z_wlike", "z_dilepton"]:
+            parser.add_argument(
+                "--nanoVersion",
+                type=str,
+                default="v9",
+                choices=samples.nano_versions,
+                help="""Version of the custom NanoAOD: v9 (TrackFitV722_NanoProdv6) or v15
+                (CMSSW_15_0 production NanoV15_vX.Y). For v15 the muon corrections default to the
+                CVH refit without module-level and J/psi corrections, no smearing and no treatment
+                of the CVH refit holes, since these were derived for v9 (the v15 refit has no holes).
+                The pixel multiplicity correction and its uncertainties are v9 only, the v15 track
+                fit fixes the pixel hit multiplicity""",
+            )
         parser.add_argument(
             "--dphiMuonMetCut",
             type=float,
@@ -641,6 +654,22 @@ def common_parser(analysis_label=""):
     commonargs, _ = parser.parse_known_args()
 
     if for_reco_highPU:
+        if getattr(commonargs, "nanoVersion", "v9") == "v15":
+            # The module-level (lbl) corrections, the J/psi massfit, the resolution smearing
+            # and the treatment of the CVH refit holes were all derived on the v9 CVH refit.
+            # The v15 refit has no holes and changed settings, and its corrections are not
+            # derived yet: use the plain CVH refit.
+            parser = set_parser_default(parser, "muonCorrData", "trackfit_only")
+            parser = set_parser_default(parser, "muonCorrMC", "trackfit_only_idealMC")
+            parser = set_parser_default(parser, "noSmearing", True)
+            parser = set_parser_default(parser, "cvhBadModules", "none")
+            # The pixel hit multiplicity of the v9 CVH refit is fixed in the v15 track fit,
+            # so its correction and uncertainties do not apply
+            if commonargs.reweightPixelMultiplicity or commonargs.pixelMultiplicityStat:
+                raise ValueError(
+                    "--reweightPixelMultiplicity and --pixelMultiplicityStat are for the v9 CVH "
+                    "refit, the v15 track fit fixes the pixel hit multiplicity"
+                )
         if commonargs.trackerMuons:
             common_logger.warning(
                 "Using tracker muons, but keep in mind that scale factors are obsolete and not recommended."
