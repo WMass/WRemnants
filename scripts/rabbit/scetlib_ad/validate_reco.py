@@ -131,8 +131,10 @@ def card_signal_column(indata, signal_proc_idx, reco_shape):
     """
     info = next(i for _, i in indata.channel_info.items() if not i.get("masked", False))
     norm = indata.norm
-    if hasattr(norm, "todense"):
-        norm = norm.todense()
+    if getattr(indata, "sparse", False):  # --sparse cards: a tf.SparseTensor
+        import tensorflow as tf
+
+        norm = tf.sparse.to_dense(tf.sparse.reorder(norm))
     if hasattr(norm, "numpy"):
         norm = norm.numpy()
     norm = np.asarray(norm, dtype=np.float64)
