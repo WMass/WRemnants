@@ -21,7 +21,7 @@ elif [[ -S "/run/.heim_org.h5l.kcm-socket" ]]; then
     # Heimdal KCM cache — socket is in /run which is already bound
     export KRB5CCNAME="KCM:${UID}"
 else
-    echo "⚠️ Warning: Kerberos cache directory $KRB5CC_HOST_DIR does not exist!"
+    echo "⚠️ Warning: Kerberos cache directory $KRB5CC_HOST_DIR does not exist!" >&2
 fi
 
 singularity run $CONTAINER "$@"
