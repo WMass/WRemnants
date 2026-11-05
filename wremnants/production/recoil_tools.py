@@ -1506,14 +1506,20 @@ class Recoil:
 
             if self.qt_max is not None and self.recoilHelper != None:
                 # the same calibration evaluated at the uncapped boson pt, stored as the
-                # systematic variation that covers the extrapolation
+                # systematic variation that covers the extrapolation. It differs from the
+                # capped evaluation only above qt_max, so the helper reuses that one
+                # below, and it needs no uncertainty weights.
+                self.recoilHelperQtExtrap = ROOT.wrem.RecoilCalibrationQtExtrapHelper[
+                    self.nstat
+                ](self.recoilHelper, self.qt_max)
                 self.df = self.df.Define(
                     "recoil_corr_qt_extrap",
-                    self.recoilHelper,
+                    self.recoilHelperQtExtrap,
                     [
                         "v_gen_pt",
                         "recoil_corr_xy_para_qt_gen",
                         "recoil_corr_xy_perp_gen",
+                        "recoil_corr",
                     ],
                 )
                 self.df = self.df.Define(
