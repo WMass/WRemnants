@@ -2039,7 +2039,7 @@ def make_pixel_multiplicity_helpers(
         res = pickle.load(fin)
 
     hNValidPixelHitsTrig_data = res["hNValidPixelHitsTrig_data"]
-    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsTrig_data"]
+    hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsNonTrig_data"]
     hNValidPixelHitsTrig_mc = res["hNValidPixelHitsTrig_mc"]
     hNValidPixelHitsNonTrig_mc = res["hNValidPixelHitsNonTrig_mc"]
 
