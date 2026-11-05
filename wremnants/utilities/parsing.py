@@ -270,6 +270,7 @@ def common_parser(analysis_label=""):
             "DeepMETReso",
             "DeepMETResp",
             "RawPFMET",
+            "PuppiMET",
             "DeepMETPVRobust",
             "DeepMETPVRobustNoPUPPI",
         ],

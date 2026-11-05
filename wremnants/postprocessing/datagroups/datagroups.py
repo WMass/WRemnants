@@ -393,7 +393,9 @@ class Datagroups(object):
         elif mode == "extrapolate":
             fakeselector = sel.FakeSelectorExtrapolateABCD
         elif mode == "simple":
-            scale = 0.85
+            # the 2026 low-PU estimate is not corrected by a global scale
+            scale = 1.0 if self.era == "2026_LowPU" else 0.85
+            logger.info(f"Global scale factor for the simple fake estimate: {scale}")
             if simultaneousABCD:
                 fakeselector = sel.FakeSelectorSimultaneousABCD
             else:

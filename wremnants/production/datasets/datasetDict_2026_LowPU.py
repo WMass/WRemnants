@@ -1,0 +1,183 @@
+from wremnants.utilities import common
+
+# TODO: update lumi JSON and CSV paths once 2026 low-PU run files are available
+lumijson = f"{common.data_dir}/lowPU/lowpu_certified_lumis_normtag_filtered.json"
+lumicsv_mu = f"{common.data_dir}/lowPU/bylsoutput_2026_LowPU.csv"
+lumicsv_el = f"{common.data_dir}/lowPU/TODO_bylsoutput_HLT_EG_2026.csv"
+
+dataDict = {
+    # TODO: update filepaths once dataset locations are known
+    "Muon_2026_LowPU": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU2026/Data/Muon",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_mu,
+        "lumijson": lumijson,
+    },
+    "EGamma_2026_LowPU": {
+        "filepaths": [
+            "{BASE_PATH}/TODO/EGamma",
+        ],
+        "group": "Data",
+        "lumicsv": lumicsv_el,
+        "lumijson": lumijson,
+    },
+    "Zmumu": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2023_PUAVE5/DYJetsToMuMu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+        ],
+        "xsec": 2103.8,
+        "group": "Zmumu",
+    },
+    "Zee": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_DYJetsToEE",
+        ],
+        "xsec": 9134.3,
+        "group": "Zee",
+    },
+    "Wplusmunu": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2023_PUAVE5/WplusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+        ],
+        "xsec": 12293.0,
+        "group": "Wmunu",
+    },
+    "Wminusmunu": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2023_PUAVE5/WminusJetsToMuNu_H2ErratumFix_TuneCP5_13p6TeV-powhegMiNNLO-pythia8-photos/NanoAODv12_PU5",
+        ],
+        "xsec": common.xsec_WminusJetsToLNu,
+        "group": "Wmunu",
+    },
+    "Wplusenu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WplusJetsToENu",
+        ],
+        "xsec": common.xsec_WplusJetsToLNu,
+        "group": "Wenu",
+    },
+    "Wminusenu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WminusJetsToENu",
+        ],
+        "xsec": common.xsec_WminusJetsToLNu,
+        "group": "Wenu",
+    },
+    "Ztautau": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_DYJetsToTauTau",
+        ],
+        "xsec": common.xsec_DYJetsToLL,
+        "group": "Ztautau",
+    },
+    "Wplustaunu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WplusJetsToTauNu",
+        ],
+        "xsec": common.xsec_WplusJetsToLNu,
+        "group": "Wtaunu",
+    },
+    "Wminustaunu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WminusJetsToTauNu",
+        ],
+        "xsec": common.xsec_WminusJetsToLNu,
+        "group": "Wtaunu",
+    },
+    "WWTo2L2Nu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WWTo2L2Nu",
+        ],
+        "xsec": common.xsec_WWTo2L2Nu,
+        "group": "Diboson",
+    },
+    "WZTo3LNu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_WZTo3LNu",
+        ],
+        "xsec": 4.912,
+        "group": "Diboson",
+    },
+    "ZZ": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_ZZ",
+        ],
+        "xsec": common.xsec_ZZ,
+        "group": "Diboson",
+    },
+    "TTTo2L2Nu": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_TTTo2L2Nu",
+        ],
+        "xsec": 87.31483776,
+        "group": "Top",
+    },
+    "TTToSemiLeptonic": {
+        "filepaths": [
+            "{BASE_PATH}/{ERA}/TODO_TTToSemiLeptonic",
+        ],
+        "xsec": 364.35,
+        "group": "Top",
+    },
+    # QCD-4Jets MadGraph MLM, binned in HT (GeV). Cross sections computed directly
+    # with GenXSecAnalyzer on the RunIII2026LowPUSummer26MiniAODv6 files (the same
+    # campaign as the NanoAOD copied locally), not taken from another era/binning.
+    "QCD-HT10to40": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-10to40_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 6.077e08,
+        "group": "QCD",
+    },
+    "QCD-HT40to70": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-40to70_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 3.118e08,
+        "group": "QCD",
+    },
+    "QCD-HT70to100": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 5.874e07,
+        "group": "QCD",
+    },
+    "QCD-HT100to200": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-100to200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 2.528e07,
+        "group": "QCD",
+    },
+    "QCD-HT200to400": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-200to400_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 1.962e06,
+        "group": "QCD",
+    },
+    "QCD-HT400to600": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-400to600_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 9.616e04,
+        "group": "QCD",
+    },
+    "QCD-HT600to800": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-600to800_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 1.350e04,
+        "group": "QCD",
+    },
+    "QCD-HT800to1000": {
+        "filepaths": [
+            "{BASE_PATH}/LowPU/2026_lowPU_v3/QCD-4Jets_Bin-HT-800to1000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+        "xsec": 3.056e03,
+        "group": "QCD",
+    },
+}
