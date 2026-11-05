@@ -22,7 +22,8 @@ runcard and a gen |Y| axis to 2.5.
      an explicit smooth=c2 on tanh_6 (its interior discriminants have no
      constant scale).
   8. The default on tanh_6 (TMD and CS): relu^2 on the interior discriminants,
-     C^2 elsewhere, penalty == the mixed numpy reference, one INFO line.
+     C^2 elsewhere, no condition registered twice, penalty == the mixed numpy
+     reference, one INFO line.
 Exits 1 on any failure."""
 
 import contextlib
@@ -436,6 +437,12 @@ def main():
             check(f"[{tag}] default arms", False, f"{type(e).__name__}: {e}")
             continue
         check(f"[{tag}] default arms", w6.smooth == "c2" and not w6.smooth_explicit)
+        labels = [c.label for c in w6._active]
+        check(
+            f"[{tag}] every condition registered once",
+            len(labels) == len(set(labels)),
+            str(sorted({x for x in labels if labels.count(x) > 1})),
+        )
         disc = [c for c in w6._active if c.scale is None]
         n_disc = (forms[0] == "tanh_6") * 2 + (forms[1] == "tanh_6")
         check(

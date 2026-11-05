@@ -445,6 +445,17 @@ def damping_conditions(
         linf2 = v["lambda_inf"] * v["lambda_inf"]
         return 3.0 * linf2 * v["lambda4"] + _l2Y(v, y_sq) ** 3
 
+    if np_model == "tanh_6":  # Y-independent: once, not per |Y| endpoint
+        conds.append(
+            Condition(
+                "lambda6 >= 0 (TMD large-b leading)",
+                ("lambda6",),
+                lambda v, r: v["lambda6"],
+                margin,
+                scale=2.0 * b2 * b2 * b2,
+            )
+        )
+
     for y in (0.0, float(ymax)):
         y_sq = y * y
         tag = f"|Y|={y:g}"
@@ -469,15 +480,6 @@ def damping_conditions(
                 )
             )
         else:  # tanh_6
-            conds.append(
-                Condition(
-                    "lambda6 >= 0 (TMD large-b leading)",
-                    ("lambda6",),
-                    lambda v, r: v["lambda6"],
-                    margin,
-                    scale=2.0 * b2 * b2 * b2,
-                )
-            )
             # Interior: B >= 0 OR B^2 <= 4*L2*lambda6. In cubic space:
             # cubic >= 0 OR cubic^2 <= 36*lambda_inf^4*L2*lambda6. Self-gating
             # and division-free, as on the CS side.
