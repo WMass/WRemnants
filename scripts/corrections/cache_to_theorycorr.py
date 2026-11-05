@@ -576,7 +576,9 @@ def main() -> int:
         "sidecars need per-member denominators, which a production MiNNLO file "
         "carries only if it was made with --pdfs.",
     )
-    parser.add_argument("--pdfas-name", default=None)
+    parser.add_argument(
+        "--pdfas-name", default=None, help="Given together with --pdfvars-name."
+    )
     parser.add_argument(
         "--pdf",
         default=None,
@@ -623,7 +625,12 @@ def main() -> int:
         print(json.dumps(vars(args), indent=2, default=str))
         return 0
 
-    if args.minnloStyle == "production" and (args.pdfvars_name or args.pdfas_name):
+    if bool(args.pdfvars_name) != bool(args.pdfas_name):
+        raise SystemExit(
+            "--pdfvars-name and --pdfas-name go together: both sidecars are "
+            "written, or neither."
+        )
+    if args.minnloStyle == "production" and args.pdfvars_name:
         raise SystemExit(
             "--minnloStyle production builds the CENTRAL denominator only; the "
             "PDF and alphaS sidecars need per-member denominators, which are "
@@ -726,7 +733,7 @@ def main() -> int:
     pdf_file = as_file = None
     pdf_map = as_map = []
     pdf_source_labels = as_source_labels = None
-    if args.pdfvars_name or args.pdfas_name:
+    if args.pdfvars_name:
         pdf_key, pdf_info, as_cen = cache_pdf(args.conf, args.pdf)
         pdf_name, lha = pdf_info["name"], pdf_info["lha_name"]
         if pdf_info["combine"] != "asymHessian":
