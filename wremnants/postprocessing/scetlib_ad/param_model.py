@@ -121,6 +121,13 @@ _CONFLICTS = (
         "a matching transition point",
         lambda names: any(n.startswith("resumTransition") for n in names),
     ),
+    (
+        # the EW ISR templates (pythiaew_ISR, setupRabbit --isrUnc) are the QED
+        # ISR effect that the floated order steps already carry
+        r"ew.*_isr",
+        "a QED ISR order step",
+        lambda names: any(n.startswith(adp.QED_KAPPA_PREFIX_OUT) for n in names),
+    ),
 )
 
 
