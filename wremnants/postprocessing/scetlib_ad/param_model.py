@@ -201,6 +201,9 @@ class SCETlibADParamModel(ParamModel):
         scale_envelope_response="linear",
         scale_envelope_points=3,
         fo_muf_poly=None,
+        fixed_ratio=None,
+        qed_knob=None,
+        gen_absY_max=None,
         **kwargs,
     ):
         """
@@ -251,6 +254,45 @@ class SCETlibADParamModel(ParamModel):
             records none is refused. ``"cache"``: the cache's own build point.
             The ratio is 1 at the start either way, so a wrong anchor is
             invisible prefit; ``"cache"`` is logged loudly.
+        fixed_ratio
+            OPT-IN, default ``None`` (off). Path to an ``.npz`` holding a FIXED
+            per-cache-bin multiplicative factor K: arrays ``bins`` (N, 6), the
+            SCETlib bins (Q_lo, Q_hi, Y_lo, Y_hi, qT_lo, qT_hi) the factor is
+            defined on, and ``ratio`` (N,). The prediction's numerator becomes
+            fold(K * sigma_cache(p)) while the ratio DENOMINATOR stays the plain
+            anchor fold(sigma_cache(p_anchor)), so the model predicts
+            template * fold(K sigma(p)) / fold(sigma(p_anchor)): the card's QCD
+            template times K at the anchor, with the parameter response of the
+            K-less cache. Built for an external on/off correction such as
+            SCETlib's QED ISR (``qed_isr = nllp`` on/off), applied without a cache
+            rebuild; the cross terms (K's own dependence on the fitted
+            parameters) are neglected by construction. Applied before the gen
+            fold, so the same file serves the gen-level and the reco path.
+            Matching is by bin VALUE: every cache bin must appear in the file
+            (extra rows, e.g. |Y| > 2.5 for a |Y| <= 2.5 subset cache, are
+            ignored).
+        gen_absY_max
+            OPT-IN, default ``None`` (off). gen_level only: accept a fit channel
+            with a SINGLE gen axis (qT), i.e. a card already summed over |Y|, by
+            appending one synthetic |Y| bin [0, gen_absY_max]. The cache is then
+            folded over |Y| < gen_absY_max, which must be the range the card was
+            summed over. Without it a 1-axis gen channel is refused as before.
+        qed_knob
+            OPT-IN, default ``None`` (off). Path to an ``.npz`` with ``bins``
+            (N, 6) and ``ratio`` (N,) = a per-cache-bin template ratio T (e.g.
+            K_NLL' / K_NLL). Adds ONE extra fitted nuisance ``qedTheta`` (Gaussian
+            prior N(0, 1) through the usual ``priors`` machinery) and multiplies
+            the numerator by T**qedTheta, i.e. the prediction becomes
+            template * fold(K * T**theta * sigma(p)) / fold(sigma(p_anchor)).
+            theta = 0 is the ``fixed_ratio`` central K (or 1 without it). Same
+            bin-by-value matching and the same neglect of cross terms as
+            ``fixed_ratio``; applied before the gen fold, so it also reaches the
+            reco path. The nuisance is appended after the envelope nuisances.
+            A comma-separated list of paths adds one independent nuisance per
+            template, ``qedTheta``, ``qedTheta2``, ``qedTheta3``, ... (each
+            N(0, 1), all in the ``qedKnob`` impact group), and the numerator
+            becomes K * prod_k T_k**theta_k * sigma(p). A single path is
+            exactly the one-knob behaviour above.
         anchor_override
             ``name=value,...`` supplying a central value the correction does not
             record (e.g. an NP coefficient compiled into SCETlib with no runtime
@@ -300,7 +342,35 @@ class SCETlibADParamModel(ParamModel):
         self._anchor = self._resolve_anchor(anchor_source, anchor_override)
 
         # ---- Gen binning, and (reco path) the response matrix.
+        self._gen_absY_max = None if gen_absY_max is None else float(gen_absY_max)
         self._setup_binning(indata, Q_lo, Q_hi)
+
+        # ---- Optional fixed per-cache-bin factor (off by default).
+        self._fixed_ratio_path = fixed_ratio
+        self._fixed_ratio = self._load_fixed_ratio(fixed_ratio)
+        self._qed_knob_path = qed_knob
+        self._qed_knob_name = "qedTheta"
+        self._qed_knob_logT = None
+        # One (name, log T) per template; a single path keeps the historical
+        # name ``qedTheta``, further paths get ``qedTheta2``, ``qedTheta3``, ...
+        self._qed_knobs = []
+        if qed_knob is not None and str(qed_knob).strip().lower() not in (
+            "",
+            "none",
+            "0",
+            "off",
+        ):
+            paths = [q.strip() for q in str(qed_knob).split(",") if q.strip()]
+            for k, path in enumerate(paths):
+                T = self._load_fixed_ratio(path, label="qed_knob")
+                logT = np.log(T)
+                if not np.any(logT != 0.0):
+                    raise ValueError(f"qed_knob {path}: template is identically 1")
+                name = (
+                    self._qed_knob_name if k == 0 else f"{self._qed_knob_name}{k + 1}"
+                )
+                self._qed_knobs.append((name, logT))
+            self._qed_knob_logT = self._qed_knobs[0][1]
 
         # ---- PDF confidence-level convention (see params.pdf_coeff_scale).
         self._conf_path = conf
@@ -326,6 +396,37 @@ class SCETlibADParamModel(ParamModel):
         # ratio is exactly 1 at the start.
         sigma_gen_anchor = self._sigma_gen_np(self._p_base_anchor)
         self.sigma_gen_central_flat = tf.constant(sigma_gen_anchor, dtype=DTYPE)
+        if self._qed_knobs:
+            vals_anchor, _ = self.core.values_and_jacobian(self._p_base_anchor)
+            vals_anchor = np.asarray(vals_anchor, dtype=np.float64)
+            Kc = 1.0 if self._fixed_ratio is None else self._fixed_ratio
+            for name, logT in self._qed_knobs:
+                for th in (-1.0, 1.0):
+                    f = self._fold(Kc * np.exp(th * logT) * vals_anchor)
+                    f = f / self._fold(Kc * vals_anchor)
+                    print(
+                        f"[SCETlibADParamModel] qed_knob {name}={th:+.0f} "
+                        f"at the anchor, relative to theta=0, per gen bin: "
+                        f"[{f.min():.6f}, {f.max():.6f}]",
+                        flush=True,
+                    )
+        if self._fixed_ratio is not None:
+            vals_anchor, _ = self.core.values_and_jacobian(self._p_base_anchor)
+            vals_anchor = np.asarray(vals_anchor, dtype=np.float64)
+            # The fixed factor as the fit sees it at the anchor, per gen bin.
+            self.fixed_ratio_gen_anchor = (
+                self._fold(self._fixed_ratio * vals_anchor) / sigma_gen_anchor
+            )
+            tot = float(
+                np.sum(self._fold(self._fixed_ratio * vals_anchor))
+                / np.sum(sigma_gen_anchor)
+            )
+            print(
+                f"[SCETlibADParamModel] fixed_ratio at the anchor, per gen bin: "
+                f"[{self.fixed_ratio_gen_anchor.min():.6f}, "
+                f"{self.fixed_ratio_gen_anchor.max():.6f}], total {tot:.6f}",
+                flush=True,
+            )
         self._build_scale_envelope(sigma_gen_anchor)
         if self.gen_level:
             self.sigma_reco_central = None
@@ -404,6 +505,16 @@ class SCETlibADParamModel(ParamModel):
         """Resolve the gen grid (and R, in the reco path) and map it onto the cache."""
         if self.gen_level:
             gen_axes = self._fit_axes(indata)
+            if len(gen_axes) == 1 and getattr(self, "_gen_absY_max", None):
+                gen_axes = list(gen_axes) + [
+                    ("absYVGen", np.array([0.0, self._gen_absY_max]))
+                ]
+                print(
+                    f"[SCETlibADParamModel] gen_absY_max ON: single gen axis "
+                    f"{gen_axes[0][0]!r}; folding the cache over |Y| < "
+                    f"{self._gen_absY_max:g} (one synthetic |Y| bin).",
+                    flush=True,
+                )
             if len(gen_axes) != 2:
                 raise NotImplementedError(
                     "gen_level SCETlibADParamModel expects a single fit channel "
@@ -458,6 +569,48 @@ class SCETlibADParamModel(ParamModel):
         # Exact sum of cache bins onto the gen grid (any nesting order, signed Y
         # folded onto |Y|, finer cache bins); raises if the cache does not tile it.
         self._fold = self.core.fold_for(self.gen_axes, self.Q_lo, self.Q_hi)
+
+    def _load_fixed_ratio(self, path, label="fixed_ratio"):
+        """Per-cache-bin constant factor K (``fixed_ratio`` / ``qed_knob``), or None."""
+        if path is None or str(path).strip().lower() in ("", "none", "0", "off"):
+            return None
+        with np.load(str(path), allow_pickle=False) as f:
+            fbins = np.asarray(f["bins"], dtype=np.float64)
+            fratio = np.asarray(f["ratio"], dtype=np.float64)
+        if fbins.ndim != 2 or fbins.shape[1] != 6 or fratio.shape != fbins.shape[:1]:
+            raise ValueError(
+                f"fixed_ratio {path}: expected bins (N, 6) and ratio (N,), got "
+                f"{fbins.shape} and {fratio.shape}"
+            )
+        if not np.all(np.isfinite(fratio)) or np.any(fratio <= 0):
+            raise ValueError(f"fixed_ratio {path}: non-finite or non-positive ratio")
+        cbins = np.asarray(self.core.bins, dtype=np.float64)
+
+        def key(b):
+            return tuple(np.round(b, 6))
+
+        lut = {key(b): i for i, b in enumerate(fbins)}
+        idx = np.array([lut.get(key(b), -1) for b in cbins], dtype=np.int64)
+        if np.any(idx < 0):
+            b = cbins[np.argmax(idx < 0)]
+            raise ValueError(
+                f"fixed_ratio {path}: {int((idx < 0).sum())} of {len(cbins)} cache "
+                f"bin(s) are not in the file, e.g. {b.tolist()}"
+            )
+        K = fratio[idx]
+        print(
+            f"[SCETlibADParamModel] {label} ON: {path} | {len(K)} cache bins "
+            f"(file has {len(fbins)}) | K in [{K.min():.6f}, {K.max():.6f}]. The "
+            f"model predicts template * fold(K sigma(p)) / fold(sigma(p_anchor)); "
+            f"cross terms of K with the fitted parameters are neglected.",
+            flush=True,
+        )
+        return K
+
+    def _apply_fixed_ratio_tf(self, sigma_cache):
+        if self._fixed_ratio is None:
+            return sigma_cache
+        return sigma_cache * tf.constant(self._fixed_ratio, dtype=sigma_cache.dtype)
 
     def _fit_axes(self, indata):
         """(name, edges) of each axis of the single non-masked channel."""
@@ -566,9 +719,10 @@ class SCETlibADParamModel(ParamModel):
         self._n_scetlib = len(self._scetlib_order)
         env_names = () if self._env_spec is None else self._env_spec.param_names
         self._env_names = tuple(env_names)
-        self._param_order = self._scetlib_order + self._env_names
+        self._knob_names = tuple(name for name, _ in self._qed_knobs)
+        self._param_order = self._scetlib_order + self._env_names + self._knob_names
         self.npoi = len(pois)
-        self.npou = len(nou) + len(self._env_names)
+        self.npou = len(nou) + len(self._env_names) + len(self._knob_names)
         self.params = np.array([p.encode() for p in self._param_order])
 
         # Position of each fitted parameter inside SCETlib's own vector.
@@ -652,9 +806,15 @@ class SCETlibADParamModel(ParamModel):
                 "the intended refusal: fix REPARAM, do not move the anchor."
             )
         # Envelope nuisances: unit nuisances centred on zero (the anchor).
-        defaults = np.concatenate([defaults, np.zeros(len(self._env_names))])
+        defaults = np.concatenate(
+            [defaults, np.zeros(len(self._env_names) + len(self._knob_names))]
+        )
         for name, val in _parse_kv(xparam_default).items():
-            if name not in available and name not in self._env_names:
+            if (
+                name not in available
+                and name not in self._env_names
+                and name not in self._knob_names
+            ):
                 raise KeyError(f"xparam_default: unknown parameter {name!r}")
             if name in self._param_order:
                 defaults[self._param_order.index(name)] = val
@@ -702,6 +862,8 @@ class SCETlibADParamModel(ParamModel):
         eigs = adp.pdf_group(self._param_order)
         if eigs:
             groups["pdfEig"] = eigs
+        if self._knob_names:
+            groups["qedKnob"] = tuple(self._knob_names)
         self.param_impact_groups = {k: v for k, v in groups.items() if v}
 
     def _setup_priors(self, priors, prior_sigmas):
@@ -1164,7 +1326,17 @@ class SCETlibADParamModel(ParamModel):
 
     def _sigma_gen(self, param):
         """sigma_gen on the gen grid, differentiable via the SCETlib bridge."""
-        return self._fold.fold_tf(self.core.tf_fn(self.scetlib_full_vector_tf(param)))
+        sigma_cache = self._apply_fixed_ratio_tf(
+            self.core.tf_fn(self.scetlib_full_vector_tf(param))
+        )
+        i0 = self._n_scetlib + len(self._env_names)
+        for k, (_, logT) in enumerate(self._qed_knobs):
+            i = i0 + k
+            theta = tf.cast(param[i : i + 1], sigma_cache.dtype)
+            sigma_cache = sigma_cache * tf.exp(
+                theta * tf.constant(logT, dtype=sigma_cache.dtype)
+            )
+        return self._fold.fold_tf(sigma_cache)
 
     def _ratio_from_param(self, param):
         """Per-fit-bin ratio to the anchor prediction, softly floored positive."""
@@ -1173,7 +1345,9 @@ class SCETlibADParamModel(ParamModel):
             nsc = self._n_scetlib
             # Gen-level template: the frozen envelope multiplies sigma_gen
             # before the response fold.
-            sigma_gen = sigma_gen * self._scale_env.factor_tf(param[nsc:])
+            sigma_gen = sigma_gen * self._scale_env.factor_tf(
+                param[nsc : nsc + len(self._env_names)]
+            )
         if self.gen_level:
             ratio = sigma_gen / self.sigma_gen_central_flat
         else:
