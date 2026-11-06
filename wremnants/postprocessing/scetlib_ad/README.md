@@ -56,10 +56,9 @@ reads the cache's format; the physics of a cache is fixed when it is built.
 ## Building a cache
 
 The build is SCETlib's own, and a runcard is all it takes: the runcards in
-`scripts/rabbit/scetlib_ad/conf/` are complete, `[Grid_*]` included (the grid the
-theory corrections are made on, `*Zgen_binning_scetlib` in
-`wremnants/utilities/binning.py`). Pass the same runcard to the fit, which rebuilds the
-calculation from it. The `[TNPs]` block is what registers the TNPs.
+`scripts/rabbit/scetlib_ad/conf/` are complete, `[Grid_*]` included (the gen grid the
+cache is built on). Pass the same runcard to the fit, which rebuilds the calculation
+from it. The `[TNPs]` block is what registers the TNPs.
 
 Inside the WRemnants container, after `source <scetlib-cms>/setup.sh`:
 

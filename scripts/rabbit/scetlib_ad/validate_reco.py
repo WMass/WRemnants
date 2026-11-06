@@ -129,7 +129,12 @@ def card_signal_column(indata, signal_proc_idx, reco_shape):
     Returns ``(column reshaped to reco_shape, lumi)``. Sliced by start:stop, not
     [:nbins]: with masked channels this channel sits at an offset.
     """
-    info = next(i for _, i in indata.channel_info.items() if not i.get("masked", False))
+    unmasked = [i for i in indata.channel_info.values() if not i.get("masked", False)]
+    if len(unmasked) != 1:
+        raise SystemExit(
+            f"--reference card needs exactly one unmasked channel, found {len(unmasked)}"
+        )
+    info = unmasked[0]
     norm = indata.norm
     if getattr(indata, "sparse", False):  # --sparse cards: a tf.SparseTensor
         import tensorflow as tf
@@ -183,10 +188,10 @@ def summarize(model_sigma, nominal, names, match_norm=True):
         with np.errstate(divide="ignore", invalid="ignore"):
             rp = np.where(npj > 0, mp / npj, np.nan)
         fin = rp[np.isfinite(rp)]
-        print(
-            f"    projection {name:<26} max|ratio-1| = "
-            f"{np.max(np.abs(fin - 1)):.5f}"
+        dev = (
+            f"{np.max(np.abs(fin - 1)):.5f}" if fin.size else "n/a (no populated bins)"
         )
+        print(f"    projection {name:<26} max|ratio-1| = {dev}")
     return wmad
 
 
