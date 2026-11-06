@@ -132,7 +132,7 @@ def card_signal_column(indata, signal_proc_idx, reco_shape):
     unmasked = [i for i in indata.channel_info.values() if not i.get("masked", False)]
     if len(unmasked) != 1:
         raise SystemExit(
-            f"--reference card needs exactly one unmasked channel, found {len(unmasked)}"
+            f"the datacard needs exactly one unmasked channel, found {len(unmasked)}"
         )
     info = unmasked[0]
     norm = indata.norm
