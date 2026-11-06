@@ -17,7 +17,10 @@ A gen-level reweighting of the MC that is constant within a gen bin cancels in P
 
 import numpy as np
 
-from wremnants.postprocessing.scetlib_ad.response_matrix import AUXILIARY_GROUP
+from wremnants.postprocessing.scetlib_ad.response_matrix import (
+    AUXILIARY_GROUP,
+    LEGACY_AUXILIARY_GROUPS,
+)
 
 # Datacard auxiliary group holding the response (overridable per card).
 DEFAULT_RESPONSE_GROUP = AUXILIARY_GROUP
@@ -110,21 +113,26 @@ def R_info_from_auxiliary(indata, group=DEFAULT_RESPONSE_GROUP):
     via rabbit's ``add_auxiliary``; rabbit exposes it as
     ``FitInputData.auxiliary``.
 
-    Returns ``R``, ``N_gen``, and ``reco_axes`` / ``gen_axes`` as ordered
-    ``(name, edges)`` lists.
+    The default group also matches cards written under the old name
+    (``LEGACY_AUXILIARY_GROUPS``).
+
+    Returns ``R``, ``N_gen``, ``reco_axes`` / ``gen_axes`` as ordered
+    ``(name, edges)`` lists, and ``group``, the group actually read.
     """
     aux = getattr(indata, "auxiliary", None) or {}
+    if group not in aux and group == DEFAULT_RESPONSE_GROUP:
+        group = next((g for g in LEGACY_AUXILIARY_GROUPS if g in aux), group)
     if group not in aux:
         raise ValueError(
             f"scetlib_ad: the datacard has no {group!r} auxiliary (the reco x gen "
-            f"response matrix R). Rebuild it with a setupRabbit that embeds the "
-            f"response from a mz_dilepton --unfolding input carrying "
-            f"'nominal_prefsr_yieldsUnfolding' and the 'prefsr' gen total, or pass "
-            f"response_group= if the card names it differently."
+            f"response matrix R). Rebuild it with setupRabbit --storeResponseMatrix "
+            f"from a mz_dilepton --unfolding input carrying the response and its "
+            f"gen total, or pass response_group= if the card names it differently."
         )
     bundle = aux[group]
     n_gen = bundle.get("N_gen")
     return dict(
+        group=group,
         R=np.asarray(bundle["R"], dtype=np.float64),
         N_gen=None if n_gen is None else np.asarray(n_gen, dtype=np.float64),
         reco_axes=[

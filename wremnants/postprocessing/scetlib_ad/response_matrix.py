@@ -15,7 +15,9 @@ import numpy as np
 from wums import ioutils as wums_io
 
 # datacard auxiliary group that setupRabbit --storeResponseMatrix writes R into
-AUXILIARY_GROUP = "scetlib_np"
+AUXILIARY_GROUP = "response_matrix"
+# the same group in cards written before the rename; read as a fallback
+LEGACY_AUXILIARY_GROUPS = ("scetlib_np",)
 
 RECO_AXES = ("ptll", "yll", "cosThetaStarll_quantile", "phiStarll_quantile")
 GEN_AXES = ("ptVGen", "absYVGen")
