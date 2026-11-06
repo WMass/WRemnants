@@ -24,6 +24,19 @@ are not on the tape.
 The recorded SCETlib config states the evaluated point, which the fit reads back
 as its anchor; it is checked against the evaluated vector, since a mismatch
 leaves the prefit ratio at 1 and silently makes only the derivatives wrong.
+
+Any theory correction can be made this way, but the main use is the histmaker's
+correction for a fit with the same cache, so that the templates and the AD
+prediction come from one calculation at one anchor. The variation names follow
+``rabbit_theory_helper`` (NP points of the LatticeNoConstraints model and the
+correlated TMD points, TNPs, scales), so a card made with these files also takes
+the standard theory nuisances.
+
+The correction covers only the cache's Q bin (the runcard's [Grid_Q], 60-120 GeV
+for the Z runcard). Used as the central correction in place of
+``scetlib_dyturbo_CT18Z_N3p0LL_N2LO``, which also has a 10-60 GeV bin, events
+below 60 GeV (``Zmumu10to50``) fall in its flow bins and get weight 1 instead of
+their correction.
 """
 
 from __future__ import annotations
@@ -84,25 +97,58 @@ def nonpdf_points() -> OrderedDict[str, dict[str, float]]:
     points["central"] = {}
     points.update(
         {
-            "lambda2_nu0.05": {"np_gnu_lambda2": 0.05},
-            "lambda2_nu0.25": {"np_gnu_lambda2": 0.25},
+            # NP points as rabbit_theory_helper looks them up (LatticeNoConstraints
+            # gamma_nu points, and the correlated TMD points)
+            "lambda2_nu0.0538": {"np_gnu_lambda2": 0.0538},
+            "lambda2_nu0.1202": {"np_gnu_lambda2": 0.1202},
+            "lambda4_nu0.0008": {"np_gnu_lambda4": 0.0008},
+            "lambda4_nu0.014": {"np_gnu_lambda4": 0.014},
+            "lambda_inf_nu1.1784": {"np_gnu_lambda_inf": 1.1784},
+            "lambda_inf_nu2.1922": {"np_gnu_lambda_inf": 2.1922},
             "lambda20.0": {"np_eff_lambda2": 0.0},
-            "lambda21.0": {"np_eff_lambda2": 1.0},
+            "lambda20.5": {"np_eff_lambda2": 0.5},
             "delta_lambda2-0.02": {"np_eff_delta_lambda2": -0.02},
             "delta_lambda20.02": {"np_eff_delta_lambda2": 0.02},
-            "lambda40.0": {"np_eff_lambda4": 0.0},
-            "lambda41.0": {"np_eff_lambda4": 1.0},
-            "lambda4_nu-0.5": {"np_gnu_lambda4": -0.5},
-            "lambda4_nu0.5": {"np_gnu_lambda4": 0.5},
+            "lambda40.01": {"np_eff_lambda4": 0.01},
+            "lambda40.12": {"np_eff_lambda4": 0.12},
             "kappaFO0.5-kappaf2.": {"scale_kappa_R": 0.5},
             "kappaFO2.-kappaf0.5": {"scale_kappa_R": 2.0},
             "mufdown": {"scale_kappa_F": 0.5},
             "mufup": {"scale_kappa_F": 2.0},
             "mufdown-kappaFO0.5-kappaf2.": {"scale_kappa_F": 0.5, "scale_kappa_R": 0.5},
             "mufup-kappaFO2.-kappaf0.5": {"scale_kappa_F": 2.0, "scale_kappa_R": 2.0},
-            "transition_points0.2_0.35_1.0": {"scale_x2": 0.35},
-            "transition_points0.2_0.75_1.0": {"scale_x2": 0.75},
-            "transition_points0.3_0.6_0.9": {"scale_x1": 0.3, "scale_x3": 0.9},
+            # transition points: the two make_postfit_vgen plots, and the four of
+            # rabbit_theory_helper's resumTransition envelope (absolute points)
+            "transition_points0.2_0.35_1.0": {
+                "scale_x1": 0.2,
+                "scale_x2": 0.35,
+                "scale_x3": 1.0,
+            },
+            "transition_points0.2_0.75_1.0": {
+                "scale_x1": 0.2,
+                "scale_x2": 0.75,
+                "scale_x3": 1.0,
+            },
+            "transition_points0.2_0.65_1.1": {
+                "scale_x1": 0.2,
+                "scale_x2": 0.65,
+                "scale_x3": 1.1,
+            },
+            "transition_points0.4_0.55_0.7": {
+                "scale_x1": 0.4,
+                "scale_x2": 0.55,
+                "scale_x3": 0.7,
+            },
+            "transition_points0.2_0.45_0.7": {
+                "scale_x1": 0.2,
+                "scale_x2": 0.45,
+                "scale_x3": 0.7,
+            },
+            "transition_points0.4_0.75_1.1": {
+                "scale_x1": 0.4,
+                "scale_x2": 0.75,
+                "scale_x3": 1.1,
+            },
         }
     )
     for name in ("gamma_cusp", "gamma_mu_q", "gamma_nu", "h_qqV", "s"):
