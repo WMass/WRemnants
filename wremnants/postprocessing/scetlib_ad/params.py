@@ -46,6 +46,29 @@ PDF_COEFF_FMT = "pdfEig{:d}"
 PDF_PREFIX_IN = "pdf_eig"
 PDF_PREFIX_OUT = "pdfEig"
 
+# QED ISR order-step multipliers, registered by a cache built with
+# ``[QED] qed_kappa = yes`` (scetlib-cms ``qed-order-kappa``; doc/qed-isr.md,
+# "Order-step multipliers"). SCETlib's kappa_k multiplies the increment of ONE
+# QED order step, central 1, so kappa_k = 0 drops the step and kappa_k = 2
+# doubles it; ``qed_kappa_ll`` -> ``qedStep_ll``. The fitted parameter is the
+# unit nuisance theta_k = kappa_k - 1 (REPARAM below), N(0, 1). In step order:
+#   ll    off  -> LL    (whole LL effect: degenerate with alpha_s, see
+#                        QED_LEADING_STEP)
+#   nll   LL   -> NLL   (two-loop cusp, one-loop noncusp, two-loop running,
+#                        mixed running)
+#   nllp  NLL  -> NLL'  (the O(alpha) constants and the O(alpha) fixed order)
+#   mix   NLL' -> NNLL  (the mixed QCD x QED Sudakov, mixed_order = nnll)
+QED_KAPPA_PREFIX_IN = "qed_kappa_"
+QED_KAPPA_PREFIX_OUT = "qedStep_"
+QED_STEPS = ("ll", "nll", "nllp", "mix")
+QED_LEADING_STEP = "ll"
+QED_STEP_LABELS = {
+    "ll": "off -> LL",
+    "nll": "LL -> NLL",
+    "nllp": "NLL -> NLL'",
+    "mix": "NLL' -> NNLL (mixed)",
+}
+
 
 def rabbit_name(scetlib_name):
     """SCETlib gradient-parameter name -> the name rabbit reports."""
@@ -55,6 +78,10 @@ def rabbit_name(scetlib_name):
         return TNP_PREFIX_OUT + scetlib_name[len(TNP_PREFIX_IN) :]
     if scetlib_name.startswith(PDF_PREFIX_IN):
         return PDF_PREFIX_OUT + scetlib_name[len(PDF_PREFIX_IN) :]
+    if scetlib_name.startswith(QED_KAPPA_PREFIX_IN):
+        step = scetlib_name[len(QED_KAPPA_PREFIX_IN) :]
+        if step in QED_STEPS:
+            return QED_KAPPA_PREFIX_OUT + step
     raise KeyError(
         f"scetlib_ad.params: no rabbit name for SCETlib parameter "
         f"{scetlib_name!r}. Add it to EXPLICIT_NAMES, decide whether it is FREE "
@@ -73,7 +100,25 @@ def scetlib_name(rabbit):
         return TNP_PREFIX_IN + rabbit[len(TNP_PREFIX_OUT) :]
     if rabbit.startswith(PDF_PREFIX_OUT):
         return PDF_PREFIX_IN + rabbit[len(PDF_PREFIX_OUT) :]
+    if rabbit.startswith(QED_KAPPA_PREFIX_OUT):
+        return QED_KAPPA_PREFIX_IN + rabbit[len(QED_KAPPA_PREFIX_OUT) :]
     raise KeyError(f"scetlib_ad.params: unknown rabbit parameter {rabbit!r}")
+
+
+def qed_step_name(step):
+    """Rabbit-facing name of the order-step nuisance for *step* (``"nllp"``)."""
+    if step not in QED_STEPS:
+        raise KeyError(f"unknown QED order step {step!r}; known: {QED_STEPS}")
+    return QED_KAPPA_PREFIX_OUT + step
+
+
+def qed_step_of(rabbit):
+    """The step suffix of a ``qedStep_*`` name, or ``None`` for any other name."""
+    if rabbit.startswith(QED_KAPPA_PREFIX_OUT):
+        step = rabbit[len(QED_KAPPA_PREFIX_OUT) :]
+        if step in QED_STEPS:
+            return step
+    return None
 
 
 # --- Priors ------------------------------------------------------------------
@@ -203,6 +248,12 @@ REPARAM = {
     "lambda6": ("unit", (0.10,)),
     "lambda6_nu": ("unit", (0.10,)),
     "lambda4_nu": ("unit", (0.50,)),
+    # The QED order-step multipliers: theta_k = kappa_k - 1, so theta = -1 drops
+    # the step (the next-lower order, exactly: SCETlib nests the orders on the
+    # tape) and theta = +1 doubles it. c0 is the anchor, i.e. kappa = 1 from
+    # STRUCTURAL_CENTRAL; width 1 is the agreed N(0, 1) "two-point" variation
+    # (qed-isr study, qed_tape_nuisance_spec.md).
+    **{QED_KAPPA_PREFIX_OUT + s: ("unit", (1.0,)) for s in QED_STEPS},
 }
 
 
@@ -299,6 +350,82 @@ def pdf_group(names):
     return tuple(n for n in names if n.startswith(PDF_PREFIX_OUT))
 
 
+# Impact group of the on-tape QED order-step nuisances. Deliberately NOT the
+# frozen-template hook's ``qedKnob``: the two treatments must never run together
+# (the model refuses it), and a different label keeps a grouped-impact bar
+# honest about which treatment produced it. Compare them by number.
+QED_ORDER_GROUP = "qedOrder"
+
+
+def qed_step_group(names):
+    """The ``qedOrder`` impact group for whichever order steps are fitted."""
+    return tuple(n for n in names if qed_step_of(n) is not None)
+
+
+def qed_steps_from_config(qed_section):
+    """The QED order steps a cache built from *qed_section* registers a kappa for.
+
+    Mirrors SCETlib's ``QED_isr_options::kappa_step`` (scetlib-cms
+    ``qed-order-kappa``, QED_isr.hpp): ``ll`` whenever QED ISR is on, ``nll`` at
+    NLL and NLL', ``nllp`` at NLL', ``mix`` with ``mixed_order = nnll`` at NLL or
+    NLL'. *qed_section* is the runcard's ``[QED]`` as ``{key: str}`` (or None);
+    absent keys take SCETlib's defaults, absent section = QED off.
+    """
+    eff = qed_effective(qed_section)
+    order = eff["qed_isr"]
+    if order == "off":
+        return ()
+    steps = ["ll"]
+    if order in ("nll", "nllp"):
+        steps.append("nll")
+    if order == "nllp":
+        steps.append("nllp")
+    if order in ("nll", "nllp") and eff.get("mixed_order") == "nnll":
+        steps.append("mix")
+    return tuple(steps)
+
+
+def qed_select_steps(present, rule):
+    """Which of the *present* order steps float under ``qed_nuisances=rule``.
+
+    ``top2`` (the agreed default) floats the two highest steps BELOW the
+    configured central order -- the last two present, in step order: NNLL ->
+    (nllp, mix) = the C-split scheme; NLL' -> (nll, nllp); NLL -> (ll, nll);
+    LL -> (ll). ``all`` floats every present step, ``none`` none, and an
+    explicit comma-separated list (step suffixes or ``qedStep_*`` names) exactly
+    those, each of which must be present.
+    """
+    present = tuple(present)
+    rule = "top2" if rule is None else str(rule).strip()
+    low = rule.lower()
+    if low in ("top2", "default", ""):
+        return present[-2:]
+    if low == "all":
+        return present
+    if low in ("none", "off", "0", "no", "false"):
+        return ()
+    asked = []
+    for tok in rule.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        step = qed_step_of(tok) or tok.lower()
+        if step not in QED_STEPS:
+            raise ValueError(
+                f"qed_nuisances: {tok!r} is neither top2/all/none nor a QED order "
+                f"step ({', '.join(QED_STEPS)} or qedStep_<step>)."
+            )
+        if step not in present:
+            raise ValueError(
+                f"qed_nuisances: step {step!r} ({QED_STEP_LABELS[step]}) is not part "
+                f"of this cache's QED order, whose steps are {list(present)}."
+            )
+        if step not in asked:
+            asked.append(step)
+    # Registry (step) order, whatever order they were typed in.
+    return tuple(s for s in present if s in asked)
+
+
 # --- The correction is the authority for the central values -------------------
 #
 # The model returns ``sigma_gen(p) / sigma_gen(p_anchor)``, which multiplies the
@@ -338,8 +465,118 @@ STRUCTURAL_CENTRAL = {
     "resumScaleMuF": 1.0,
 }
 
-# REFUSE: a difference means the cache computes a different function, which no
-# parameter move recovers.
+# --- QED ISR settings ---------------------------------------------------------
+#
+# SCETlib's ``[QED]`` section (prod/scetlib_run/defaults.conf, autodiff-Ai).
+# ``qed_isr = off`` is the default and makes every other key irrelevant, so the
+# comparison is between EFFECTIVE settings (:func:`qed_effective`): an absent
+# section or an absent key reads as SCETlib's default, a QED-off config collapses
+# to ``{"qed_isr": "off"}``, and a key is kept only at the orders where SCETlib
+# reads it. That is what lets "absent" mean "off" without turning a harmless
+# spelling difference (``mixed_order = nnll`` written at ``qed_isr = ll``, where
+# it does nothing) into a refusal.
+QED_SECTION = "QED"
+QED_ORDER_KEYS = (
+    "mixed_order",
+    "qcd_side_mixed",
+    "mixed_running",
+    "alpha_fo",
+    "alpha_mz",
+    "mz",
+)
+# SCETlib's defaults. ``alpha_mz`` / ``mz`` empty = core/SM_defaults.hpp
+# (1/128.89 at 91.1876 GeV, as hard-coded in DYTurbo), so empty and the explicit
+# number are the same calculation.
+QED_DEFAULTS = {
+    "qed_isr": "off",
+    "mixed_order": "ll",
+    "qcd_side_mixed": "no",
+    "mixed_running": "yes",
+    "alpha_fo": "running",
+    "alpha_mz": repr(1.0 / 128.89),
+    "mz": "91.1876",
+}
+# The orders at which SCETlib reads each key (QED_isr.hpp / defaults.conf).
+_QED_KEY_ORDERS = {
+    "mixed_order": ("nll", "nllp"),
+    "qcd_side_mixed": ("nll", "nllp"),
+    "mixed_running": ("nll", "nllp"),
+    "alpha_fo": ("nllp",),
+    "alpha_mz": ("ll", "nll", "nllp"),
+    "mz": ("ll", "nll", "nllp"),
+}
+_QED_OFF = ("off", "no", "none", "false", "0", "")
+_QED_BOOL = {
+    "yes": "yes",
+    "true": "yes",
+    "1": "yes",
+    "no": "no",
+    "false": "no",
+    "0": "no",
+}
+
+
+def qed_effective(qed_section):
+    """The EFFECTIVE QED ISR settings of a runcard's ``[QED]`` section.
+
+    ``qed_section`` is ``{key: str}`` or ``None`` (no section: a correction made
+    before SCETlib had QED, i.e. QED off). Returns ``{"qed_isr": "off"}`` for any
+    QED-off config, else every key SCETlib reads at that order, absent ones
+    filled from :data:`QED_DEFAULTS`, booleans and empties normalised.
+    """
+    body = {str(k).lower(): v for k, v in (qed_section or {}).items()}
+    order = str(body.get("qed_isr", QED_DEFAULTS["qed_isr"])).strip().lower()
+    if order in _QED_OFF:
+        return {"qed_isr": "off"}
+    eff = {"qed_isr": order}
+    for key in QED_ORDER_KEYS:
+        if order not in _QED_KEY_ORDERS[key]:
+            continue
+        raw = body.get(key)
+        val = "" if raw is None else str(raw).strip()
+        if val == "":
+            val = QED_DEFAULTS[key]
+        low = val.lower()
+        eff[key] = (
+            _QED_BOOL.get(low, low)
+            if key in ("qcd_side_mixed", "mixed_running")
+            else low
+        )
+    return eff
+
+
+def qed_is_on(qed_section):
+    return qed_effective(qed_section)["qed_isr"] != "off"
+
+
+def compare_qed_config(corr_cfg, cache_cfg):
+    """``[(name, corr_value, cache_value)]`` for the effective QED settings that
+    differ between a correction runcard and the cache's (both ``{section: {...}}``).
+
+    "absent" reads as "off" on BOTH sides; see :func:`qed_effective`. A QED on/off
+    mismatch is reported as the one entry ``QED.qed_isr``; otherwise every key
+    either side reads at that order is compared.
+    """
+    c = qed_effective((corr_cfg or {}).get(QED_SECTION))
+    h = qed_effective((cache_cfg or {}).get(QED_SECTION))
+    out = []
+    if not same_setting(c["qed_isr"], h["qed_isr"]):
+        out.append((f"{QED_SECTION}.qed_isr", c["qed_isr"], h["qed_isr"]))
+        if "off" in (c["qed_isr"], h["qed_isr"]):
+            return out
+    for key in QED_ORDER_KEYS:
+        if key in c or key in h:
+            cv, hv = c.get(key), h.get(key)
+            if not same_setting(cv, hv):
+                out.append((f"{QED_SECTION}.{key}", cv, hv))
+    return out
+
+
+# --- What we declared ahead of time to matter --------------------------------
+#
+# REFUSE: the cache computes a different FUNCTION, so no parameter move
+# recovers it. Four groups, and the test for each is "would a difference here
+# mean the cache is not the calculation the histmaker's templates carry?".
 CORR_REFUSE_KEYS = frozenset(
     {
         # The PDF.
@@ -391,6 +628,16 @@ CORR_REFUSE_KEYS = frozenset(
         "Electroweak.gammaw",
         "Electroweak.ckm",
         "Process.boson",
+        # (5) QED ISR: a different QED order (or coupling) is a different
+        # function. Compared by :func:`compare_qed_config`, NOT by the generic
+        # loop, because the generic loop walks the CORRECTION's sections and a
+        # correction made before [QED] existed (every production one so far)
+        # has no such section -- the mismatch was then never visited at all and
+        # a QED-on cache against a QED-off correction passed silently. There
+        # "absent" means "off", on both sides. ``qed_kappa`` is deliberately
+        # NOT here: at kappa = 1 it changes no number (bitwise, scetlib-cms
+        # qed-order-kappa test 1), it only registers parameters.
+        *(f"{QED_SECTION}.{k}" for k in ("qed_isr",) + QED_ORDER_KEYS),
     }
 )
 
@@ -471,6 +718,11 @@ def structural_central(rabbit):
         return STRUCTURAL_CENTRAL[rabbit]
     if rabbit.startswith(PDF_PREFIX_OUT):
         return 0.0
+    # The QED order-step multipliers: SCETlib registers kappa_k with central 1
+    # (the configured order itself), and the runcard has no key for it -- the
+    # correction IS kappa = 1 by construction, whatever order it was run at.
+    if qed_step_of(rabbit) is not None:
+        return 1.0
     return None
 
 
@@ -553,11 +805,18 @@ def compare_corr_config(corr_cfg, cache_cfg):
     ``[(name, corr_value, cache_value)]`` for the declared keys that disagree;
     ``corr_only`` names the keys only the correction carries ("not checked").
     Section names are compared as spelled, keys lowercased.
+
+    ``[QED]`` is the exception to "iterate the correction's keys": it is
+    compared on EFFECTIVE settings by :func:`compare_qed_config` (an absent
+    section or key = SCETlib's default, i.e. QED off), and its refusals are
+    named ``QED.<key>`` so a caller can tell them apart.
     """
     refuse, warn, corr_only = [], [], []
     for section, corr_body in sorted(corr_cfg.items()):
         if not isinstance(corr_body, dict):
             continue
+        if section == QED_SECTION:
+            continue  # compared below, with "absent" = "off" on both sides
         cache_body = cache_cfg.get(section)
         cache_body = (
             {str(k).lower(): v for k, v in cache_body.items()}
@@ -589,4 +848,8 @@ def compare_corr_config(corr_cfg, cache_cfg):
             ):
                 if not same_setting(corr_val, cache_val):
                     warn.append((name, corr_val, cache_val))
+    # [QED] is visited whether or not the correction carries the section: a
+    # correction made before SCETlib had QED is QED-off, and a QED-on cache
+    # against it is a different calculation (see CORR_REFUSE_KEYS, group 5).
+    refuse.extend(compare_qed_config(corr_cfg, cache_cfg))
     return refuse, warn, corr_only
