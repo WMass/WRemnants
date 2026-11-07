@@ -3,8 +3,8 @@ import pprint
 import re
 
 import numpy as np
-from rabbit.tensorwriter import TensorWriter
 
+from rabbit.tensorwriter import TensorWriter
 from wremnants.postprocessing.theory_variation_labels import (
     BC_QUARK_MASS_VARIATIONS,
     LATTICE_CORRELATED_NP_UNCERTAINTIES,
