@@ -2,7 +2,9 @@ import copy
 import pprint
 import re
 
+import numpy as np
 from rabbit.tensorwriter import TensorWriter
+
 from wremnants.postprocessing.theory_variation_labels import (
     BC_QUARK_MASS_VARIATIONS,
     LATTICE_CORRELATED_NP_UNCERTAINTIES,
@@ -259,6 +261,13 @@ class SigmaULTheoryFitWriter(TensorWriter):
             normalize=normalize,
             apply_postOp=apply_postOp,
         )
+        if h.variances() is None and kwargs.get("variances") is None:
+            # A Double-storage prediction (every cache-derived `_adcorr*` correction)
+            # carries no statistical uncertainty: write zero sumw2 rather than letting
+            # rabbit's writer turn the missing variances into a NaN.
+            kwargs["variances"] = np.zeros_like(
+                h.values(flow=self.channels[channel]["flow"])
+            )
         super().add_process(h, name, channel, **kwargs)
         self.ref[channel][name] = h
 
@@ -294,6 +303,13 @@ class SigmaULTheoryFitWriter(TensorWriter):
             h = hh.rebinHist(
                 h, self.ref[channel]["absYV_name"], self.ref[channel]["absYV_bins"]
             )
+        # Match the |Y| underflow convention of the data channel, so every template has
+        # the data's shape with flow: a cache-derived correction's absY axis carries an
+        # underflow bin that the unfolded data axis does not (it is empty for an |Y|).
+        absY_name = self.ref[channel]["absYV_name"]
+        ref_under = self.ref[channel]["h"].axes[absY_name].traits.underflow
+        if h.axes[absY_name].traits.underflow != ref_under:
+            h = hh.setFlow(h, absY_name, under=ref_under)
         if normalize:
             h *= self.ref[channel]["lumi"] * self.ref[channel]["scale"]
 
@@ -355,8 +371,16 @@ class SigmaULTheoryFitWriter(TensorWriter):
         return h
 
     def load_sigmaul_data(
-        self, pseudodataGenerator, infile, fitresultMapping, channelSigmaUL
+        self,
+        pseudodataGenerator,
+        infile,
+        fitresultMapping,
+        channelSigmaUL,
+        infile_result=None,
     ):
+        # infile_result: which result of the unfolding fit to read. None reads the fit to
+        # data ('results') and falls back to 'results_asimov' when only Asimov was fitted
+        # (rabbit.io_tools.get_fitresult); 'asimov' forces the Asimov result.
         if pseudodataGenerator:
             corrfile = f"{common.data_dir}/TheoryCorrections/{pseudodataGenerator}_CorrZ.pkl.lz4"
             self.logger.info("Loading sigmaUL pseudodata from %s", corrfile)
@@ -375,7 +399,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
 
                 self.logger.info("Loading unfolding covariance from %s", infile)
                 fitresult, meta = rabbit.io_tools.get_fitresult(
-                    infile, result="asimov", meta=True
+                    infile, result=infile_result, meta=True
                 )
                 h_data_cov = fitresult["mappings"][fitresultMapping][
                     "hist_postfit_inclusive_cov"
@@ -387,7 +411,7 @@ class SigmaULTheoryFitWriter(TensorWriter):
         import rabbit.io_tools
 
         fitresult, meta = rabbit.io_tools.get_fitresult(
-            infile, result="asimov", meta=True
+            infile, result=infile_result, meta=True
         )
         self.logger.debug(
             "Available models in fit result: %s", list(fitresult["mappings"].keys())
@@ -427,6 +451,11 @@ class SigmaULTheoryFitWriter(TensorWriter):
 
     def add_alphas_variation(self):
         self.logger.info("Adding alphaS variation")
+        if not self._keep_systematic("pdfAlphaS"):
+            # excluded (e.g. alpha_s is a ParamModel parameter): the _pdfas
+            # sidecar is not needed, and a prediction need not have one
+            self.logger.info("pdfAlphaS excluded, not loading the alphaS variation")
+            return
         symmetrize = "average" if "alphaS" in self.nois else "quadratic"
         alphas_var_name = _pdfas_generator_name(self.predGenerator)
         alphas_vars = theory_corrections.load_corr_helpers(
@@ -509,7 +538,12 @@ class SigmaULTheoryFitWriter(TensorWriter):
             gamma_np_uncs = STANDARD_GAMMA_NP_UNCERTAINTIES
         print(corr_np_uncs, gamma_np_uncs)
 
+        # Nuisances filtered out are skipped BEFORE their vars entries are looked up: a
+        # prediction need not carry the variations a fit does not use (a cache-derived
+        # `_adcorr*` nominal has no lattice eigvars or renorm-scale envelope).
         for up_var, down_var, nuisance_name in corr_np_uncs:
+            if not self._keep_systematic(nuisance_name):
+                continue
             self.add_systematic(
                 [nominal[{"vars": up_var}], nominal[{"vars": down_var}]],
                 nuisance_name,
@@ -520,6 +554,8 @@ class SigmaULTheoryFitWriter(TensorWriter):
             )
 
         for up_var, down_var, nuisance_name in gamma_np_uncs:
+            if not self._keep_systematic(nuisance_name):
+                continue
             self.add_systematic(
                 [nominal[{"vars": up_var}], nominal[{"vars": down_var}]],
                 nuisance_name,
@@ -530,6 +566,8 @@ class SigmaULTheoryFitWriter(TensorWriter):
             )
 
         for up_var, down_var in TNP_UNCERTAINTIES:
+            if not self._keep_systematic(f"resumTNP_{down_var.split('-')[0]}"):
+                continue
             self.add_systematic(
                 [nominal[{"vars": up_var}], nominal[{"vars": down_var}]],
                 f"resumTNP_{down_var.split('-')[0]}",
@@ -540,6 +578,8 @@ class SigmaULTheoryFitWriter(TensorWriter):
             )
 
         for up_var, down_var, nuisance_name in TRANSITION_FO_UNCERTAINTIES:
+            if not self._keep_systematic(nuisance_name):
+                continue
             self.add_systematic(
                 [nominal[{"vars": up_var}], nominal[{"vars": down_var}]],
                 nuisance_name,
@@ -569,6 +609,18 @@ class SigmaULTheoryFitWriter(TensorWriter):
             scale = pdfInfo.get("inflation_factor_alphaS", 1)
             scale = pdfInfo.get("scale", 1) * scale
         self.logger.debug(f"Using scale {scale}.")
+
+        n_eig = (pdfInfo["entries"] - 1) // 2
+        if pdfName != "pdfHERAPDF20" and not any(
+            self._keep_systematic(f"pdf{k}{self.pdf.upper()}")
+            for k in range(1, n_eig + 1)
+        ):
+            # every eigenvector excluded (e.g. they are ParamModel parameters): the
+            # _pdfvars sidecar is not needed, and a prediction need not have one
+            self.logger.info(
+                "All PDF eigenvectors excluded, not loading the PDF variations"
+            )
+            return
 
         pdf_var_key_ext = None
         if pdfName == "pdfHERAPDF20" and self._keep_systematic("HERAPDF20EXT"):
