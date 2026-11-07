@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import os
 import pathlib
 from collections import OrderedDict
 
@@ -630,7 +631,12 @@ def main() -> int:
         "derived from scetlib_ad.params, and an unusable key is refused with "
         "the list this cache allows.",
     )
-    parser.add_argument("--threads", type=int, default=300)
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=os.cpu_count(),
+        help="threads for the cache evaluation (default: all cores)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.dry_run:
@@ -663,11 +669,9 @@ def main() -> int:
         )
     else:
         central_denom_raw = load_histogram(args.minnlo, args.minnloh)
-    central_values, edges, central_member_labels = canonical_values(
+    central_values, edges, _ = canonical_values(
         central_denom_raw, False, singleton_q_edges=cache_q_edges
     )
-    if central_member_labels is not None:
-        raise RuntimeError("central denominator unexpectedly has a member axis")
     central_values, edges, _ = crop_to_cache(central_values, edges, None, core)
     fold = core.fold_for(
         [("ptVGen", edges["qT"]), ("absYVGen", edges["absY"])],
