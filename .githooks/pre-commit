@@ -7,11 +7,14 @@ set -e
 # Trap the EXIT signal to print the last executed command when the script exits
 trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
 
-# compiler flags ROOT was built with (C++ standard, ROOT include directory, ...)
-ROOTCFLAGS=$(root-config --cflags)
-
 # Find all staged c++ files
 STAGED_FILES_CPP=$(git diff --cached --name-only --diff-filter=d | grep -E '\.(c|cpp|h|hpp)$' || true)
+
+if [ -n "$STAGED_FILES_CPP" ]; then
+  # compiler flags ROOT was built with (C++ standard, ROOT include directory, ...),
+  # only needed (and root-config only required) when C++ files are staged
+  ROOTCFLAGS=$(root-config --cflags)
+fi
 
 for FILE in $STAGED_FILES_CPP; do
   clang++ -I./narf/narf/include/ -I./wremnants/include/ ${ROOTCFLAGS} -fsyntax-only $FILE
