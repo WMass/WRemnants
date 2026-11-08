@@ -548,7 +548,7 @@ def make_muon_calibration_helper_single(
     filename=data_dir + "/calibration/correctionResults_v718_idealgeom_gensim.root",
 ):
 
-    helper = ROOT.wrem.CVHCorrectorSingle[""](filename)
+    helper = getattr(ROOT.wrem, "CVHCorrectorSingle<>")(filename)
     return helper
 
 
