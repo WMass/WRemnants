@@ -15,7 +15,7 @@ import hist
 import lz4.frame
 import numpy as np
 
-from wremnants.utilities import binning
+from wremnants.utilities import binning, common
 from wremnants.utilities.io_tools import base_io
 from wums import boostHistHelpers as hh
 from wums import ioutils, logging
@@ -962,6 +962,57 @@ def read_combined_corrs(procNames, generator, corr_files, axes=[], absy=True, re
     return h
 
 
+# The analysis datasets normalise the tau samples to the cross section after their tau decay filter, the MiNNLO
+# references and the predictions to the inclusive cross section of the parent boson.
+tau_decay_filter_factors = {
+    "Ztautau": common.Z_TAU_TO_LEP_RATIO,
+    "Wplustaunu": common.BR_TAUToMU,
+    "Wminustaunu": common.BR_TAUToMU,
+}
+tau_parent_xsecs = {
+    "Ztautau": [common.xsec_DYJetsToLL, common.xsec_DYJetsToLLMass10to50],
+    "Wplustaunu": [common.xsec_WplusJetsToLNu],
+    "Wminustaunu": [common.xsec_WminusJetsToLNu],
+}
+
+
+def inclusive_tau_xsec(sample, xsec):
+    """Inclusive parent-boson cross section of a tau sample with cross section xsec, which is either that one or the
+    one after the tau decay filter; refuses any other. Other samples are returned unchanged.
+    """
+    prefix = next((p for p in tau_decay_filter_factors if sample.startswith(p)), None)
+    if prefix is None:
+        return xsec
+    factor = tau_decay_filter_factors[prefix]
+    for parent in tau_parent_xsecs[prefix]:
+        if np.isclose(xsec, parent, rtol=1e-6, atol=0):
+            return xsec
+        if np.isclose(xsec, parent * factor, rtol=1e-6, atol=0):
+            logger.info(
+                f"The cross section of {sample} includes the tau decay filter factor {factor}; "
+                f"using the inclusive {parent} pb"
+            )
+            return parent
+    raise RuntimeError(
+        f"Cannot tell whether the cross section {xsec} pb of {sample} is inclusive or after the tau decay filter"
+    )
+
+
+def check_minnlo_procs(procs, combine_with_tau):
+    """Refuses a list of MiNNLO samples that would read a sample twice, also as the tau companion of another"""
+    read = []
+    for proc in procs:
+        read.append(proc)
+        if combine_with_tau and proc.replace("mu", "tau") != proc:
+            read.append(proc.replace("mu", "tau"))
+    duplicates = sorted({p for p in read if read.count(p) > 1})
+    if duplicates:
+        raise ValueError(
+            f"MiNNLO samples {duplicates} would be read more than once (samples {procs}, "
+            f"combine_with_tau={combine_with_tau})"
+        )
+
+
 def read_mu_hist_combine_tau(
     minnlof, mu_sample, hist_name, eras, combine_with_tau=True
 ):
@@ -981,7 +1032,9 @@ def read_mu_hist_combine_tau(
                 hmu_era = load_and_scale(
                     results, mu_sample_era, hist_name, apply_xsec=False
                 )
-                xsec_era = read_xsec(minnlof, mu_sample_era)
+                xsec_era = inclusive_tau_xsec(
+                    mu_sample, read_xsec(minnlof, mu_sample_era)
+                )
                 if xsec == 0:
                     xsec = xsec_era
                 elif xsec_era != xsec:
@@ -996,6 +1049,9 @@ def read_mu_hist_combine_tau(
 
             if combine_with_tau:
                 tau_sample_era = mu_sample_era.replace("mu", "tau")
+                if tau_sample_era == mu_sample_era:
+                    # not a muon sample (e.g. already a tau sample): reading it again would halve its variances
+                    continue
                 if tau_sample_era not in results.keys():
                     logger.warning(
                         f"Sample {tau_sample_era} not found, continue without"
