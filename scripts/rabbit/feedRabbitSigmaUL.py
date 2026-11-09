@@ -47,6 +47,13 @@ def make_parser():
         help="Input unfolded fit result for the Z sigmaUL distribution.",
     )
     parser.add_argument(
+        "--infileResult",
+        type=str,
+        default=None,
+        help="Result of the unfolding fit to read: None (default) takes the fit to data "
+        "and falls back to the Asimov one if that is all the file has; 'asimov' forces it.",
+    )
+    parser.add_argument(
         "--fitresultMapping",
         nargs="+",
         default=["Select helicitySig:0"],
@@ -159,6 +166,7 @@ def main():
         args.infile,
         args.fitresultMapping,
         args.channelSigmaUL,
+        infile_result=args.infileResult,
     )
     writer.add_sigmaul_process()
     writer.add_alphas_variation()
