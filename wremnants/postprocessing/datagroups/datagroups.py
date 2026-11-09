@@ -100,7 +100,16 @@ class Datagroups(object):
 
         self.setGenAxes()
 
-        if "lowpu" in self.mode:
+        if self.mode == "btojpsik":
+            # The BMM-Tools NanoAOD analysis: BuToJpsiK / signalBuToJpsiK /
+            # BuToJpsiPi are separate datasets, grouped by datagroups_btojpsik.
+            # Without this branch a btojpsik output falls through to
+            # datagroups_default and every simulated sample is merged into a
+            # single "Simulation" group.
+            from wremnants.postprocessing.datagroups.datagroups_btojpsik import (
+                make_datagroups_btojpsik as make_datagroups,
+            )
+        elif "lowpu" in self.mode:
             from wremnants.postprocessing.datagroups.datagroupsLowPU import (
                 make_datagroups_lowPU as make_datagroups,
             )
@@ -493,7 +502,7 @@ class Datagroups(object):
         if not self.xnorm:
             scale *= self.lumi * 1000
         gen_filter_eff = self.results[proc.name].get("gen_filter_eff", 1)
-        scale * gen_filter_eff
+        scale *= gen_filter_eff
 
         return scale
 
