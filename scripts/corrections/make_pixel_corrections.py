@@ -20,7 +20,7 @@ histnames.append("hNValidPixelHitsTrig")
 histnames.append("hNValidPixelHitsNonTrig")
 
 
-datagroups = Datagroups(args.inputFile)
+datagroups = Datagroups(args.inputFile, splitGroups=True)
 
 if datagroups.mode != "z_dilepton":
     raise ValueError("Expected input is the output from the dilepton histmaker")

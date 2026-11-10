@@ -14,6 +14,24 @@ from wums import logging
 
 logger = logging.child_logger(__name__)
 
+# production tags of the custom NanoAOD per version, tried in this order
+production_tags = {
+    "v9": {
+        "data": [
+            "TrackFitV722_NanoProdv6",
+            "TrackFitV722_NanoProdv5",
+            "TrackFitV722_NanoProdv3",
+        ],
+        "mc": [
+            "TrackFitV722_NanoProdv6",
+            "TrackFitV722_NanoProdv5",
+            "TrackFitV722_NanoProdv4",
+            "TrackFitV722_NanoProdv3",
+        ],
+    },
+    "v15": {"data": ["v1p0"], "mc": ["v1p0"]},
+}
+
 default_nfiles = {
     "Wminusmunu_2016PostVFP": 1700,
     "Wplusmunu_2016PostVFP": 2000,
@@ -117,6 +135,7 @@ def makeFilelist(
     is_data=False,
     oneMCfileEveryN=None,
     era=None,
+    nano_version="v9",
 ):
     filelist = []
     expandedPaths = []
@@ -126,7 +145,12 @@ def makeFilelist(
         # try each tag in order until files are found
         fallback = False
         for prod_tag in nano_prod_tags:
-            format_args = dict(BASE_PATH=base_path, NANO_PROD_TAG=prod_tag, ERA=era)
+            format_args = dict(
+                BASE_PATH=base_path,
+                NANO_PROD_TAG=prod_tag,
+                NANO_VERSION=nano_version.upper(),
+                ERA=era,
+            )
 
             path = orig_path.format(**format_args)
             expandedPaths.append(path)
@@ -173,7 +197,7 @@ def makeFilelist(
     return toreturn
 
 
-def getDataPath():
+def getDataPath(nanoVersion="v9"):
     import socket
 
     # Explicit override wins (containers, custom mounts, CI runners).
@@ -191,13 +215,23 @@ def getDataPath():
     if any(n.endswith(".cern.ch") for n in names):
         base_path = "/scratch/shared/NanoAOD"
     elif any(n.endswith(".mit.edu") for n in names):
-        base_path = "/scratch/submit/cms/wmass/NanoAOD"
+        if nanoVersion == "v15":
+            # output area of the NanoV15 productions (CRAB site T3_US_MIT)
+            base_path = "/ceph/submit/data/group/cms/store/group/zmass/NanoAOD"
+        else:
+            base_path = "/scratch/submit/cms/wmass/NanoAOD"
     elif "cmsanalysis.pi.infn.it" in names:
         # NOTE: If anyone wants to run lowpu analysis at Pisa they'd probably want a different path
         base_path = "/scratchnvme/wmass/NANOV9/postVFP"
     elif "cmsasymow.pi.infn.it" in names:
         base_path = "/scratch/wmass/y2016"
-    else:
+    if nanoVersion == "v15" and not any(n.endswith(".mit.edu") for n in names):
+        raise RuntimeError(
+            f"getDataPath: no default location of the NanoAOD {nanoVersion} files for host "
+            f"{short!r}. Set the WREMNANTS_DATA_PATH environment variable or pass base_path= "
+            f"to getDatasets()."
+        )
+    elif base_path is None:
         raise RuntimeError(
             f"getDataPath: no default NanoAOD location for host "
             f"{short!r} (fqdn={fqdn!r}). Set the WREMNANTS_DATA_PATH "
@@ -225,17 +259,8 @@ def getDatasets(
     aux=None,
     base_path=None,
     nanoVersion="v9",
-    data_tags=[
-        "TrackFitV722_NanoProdv6",
-        "TrackFitV722_NanoProdv5",
-        "TrackFitV722_NanoProdv3",
-    ],
-    mc_tags=[
-        "TrackFitV722_NanoProdv6",
-        "TrackFitV722_NanoProdv5",
-        "TrackFitV722_NanoProdv4",
-        "TrackFitV722_NanoProdv3",
-    ],
+    data_tags=None,
+    mc_tags=None,
     oneMCfileEveryN=None,
     checkFileForZombie=False,
     era="2016PostVFP",
@@ -245,9 +270,16 @@ def getDatasets(
     if maxFiles is None or (isinstance(maxFiles, int) and maxFiles < -1):
         maxFiles = default_nfiles
 
+    # versions without their own production tags (e.g. the low-PU v12) use the NanoV9 ones
+    version_tags = production_tags.get(nanoVersion, production_tags["v9"])
+    if data_tags is None:
+        data_tags = version_tags["data"]
+    if mc_tags is None:
+        mc_tags = version_tags["mc"]
+
     if not base_path:
-        base_path = getDataPath()
-    logger.info(f"Loading samples from {base_path}.")
+        base_path = getDataPath(nanoVersion)
+    logger.info(f"Loading NanoAOD {nanoVersion} samples from {base_path}.")
 
     module = importlib.import_module(f"wremnants.production.datasets.datasetDict_{era}")
     if extended:
@@ -295,6 +327,7 @@ def getDatasets(
             is_data=is_data,
             oneMCfileEveryN=oneMCfileEveryN,
             era=era,
+            nano_version=nanoVersion,
         )
 
         if checkFileForZombie:

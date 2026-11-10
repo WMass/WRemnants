@@ -154,6 +154,37 @@ def analysis_debug_output(results):
     logger.debug("")
 
 
+def _add_scetlib_corr_meta(meta_info, args):
+    """Record the SCETlib runcard of the central theory correction, if it has one.
+
+    A differentiable SCETlib prediction (scetlib_ad) multiplies the templates
+    written here by sigma(p) / sigma(p_anchor), so it needs the point p_anchor the
+    templates were corrected at. Never fails the histmaker.
+    """
+    theory_corr = getattr(args, "theoryCorr", None)
+    if not theory_corr:
+        return
+    # with --theoryCorrAltOnly the nominal templates are not corrected
+    applied = not bool(getattr(args, "theoryCorrAltOnly", False))
+    try:
+        from wremnants.postprocessing.scetlib_ad import corr_config
+
+        cfg_meta = corr_config.build_corr_config_meta(
+            theory_corr, applied_to_nominal=applied
+        )
+    except Exception as exc:
+        logger.warning(f"Could not record the SCETlib correction runcard: {exc}")
+        return
+    if cfg_meta:
+        meta_info[corr_config.CORR_CONFIG_META_KEY] = cfg_meta
+        logger.info(
+            f"Recorded the SCETlib runcard of {theory_corr[0]} for {sorted(cfg_meta)} "
+            f"(applied_to_nominal={applied})"
+        )
+    else:
+        logger.debug(f"No SCETlib NP runcard in the correction {theory_corr[0]}")
+
+
 def write_analysis_output(results, outfile, args, name_append=[]):
     analysis_debug_output(results)
 
@@ -203,11 +234,9 @@ def write_analysis_output(results, outfile, args, name_append=[]):
             ioutils.pickle_dump_h5py(k, v, f, override=open_as != "w")
 
         if "meta_info" not in f.keys():
-            ioutils.pickle_dump_h5py(
-                "meta_info",
-                output_tools.make_meta_info_dict(args=args, wd=common.base_dir),
-                f,
-            )
+            meta_info = output_tools.make_meta_info_dict(args=args, wd=common.base_dir)
+            _add_scetlib_corr_meta(meta_info, args)
+            ioutils.pickle_dump_h5py("meta_info", meta_info, f)
 
     logger.info(f"Writing output: {time.time()-time0}")
     logger.info(f"Output saved in {outfile}")

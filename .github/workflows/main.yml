@@ -108,12 +108,13 @@ jobs:
 
       - name: check C++ Files
         run: |
-          export ROOTINCLUDEPATH=`scripts/ci/run_with_singularity.sh python3 -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'`/ROOT/include
+          # compiler flags ROOT was built with (C++ standard, ROOT include directory, ...)
+          export ROOTCFLAGS=$(scripts/ci/run_with_singularity.sh root-config --cflags)
           # Find all C++ files and check their syntax in parallel
           find . \( -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -not -path '*/narf/*' -not -path '*/rabbit/*' -not -path '*/wremnants-data/* -not -path '*/wums/*'' | \
           xargs -P 16 -I {} bash -c '
             echo "Checking {}"
-            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ -I ${ROOTINCLUDEPATH} -std=c++20 -fsyntax-only "{}" || \
+            scripts/ci/run_with_singularity.sh clang++ -I./narf/narf/include/ -I./wremnants/include/ ${ROOTCFLAGS} -fsyntax-only "{}" || \
             { echo "Syntax error in {}"; exit 1; }
           '
 
@@ -1703,6 +1704,15 @@ jobs:
           WREMNANTS_OUTDIR: ${{ needs.setenv.outputs.WREMNANTS_OUTDIR }}
         run: |
           echo "WREMNANTS_OUTDIR=${WREMNANTS_OUTDIR}" >> $GITHUB_ENV
+
+      - name: setup kerberos
+        # copy-clean uploads to EOS from the bare runner, so it needs its own
+        # credential: the runner's ambient ccache is not ours to rely on
+        run: |
+          mkdir -p /run/user/$UID/krb5ccdir
+          KRB5CCNAME=DIR:/run/user/$UID/krb5ccdir kinit -kt ~/private/.keytab cmsmwbot@CERN.CH
+          KRB5CCNAME=DIR:/run/user/$UID/krb5ccdir klist
+          echo "KRB5CCNAME=DIR:/run/user/$UID/krb5ccdir" >> $GITHUB_ENV
 
       - name: copy clean plots
         run: |

@@ -1,6 +1,6 @@
 [submodule "narf"]
 	path = narf
-	url = https://github.com/bendavid/narf.git
+	url = https://github.com/WMass/narf.git
 [submodule "wremnants-data"]
 	path = wremnants-data
 	url = https://gitlab.cern.ch/cms-wmass/wremnants-data.git

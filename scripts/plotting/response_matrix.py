@@ -61,6 +61,7 @@ groups = Datagroups(
     args.infile,
     filterGroups=args.procFilters,
     excludeGroups=None if args.procFilters else ["QCD"],
+    splitGroups=True,
 )
 
 groups.setGenAxes(

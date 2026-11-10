@@ -62,7 +62,11 @@ if __name__ == "__main__":
     colors = mpl.colormaps["tab10"]
 
     groups = Datagroups(
-        args.infile, excludeGroups=None, extendedABCD=True, integrateHighMT=True
+        args.infile,
+        excludeGroups=None,
+        extendedABCD=True,
+        integrateHighMT=True,
+        splitGroups=True,
     )
 
     groups.loadHistsForDatagroups(

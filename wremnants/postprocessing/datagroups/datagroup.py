@@ -18,7 +18,14 @@ class Datagroup_member(object):
 class Datagroup(object):
 
     def __init__(
-        self, name, members={}, scale=None, memberOp=None, label=None, color=None
+        self,
+        name,
+        members={},
+        scale=None,
+        memberOp=None,
+        label=None,
+        color=None,
+        components=None,
     ):
         self.name = name
         self.scale = scale
@@ -31,6 +38,9 @@ class Datagroup(object):
 
         self.histselector = None  # selector object to perform selection operation
         self.memberOp = memberOp  # list of operations that is applied on single members
+        # for a group of several processes, e.g. W = Wmunu + Wtaunu: the member names
+        # of each, {process: [member names]}, see Datagroups.resolveProcesses
+        self.components = components
 
         self.hists = {}  # list of histograms processed from narf datasets
         # the same histograms keeping their MC-stat fold axis (Datagroups.mcStatFolds)
@@ -96,3 +106,10 @@ class Datagroup(object):
             self.memberOp = [v for (v, i) in zip(self.memberOp, mask) if i]
 
         self.members = [m for (m, i) in zip(self.members, mask) if i]
+
+        if self.components:
+            self.components = {
+                k: [n for n in v if n != member.name]
+                for k, v in self.components.items()
+                if [n for n in v if n != member.name]
+            }
