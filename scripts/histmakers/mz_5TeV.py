@@ -31,12 +31,8 @@ from wremnants.production.datasets.dataset_tools import getDatasets
 from wremnants.production.histmaker_tools import write_analysis_output
 
 if args.muonCorr == "rochester":
-    narf.clingutils.Load("libPhysics")
-    narf.clingutils.Load("libROOTVecOps")
-    narf.clingutils.Load("libROOTDataFrame")
     narf.clingutils.Declare('#include "lowpu_rochester.hpp"')
 elif args.muonCorr == "scarekit":
-    narf.clingutils.Load("libROOTDataFrame")
     narf.clingutils.Declare('#include "lowpu_muonscarekit.hpp"')
     scarekit_mc_helper = ROOT.wrem.MuonScarekitMCHelper(args.randomSeedForToys)
 
