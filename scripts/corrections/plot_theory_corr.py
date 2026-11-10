@@ -383,6 +383,154 @@ def make_plot_1d(
     output_tools.write_index_and_log(outdir, outfile, args=args)
 
 
+def make_plot_1d_num_den_ratio(
+    h_nums_central,
+    h_dens_central,
+    central_labels,
+    h_ratios,
+    names,
+    proc,
+    axis,
+    labels=None,
+    corr=None,
+    xmin=None,
+    xmax=None,
+    ymin=None,
+    ymax=None,
+    rmin=None,
+    rmax=None,
+    flow=True,
+    uncertainty_bands=False,
+):
+    logger.info(
+        f"Make 1D num/den + ratio plot for corr {corr} with {len(names)} ratios "
+        f"and {len(h_nums_central)} central num/den pair(s) for axis {axis}"
+    )
+
+    if flow:
+        xedges = plot_tools.extendEdgesByFlow(h_ratios[0])
+    else:
+        xedges = h_ratios[0].axes.edges[0]
+
+    # Upper panel always shows density (dN/dx); the ratio panel is unaffected
+    # since the bin-width factor would cancel between numerator and denominator.
+    binwidths = xedges[1:] - xedges[:-1]
+    h_nums_central = [
+        hh.scaleHist(h, 1.0 / binwidths, createNew=True) for h in h_nums_central
+    ]
+    h_dens_central = [
+        hh.scaleHist(h, 1.0 / binwidths, createNew=True) for h in h_dens_central
+    ]
+
+    if xmin is None:
+        xmin, xmax = (xedges[0], xedges[-1])
+
+    upper_hists = h_nums_central + h_dens_central
+    if ymin is None or ymax is None:
+        xmap = (xedges[1:] > xmin) & (xedges[:-1] < xmax)
+        ymax_data = max([max(h.values(flow=flow)[xmap]) for h in upper_hists])
+        # default lower edge is 0 so the scale of the spectra is honest
+        ymin = ymin if ymin is not None else 0
+        ymax = ymax if ymax is not None else ymax_data + 0.3 * (ymax_data - ymin)
+
+    if rmin is None or rmax is None:
+        xmap = (xedges[1:] > xmin) & (xedges[:-1] < xmax)
+        rmax_data = max([max(h.values(flow=flow)[xmap]) for h in h_ratios])
+        rmin_data = min([min(h.values(flow=flow)[xmap]) for h in h_ratios])
+        rrange = rmax_data - rmin_data
+        rmin = rmin if rmin is not None else rmin_data - 0.1 * rrange
+        rmax = rmax if rmax is not None else rmax_data + 0.1 * rrange
+
+    fig, ax, ratio_axes = plot_tools.figureWithRatio(
+        h_ratios[0],
+        xlabel=styles.axis_labels.get(axis, axis),
+        ylabel="events / bin width",
+        ylim=(ymin, ymax),
+        rlabel="correction",
+        rrange=(rmin, rmax),
+        xlim=(xmin, xmax),
+        width_scale=1.2,
+        automatic_scale=False,
+    )
+    # figureWithRatio hardcodes labelpad=40 on the y-labels, which reserves
+    # ~half an inch of empty space to the left of the spine that
+    # bbox_inches="tight" then preserves on save. Reset to a sane default.
+    ax.yaxis.labelpad = 5
+    for rax_ in ratio_axes:
+        rax_.yaxis.labelpad = 5
+    rax = ratio_axes[0]
+
+    rax.plot(
+        [min(xedges), max(xedges)], [1, 1], color="black", linestyle="--", zorder=-1
+    )
+
+    # hide tick labels on the upper panel x-axis (numbers belong on the ratio panel)
+    ax.tick_params(axis="x", which="both", labelbottom=False)
+
+    # upper panel: one solid (num=SCETlib+DYTurbo) + one dashed (den=MiNNLO) per corr
+    n_central = max(1, len(h_nums_central))
+    multi = n_central > 1
+    for i, (hn, hd) in enumerate(zip(h_nums_central, h_dens_central)):
+        c = colors((i + 0.5) / n_central)
+        clbl = central_labels[i] if central_labels else None
+        num_label = (
+            f"SCETlib + DYTurbo ({clbl})" if (multi and clbl) else "SCETlib + DYTurbo"
+        )
+        den_label = f"MiNNLO ({clbl})" if (multi and clbl) else "MiNNLO"
+        ax.stairs(hn.values(flow=flow), xedges, color=c, linestyle="-", label=num_label)
+        ax.stairs(
+            hd.values(flow=flow), xedges, color=c, linestyle="--", label=den_label
+        )
+
+    # ratio panel: every variation
+    NUM_COLORS = max(1, len(h_ratios) - 2)
+    for i, h_ratio in enumerate(h_ratios):
+        y = h_ratio.values(flow=flow)
+        rax.stairs(y, xedges, color=colors((i - 0.5) / NUM_COLORS), label=labels[i])
+        if uncertainty_bands:
+            err = np.sqrt(h_ratio.variances(flow=flow))
+            rax.bar(
+                x=xedges[:-1],
+                height=2 * err,
+                bottom=y - err,
+                width=np.diff(xedges),
+                align="edge",
+                linewidth=0,
+                alpha=0.3,
+                color=colors(i),
+                zorder=-1,
+            )
+
+    text_size = plot_tools.get_textsize(ax, None)
+    ax.text(
+        0.02,
+        0.98,
+        styles.text_dict.get(proc, proc),
+        transform=ax.transAxes,
+        fontsize=text_size,
+        verticalalignment="top",
+        horizontalalignment="left",
+    )
+    plot_tools.addLegend(ax, ncols=1)
+    plot_tools.addLegend(rax, ncols=1 + int(len(names) / 7))
+
+    plot_tools.add_cms_decor(
+        ax,
+        args.cmsDecor,
+        data=False,
+        lumi=None,
+        loc=0,
+    )
+
+    outfile = f"hist_numden_{axis}_{proc}"
+    if corr:
+        outfile += f"_{corr}"
+    if args.postfix:
+        outfile += f"_{args.postfix}"
+    plot_tools.save_pdf_and_png(outdir, outfile)
+    output_tools.write_index_and_log(outdir, outfile, args=args)
+
+
 for dataset, corr_hists in corr_dict.items():
     logger.info(f"Now at {dataset}")
     base_proc = dataset.replace("PostVFP", "")
@@ -412,6 +560,11 @@ for dataset, corr_hists in corr_dict.items():
         all_names = []
         all_labels = []
         all_axes = []
+        # track which index in all_hists_num / all_hists_den is the central
+        # for each corr entry, plus a human label for the legend
+        central_num_idxs = []
+        central_den_idxs = []
+        central_corr_labels = []
 
         for corr, corrh in corr_hists.items():
             proc = base_proc
@@ -522,6 +675,11 @@ for dataset, corr_hists in corr_dict.items():
                 hists_den = list(corrh_den_systs.values())
                 hists_num = list(corrh_num_systs.values())
 
+            # record per-corr central entry (first slot just added)
+            central_num_idxs.append(len(all_hists_num))
+            central_den_idxs.append(len(all_hists_den))
+            central_corr_labels.append(corr)
+
             all_hists += hists
             all_hists_den += hists_den
             all_hists_num += hists_num
@@ -591,12 +749,13 @@ for dataset, corr_hists in corr_dict.items():
 
                 if len(all_hists[0].axes) > 1:
                     # lower dimensional projection, do projection on numerator and denominator and recompute ratio
-                    hists_1d = [
-                        hh.divideHists(n.project(axis), d.project(axis))
-                        for n, d in zip(all_hists_num, all_hists_den)
-                    ]
+                    nums_1d = [n.project(axis) for n in all_hists_num]
+                    dens_1d = [d.project(axis) for d in all_hists_den]
+                    hists_1d = [hh.divideHists(n, d) for n, d in zip(nums_1d, dens_1d)]
                 else:
                     # have 1D correction, can use correction directly
+                    nums_1d = all_hists_num[:]
+                    dens_1d = all_hists_den[:]
                     hists_1d = all_hists[:]
 
                 make_plot_1d(
@@ -614,6 +773,31 @@ for dataset, corr_hists in corr_dict.items():
                     uncertainty_bands=args.showUncertainties,
                     extra_text=mass_text,
                     outfile_suffix=mass_suffix,
+                )
+
+                # central num/den per corr, with bounds-checking in case a
+                # given num/den hist didn't carry the syst axis (one entry only)
+                nums_central = [
+                    nums_1d[i if i < len(nums_1d) else 0] for i in central_num_idxs
+                ]
+                dens_central = [
+                    dens_1d[i if i < len(dens_1d) else 0] for i in central_den_idxs
+                ]
+
+                make_plot_1d_num_den_ratio(
+                    nums_central,
+                    dens_central,
+                    central_corr_labels,
+                    hists_1d,
+                    all_names,
+                    proc,
+                    axis,
+                    labels=all_labels,
+                    flow=not args.noFlow,
+                    corr="all",
+                    xmin=args.xlim[0] if args.xlim else None,
+                    xmax=args.xlim[1] if args.xlim else None,
+                    uncertainty_bands=args.showUncertainties,
                 )
 
 if output_tools.is_eosuser_path(args.outpath) and args.eoscp:
