@@ -233,7 +233,7 @@ proxy_gen_v(const ROOT::Math::PtEtaPhiMVector lep_gen,
             const ROOT::Math::PtEtaPhiMVector trg_lep, int trg_charge) {
   ROOT::Math::PxPyPzEVector res;
 
-  if (trg_charge == 1) {
+  if (trg_charge > 0) {
     res =
         ROOT::Math::PxPyPzEVector(lep_gen) + ROOT::Math::PxPyPzEVector(trg_lep);
   } else {

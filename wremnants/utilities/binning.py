@@ -403,6 +403,7 @@ def get_unfolding_dilepton_axes(
     add_out_of_acceptance_axis=False,
     flow_y=False,
     rebin_pt=None,
+    edges_override=None,
 ):
     """
     construct axes, columns, and selections for differential Z dilepton measurement from correponding reco edges. Currently supported: pT(Z), |yZ|
@@ -411,7 +412,10 @@ def get_unfolding_dilepton_axes(
     reco_edges (dict of lists): the key is the corresponding reco axis name and the values the edges
     gen_level (str): generator level definition (e.g. `prefsr`, `postfsr`)
     add_out_of_acceptance_axis (boolean): To add a boolean axis for the use of out of acceptance contribution
+    edges_override (dict of lists, optional): explicit edges for the named gen axes
+        (e.g. {"ptVGen": [...]}) instead of the ones derived from `reco_edges`
     """
+    edges_override = edges_override or {}
 
     axes = []
     cols = []
@@ -426,9 +430,12 @@ def get_unfolding_dilepton_axes(
         cols.append(f"{gen_level}V_{var}")
 
         if v == "ptVGen":
-            edges = reco_edges["ptll"]
-            if rebin_pt is not None:
-                edges = rebin_pt(edges)
+            if v in edges_override:
+                edges = np.asarray(edges_override[v], dtype=float)
+            else:
+                edges = reco_edges["ptll"]
+                if rebin_pt is not None:
+                    edges = rebin_pt(edges)
 
             axes.append(
                 hist.axis.Variable(
@@ -436,19 +443,23 @@ def get_unfolding_dilepton_axes(
                 ),
             )
         elif v == "absYVGen":
-            # 1 absYVGen for 2 yll bins (negative and positive)
-            edges = reco_edges["yll"]
-            if edges[len(edges) // 2] != 0:
-                raise RuntimeError("Central bin edge must be 0")
+            if v in edges_override:
+                abs_edges = np.asarray(edges_override[v], dtype=float)
+            else:
+                # 1 absYVGen for 2 yll bins (negative and positive)
+                edges = reco_edges["yll"]
+                if edges[len(edges) // 2] != 0:
+                    raise RuntimeError("Central bin edge must be 0")
+                abs_edges = np.asarray(edges[len(edges) // 2 :], dtype=float)
             axes.append(
                 hist.axis.Variable(
-                    edges[len(edges) // 2 :],
+                    abs_edges,
                     name="absYVGen",
                     underflow=False,
                     overflow=flow_y,
                 ),
             )
-            selections.append(f"{gen_level}V_absY < {edges[-1]}")
+            selections.append(f"{gen_level}V_absY < {abs_edges[-1]}")
         elif v in ["qVGen"]:
             axes.append(
                 hist.axis.Regular(

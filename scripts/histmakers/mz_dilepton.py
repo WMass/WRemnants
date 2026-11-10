@@ -21,10 +21,12 @@ from wremnants.production import (
     muon_efficiencies_smooth,
     muon_prefiring,
     muon_selections,
+    nano_compat,
     pileup,
     systematics,
     theory_corrections,
     theoryAgnostic_tools,
+    top_corrections,
     unfolding_tools,
     vertex,
 )
@@ -145,6 +147,16 @@ parser.add_argument(
     help="Apply quark-mass correction generators as additional theory variations.",
 )
 parser.add_argument(
+    "--responseGenBinning",
+    type=str,
+    default="none",
+    choices=["none", "theoryCorr"],
+    help="With 'theoryCorr', also write a response matrix on the gen grid of the "
+    "first --theoryCorr file ('nominal_<level>_yieldsResponse', reco x gen, and the "
+    "gen total '<level>_response'), next to the unchanged --unfoldingAxes binning. "
+    "Requires --unfolding --poiAsNoi.",
+)
+parser.add_argument(
     "--splitSampleInN",
     type=int,
     default=-1,
@@ -199,6 +211,9 @@ parser = parsing.set_parser_default(
 args = parser.parse_args()
 
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
+
+if args.responseGenBinning != "none" and not args.unfolding:
+    raise ValueError("--responseGenBinning needs --unfolding")
 
 if args.dxybsVeto > 0 and args.dxybsVeto < args.dxybs:
     raise ValueError("When using together '--dxybsVeto X --dxybs Y' it must be X > Y.")
@@ -284,7 +299,7 @@ datasets = getDatasets(
     filt=args.filterProcs,
     excl=args.excludeProcs,
     aux=args.auxiliaryProcs,
-    nanoVersion="v9",
+    nanoVersion=args.nanoVersion,
     base_path=args.dataPath,
     extended="msht20an3lo" not in args.pdfs,
     oneMCfileEveryN=args.oneMCfileEveryN,
@@ -644,6 +659,32 @@ if args.unfolding:
             "mass_max": mass_max,
         }
 
+    response_gen_edges = None
+    response_corr_edges = None
+    if args.responseGenBinning == "theoryCorr":
+        if not args.theoryCorr or not args.poiAsNoi:
+            raise ValueError(
+                "--responseGenBinning theoryCorr needs --theoryCorr and --poiAsNoi "
+                "(the reco x gen histogram only exists in the poi-as-noi path)"
+            )
+        # The correction is applied as a bin lookup on its own grid, so a response
+        # on that grid folds a prediction of the same correction exactly. qT keeps
+        # the correction's full range; |Y| stops at the gen acceptance edge.
+        response_corr_edges = theory_corrections.get_corr_grid_edges(
+            args.theoryCorr[0], "Z"
+        )
+        y_max = max(all_axes["yll"].edges)
+        abs_y_edges = [e for e in response_corr_edges["absY"] if e <= y_max + 1e-9]
+        if abs(abs_y_edges[-1] - y_max) > 1e-9:
+            raise ValueError(
+                f"The |Y| acceptance edge {y_max} is not an edge of the absY grid of "
+                f"{args.theoryCorr[0]}"
+            )
+        response_gen_edges = {
+            "ptVGen": list(response_corr_edges["qT"]),
+            "absYVGen": abs_y_edges,
+        }
+
     unfolder_z = unfolding_tools.UnfolderZ(
         reco_axes_edges={a: all_axes[a].edges for a in args.axes},
         unfolding_axes_names=args.unfoldingAxes,
@@ -651,6 +692,8 @@ if args.unfolding:
         poi_as_noi=args.poiAsNoi,
         fitresult=args.fitresult,
         cutsmap=cutsmap,
+        response_gen_edges=response_gen_edges,
+        response_corr_edges=response_corr_edges,
     )
 
     if not args.poiAsNoi:
@@ -762,6 +805,7 @@ diff_weights_helper = (
     scale_e=args.scale_e,
     scale_M=args.scale_M,
     make_uncertainty_helper=True,
+    smearing=not args.noSmearing,
 )
 z_non_closure_parametrized_helper, z_non_closure_binned_helper = (
     muon_calibration.make_Z_non_closure_helpers(
@@ -774,17 +818,29 @@ mc_calibration_helper, data_calibration_helper, calibration_uncertainty_helper =
 )
 
 closure_unc_helper = muon_calibration.make_closure_uncertainty_helper(
-    common.closure_filepaths["parametrized"]
+    common.closure_filepaths["parametrized"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 closure_unc_helper_A = muon_calibration.make_uniform_closure_uncertainty_helper(
-    0, common.correlated_variation_base_size["A"]
+    0,
+    common.correlated_variation_base_size["A"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 closure_unc_helper_M = muon_calibration.make_uniform_closure_uncertainty_helper(
-    2, common.correlated_variation_base_size["M"]
+    2,
+    common.correlated_variation_base_size["M"],
+    scale_var_method=args.muonScaleVariation,
+    smearing=not args.noSmearing,
 )
 
 smearing_helper, smearing_uncertainty_helper = (
-    (None, None) if args.noSmearing else muon_calibration.make_muon_smearing_helpers()
+    (None, None)
+    if args.noSmearing
+    else muon_calibration.make_muon_smearing_helpers(
+        scale_var_method=args.muonScaleVariation,
+    )
 )
 
 smearinggradhelper = muon_calibration.make_smearing_grad_helper()
@@ -850,10 +906,18 @@ if args.quarkMassCorr:
         corr_helpers.setdefault(proc, {})
         corr_helpers[proc].update(helper_map)
 
+# recoil calibration inputs and validation histograms (--recoilHists), as in the W-like
+recoilHelper = None
+if args.recoilHists and not args.noRecoil:
+    from wremnants.production import recoil_tools
+
+    recoilHelper = recoil_tools.Recoil("highPU", args, flavor="mumu")
+
 
 def build_graph(df, dataset):
     logger.info(f"build graph for dataset: {dataset.name}")
     results = []
+    df = nano_compat.define_nano_compat(df, args.nanoVersion)
     isW = dataset.name in samples.wprocs
     isZ = dataset.name in samples.zprocs
     isWorZ = isW or isZ
@@ -1428,6 +1492,11 @@ def build_graph(df, dataset):
             )
             weight_expr += "*insituCentralW"
 
+        if dataset.group == "Top":
+            # NNLO QCD + NLO EW over POWHEG+Pythia8, applied to the ttbar samples
+            df = top_corrections.define_top_pt_weight(df, dataset.name)
+            weight_expr += "*topPtWeight"
+
         logger.debug(f"Experimental weight defined: {weight_expr}")
         df = df.Define("exp_weight", weight_expr)
         df = theory_corrections.define_theory_weights_and_corrs(
@@ -1437,6 +1506,10 @@ def build_graph(df, dataset):
             args,
             helicity_smoothing_helpers=helicity_smoothing_helpers,
         )
+
+        if dataset.group == "Top":
+            # the size of the top pt reweighting itself is taken as its uncertainty
+            df = df.Define("nominal_weight_noTopPt", "nominal_weight/topPtWeight")
 
         df = df.Define(
             "Mupluscor_mom4",
@@ -1465,6 +1538,11 @@ def build_graph(df, dataset):
         )
         df = df.Define(
             "ptv", "std::array<double, 2>{Mupluscor_mom4.pt(), Muminuscor_mom4.pt()}"
+        )
+
+    if recoilHelper is not None:
+        df = recoilHelper.recoil_Z_muons(
+            df, results, dataset, first="firstMuons", second="secondMuons"
         )
 
     if args.cvhEfficiencyHists:
@@ -2041,6 +2119,15 @@ def build_graph(df, dataset):
 
             results.append(df.HistoBoost(channel, axes, [*cols, "nominal_weight"]))
 
+            if dataset.group == "Top":
+                systematics.add_syst_hist(
+                    results,
+                    df,
+                    f"{channel}_topPtNNLO",
+                    axes,
+                    [*cols, "nominal_weight_noTopPt"],
+                )
+
             if isZ:
                 # theory agnostic stuff
                 theoryAgnostic_axes, theoryAgnostic_cols = (
@@ -2299,19 +2386,25 @@ def build_graph(df, dataset):
                         f"{reco_sel_GF}_genEta",
                         f"{reco_sel_GF}_genCharge",
                     ]
+                    response_weight_col = f"{reco_sel_GF}_response_weight"
                     if diff_weights_helper:
                         df = df.Define(
-                            f"{reco_sel_GF}_response_weight",
+                            response_weight_col,
                             diff_weights_helper,
                             [*input_kinematics],
                         )
-                        input_kinematics.append(f"{reco_sel_GF}_response_weight")
 
                     # muon scale variation from stats. uncertainty on the jpsi massfit
+                    df, _scale_cols = muon_calibration.jpsi_style_cols(
+                        df,
+                        data_jpsi_crctn_unc_helper,
+                        reco_sel_GF,
+                        response_weight_col,
+                    )
                     df = df.Define(
                         "nominal_muonScaleSyst_responseWeights_tensor",
                         data_jpsi_crctn_unc_helper,
-                        [*input_kinematics, "nominal_weight"],
+                        [*_scale_cols, "nominal_weight"],
                     )
                     muonScaleSyst_responseWeights = df.HistoBoost(
                         f"{channel}_muonScaleSyst_responseWeights",
@@ -2332,43 +2425,51 @@ def build_graph(df, dataset):
                         base_name=channel,
                     )
 
-                    # add pixel multiplicity uncertainties
-                    df = df.Define(
-                        "nominal_pixelMultiplicitySyst_tensor",
-                        pixel_multiplicity_uncertainty_helper,
-                        [*pixel_multiplicity_cols, "nominal_weight"],
-                    )
-                    hist_pixelMultiplicitySyst = df.HistoBoost(
-                        f"{channel}_pixelMultiplicitySyst",
-                        axes,
-                        [*cols, "nominal_pixelMultiplicitySyst_tensor"],
-                        tensor_axes=pixel_multiplicity_uncertainty_helper.tensor_axes,
-                        storage=hist.storage.Double(),
-                    )
-                    results.append(hist_pixelMultiplicitySyst)
-
-                    if args.pixelMultiplicityStat:
+                    # pixel multiplicity uncertainties, only for the v9 CVH refit: the v15
+                    # track fit fixes the pixel hit multiplicity
+                    if args.nanoVersion == "v9":
                         df = df.Define(
-                            "nominal_pixelMultiplicityStat_tensor",
-                            pixel_multiplicity_uncertainty_helper_stat,
+                            "nominal_pixelMultiplicitySyst_tensor",
+                            pixel_multiplicity_uncertainty_helper,
                             [*pixel_multiplicity_cols, "nominal_weight"],
                         )
-                        hist_pixelMultiplicityStat = df.HistoBoost(
-                            f"{channel}_pixelMultiplicityStat",
+                        hist_pixelMultiplicitySyst = df.HistoBoost(
+                            f"{channel}_pixelMultiplicitySyst",
                             axes,
-                            [*cols, "nominal_pixelMultiplicityStat_tensor"],
-                            tensor_axes=pixel_multiplicity_uncertainty_helper_stat.tensor_axes,
+                            [*cols, "nominal_pixelMultiplicitySyst_tensor"],
+                            tensor_axes=pixel_multiplicity_uncertainty_helper.tensor_axes,
                             storage=hist.storage.Double(),
                         )
-                        results.append(hist_pixelMultiplicityStat)
+                        results.append(hist_pixelMultiplicitySyst)
+
+                        if args.pixelMultiplicityStat:
+                            df = df.Define(
+                                "nominal_pixelMultiplicityStat_tensor",
+                                pixel_multiplicity_uncertainty_helper_stat,
+                                [*pixel_multiplicity_cols, "nominal_weight"],
+                            )
+                            hist_pixelMultiplicityStat = df.HistoBoost(
+                                f"{channel}_pixelMultiplicityStat",
+                                axes,
+                                [*cols, "nominal_pixelMultiplicityStat_tensor"],
+                                tensor_axes=pixel_multiplicity_uncertainty_helper_stat.tensor_axes,
+                                storage=hist.storage.Double(),
+                            )
+                            results.append(hist_pixelMultiplicityStat)
 
                     if args.nonClosureScheme in ["A-M-separated", "A-only"]:
                         # add the ad-hoc Z non-closure nuisances from the jpsi massfit to muon scale unc
                         df = df.DefinePerSample("AFlag", "0x01")
+                        df, _znc_cols = muon_calibration.jpsi_style_cols(
+                            df,
+                            z_non_closure_parametrized_helper,
+                            reco_sel_GF,
+                            response_weight_col,
+                        )
                         df = df.Define(
                             "Z_non_closure_parametrized_A",
                             z_non_closure_parametrized_helper,
-                            [*input_kinematics, "nominal_weight", "AFlag"],
+                            [*_znc_cols, "nominal_weight", "AFlag"],
                         )
                         hist_Z_non_closure_parametrized_A = df.HistoBoost(
                             f"{channel}_Z_non_closure_parametrized_A",
@@ -2385,10 +2486,16 @@ def build_graph(df, dataset):
                         "M-only",
                     ]:
                         df = df.DefinePerSample("MFlag", "0x04")
+                        df, _znc_cols = muon_calibration.jpsi_style_cols(
+                            df,
+                            z_non_closure_parametrized_helper,
+                            reco_sel_GF,
+                            response_weight_col,
+                        )
                         df = df.Define(
                             "Z_non_closure_parametrized_M",
                             z_non_closure_parametrized_helper,
-                            [*input_kinematics, "nominal_weight", "MFlag"],
+                            [*_znc_cols, "nominal_weight", "MFlag"],
                         )
                         hist_Z_non_closure_parametrized_M = df.HistoBoost(
                             f"{channel}_Z_non_closure_parametrized_M",
@@ -2401,10 +2508,16 @@ def build_graph(df, dataset):
 
                     if args.nonClosureScheme == "A-M-combined":
                         df = df.DefinePerSample("AMFlag", "0x01 | 0x04")
+                        df, _znc_cols = muon_calibration.jpsi_style_cols(
+                            df,
+                            z_non_closure_parametrized_helper,
+                            reco_sel_GF,
+                            response_weight_col,
+                        )
                         df = df.Define(
                             "Z_non_closure_parametrized",
                             z_non_closure_parametrized_helper,
-                            [*input_kinematics, "nominal_weight", "AMFlag"],
+                            [*_znc_cols, "nominal_weight", "AMFlag"],
                         )
                         hist_Z_non_closure_parametrized = df.HistoBoost(
                             (
@@ -2420,10 +2533,16 @@ def build_graph(df, dataset):
                         results.append(hist_Z_non_closure_parametrized)
 
                     # extra uncertainties from non-closure stats
+                    df, _clos_cols = muon_calibration.jpsi_style_cols(
+                        df,
+                        closure_unc_helper,
+                        reco_sel_GF,
+                        response_weight_col,
+                    )
                     df = df.Define(
                         "muonScaleClosSyst_responseWeights_tensor_splines",
                         closure_unc_helper,
-                        [*input_kinematics, "nominal_weight"],
+                        [*_clos_cols, "nominal_weight"],
                     )
                     nominal_muonScaleClosSyst_responseWeights = df.HistoBoost(
                         f"{channel}_muonScaleClosSyst_responseWeights",
@@ -2435,10 +2554,16 @@ def build_graph(df, dataset):
                     results.append(nominal_muonScaleClosSyst_responseWeights)
 
                     # extra uncertainties for A (fully correlated)
+                    df, _closA_cols = muon_calibration.jpsi_style_cols(
+                        df,
+                        closure_unc_helper_A,
+                        reco_sel_GF,
+                        response_weight_col,
+                    )
                     df = df.Define(
                         "muonScaleClosASyst_responseWeights_tensor_splines",
                         closure_unc_helper_A,
-                        [*input_kinematics, "nominal_weight"],
+                        [*_closA_cols, "nominal_weight"],
                     )
                     nominal_muonScaleClosASyst_responseWeights = df.HistoBoost(
                         f"{channel}_muonScaleClosASyst_responseWeights",
@@ -2450,10 +2575,16 @@ def build_graph(df, dataset):
                     results.append(nominal_muonScaleClosASyst_responseWeights)
 
                     # extra uncertainties for M (fully correlated)
+                    df, _closM_cols = muon_calibration.jpsi_style_cols(
+                        df,
+                        closure_unc_helper_M,
+                        reco_sel_GF,
+                        response_weight_col,
+                    )
                     df = df.Define(
                         "muonScaleClosMSyst_responseWeights_tensor_splines",
                         closure_unc_helper_M,
-                        [*input_kinematics, "nominal_weight"],
+                        [*_closM_cols, "nominal_weight"],
                     )
                     nominal_muonScaleClosMSyst_responseWeights = df.HistoBoost(
                         f"{channel}_muonScaleClosMSyst_responseWeights",

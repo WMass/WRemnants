@@ -20,6 +20,16 @@ parser.add_argument(
     "--ratioToData", action="store_true", help="Use data as denominator in ratio"
 )
 parser.add_argument(
+    "--stackOrder",
+    type=str,
+    nargs="*",
+    default=[],
+    help="Group names to force to the BOTTOM of the stack, in that order, "
+    "overriding the default sort by yield. Groups not named keep their "
+    "yield-sorted position above them. Useful when one component dwarfs the "
+    "rest and is more readable underneath them than on top.",
+)
+parser.add_argument(
     "-n",
     "--baseName",
     type=str,
@@ -69,6 +79,13 @@ parser.add_argument(
     help="Rebin before the selection operation (e.g. before fake rate computation), default if after",
 )
 parser.add_argument("--logy", action="store_true", help="Enable log scale for y axis")
+parser.add_argument(
+    "--logx",
+    action="store_true",
+    help="Enable log scale for x axis. Needed for axes whose bin edges are "
+    "log-spaced -- makeStackPlotWithRatio already supported it, this only "
+    "exposes it.",
+)
 parser.add_argument(
     "--procFilters",
     type=str,
@@ -532,6 +549,22 @@ if addVariation:
         unstack.append(varname)
 
 groups.sortByYields(args.baseName, nominalName=nominalName)
+
+if args.stackOrder:
+    # `prednames` below is the REVERSED group order, so a group that should sit at
+    # the bottom of the stack has to be last in the dict.
+    missing = [n for n in args.stackOrder if n not in groups.groups]
+    if missing:
+        raise ValueError(
+            f"--stackOrder names groups that are not present: {missing}. "
+            f"Available: {list(groups.groups)}"
+        )
+    rest = [n for n in groups.groups if n not in args.stackOrder]
+    groups.groups = {
+        n: groups.groups[n] for n in rest + list(reversed(args.stackOrder))
+    }
+    logger.info("Stack order forced, bottom first: %s", args.stackOrder)
+
 histInfo = groups.groups
 
 logger.info(f"Unstacked processes are {exclude}")
@@ -614,7 +647,11 @@ for h in args.hists:
             collapseSyst(x[select]), h, overflow_ax
         )
         action = base_action
-        href = h if h != "ptVgen" else ("ptWgen" if "Wmunu" in prednames else "ptZgen")
+        href = (
+            h
+            if h != "ptVgen"
+            else ("ptWgen" if {"W", "Wmunu"} & set(prednames) else "ptZgen")
+        )
 
     if groups.flavor in ["e", "ee"]:
         xlabel = xlabel.replace(r"\mu", "e")
@@ -629,6 +666,7 @@ for h in args.hists:
         ylim=args.ylim,
         yscale=args.yscale,
         logy=args.logy,
+        logx=args.logx,
         fill_between=args.fillBetween if hasattr(args, "fillBetween") else None,
         lower_panel_variations=(
             args.lowerPanelVariations if hasattr(args, "lowerPanelVariations") else 0

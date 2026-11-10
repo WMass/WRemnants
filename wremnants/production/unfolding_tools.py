@@ -187,7 +187,14 @@ def add_xnorm_histograms(
     unfolding_cols,
     base_name="xnorm",
     add_helicity_axis=False,
+    selection=None,
 ):
+    """Fill a gen-level (xnorm) total and its theory systematics.
+
+    ``selection`` (optional) is applied after the weight definitions, and the
+    returned node is the weighted but unselected one, so that a second gen total
+    with a different selection can reuse the same weight definitions.
+    """
     # add histograms before any selection
     df_xnorm = df
     df_xnorm = df_xnorm.DefinePerSample("exp_weight", "1.0")
@@ -201,6 +208,10 @@ def add_xnorm_histograms(
     )
 
     df_xnorm = df_xnorm.Define("xnorm", "0.5")
+
+    df_weighted = df_xnorm
+    if selection is not None:
+        df_xnorm = df_xnorm.Filter(selection)
 
     axis_xnorm = hist.axis.Regular(
         1, 0.0, 1.0, name="count", underflow=False, overflow=False
@@ -243,7 +254,7 @@ def add_xnorm_histograms(
         nhelicity=9,
     )
 
-    return df_xnorm
+    return df_weighted
 
 
 def reweight_to_fitresult(filename, result=None, mapping=None, channel=None):
@@ -349,6 +360,26 @@ def rebin_pt(edges):
     return new_edges
 
 
+def _corr_axis_gen_selection(corr_axis, edges, gen_level):
+    """Gen selection restricting events to the range of a theory-correction axis
+    that is not a gen axis of the response, so that the response gen total counts
+    the same phase space as the prediction on the correction's grid."""
+    if corr_axis == "Q":
+        if len(edges) != 2:
+            raise ValueError(
+                f"The response gen total needs a correction with a single Q bin, "
+                f"got Q edges {list(edges)}"
+            )
+        return (
+            f"{gen_level}V_mass > {float(edges[0]):.10g} && "
+            f"{gen_level}V_mass < {float(edges[-1]):.10g}"
+        )
+    raise ValueError(
+        f"No gen selection is known for the theory correction's {corr_axis!r} "
+        "axis, which is not a gen axis of the response either"
+    )
+
+
 class UnfolderZ:
     """
     To be used in histmakers to define columns and add histograms for unfolding of Z dilepton kinematics
@@ -365,6 +396,8 @@ class UnfolderZ:
         fitresult_mapping=f"Select",
         fitresult_channel="ch0_masked",
         low_pu=False,
+        response_gen_edges=None,
+        response_corr_edges=None,
     ):
         self.analysis_label = "z_lowpu" if low_pu else "z_dilepton"
         self.cutsmap = cutsmap
@@ -429,6 +462,70 @@ class UnfolderZ:
                             Found unfolding axis {ax}\n
                             And weightsByHelicity_helper axis {wbh_axis}
                             """)
+
+        # Optional second set of gen axes for a response matrix on the theory
+        # correction's grid, next to (and leaving untouched) the unfolding axes. No
+        # helicity axis: filled with nominal_weight, i.e. the helicity sum.
+        self.response_gen_edges = response_gen_edges
+        self.response_axes = {}
+        self.response_cols = {}
+        if response_gen_edges:
+            names = [n for n in unfolding_axes_names if n != "helicitySig"]
+            for level in self.unfolding_levels:
+                a, c, _ = binning.get_unfolding_dilepton_axes(
+                    names,
+                    reco_axes_edges,
+                    level,
+                    flow_y=self.poi_as_noi,
+                    add_out_of_acceptance_axis=self.poi_as_noi,
+                    rebin_pt=rebin_pt,
+                    edges_override=response_gen_edges,
+                )
+                self.response_axes[level] = a
+                self.response_cols[level] = c
+                logger.info(
+                    f"Response-matrix gen axes ({level}): "
+                    + ", ".join(
+                        f"{ax.name} {ax.size} bins"
+                        + (f" up to {ax.edges[-1]:g}" if hasattr(ax, "edges") else "")
+                        for ax in a
+                    )
+                )
+
+        # Selection of the response gen total: the correction axes that are not
+        # gen axes of the response (today Q) become explicit cuts.
+        self.response_gen_selections = {}
+        if self.response_axes:
+            if not self.poi_as_noi:
+                raise RuntimeError(
+                    "A response matrix on the theory correction's gen grid needs "
+                    "poi_as_noi (otherwise the gen histograms are already "
+                    "acceptance-filtered)"
+                )
+            if not response_corr_edges:
+                raise ValueError(
+                    "response_gen_edges needs response_corr_edges, the full grid "
+                    "of the correction (get_corr_grid_edges)"
+                )
+            gen_axis_names = {
+                theory_corrections.GEN_TO_CORR_AXIS.get(name, name)
+                for name in response_gen_edges
+            }
+            needs_cut = sorted(set(response_corr_edges) - gen_axis_names)
+            for level in self.unfolding_levels:
+                self.response_gen_selections[level] = [
+                    _corr_axis_gen_selection(c, response_corr_edges[c], level)
+                    for c in needs_cut
+                ]
+            logger.info(
+                "Response gen-total selection (correction axes "
+                f"{needs_cut} are not gen axes of the response, the rest are "
+                "handled by the binning): "
+                + (
+                    " && ".join(self.response_gen_selections[self.unfolding_levels[0]])
+                    or "none needed"
+                )
+            )
 
         self.unfolding_corr_helper = (
             reweight_to_fitresult(
@@ -506,14 +603,11 @@ class UnfolderZ:
                     base_name=f"{level}_full",
                 )
 
-                if self.poi_as_noi:
-                    df_xnorm = df.Filter(f"{level}_acceptance")
-                else:
-                    df_xnorm = df
-
-                add_xnorm_histograms(
+                # Weights defined once; the fiducial gen total takes the
+                # acceptance selection, the response gen total its own below.
+                df_weighted = add_xnorm_histograms(
                     results,
-                    df_xnorm,
+                    df,
                     args,
                     dataset.name,
                     corr_helpers,
@@ -526,7 +620,33 @@ class UnfolderZ:
                     ],
                     add_helicity_axis=self.add_helicity_axis,
                     base_name=level,
+                    selection=(f"{level}_acceptance" if self.poi_as_noi else None),
                 )
+
+                if self.response_axes:
+                    # Response gen total: same weights, no acceptance cut, the
+                    # correction's phase space instead.
+                    df_response = df_weighted
+                    for selection in self.response_gen_selections[level]:
+                        df_response = df_response.Filter(selection)
+                    results.append(
+                        df_response.HistoBoost(
+                            f"{level}_response",
+                            [
+                                a
+                                for a in self.response_axes[level]
+                                if a.name != "acceptance"
+                            ],
+                            [
+                                *[
+                                    c
+                                    for c in self.response_cols[level]
+                                    if c != f"{level}_acceptance"
+                                ],
+                                "nominal_weight",
+                            ],
+                        )
+                    )
 
         return df
 
@@ -579,5 +699,19 @@ class UnfolderZ:
                         f"{noiAsPoiHistName}_theory_weight",
                         yield_axes,
                         [*yield_cols, f"theory_weight_{level}"],
+                    )
+                )
+
+            if self.response_axes:
+                # reco x gen on the response grid, summed over helicities
+                results.append(
+                    df.HistoBoost(
+                        f"nominal_{level}_yieldsResponse",
+                        [*nominal_axes, *self.response_axes[level]],
+                        [
+                            *nominal_cols,
+                            *self.response_cols[level],
+                            "nominal_weight",
+                        ],
                     )
                 )

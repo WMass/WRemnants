@@ -698,6 +698,51 @@ def load_corr_hist(filename, proc, histname):
     return corrh
 
 
+def get_corr_grid_edges(
+    generator,
+    proc_label="Z",
+    base_dir=f"{common.data_dir}/TheoryCorrections/",
+    minnlo_ratio=True,
+):
+    """Bin edges {axis_name: edges} of the kinematic axes of a theory correction.
+
+    The correction is applied as a bin lookup on this grid, so a gen binning that
+    refines it reproduces the applied weight exactly.
+    """
+    candidate_fnames = [
+        f"{base_dir}/{generator}_Corr{proc_label}.pkl.lz4",
+        f"{base_dir}/{generator}Corr{proc_label}.pkl.lz4",
+    ]
+    fname = next((f for f in candidate_fnames if os.path.isfile(f)), None)
+    if fname is None:
+        raise FileNotFoundError(
+            f"No correction file for generator {generator}, process {proc_label}: "
+            f"tried {candidate_fnames}"
+        )
+    corrh = load_corr_hist(
+        fname, proc_label, get_corr_name(generator, minnlo_ratio=minnlo_ratio)
+    )
+    edges = {
+        ax.name: np.asarray(ax.edges, dtype=float)
+        for ax in corrh.axes
+        if hasattr(ax, "edges") and ax.name not in ("vars", "charge", "helicity")
+    }
+    logger.info(
+        f"Correction grid of {generator} ({os.path.basename(fname)}): "
+        + ", ".join(f"{k}: {len(v) - 1} bins up to {v[-1]:g}" for k, v in edges.items())
+    )
+    return edges
+
+
+# Response/unfolding gen axis name -> the correction histogram's axis name.
+GEN_TO_CORR_AXIS = {
+    "ptVGen": "qT",
+    "ptVgen": "qT",
+    "absYVGen": "absY",
+    "absYVgen": "absY",
+}
+
+
 def compute_envelope(
     h, name, entries, axis_name="vars", slice_axis=None, slice_val=None
 ):

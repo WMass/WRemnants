@@ -262,7 +262,7 @@ def build_graph(df, dataset):
         if not dataset.is_data:
             df = df.Define(
                 "Muon_pt_corr",
-                "wrem::applyRochesterMC(Muon_pt, Muon_eta, Muon_phi, Muon_charge, Muon_genPartIdx, GenPart_pt, Muon_nTrackerLayers)",
+                "wrem::applyRochesterMC(Muon_pt, Muon_eta, Muon_phi, Muon_charge, Muon_genPartIdx, GenPart_pt, Muon_nTrackerLayers, run, luminosityBlock, event)",
             )
             # df = df.Alias("Muon_pt_corr", "Muon_pt")
             df = df.Filter("HLT_Mu17")

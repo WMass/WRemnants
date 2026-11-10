@@ -292,6 +292,26 @@ double get_pdgid_mass(const int &pdgId) {
   return 0;
 }
 
+// Lepton masses in the POWHEG (MiNNLO) samples, the lhfm/{e,mu,tau}mass
+// defaults of POWHEG-BOX-V2 (lhefinitemasses), kept by Pythia. NanoAOD does not
+// store the lepton masses (GenPart_mass = 0). Other particles get the fallback,
+// e.g. the stored mass of BSM particles.
+double get_generator_mass(const int &pdgId, const double fallback = 0.) {
+  switch (std::abs(pdgId)) {
+  case 11:
+    return 0.000511;
+  case 13:
+    return 0.1057;
+  case 15:
+    return 1.777;
+  case 12:
+  case 14:
+  case 16:
+    return 0.;
+  }
+  return fallback;
+}
+
 ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector>
 ewLeptons(const ROOT::VecOps::RVec<int> &status,
           const ROOT::VecOps::RVec<int> &statusFlags,

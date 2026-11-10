@@ -57,6 +57,12 @@ def parse_args():
         help="Number of sigma steps used to define interpolation cdf points",
     )
     parser.add_argument(
+        "--localPchipCellsJson",
+        type=str,
+        default=None,
+        help="Optional JSON payload describing response-map cells that should use local monotone-PCHIP CDF/PDF evaluation instead of the default cubic interpolation.",
+    )
+    parser.add_argument(
         "--runDebugChecks",
         action="store_true",
         help="Evaluate interpolation and derivative outputs at a single test point",
@@ -144,6 +150,9 @@ def main():
             hist_response, hist_response_scaled, hist_response_smeared
         )
     )
+    local_pchip_cells = response_maps_utils.load_regularized_cells(
+        args.localPchipCellsJson
+    )
     interp_cdfvals = response_maps_utils.make_interp_cdfvals(
         args.interpSigmaMin, args.interpSigmaMax, args.interpSigmaSteps
     )
@@ -160,6 +169,7 @@ def main():
         hist_response_scaled,
         hist_response_smeared,
         interp_cdfvals,
+        local_pchip_cells=local_pchip_cells,
     )
     response_maps_utils.log_quantile_diagnostics(response_map)
     response_maps_utils.log_interpolator_bounds(response_map)

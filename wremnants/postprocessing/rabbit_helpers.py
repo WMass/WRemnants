@@ -174,7 +174,7 @@ def correct_bw_xsec(h, h_ref):
         )
         return h
 
-    h_corr = hh.divideHists(h.project(var), h_ref.project(var))
+    h_corr = hh.divideHists(h_ref.project(var), h.project(var))
     h = hh.multiplyHists(h, h_corr)
 
     return h
@@ -340,9 +340,9 @@ def add_V_mass_uncertainty(
     if args.breitwignerWMassWeights and label == "W":
         preOpMap = {}
         for group in ["Wmunu", "Wtaunu"]:
-            if group not in datagroups.groups.keys():
+            if not datagroups.hasProcess(group):
                 continue
-            for member in datagroups.groups[group].members:
+            for member in datagroups.processMembers(group):
                 h_ref = datagroups.readHist(
                     datagroups.nominalName, member, massWeightName
                 )
@@ -480,9 +480,9 @@ def add_W_width_uncertainty(
     if args.breitwignerWMassWeights:
         preOpMap = {}
         for group in ["Wmunu", "Wtaunu"]:
-            if group not in datagroups.groups.keys():
+            if not datagroups.hasProcess(group):
                 continue
-            for member in datagroups.groups[group].members:
+            for member in datagroups.processMembers(group):
                 h_ref = datagroups.readHist(
                     datagroups.nominalName, member, widthWeightName
                 )
@@ -569,6 +569,9 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            # the nuisances are named from the axis label, so the two sets of
+            # variations need different ones, otherwise they collide
+            labelsByAxis=["recoil_stat"],
             passToFakes=passSystToFakes,
         )
         datagroups.addSystematic(
@@ -582,7 +585,14 @@ def add_recoil_uncertainty(
                 "expNoCalib",
                 "expNoLumi",
             ],
+            splitGroup={
+                "recoil_bkg": ".*_bkg",
+                "recoil_qtParam": ".*_qtParam",
+            },
             systAxes=["recoil_unc"],
+            # integer axis in older histmaker outputs, otherwise the category labels
+            # are the nuisance names, with the Up/Down variations paired
+            labelsByAxis=["recoil_calibration_bkg"],
             passToFakes=passSystToFakes,
         )
 
@@ -599,6 +609,7 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            labelsByAxis=["recoil_calibration_bkg"],
             passToFakes=passSystToFakes,
         )
 
@@ -613,6 +624,7 @@ def add_recoil_uncertainty(
                 "expNoLumi",
             ],
             systAxes=["recoil_unc"],
+            labelsByAxis=["recoil_stat"],
             passToFakes=passSystToFakes,
         )
 
@@ -789,7 +801,7 @@ def add_mb_fo_uncertainty(
     processes_with_corr = []
 
     for proc in processes_expanded:
-        members = datagroups.groups[proc].members
+        members = datagroups.processMembers(proc)
         has_corr = any(
             corr_hist_name in datagroups.results[member.name]["output"]
             for member in members
@@ -1113,7 +1125,7 @@ def add_noi_unfolding_variations(
             preOpMap={
                 m.name: make_poi_variations
                 for g in datagroups.expandProcess(process)
-                for m in datagroups.groups[g].members
+                for m in datagroups.processMembers(g)
             },
             preOpArgs=dict(
                 poi_axes=poi_axes,

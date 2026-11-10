@@ -210,14 +210,16 @@ def define_prefsr_vars(df):
         "prefsrLeps",
         "wrem::prefsrLeptons(GenPart_status, GenPart_statusFlags, GenPart_pdgId, GenPart_genPartIdxMother)",
     )
-    df = df.Define(
-        "genl",
-        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[0]], GenPart_eta[prefsrLeps[0]], GenPart_phi[prefsrLeps[0]], GenPart_mass[prefsrLeps[0]])",
-    )
-    df = df.Define(
-        "genlanti",
-        "ROOT::Math::PtEtaPhiMVector(GenPart_pt[prefsrLeps[1]], GenPart_eta[prefsrLeps[1]], GenPart_phi[prefsrLeps[1]], GenPart_mass[prefsrLeps[1]])",
-    )
+    # NanoAOD and NanoGen do not store the mass of leptons (GenPart_mass = 0), while pt, eta and phi are those of
+    # the massive lepton. The masses of the generator are used for the SM leptons; with the stored 0 the boson mass
+    # would be biased by about -120 MeV for taus (Z, median) and -0.6 MeV for muons (mean). BSM leptons keep the
+    # stored mass.
+    for name, idx in [("genl", 0), ("genlanti", 1)]:
+        i = f"prefsrLeps[{idx}]"
+        df = df.Define(
+            name,
+            f"ROOT::Math::PtEtaPhiMVector(GenPart_pt[{i}], GenPart_eta[{i}], GenPart_phi[{i}], wrem::get_generator_mass(GenPart_pdgId[{i}], GenPart_mass[{i}]))",
+        )
     df = df.Define(
         "genV", "ROOT::Math::PxPyPzEVector(genl)+ROOT::Math::PxPyPzEVector(genlanti)"
     )

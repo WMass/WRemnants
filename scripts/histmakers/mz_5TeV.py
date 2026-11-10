@@ -175,7 +175,7 @@ def build_graph(df, dataset):
         else:
             df = df.Define(
                 "Muon_pt_corr",
-                "wrem::applyRochesterMC(Muon_pt, Muon_eta, Muon_phi, ROOT::VecOps::RVec<float>(Muon_charge.begin(), Muon_charge.end()), Muon_genPartIdx, GenPart_pt, Muon_nTrackerLayers)",
+                "wrem::applyRochesterMC(Muon_pt, Muon_eta, Muon_phi, ROOT::VecOps::RVec<float>(Muon_charge.begin(), Muon_charge.end()), Muon_genPartIdx, GenPart_pt, Muon_nTrackerLayers, run, luminosityBlock, event)",
             )
     elif args.muonCorr == "scarekit":
         if dataset.is_data:

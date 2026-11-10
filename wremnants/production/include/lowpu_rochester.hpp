@@ -4,6 +4,8 @@
 #include "defines.hpp"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/unsupported/Eigen/CXX11/Tensor>
+#include <random>
+#include <string>
 #include <fstream>
 
 // #include <boost/math/special_functions/erf.hpp>
@@ -606,8 +608,19 @@ RoccoR *rochester = new RoccoR(
                                                                 // for lowPU
 
 Vec_f applyRochesterMC(Vec_f pt, Vec_f eta, Vec_f phi, Vec_f ch, Vec_i gen_idx,
-                       Vec_f gen_pt, Vec_i nTrackerLayers,
+                       Vec_f gen_pt, Vec_i nTrackerLayers, unsigned int run,
+                       unsigned int lumi, unsigned long long event,
                        int fluctuation = 0) {
+
+  // Thread-safe, per-event RNG seeded from (run, lumi, event): reproducible
+  // across files, datasets, thread counts, and task splitting (fix for issue
+  // #576). Mirrors the MuonScarekitMCHelper / wrem::SmearingHelper idiom; the
+  // purpose hash keeps this stream independent of other helpers' streams for
+  // the same event.
+  std::seed_seq seq{std::hash<std::string>()("applyRochesterMC"),
+                    std::size_t(run), std::size_t(lumi), std::size_t(event)};
+  std::mt19937 rng(seq);
+  std::uniform_real_distribution<double> unif(0., 1.);
 
   unsigned int size = pt.size();
   Vec_f res(size, 0.0);
@@ -622,8 +635,8 @@ Vec_f applyRochesterMC(Vec_f pt, Vec_f eta, Vec_f phi, Vec_f ch, Vec_i gen_idx,
     else
       res[i] = 1.0000 * pt[i] *
                rochester->kSmearMC(ch[i], pt[i], eta[i], phi[i],
-                                   nTrackerLayers.at(i),
-                                   rochester->random->Rndm(), fluctuation, 0);
+                                   nTrackerLayers.at(i), unif(rng),
+                                   fluctuation, 0);
   }
 
   return res;

@@ -59,6 +59,20 @@ args = parser.parse_args()
 logger = logging.setup_logger(__file__, args.verbose, args.noColorLogger)
 era = args.era
 
+# The ONNX-reweight scale-uncertainty path requires muon-collection branches
+# (Muon_genPartFlav for the muon_source column) and reco/gen phi columns for
+# the candidates, which the kaon ``bkmm_kaon_stuff`` plumbing in this histmaker
+# does not provide; running with the global default ``onnxReweight`` breaks
+# --includeKaonScaleVariations at graph construction. Pin to the splines method
+# until the kaon plumbing is extended for the ONNX column contract.
+if args.muonScaleVariation == "onnxReweight":
+    logger.warning(
+        "--muonScaleVariation onnxReweight is not supported by the kaon scale "
+        "variation plumbing in this histmaker; falling back to "
+        "'smearingWeightsSplines'"
+    )
+    args.muonScaleVariation = "smearingWeightsSplines"
+
 logger.debug(f"\n\n  Looking for datasets in era: {era} for path: {args.dataPath}")
 
 logger.debug(f"\n\n args.excludeProcs: {args.excludeProcs}")

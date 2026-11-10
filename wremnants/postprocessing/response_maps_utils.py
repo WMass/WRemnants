@@ -9,6 +9,7 @@ Workflow:
 6. Export the TFLite model.
 """
 
+import json
 import os
 
 import h5py
@@ -147,6 +148,80 @@ def make_dsigmasq(hist_response_smeared):
     return tf.constant(dsigma**2, tf.float64)
 
 
+def load_regularized_cells(cells_json):
+    if cells_json is None:
+        return None
+
+    with open(cells_json, encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    if isinstance(payload, list):
+        cell_entries = payload
+    elif "cells" in payload:
+        cell_entries = payload["cells"]
+    elif "events" in payload:
+        cell_entries = [event["cell"] for event in payload["events"]]
+    else:
+        raise ValueError(
+            f"Could not find regularized cells in {cells_json}; expected a list, "
+            "a `cells` array, or an `events` array with embedded `cell` records."
+        )
+
+    deduped = {}
+    for entry in cell_entries:
+        key = (
+            int(entry["charge_idx"]),
+            int(entry["pt_idx"]),
+            int(entry["eta_idx"]),
+        )
+        deduped[key] = {
+            "charge_idx": key[0],
+            "pt_idx": key[1],
+            "eta_idx": key[2],
+        }
+
+    cells = [deduped[key] for key in sorted(deduped)]
+    logger.info("Loaded %s local-PCHIP cells from %s", len(cells), cells_json)
+    return cells
+
+
+def build_regularized_cell_regions(hist_response, regularized_cells):
+    if not regularized_cells:
+        return None
+
+    pt_edges = np.asarray(hist_response.axes["genPt"].edges, dtype=float)
+    eta_edges = np.asarray(hist_response.axes["genEta"].edges, dtype=float)
+    charge_centers = np.asarray(hist_response.axes["genCharge"].centers, dtype=float)
+
+    regions = []
+    for cell in regularized_cells:
+        charge_idx = int(cell["charge_idx"])
+        pt_idx = int(cell["pt_idx"])
+        eta_idx = int(cell["eta_idx"])
+
+        if charge_idx < 0 or charge_idx >= hist_response.axes["genCharge"].size:
+            raise ValueError(
+                f"charge_idx {charge_idx} is outside the response-map range"
+            )
+        if pt_idx < 0 or pt_idx >= hist_response.axes["genPt"].size:
+            raise ValueError(f"pt_idx {pt_idx} is outside the response-map range")
+        if eta_idx < 0 or eta_idx >= hist_response.axes["genEta"].size:
+            raise ValueError(f"eta_idx {eta_idx} is outside the response-map range")
+
+        regions.append(
+            {
+                "charge": float(charge_centers[charge_idx]),
+                "pt_low": float(pt_edges[pt_idx]),
+                "pt_high": float(pt_edges[pt_idx + 1]),
+                "eta_low": float(eta_edges[eta_idx]),
+                "eta_high": float(eta_edges[eta_idx + 1]),
+            }
+        )
+
+    logger.info("Configured %s local-PCHIP response regions", len(regions))
+    return regions
+
+
 class ResponseMapInterpolator:
     def __init__(
         self,
@@ -157,6 +232,7 @@ class ResponseMapInterpolator:
         grid_points,
         bounds,
         dsigmasq,
+        local_pchip_regions,
     ):
         self.quants = tf.constant(quants, tf.float64)
         self.quants_scaled = tf.constant(quants_scaled, tf.float64)
@@ -170,6 +246,29 @@ class ResponseMapInterpolator:
         self.eta_low = bounds["eta_low"]
         self.eta_high = bounds["eta_high"]
         self.dsigmasq = dsigmasq
+        self.local_pchip_regions = local_pchip_regions
+        if local_pchip_regions:
+            self.local_pchip_charge = tf.constant(
+                [region["charge"] for region in local_pchip_regions], tf.float64
+            )
+            self.local_pchip_pt_low = tf.constant(
+                [region["pt_low"] for region in local_pchip_regions], tf.float64
+            )
+            self.local_pchip_pt_high = tf.constant(
+                [region["pt_high"] for region in local_pchip_regions], tf.float64
+            )
+            self.local_pchip_eta_low = tf.constant(
+                [region["eta_low"] for region in local_pchip_regions], tf.float64
+            )
+            self.local_pchip_eta_high = tf.constant(
+                [region["eta_high"] for region in local_pchip_regions], tf.float64
+            )
+        else:
+            self.local_pchip_charge = None
+            self.local_pchip_pt_low = None
+            self.local_pchip_pt_high = None
+            self.local_pchip_eta_low = None
+            self.local_pchip_eta_high = None
 
     def _interp_quantiles(self, quants_sel, gen_pt, gen_eta, gen_charge):
         charge_idx = tf.where(gen_charge > 0.0, 1, 0)
@@ -183,20 +282,70 @@ class ResponseMapInterpolator:
 
         return tf.reshape(quants_interp, [-1])
 
-    def interp_cdf(self, quants_sel, gen_pt, gen_eta, gen_charge, qopr):
+    def _interp_cdf_with_mode(
+        self, mode, quants_sel, gen_pt, gen_eta, gen_charge, qopr
+    ):
         quants_interp = self._interp_quantiles(quants_sel, gen_pt, gen_eta, gen_charge)
         quant_cdfvals_interp = tf.reshape(self.quant_cdfvals, [-1])
 
         qopr = tf.clip_by_value(qopr, self.qopr_low, self.qopr_high)
         qopr = tf.reshape(qopr, [-1])
 
-        cdf = wums.fitutils.cubic_spline_interpolate(
-            xi=quants_interp[..., None],
-            yi=quant_cdfvals_interp[..., None],
-            x=qopr[..., None],
-            axis=0,
-        )
+        if mode == "cubic":
+            cdf = wums.fitutils.cubic_spline_interpolate(
+                xi=quants_interp[..., None],
+                yi=quant_cdfvals_interp[..., None],
+                x=qopr[..., None],
+                axis=0,
+            )
+        elif mode == "pchip":
+            cdf = wums.fitutils.pchip_interpolate(
+                xi=quants_interp[..., None],
+                yi=quant_cdfvals_interp[..., None],
+                x=qopr[..., None],
+                axis=0,
+            )
+        else:
+            raise ValueError(f"Unsupported interpolation mode {mode}")
         return cdf[..., 0]
+
+    def _local_pchip_mask(self, gen_pt, gen_eta, gen_charge):
+        if self.local_pchip_charge is None:
+            return None
+
+        pt = tf.reshape(gen_pt, [-1, 1])
+        eta = tf.reshape(gen_eta, [-1, 1])
+        charge = tf.reshape(
+            tf.where(
+                gen_charge > tf.constant(0.0, tf.float64),
+                tf.constant(1.0, tf.float64),
+                tf.constant(-1.0, tf.float64),
+            ),
+            [-1, 1],
+        )
+
+        charge_match = tf.equal(charge, self.local_pchip_charge[None, :])
+        pt_match = (pt >= self.local_pchip_pt_low[None, :]) & (
+            pt < self.local_pchip_pt_high[None, :]
+        )
+        eta_match = (eta >= self.local_pchip_eta_low[None, :]) & (
+            eta < self.local_pchip_eta_high[None, :]
+        )
+        return tf.reduce_any(charge_match & pt_match & eta_match, axis=1)
+
+    def interp_cdf(self, quants_sel, gen_pt, gen_eta, gen_charge, qopr):
+        cdf_cubic = self._interp_cdf_with_mode(
+            "cubic", quants_sel, gen_pt, gen_eta, gen_charge, qopr
+        )
+        local_mask = self._local_pchip_mask(gen_pt, gen_eta, gen_charge)
+        if local_mask is None:
+            return cdf_cubic
+
+        cdf_pchip = self._interp_cdf_with_mode(
+            "pchip", quants_sel, gen_pt, gen_eta, gen_charge, qopr
+        )
+        local_mask = tf.broadcast_to(tf.reshape(local_mask, [-1]), tf.shape(cdf_cubic))
+        return tf.where(local_mask, cdf_pchip, cdf_cubic)
 
     def interp_pdf(self, quants_sel, gen_pt, gen_eta, gen_charge, qopr):
         with tf.GradientTape() as tape:
@@ -253,7 +402,11 @@ class ResponseMapInterpolator:
 
 
 def build_response_map_interpolator(
-    hist_response, hist_response_scaled, hist_response_smeared, interp_cdfvals
+    hist_response,
+    hist_response_scaled,
+    hist_response_smeared,
+    interp_cdfvals,
+    local_pchip_cells=None,
 ):
     quant_cdfvals = make_quant_cdfvals(interp_cdfvals)
     quants, quants_scaled, quants_smeared = histograms_to_quantiles(
@@ -262,6 +415,9 @@ def build_response_map_interpolator(
     grid_points = make_grid_points(hist_response)
     bounds = make_axis_bounds(hist_response)
     dsigmasq = make_dsigmasq(hist_response_smeared)
+    local_pchip_regions = build_regularized_cell_regions(
+        hist_response, local_pchip_cells
+    )
     return ResponseMapInterpolator(
         quants=quants,
         quants_scaled=quants_scaled,
@@ -270,6 +426,7 @@ def build_response_map_interpolator(
         grid_points=grid_points,
         bounds=bounds,
         dsigmasq=dsigmasq,
+        local_pchip_regions=local_pchip_regions,
     )
 
 

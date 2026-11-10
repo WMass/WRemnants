@@ -35,6 +35,28 @@ from wums import boostHistHelpers as hh
 from wums import logging, output_tools
 
 
+def _parse_decorr_rebin(value):
+    """Parse one --decorrRebin token.
+
+    A bare integer merges that many bins (the historical behaviour). A
+    comma-separated list is taken as explicit bin edges in axis units, e.g.
+    ``0,10,44`` puts the decorrelated parameters in ptll [0,10) and [10,44).
+    Both forms are consumed by hh.rebinHistMultiAx, which switches on the type.
+    """
+    if "," in value:
+        edges = [float(v) for v in value.split(",")]
+        if len(edges) < 2:
+            raise argparse.ArgumentTypeError(
+                f"--decorrRebin edge list '{value}' needs at least two edges"
+            )
+        if any(b <= a for a, b in zip(edges[:-1], edges[1:])):
+            raise argparse.ArgumentTypeError(
+                f"--decorrRebin edge list '{value}' must be strictly increasing"
+            )
+        return edges
+    return int(value)
+
+
 def _parse_axis_range_specs(specs):
     parsed_specs = []
     for axis, low, high in specs:
@@ -89,6 +111,9 @@ def _build_preselection_specs(selection_specs, fitvar):
     return parsed_specs
 
 
+_NEG_EDGE_LIST = re.compile(r"^-[0-9.]+(,-?[0-9.]+)+$")
+
+
 def _normalize_negative_imaginary_bounds(argv):
     normalized_argv = []
     i = 0
@@ -104,6 +129,16 @@ def _normalize_negative_imaginary_bounds(argv):
                 else:
                     normalized_argv.append(value)
             i += 4
+        elif token == "--decorrRebin":
+            # an edge list starting with a negative edge ("-2,0,2") would otherwise
+            # be taken for an option; a leading space keeps it a value
+            i += 1
+            while i < len(argv) and (
+                not argv[i].startswith("-") or _NEG_EDGE_LIST.match(argv[i])
+            ):
+                neg = _NEG_EDGE_LIST.match(argv[i])
+                normalized_argv.append(f" {argv[i]}" if neg else argv[i])
+                i += 1
         else:
             i += 1
 
@@ -117,7 +152,15 @@ def apply_preselection(h, specs: tuple = ()):
             raise ValueError(
                 f"--presel requested axis '{axis_name}', but histogram axes are {h.axes.name}"
             )
-        h = h[{axis_name: slice(low, hh.get_hist_slice_upper(h, axis_name, high))}]
+        upper = hh.get_hist_slice_upper(h, axis_name, high)
+        # A bare slice moves the out-of-range content into the axis' flow bins,
+        # where a later sum over the axis re-adds it and undoes the cut. Drop the
+        # flow bins, except the overflow when `high` is the last edge (inclusive
+        # upper bound, see get_hist_slice_upper).
+        h = h[{axis_name: slice(low, upper)}]
+        h = hh.setFlow(
+            h, axis_name, under=False, over=None if upper is hist.overflow else False
+        )
         if ":sum" in axis:
             h = h[{axis_name: hist.sum}]
     return h
@@ -531,10 +574,12 @@ def make_parser(parser=None, argv=None):
     )
     parser.add_argument(
         "--decorrRebin",
-        type=int,
+        type=_parse_decorr_rebin,
         nargs="*",
         default=[],
-        help="Rebin axis by this value (default, 1, does nothing)",
+        help="Binning of the decorrelated parameters, one entry per decorrelated axis. "
+        "An integer merges that many bins (default, 1, does nothing); a comma-separated "
+        "list gives explicit bin edges in axis units, e.g. '0,10,44'.",
     )
     parser.add_argument(
         "--decorrAbsval",
@@ -691,6 +736,23 @@ def make_parser(parser=None, argv=None):
         "--addCustomRecoilSyst",
         action="store_true",
         help="Add custom recoil systematic uncertainties from smearing met pt/phi and scaling met pt",
+    )
+    parser.add_argument(
+        "--storeResponseMatrix",
+        action="store_true",
+        help="Store the response matrix (and its gen total) in the datacard, for a "
+        "parameter model that folds a gen-level prediction",
+    )
+    parser.add_argument(
+        "--responseMatrixGenBinning",
+        type=str,
+        default="unfolding",
+        choices=["unfolding", "response"],
+        help="Which gen binning to take the stored response matrix from: "
+        "'unfolding' (default) is 'nominal_prefsr_yieldsUnfolding', the gen "
+        "binning derived from the reco binning; 'response' is the parallel, "
+        "finer 'nominal_prefsr_yieldsResponse' written by mz_dilepton "
+        "--responseGenBinning, on the theory correction's own grid.",
     )
 
     parser.add_argument(
@@ -1041,6 +1103,23 @@ def make_parser(parser=None, argv=None):
         type=float,
         help="Specify normalization uncertainty for Fake background (for W analysis). If negative, treat as free floating, if 0 nothing is added",
     )
+    parser.add_argument(
+        "--logNormalPhotonInducedQG",
+        default=1.25,
+        type=float,
+        help="Normalization uncertainty of the photon-induced gamma q -> V q' processes, "
+        "one nuisance for W and Z (same photon PDF, leading-order generator and "
+        "phase-space cuts): the photon PDF (LUXqed type) is known to a few percent, "
+        "the uncertainty is that of a leading-order prediction. If 0 nothing is added",
+    )
+    parser.add_argument(
+        "--logNormalPhotonInducedGG",
+        default=1.1,
+        type=float,
+        help="Normalization uncertainty of the photon-induced gamma gamma -> l l "
+        "processes, uncorrelated with the gamma q ones (no QCD at leading order, "
+        "photon-photon luminosity known to a few percent). If 0 nothing is added",
+    )
     # pseudodata
     parser.add_argument(
         "--pseudoData", type=str, nargs="+", help="Histograms to use as pseudodata"
@@ -1296,13 +1375,27 @@ def setup(
     logger.debug(f"Filtering these groups of processes: {args.filterProcGroups}")
     logger.debug(f"Excluding these groups of processes: {args.excludeProcGroups}")
 
+    xnorm = any(
+        inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
+    )
+    # the fits where the muon component of W (Z) is the signal and the tau one a
+    # background keep them as separate groups instead of the merged W (Z)
+    splitSignalGroups = bool(
+        xnorm
+        or isUnfolding
+        or isTheoryAgnostic
+        or "xsec" in args.noi
+        or args.helicityFitTheoryUnc
+        or args.addTauToSignal
+        or args.addBSMProcess
+        or args.addBSMMixing is not None
+    )
     datagroups = Datagroups(
         inputFile,
         excludeGroups=excludeGroup,
         filterGroups=filterGroup,
-        xnorm=any(
-            inputBaseName.startswith(x) for x in ["gen", "xnorm", "prefsr", "postfsr"]
-        ),
+        xnorm=xnorm,
+        splitGroups=["W", "Z"] if splitSignalGroups else False,
     )
 
     bsm_signals = []
@@ -1759,6 +1852,23 @@ def setup(
         logger.info(f"Signal samples: {datagroups.procGroups['signal_samples']}")
 
     signal_samples_forMass = ["signal_samples_inctau"]
+
+    def groupsWithHist(histname, anyMember=False):
+        # groups for which every member has the histogram, so that histmaker outputs
+        # produced before a process (or an option) was added keep working.
+        # With anyMember, groups for which at least one member has it, e.g. the W-like
+        # Zmumu group where only Zmumu and not Zmumu10to50 is calibrated; the other
+        # members fall back to the nominal histogram, i.e. no variation
+        check = any if anyMember else all
+        return [
+            g
+            for g in datagroups.procGroups["MCnoQCD"]
+            if len(datagroups.processMembers(g))
+            and check(
+                histname in datagroups.results.get(m.name, {}).get("output", {})
+                for m in datagroups.processMembers(g)
+            )
+        ]
 
     datagroups.writer = writer
 
@@ -2234,14 +2344,18 @@ def setup(
         )
 
     # lowPU does not include PhotonInduced as a process. skip it:
-    if not lowPU and "PhotonInduced" in datagroups.groups:
-        datagroups.addNormSystematic(
-            name="CMS_PhotonInduced",
-            processes=["PhotonInduced"],
-            groups=[f"CMS_background", "experiment", "expNoLumi", "expNoCalib"],
-            passToFakes=passSystToFakes,
-            norm=2.0,
-        )
+    for proc, norm in (
+        ("PhotonInducedQG", args.logNormalPhotonInducedQG),
+        ("PhotonInducedGG", args.logNormalPhotonInducedGG),
+    ):
+        if not lowPU and norm != 0 and datagroups.hasProcess(proc):
+            datagroups.addNormSystematic(
+                name=f"CMS_{proc}",
+                processes=[proc],
+                groups=[f"CMS_background", "experiment", "expNoLumi", "expNoCalib"],
+                passToFakes=passSystToFakes,
+                norm=norm,
+            )
     if wmass:
         if args.logNormalWmunu != 0:
             datagroups.addNormSystematic(
@@ -2326,7 +2440,7 @@ def setup(
                     norm=args.logNormalFake,
                 )
 
-        if "Top" in datagroups.groups:
+        if datagroups.hasProcess("Top"):
             datagroups.addNormSystematic(
                 name="CMS_Top",
                 processes=["Top"],
@@ -2334,7 +2448,23 @@ def setup(
                 passToFakes=passSystToFakes,
                 norm=1.06,
             )
-        if "Diboson" in datagroups.groups:
+        if "Top" in groupsWithHist("nominal_topPtNNLO"):
+            # the top pt reweighting is applied in the histmaker, its size is taken as
+            # the uncertainty (mirrored), as recommended by the TOP PAG
+            datagroups.addSystematic(
+                "topPtNNLO",
+                processes=["Top"],
+                mirror=True,
+                groups=[
+                    "CMS_background",
+                    "experiment",
+                    "expNoLumi",
+                    "expNoCalib",
+                ],
+                systAxes=[],
+                passToFakes=passSystToFakes,
+            )
+        if datagroups.hasProcess("Diboson"):
             datagroups.addNormSystematic(
                 name="CMS_VV",
                 processes=["Diboson"],
@@ -3050,12 +3180,38 @@ def setup(
                 )
 
     if (wmass or wlike) and datagroups.args_from_metadata("recoilUnc"):
+        # apply the uncertainty to every process the recoil calibration was applied to
+        # (samples.wprocs_recoil / zprocs_recoil), i.e. those with the variations stored
+        recoilSamples = groupsWithHist("nominal_recoil_stat", anyMember=True)
+        logger.info(f"Apply the recoil uncertainty to {recoilSamples}")
         rabbit_helpers.add_recoil_uncertainty(
             datagroups,
-            ["signal_samples"],
+            recoilSamples,
             passSystToFakes=passSystToFakes,
             flavor=datagroups.flavor if datagroups.flavor else "mu",
             pu_type="lowPU" if lowPU else "highPU",
+        )
+
+    # calibration evaluated without the cap on the boson pt (histmaker --recoilQtMax),
+    # covering the extrapolation of the calibration beyond the range it was derived in
+    recoilQtExtrapSamples = groupsWithHist("nominal_recoilQtExtrap", anyMember=True)
+    if len(recoilQtExtrapSamples):
+        logger.info(
+            f"Apply the recoil qt extrapolation uncertainty to {recoilQtExtrapSamples}"
+        )
+        datagroups.addSystematic(
+            "recoilQtExtrap",
+            mirror=True,
+            processes=recoilQtExtrapSamples,
+            groups=[
+                "recoil_qtExtrap",
+                "recoil",
+                "experiment",
+                "expNoLumi",
+                "expNoCalib",
+            ],
+            systAxes=[],
+            passToFakes=passSystToFakes,
         )
 
     if lowPU:
@@ -3412,31 +3568,39 @@ def setup(
                 scale=args.resolutionStatScaling,
             )
 
-    datagroups.addSystematic(
-        "pixelMultiplicitySyst",
-        mirror=True,
-        processes=["single_v_samples"],
-        groups=["pixelMultiplicitySyst", "muonCalibration", "experiment", "expNoLumi"],
-        baseName="pixel_multiplicity_syst_",
-        systAxes=["var"],
-        passToFakes=passSystToFakes,
-    )
-
-    if datagroups.args_from_metadata("pixelMultiplicityStat"):
+    # the pixel multiplicity uncertainties are only booked for the v9 CVH refit, the v15
+    # track fit fixes the pixel hit multiplicity (outputs without nanoVersion are v9)
+    if datagroups.getMetaInfo()["args"].get("nanoVersion", "v9") == "v9":
         datagroups.addSystematic(
-            "pixelMultiplicityStat",
+            "pixelMultiplicitySyst",
             mirror=True,
             processes=["single_v_samples"],
             groups=[
-                "pixelMultiplicityStat",
+                "pixelMultiplicitySyst",
                 "muonCalibration",
                 "experiment",
                 "expNoLumi",
             ],
-            baseName="pixel_multiplicity_stat_",
+            baseName="pixel_multiplicity_syst_",
             systAxes=["var"],
             passToFakes=passSystToFakes,
         )
+
+        if datagroups.args_from_metadata("pixelMultiplicityStat"):
+            datagroups.addSystematic(
+                "pixelMultiplicityStat",
+                mirror=True,
+                processes=["single_v_samples"],
+                groups=[
+                    "pixelMultiplicityStat",
+                    "muonCalibration",
+                    "experiment",
+                    "expNoLumi",
+                ],
+                baseName="pixel_multiplicity_stat_",
+                systAxes=["var"],
+                passToFakes=passSystToFakes,
+            )
 
     if dilepton and "run" in fitvar:
         # add ad-hoc normalization uncertainty uncorrelated across run bins
@@ -3852,6 +4016,51 @@ if __name__ == "__main__":
             f"'{muon_efficiencies_insitu.INSITU_BOUND_AUX_NAME}'"
         )
         writer.add_auxiliary(muon_efficiencies_insitu.INSITU_BOUND_AUX_NAME, aux)
+    # Embed the response matrix R and its gen total N_gen in the datacard
+    # (auxiliary group), for a parameter model that folds a gen-level prediction.
+    # Only inputs carrying both histograms are considered.
+    if args.storeResponseMatrix:
+        from wremnants.postprocessing.scetlib_ad import response_matrix
+
+        if args.responseMatrixGenBinning == "response":
+            resp_hist = response_matrix.RESPONSE_HIST
+            resp_gentotal = response_matrix.RESPONSE_GENTOTAL
+        else:
+            resp_hist = response_matrix.DEFAULT_HIST
+            resp_gentotal = response_matrix.DEFAULT_GENTOTAL
+        resp_inputs = [
+            f
+            for f in args.inputFile
+            if response_matrix.has_response(
+                f, hist_name=resp_hist, gen_total_name=resp_gentotal
+            )
+        ]
+        if len(resp_inputs) > 1:
+            raise RuntimeError(
+                f"Multiple inputs carry the response matrix: {resp_inputs}"
+            )
+        if not resp_inputs:
+            raise RuntimeError(
+                f"--storeResponseMatrix: no input carries both {resp_hist!r} and "
+                f"{resp_gentotal!r}"
+            )
+        logger.info(f"Embedding the response matrix {resp_hist} of {resp_inputs[0]}")
+        R_info = response_matrix.load_R(
+            resp_inputs[0], hist_name=resp_hist, gen_total_name=resp_gentotal
+        )
+        writer.add_auxiliary(
+            response_matrix.AUXILIARY_GROUP,
+            {
+                "R": R_info["R"],
+                "N_gen": R_info["N_gen"],
+                "reco_axes": [n for n, _ in R_info["reco_axes"]],
+                "gen_axes": [n for n, _ in R_info["gen_axes"]],
+                **{
+                    f"edges__{n}": e
+                    for n, e in R_info["reco_axes"] + R_info["gen_axes"]
+                },
+            },
+        )
 
     # propagate meta info into result file
     meta = {
