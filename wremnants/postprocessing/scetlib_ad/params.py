@@ -389,9 +389,10 @@ def qed_select_steps(present, rule):
     """Which of the *present* order steps float under ``qed_nuisances=rule``.
 
     ``top2`` (the agreed default) floats the two highest steps BELOW the
-    configured central order -- the last two present, in step order: NNLL ->
-    (nllp, mix) = the C-split scheme; NLL' -> (nll, nllp); NLL -> (ll, nll);
-    LL -> (ll). ``all`` floats every present step, ``none`` none, and an
+    configured central order -- the last two present, in step order: NLL' ->
+    (nll, nllp), the recommended Z configuration; NNLL -> (nllp, mix);
+    NLL -> (ll, nll); LL -> (ll). ``all`` floats every present step, ``none``
+    none, and an
     explicit comma-separated list (step suffixes or ``qedStep_*`` names) exactly
     those, each of which must be present.
     """

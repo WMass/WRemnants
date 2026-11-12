@@ -27,6 +27,9 @@ property of the cache (``gradient_param_names()``), and can include:
   registers ``qed_kappa_<step>`` (central 1) per QED order step; the fit floats
   the ones ``qed_nuisances`` selects (default: the top two below the central
   order) as ``qedStep_<step>`` = kappa - 1 ~ N(0, 1), group ``qedOrder``.
+  Recommended Z configuration: an NLL' central cache (``[QED] qed_isr = nllp``,
+  ``qed_kappa = yes``, ``mixed_order`` / ``qcd_side_mixed`` absent, i.e. off),
+  on which the default ``top2`` floats ``qedStep_nll`` and ``qedStep_nllp``.
 
 By default (:data:`params.DEFAULT_FROZEN`) the NP shape constants,
 ``resumTNP_b_qqDS``, ``resumTransition1/3`` and ``kappa_R`` / ``kappa_F`` are
@@ -318,9 +321,11 @@ class SCETlibADParamModel(ParamModel):
             cross terms with the NP lambdas, alpha_s, TNPs and PDFs included.
 
             ``top2`` (DEFAULT): the two highest steps below the central order
-            the cache's ``[QED]`` configures -- NNLL (``nllp`` + ``mixed_order
-            = nnll``) -> ``nllp``, ``mix`` (= the C-split scheme); NLL' ->
-            ``nll``, ``nllp``; NLL -> ``ll``, ``nll``; LL -> ``ll``. ``all``:
+            the cache's ``[QED]`` configures -- NLL' (``qed_isr = nllp``, no
+            mixed term) -> ``nll``, ``nllp``, the RECOMMENDED Z configuration
+            (the NLL' central is the configuration cross-checked against DYTurbo);
+            NNLL (``nllp`` + ``mixed_order = nnll``) -> ``nllp``, ``mix``;
+            NLL -> ``ll``, ``nll``; LL -> ``ll``. ``all``:
             every step present. ``none``: none (kappa = 1, the cache's central
             order with no QED order nuisance). Or an explicit comma-separated
             list of steps (``ll``, ``nll``, ``nllp``, ``mix``). Floating ``ll``
