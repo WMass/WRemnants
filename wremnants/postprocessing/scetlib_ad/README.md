@@ -58,7 +58,8 @@ reads the cache's format; the physics of a cache is fixed when it is built.
 The build is SCETlib's own, and a runcard is all it takes: the runcards in
 `scripts/rabbit/scetlib_ad/conf/` are complete, `[Grid_*]` included (the gen grid the
 cache is built on). Pass the same runcard to the fit, which rebuilds the calculation
-from it. The `[TNPs]` block is what registers the TNPs.
+from it. The `[TNPs]` block is what registers the TNPs, and the `[QED]` block (QED ISR at
+NLL', `qed_kappa = yes`) the QED order steps `qedStep_*`.
 
 Inside the WRemnants container, after `source <scetlib-cms>/setup.sh`:
 

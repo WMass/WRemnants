@@ -23,6 +23,13 @@ property of the cache (``gradient_param_names()``), and can include:
 * PDF eigenvector coefficients, exact at ``c_e = 0, +-1``;
 * the profile scales ``kappa_R``, ``kappa_F`` and the transition points
   ``x1..x3`` (registered by ``set_diff_scales(1)``).
+* QED ISR order-step multipliers: a cache built with ``[QED] qed_kappa = yes``
+  registers ``qed_kappa_<step>`` (central 1) per QED order step; the fit floats
+  the ones ``qed_nuisances`` selects (default: the top two below the central
+  order) as ``qedStep_<step>`` = kappa - 1 ~ N(0, 1), group ``qedOrder``.
+  Recommended Z configuration: an NLL' central cache (``[QED] qed_isr = nllp``,
+  ``qed_kappa = yes``, ``mixed_order`` / ``qcd_side_mixed`` absent, i.e. off),
+  on which the default ``top2`` floats ``qedStep_nll`` and ``qedStep_nllp``.
 
 By default (:data:`params.DEFAULT_FROZEN`) the NP shape constants,
 ``resumTNP_b_qqDS``, ``resumTransition1/3`` and ``kappa_R`` / ``kappa_F`` are
@@ -85,6 +92,7 @@ DTYPE = tf.float64
 # parameter that makes a card syst a double count. Only entries whose model
 # parameter is fitted are enforced. A regex, so that the PDF eigenvector
 # templates (pdf<N><SET>...) are told apart from pdfAlphaS.
+_EW_ISR_PATTERN = r"ew.*_isr"
 _CONFLICTS = (
     (
         r"scetlibnp",
@@ -116,6 +124,14 @@ _CONFLICTS = (
         r"^resumtransition",
         "a matching transition point",
         lambda names: any(n.startswith("resumTransition") for n in names),
+    ),
+    (
+        # the EW ISR templates (pythiaew_ISR, setupRabbit --isrUnc) are the QED
+        # ISR effect that the floated order steps already carry (matched
+        # case-insensitively, like every pattern here)
+        _EW_ISR_PATTERN,
+        "a QED ISR order step",
+        lambda names: any(n.startswith(adp.QED_KAPPA_PREFIX_OUT) for n in names),
     ),
 )
 
@@ -201,6 +217,11 @@ class SCETlibADParamModel(ParamModel):
         scale_envelope_response="linear",
         scale_envelope_points=3,
         fo_muf_poly=None,
+        fixed_ratio=None,
+        qed_knob=None,
+        gen_absY_max=None,
+        qed_nuisances="top2",
+        qed_check="refuse",
         **kwargs,
     ):
         """
@@ -251,6 +272,90 @@ class SCETlibADParamModel(ParamModel):
             records none is refused. ``"cache"``: the cache's own build point.
             The ratio is 1 at the start either way, so a wrong anchor is
             invisible prefit; ``"cache"`` is logged loudly.
+        fixed_ratio
+            OPT-IN, default ``None`` (off). Path to an ``.npz`` holding a FIXED
+            per-cache-bin multiplicative factor K: arrays ``bins`` (N, 6), the
+            SCETlib bins (Q_lo, Q_hi, Y_lo, Y_hi, qT_lo, qT_hi) the factor is
+            defined on, and ``ratio`` (N,). The prediction's numerator becomes
+            fold(K * sigma_cache(p)) while the ratio DENOMINATOR stays the plain
+            anchor fold(sigma_cache(p_anchor)), so the model predicts
+            template * fold(K sigma(p)) / fold(sigma(p_anchor)): the card's QCD
+            template times K at the anchor, with the parameter response of the
+            K-less cache. Built for an external on/off correction such as
+            SCETlib's QED ISR (``qed_isr = nllp`` on/off), applied without a cache
+            rebuild; the cross terms (K's own dependence on the fitted
+            parameters) are neglected by construction. Applied before the gen
+            fold, so the same file serves the gen-level and the reco path.
+            Matching is by bin VALUE: every cache bin must appear in the file
+            (extra rows, e.g. |Y| > 2.5 for a |Y| <= 2.5 subset cache, are
+            ignored).
+        gen_absY_max
+            OPT-IN, default ``None`` (off). gen_level only: accept a fit channel
+            with a SINGLE gen axis (qT), i.e. a card already summed over |Y|, by
+            appending one synthetic |Y| bin [0, gen_absY_max]. The cache is then
+            folded over |Y| < gen_absY_max, which must be the range the card was
+            summed over. Without it a 1-axis gen channel is refused as before.
+        qed_knob
+            OPT-IN, default ``None`` (off). Path to an ``.npz`` with ``bins``
+            (N, 6) and ``ratio`` (N,) = a per-cache-bin template ratio T (e.g.
+            K_NLL' / K_NLL). Adds ONE extra fitted nuisance ``qedTheta`` (Gaussian
+            prior N(0, 1) through the usual ``priors`` machinery) and multiplies
+            the numerator by T**qedTheta, i.e. the prediction becomes
+            template * fold(K * T**theta * sigma(p)) / fold(sigma(p_anchor)).
+            theta = 0 is the ``fixed_ratio`` central K (or 1 without it). Same
+            bin-by-value matching and the same neglect of cross terms as
+            ``fixed_ratio``; applied before the gen fold, so it also reaches the
+            reco path. The nuisance is appended after the envelope nuisances.
+            A comma-separated list of paths adds one independent nuisance per
+            template, ``qedTheta``, ``qedTheta2``, ``qedTheta3``, ... (each
+            N(0, 1), all in the ``qedKnob`` impact group), and the numerator
+            becomes K * prod_k T_k**theta_k * sigma(p). A single path is
+            exactly the one-knob behaviour above.
+        qed_nuisances
+            Which QED ISR order steps float ON THE TAPE, for a cache built with
+            ``[QED] qed_kappa = yes`` (SCETlib registers one multiplier
+            ``qed_kappa_<step>`` per order step present, central 1). Each
+            floated step is the unit nuisance ``qedStep_<step>`` = theta_k =
+            kappa_k - 1 with an N(0, 1) prior (theta = -1 drops the step, i.e.
+            the next-lower order exactly; +1 doubles it), all in the
+            ``qedOrder`` impact group; the others stay at kappa = 1. Unlike the
+            frozen ``qed_knob`` templates the response is the calculation's own,
+            cross terms with the NP lambdas, alpha_s, TNPs and PDFs included.
+
+            ``top2`` (DEFAULT): the two highest steps below the central order
+            the cache's ``[QED]`` configures -- NLL' (``qed_isr = nllp``, no
+            mixed term) -> ``nll``, ``nllp``, the RECOMMENDED Z configuration
+            (the NLL' central is the configuration cross-checked against DYTurbo);
+            NNLL (``nllp`` + ``mixed_order = nnll``) -> ``nllp``, ``mix``;
+            NLL -> ``ll``, ``nll``; LL -> ``ll``. ``all``:
+            every step present. ``none``: none (kappa = 1, the cache's central
+            order with no QED order nuisance). Or an explicit comma-separated
+            list of steps (``ll``, ``nll``, ``nllp``, ``mix``). Floating ``ll``
+            (the whole LL effect) WARNS: a whole-effect QED nuisance is
+            degenerate with alpha_s and its prior width sets the alpha_s answer
+            (qed-isr study, 261104-qed-nll-central); it is for checks and
+            bounds only. Governed by this token alone, like the scale envelope
+            -- ``fit_params`` naming a step this rule does not select is
+            refused. ``none`` also reads ``off``, ``0``, ``no``, ``false``. On a
+            cache without the multipliers the default and ``none`` are inactive
+            (a note), while ``all`` or a list is refused.
+            Refused together with ``qed_knob`` (the same uncertainty twice):
+            pass ``qed_nuisances=none`` to use frozen templates on a kappa cache.
+            A card that carries EW ISR templates (``pythiaew_ISR``) is refused
+            when a step floats; next to ``qed_knob`` it only warns, since knob
+            fits on such cards freeze those systs (``--freezeParameters``).
+        qed_check
+            ``refuse`` (DEFAULT) or ``warn``: what a ``[QED]`` mismatch between
+            the cache and the card's theory correction does (see
+            ``params.compare_qed_config``; an absent section or key reads as
+            QED off / SCETlib's default on both sides). There is ONE automatic
+            exception, the legacy frozen-K workflow: correction QED OFF, cache
+            QED ON and ``fixed_ratio`` given -- the QCD-only template times the
+            fixed QED factor K, which is how every qed-isr scheme fit through
+            261104 was run (QED-on cache + ``fixed_ratio=K``) -- is reported as a
+            WARNING, so those configurations replay unchanged. ``fixed_ratio``
+            on top of a correction that is itself QED-on refuses (K would be
+            applied twice) unless ``qed_check=warn``.
         anchor_override
             ``name=value,...`` supplying a central value the correction does not
             record (e.g. an NP coefficient compiled into SCETlib with no runtime
@@ -290,6 +395,16 @@ class SCETlibADParamModel(ParamModel):
 
         self._response_group = str(response_group)
         self.gen_level = bool(gen_level)
+        # Needed by the [QED] config check in _resolve_anchor (the legacy
+        # fixed_ratio escape), which runs before the factor itself is loaded
+        # below.
+        self._fixed_ratio_path = fixed_ratio
+        self._qed_check = str(qed_check).strip().lower()
+        if self._qed_check not in ("refuse", "warn"):
+            raise ValueError(
+                f"SCETlibADParamModel: qed_check={qed_check!r}; use 'refuse' "
+                f"(default) or 'warn'."
+            )
 
         # ---- Backend: rebuild the calculation and load the cache.
         self.core = ScetlibADXsec(conf, cache, threads=threads, fo_muf_poly=fo_muf_poly)
@@ -300,7 +415,32 @@ class SCETlibADParamModel(ParamModel):
         self._anchor = self._resolve_anchor(anchor_source, anchor_override)
 
         # ---- Gen binning, and (reco path) the response matrix.
+        self._gen_absY_max = None if gen_absY_max is None else float(gen_absY_max)
         self._setup_binning(indata, Q_lo, Q_hi)
+
+        # ---- Optional fixed per-cache-bin factor (off by default).
+        self._fixed_ratio = self._load_fixed_ratio(fixed_ratio)
+        self._qed_knob_path = qed_knob
+        self._qed_knob_name = "qedTheta"
+        # One (name, log T) per template; a single path keeps the historical
+        # name ``qedTheta``, further paths get ``qedTheta2``, ``qedTheta3``, ...
+        self._qed_knobs = []
+        if qed_knob is not None and str(qed_knob).strip().lower() not in (
+            "",
+            "none",
+            "0",
+            "off",
+        ):
+            paths = [q.strip() for q in str(qed_knob).split(",") if q.strip()]
+            for k, path in enumerate(paths):
+                T = self._load_fixed_ratio(path, label="qed_knob")
+                logT = np.log(T)
+                if not np.any(logT != 0.0):
+                    raise ValueError(f"qed_knob {path}: template is identically 1")
+                name = (
+                    self._qed_knob_name if k == 0 else f"{self._qed_knob_name}{k + 1}"
+                )
+                self._qed_knobs.append((name, logT))
 
         # ---- PDF confidence-level convention (see params.pdf_coeff_scale).
         self._conf_path = conf
@@ -318,6 +458,9 @@ class SCETlibADParamModel(ParamModel):
                 response=str(scale_envelope_response),
             )
 
+        # ---- QED order-step nuisances on the tape (qed_kappa caches only).
+        self._resolve_qed_steps(qed_nuisances)
+
         # ---- Parameter registration. Everything the fit does NOT expose stays
         # pinned at the anchor, so the SCETlib vector is always complete.
         self._register_params(fit_params, poi_params, xparam_default)
@@ -326,6 +469,37 @@ class SCETlibADParamModel(ParamModel):
         # ratio is exactly 1 at the start.
         sigma_gen_anchor = self._sigma_gen_np(self._p_base_anchor)
         self.sigma_gen_central_flat = tf.constant(sigma_gen_anchor, dtype=DTYPE)
+        if self._qed_knobs:
+            vals_anchor, _ = self.core.values_and_jacobian(self._p_base_anchor)
+            vals_anchor = np.asarray(vals_anchor, dtype=np.float64)
+            Kc = 1.0 if self._fixed_ratio is None else self._fixed_ratio
+            for name, logT in self._qed_knobs:
+                for th in (-1.0, 1.0):
+                    f = self._fold(Kc * np.exp(th * logT) * vals_anchor)
+                    f = f / self._fold(Kc * vals_anchor)
+                    print(
+                        f"[SCETlibADParamModel] qed_knob {name}={th:+.0f} "
+                        f"at the anchor, relative to theta=0, per gen bin: "
+                        f"[{f.min():.6f}, {f.max():.6f}]",
+                        flush=True,
+                    )
+        if self._fixed_ratio is not None:
+            vals_anchor, _ = self.core.values_and_jacobian(self._p_base_anchor)
+            vals_anchor = np.asarray(vals_anchor, dtype=np.float64)
+            # The fixed factor as the fit sees it at the anchor, per gen bin.
+            self.fixed_ratio_gen_anchor = (
+                self._fold(self._fixed_ratio * vals_anchor) / sigma_gen_anchor
+            )
+            tot = float(
+                np.sum(self._fold(self._fixed_ratio * vals_anchor))
+                / np.sum(sigma_gen_anchor)
+            )
+            print(
+                f"[SCETlibADParamModel] fixed_ratio at the anchor, per gen bin: "
+                f"[{self.fixed_ratio_gen_anchor.min():.6f}, "
+                f"{self.fixed_ratio_gen_anchor.max():.6f}], total {tot:.6f}",
+                flush=True,
+            )
         self._build_scale_envelope(sigma_gen_anchor)
         if self.gen_level:
             self.sigma_reco_central = None
@@ -372,6 +546,12 @@ class SCETlibADParamModel(ParamModel):
                 if self._env_names
                 else ""
             )
+            + (
+                f" + {len(self._knob_names)} frozen QED template(s) "
+                f"{list(self._knob_names)}"
+                if self._knob_names
+                else ""
+            )
             + f" = {self.nparams} total "
             f"({self.npoi} POI: {[n for n in self._param_order[: self.npoi]]})",
             flush=True,
@@ -400,10 +580,109 @@ class SCETlibADParamModel(ParamModel):
             f"(got --jitCompile {opt}" + (", dense input)." if not sparse else ").")
         )
 
+    def _resolve_qed_steps(self, qed_nuisances):
+        """Which ``qedStep_*`` (theta_k = kappa_k - 1) the fit floats.
+
+        Sets ``self._qed_present`` (the steps the CACHE registers, in step
+        order), ``self._qed_selected`` (the floated subset) and
+        ``self._qed_frozen_steps`` (present, held at kappa = 1).
+        """
+        present = tuple(
+            adp.qed_step_of(n) for n in self.rabbit_names if adp.qed_step_of(n)
+        )
+        self._qed_present = present
+        self._qed_selected = ()
+        self._qed_frozen_steps = ()
+        qed_conf = self._cache_config().get(adp.QED_SECTION)
+        rule = "top2" if qed_nuisances is None else str(qed_nuisances).strip()
+        if not present:
+            # The default (top2) and "none" are fine on any cache; "all" and an
+            # explicit list ask for steps this cache cannot vary.
+            if adp.qed_rule_kind(rule) in ("all", "list"):
+                raise ValueError(
+                    f"SCETlibADParamModel: qed_nuisances={qed_nuisances!r} asks "
+                    f"for QED order steps, but this cache registers no "
+                    f"qed_kappa_* parameters (it was not built with [QED] "
+                    f"qed_kappa = yes)."
+                )
+            if adp.qed_is_on(qed_conf):
+                print(
+                    "[SCETlibADParamModel] note: the cache computes QED ISR "
+                    f"({adp.qed_effective(qed_conf)}) but was built without the "
+                    "order-step multipliers (qed_kappa), so no QED order "
+                    "nuisance is on the tape; qed_nuisances is inactive.",
+                    flush=True,
+                )
+            return
+        # The registry and the runcard must describe the same order: the
+        # kappas are registered BY that order, so a disagreement means the
+        # runcard handed to the model is not the one the cache was built from.
+        expected = adp.qed_steps_from_config(qed_conf)
+        if tuple(expected) != present:
+            raise ValueError(
+                f"SCETlibADParamModel: the cache registers QED order steps "
+                f"{list(present)} but its runcard's [QED] "
+                f"({adp.qed_effective(qed_conf)}) implies {list(expected)}. The "
+                f"runcard is not the one this cache was built from."
+            )
+        selected = adp.qed_select_steps(present, rule)
+        if selected and self._qed_knobs:
+            raise ValueError(
+                f"SCETlibADParamModel: qed_knob (frozen QED templates "
+                f"{[n for n, _ in self._qed_knobs]}) together with the on-tape "
+                f"QED order steps {[adp.qed_step_name(x) for x in selected]} "
+                f"(qed_nuisances={rule!r}) counts the QED order uncertainty "
+                f"twice. Use one: qed_nuisances=none for the frozen templates, "
+                f"or drop qed_knob."
+            )
+        self._qed_selected = tuple(selected)
+        self._qed_frozen_steps = tuple(x for x in present if x not in selected)
+        central = adp.qed_effective(qed_conf)
+        print(
+            f"[SCETlibADParamModel] QED order steps on the tape: cache central "
+            f"{central} | present {list(present)} | qed_nuisances={rule!r} -> "
+            f"floating "
+            + (
+                ", ".join(
+                    f"{adp.qed_step_name(x)} ({adp.QED_STEP_LABELS[x]})"
+                    for x in selected
+                )
+                or "none"
+            )
+            + (
+                f"; held at kappa = 1: {list(self._qed_frozen_steps)}"
+                if self._qed_frozen_steps
+                else ""
+            )
+            + ". theta = kappa - 1 ~ N(0, 1).",
+            flush=True,
+        )
+        if adp.QED_LEADING_STEP in selected:
+            print(
+                f"[SCETlibADParamModel] WARNING: floating "
+                f"{adp.qed_step_name(adp.QED_LEADING_STEP)} = the off -> LL step, "
+                f"i.e. the WHOLE leading QED effect. A whole-effect QED nuisance "
+                f"is degenerate with alpha_s and its prior width, not the data, "
+                f"sets the alpha_s answer (qed-isr study: 261104-qed-nll-central, "
+                f"N vs N100). Use it for checks and bounds only, not as the "
+                f"nominal QED uncertainty.",
+                flush=True,
+            )
+
     def _setup_binning(self, indata, Q_lo, Q_hi):
         """Resolve the gen grid (and R, in the reco path) and map it onto the cache."""
         if self.gen_level:
             gen_axes = self._fit_axes(indata)
+            if len(gen_axes) == 1 and getattr(self, "_gen_absY_max", None):
+                gen_axes = list(gen_axes) + [
+                    ("absYVGen", np.array([0.0, self._gen_absY_max]))
+                ]
+                print(
+                    f"[SCETlibADParamModel] gen_absY_max ON: single gen axis "
+                    f"{gen_axes[0][0]!r}; folding the cache over |Y| < "
+                    f"{self._gen_absY_max:g} (one synthetic |Y| bin).",
+                    flush=True,
+                )
             if len(gen_axes) != 2:
                 raise NotImplementedError(
                     "gen_level SCETlibADParamModel expects a single fit channel "
@@ -458,6 +737,48 @@ class SCETlibADParamModel(ParamModel):
         # Exact sum of cache bins onto the gen grid (any nesting order, signed Y
         # folded onto |Y|, finer cache bins); raises if the cache does not tile it.
         self._fold = self.core.fold_for(self.gen_axes, self.Q_lo, self.Q_hi)
+
+    def _load_fixed_ratio(self, path, label="fixed_ratio"):
+        """Per-cache-bin constant factor K (``fixed_ratio`` / ``qed_knob``), or None."""
+        if path is None or str(path).strip().lower() in ("", "none", "0", "off"):
+            return None
+        with np.load(str(path), allow_pickle=False) as f:
+            fbins = np.asarray(f["bins"], dtype=np.float64)
+            fratio = np.asarray(f["ratio"], dtype=np.float64)
+        if fbins.ndim != 2 or fbins.shape[1] != 6 or fratio.shape != fbins.shape[:1]:
+            raise ValueError(
+                f"fixed_ratio {path}: expected bins (N, 6) and ratio (N,), got "
+                f"{fbins.shape} and {fratio.shape}"
+            )
+        if not np.all(np.isfinite(fratio)) or np.any(fratio <= 0):
+            raise ValueError(f"fixed_ratio {path}: non-finite or non-positive ratio")
+        cbins = np.asarray(self.core.bins, dtype=np.float64)
+
+        def key(b):
+            return tuple(np.round(b, 6))
+
+        lut = {key(b): i for i, b in enumerate(fbins)}
+        idx = np.array([lut.get(key(b), -1) for b in cbins], dtype=np.int64)
+        if np.any(idx < 0):
+            b = cbins[np.argmax(idx < 0)]
+            raise ValueError(
+                f"fixed_ratio {path}: {int((idx < 0).sum())} of {len(cbins)} cache "
+                f"bin(s) are not in the file, e.g. {b.tolist()}"
+            )
+        K = fratio[idx]
+        print(
+            f"[SCETlibADParamModel] {label} ON: {path} | {len(K)} cache bins "
+            f"(file has {len(fbins)}) | K in [{K.min():.6f}, {K.max():.6f}]. The "
+            f"model predicts template * fold(K sigma(p)) / fold(sigma(p_anchor)); "
+            f"cross terms of K with the fitted parameters are neglected.",
+            flush=True,
+        )
+        return K
+
+    def _apply_fixed_ratio_tf(self, sigma_cache):
+        if self._fixed_ratio is None:
+            return sigma_cache
+        return sigma_cache * tf.constant(self._fixed_ratio, dtype=sigma_cache.dtype)
 
     def _fit_axes(self, indata):
         """(name, edges) of each axis of the single non-masked channel."""
@@ -536,6 +857,28 @@ class SCETlibADParamModel(ParamModel):
                 f"cache's parameter set {available}. A parameter can only be "
                 f"fitted if the runcard declared it before the rules were built."
             )
+        # The QED order steps are governed by qed_nuisances, not fit_params
+        # (like the scale envelope): drop the unselected ones from the default
+        # set, refuse an explicit request the rule contradicts, and append the
+        # selected ones in registry order if fit_params did not list them.
+        qed_sel = {adp.qed_step_name(x) for x in self._qed_selected}
+        if _as_name_tuple(fit_params) not in ((), ("all",)):
+            clash = [
+                n
+                for n in requested
+                if adp.qed_step_of(n) is not None and n not in qed_sel
+            ]
+            if clash:
+                raise ValueError(
+                    f"SCETlibADParamModel: fit_params names the QED order "
+                    f"step(s) {clash}, which qed_nuisances does not select "
+                    f"(it floats {sorted(qed_sel) or 'none'}). The steps are "
+                    f"chosen by qed_nuisances alone; pass e.g. "
+                    f"qed_nuisances={','.join(adp.qed_step_of(n) for n in clash)}."
+                )
+        requested = tuple(
+            n for n in requested if adp.qed_step_of(n) is None or n in qed_sel
+        ) + tuple(n for n in available if n in qed_sel and n not in requested)
         # Naming the scales in fit_params overrides DEFAULT_FROZEN; together
         # with the envelope that would count the same uncertainty twice.
         if self._env_spec is not None:
@@ -566,9 +909,10 @@ class SCETlibADParamModel(ParamModel):
         self._n_scetlib = len(self._scetlib_order)
         env_names = () if self._env_spec is None else self._env_spec.param_names
         self._env_names = tuple(env_names)
-        self._param_order = self._scetlib_order + self._env_names
+        self._knob_names = tuple(name for name, _ in self._qed_knobs)
+        self._param_order = self._scetlib_order + self._env_names + self._knob_names
         self.npoi = len(pois)
-        self.npou = len(nou) + len(self._env_names)
+        self.npou = len(nou) + len(self._env_names) + len(self._knob_names)
         self.params = np.array([p.encode() for p in self._param_order])
 
         # Position of each fitted parameter inside SCETlib's own vector.
@@ -652,9 +996,15 @@ class SCETlibADParamModel(ParamModel):
                 "the intended refusal: fix REPARAM, do not move the anchor."
             )
         # Envelope nuisances: unit nuisances centred on zero (the anchor).
-        defaults = np.concatenate([defaults, np.zeros(len(self._env_names))])
+        defaults = np.concatenate(
+            [defaults, np.zeros(len(self._env_names) + len(self._knob_names))]
+        )
         for name, val in _parse_kv(xparam_default).items():
-            if name not in available and name not in self._env_names:
+            if (
+                name not in available
+                and name not in self._env_names
+                and name not in self._knob_names
+            ):
                 raise KeyError(f"xparam_default: unknown parameter {name!r}")
             if name in self._param_order:
                 defaults[self._param_order.index(name)] = val
@@ -702,6 +1052,11 @@ class SCETlibADParamModel(ParamModel):
         eigs = adp.pdf_group(self._param_order)
         if eigs:
             groups["pdfEig"] = eigs
+        if self._knob_names:
+            groups["qedKnob"] = tuple(self._knob_names)
+        qed_steps = adp.qed_step_group(self._param_order)
+        if qed_steps:
+            groups[adp.QED_ORDER_GROUP] = qed_steps
         self.param_impact_groups = {k: v for k, v in groups.items() if v}
 
     def _setup_priors(self, priors, prior_sigmas):
@@ -717,6 +1072,14 @@ class SCETlibADParamModel(ParamModel):
                 f"carry an N(0,1) constraint by construction. Pass priors=1 (the "
                 f"registry gives every TNP sigma=1 and leaves the lambdas free), "
                 f"or drop them from fit_params."
+            )
+        qed_steps = adp.qed_step_group(self._param_order)
+        if qed_steps and not priors:
+            raise ValueError(
+                f"SCETlibADParamModel: the QED order-step nuisance(s) "
+                f"{list(qed_steps)} are being fitted but priors are off. They are "
+                f"N(0, 1) by construction (theta = kappa - 1, |theta| = 1 = the "
+                f"whole step). Pass priors=1, or qed_nuisances=none."
             )
         if not priors:
             return
@@ -872,6 +1235,7 @@ class SCETlibADParamModel(ParamModel):
 
         # ---- Is the cache the same calculation the templates carry?
         refuse, warn, corr_only = adp.compare_corr_config(cfg, self._cache_config())
+        refuse = self._qed_config_verdict(cfg, refuse)
         shift = np.abs(anchor - cache_anchor)
         worst = int(np.argmax(shift)) if shift.size else 0
         print(
@@ -918,6 +1282,15 @@ class SCETlibADParamModel(ParamModel):
                 )
                 + "\nRebuild the cache from the correction's runcard, or the "
                 "card from a histmaker using the cache's."
+                + (
+                    "\n    [QED]: an absent section or key reads as QED off / "
+                    "SCETlib's default. A QED-on cache under a QED-off "
+                    "correction is accepted only with fixed_ratio (the legacy "
+                    "frozen-K workflow) or, on your own authority, "
+                    "qed_check=warn."
+                    if any(str(r[0]).startswith(adp.QED_SECTION + ".") for r in refuse)
+                    else ""
+                )
             )
 
         if source == "cache":
@@ -931,6 +1304,73 @@ class SCETlibADParamModel(ParamModel):
             )
             return cache_anchor
         return anchor
+
+    def _qed_config_verdict(self, corr_cfg, refuse):
+        """Apply the [QED] policy to ``compare_corr_config``'s refusals.
+
+        Returns the refusals that still stand. The QED ones (``QED.*``) are
+        downgraded to a printed WARNING in two cases only: the legacy frozen-K
+        workflow (correction QED off, cache QED on, ``fixed_ratio`` given), and
+        an explicit ``qed_check=warn``. Separately, ``fixed_ratio`` on a
+        correction that is already QED-on refuses (K counted twice) unless
+        ``qed_check=warn``.
+        """
+        cache_qed = self._cache_config().get(adp.QED_SECTION)
+        corr_qed = corr_cfg.get(adp.QED_SECTION)
+        c_eff, h_eff = adp.qed_effective(corr_qed), adp.qed_effective(cache_qed)
+        fixed = self._fixed_ratio_path is not None and str(
+            self._fixed_ratio_path
+        ).strip().lower() not in ("", "none", "0", "off")
+        qed = [r for r in refuse if str(r[0]).startswith(adp.QED_SECTION + ".")]
+        other = [r for r in refuse if r not in qed]
+        print(
+            f"[SCETlibADParamModel] [QED] effective settings: correction {c_eff} "
+            f"| cache {h_eff}"
+            + (
+                " (correction records no [QED] section: read as off)"
+                if not isinstance(corr_qed, dict)
+                else ""
+            ),
+            flush=True,
+        )
+        legacy = fixed and c_eff["qed_isr"] == "off" and h_eff["qed_isr"] != "off"
+        if qed and (legacy or self._qed_check == "warn"):
+            why = (
+                "the legacy frozen-K workflow (QED-off correction, QED-on cache, "
+                "fixed_ratio supplying the central QED factor)"
+                if legacy
+                else "qed_check=warn"
+            )
+            print(
+                f"[SCETlibADParamModel] WARNING: the cache's QED ISR differs from "
+                f"the correction's, accepted because of {why}:\n"
+                + "\n".join(
+                    f"    {n}: correction {c!r} vs cache {h!r}" for n, c, h in qed
+                )
+                + "\n    The anchor prediction is the correction's template "
+                "(times fixed_ratio's K if given), while the parameter response "
+                "is the cache's QED-on one.",
+                flush=True,
+            )
+            qed = []
+        if fixed and c_eff["qed_isr"] != "off":
+            msg = (
+                f"fixed_ratio={self._fixed_ratio_path} multiplies a template whose "
+                f"theory correction already carries QED ISR ({c_eff}): if K is a "
+                f"QED factor it is applied twice. fixed_ratio exists for the legacy "
+                f"QCD-only templates."
+            )
+            if self._qed_check == "warn":
+                print(
+                    f"[SCETlibADParamModel] WARNING (qed_check=warn): {msg}",
+                    flush=True,
+                )
+            else:
+                raise ValueError(
+                    f"SCETlibADParamModel: {msg} Pass qed_check=warn if K is not "
+                    f"a QED factor."
+                )
+        return other + qed
 
     def _sigma_gen_overrides(self, overrides):
         """sigma_gen (flat) at the anchor with PHYSICAL overrides applied.
@@ -1100,6 +1540,24 @@ class SCETlibADParamModel(ParamModel):
                     f"(case as in the card). Conflicting systs:\n"
                     + "\n".join(f"    {s}" for s in clash[:20])
                 )
+        # The frozen QED templates (qed_knob) carry the same physics as the EW
+        # ISR templates too, but past knob fits ran on cards that keep those
+        # systs and freeze them (--freezeParameters), which the model cannot
+        # see: warn instead of refusing.
+        if self._knob_names:
+            rx = re.compile(_EW_ISR_PATTERN)
+            clash = [s for s, low in lowered if rx.search(low)]
+            if clash:
+                print(
+                    f"[SCETlibADParamModel] WARNING: the card carries "
+                    f"{len(clash)} EW ISR syst(s) matching {_EW_ISR_PATTERN!r} "
+                    f"({', '.join(clash[:5])}) next to the frozen QED "
+                    f"template(s) {list(self._knob_names)}; unless they are "
+                    f"frozen (--freezeParameters) or removed (setupRabbit "
+                    f"--excludeNuisances), the QED ISR uncertainty is counted "
+                    f"twice.",
+                    flush=True,
+                )
 
     # =========================================================================
     # evaluation
@@ -1164,7 +1622,17 @@ class SCETlibADParamModel(ParamModel):
 
     def _sigma_gen(self, param):
         """sigma_gen on the gen grid, differentiable via the SCETlib bridge."""
-        return self._fold.fold_tf(self.core.tf_fn(self.scetlib_full_vector_tf(param)))
+        sigma_cache = self._apply_fixed_ratio_tf(
+            self.core.tf_fn(self.scetlib_full_vector_tf(param))
+        )
+        i0 = self._n_scetlib + len(self._env_names)
+        for k, (_, logT) in enumerate(self._qed_knobs):
+            i = i0 + k
+            theta = tf.cast(param[i : i + 1], sigma_cache.dtype)
+            sigma_cache = sigma_cache * tf.exp(
+                theta * tf.constant(logT, dtype=sigma_cache.dtype)
+            )
+        return self._fold.fold_tf(sigma_cache)
 
     def _ratio_from_param(self, param):
         """Per-fit-bin ratio to the anchor prediction, softly floored positive."""
@@ -1173,7 +1641,9 @@ class SCETlibADParamModel(ParamModel):
             nsc = self._n_scetlib
             # Gen-level template: the frozen envelope multiplies sigma_gen
             # before the response fold.
-            sigma_gen = sigma_gen * self._scale_env.factor_tf(param[nsc:])
+            sigma_gen = sigma_gen * self._scale_env.factor_tf(
+                param[nsc : nsc + len(self._env_names)]
+            )
         if self.gen_level:
             ratio = sigma_gen / self.sigma_gen_central_flat
         else:
