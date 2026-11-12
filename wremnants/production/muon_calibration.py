@@ -2032,11 +2032,48 @@ def define_passthrough_corrections_jpsi_calibration_ntuples(df):
 
 
 def make_pixel_multiplicity_helpers(
-    filename=f"{common.data_dir}/calibration/pixelcorr.pkl.lz4",
+    filename=None,
     reverse_variations=False,
+    weights="auto",
 ):
+    """Helpers for the pixel multiplicity correction and its systematic and statistical
+    variations, from the output of scripts/corrections/make_pixel_corrections.py.
+
+    weights: how a muon gets its weight.
+      - "flag": by its own pixel-hit flag: w0 = p0_data / p0_MC without a valid pixel
+        hit, w1 = (1 - p0_data) / (1 - p0_MC) with one. The few percent of muons
+        without a pixel hit carry a weight far from one, and the binomial fluctuation
+        of their number dominates the variation templates.
+      - "response": by the expectation of that weight for its generated pt and
+        reco/gen curvature ratio, w = (1 - f0) w1 + f0 w0 with the probability f0 of no
+        valid pixel hit from the correction file (needs its "hZeroPixelProb").
+      - "auto": "response" if the correction file provides the probability, else "flag".
+      - "both": "response", and the helpers of the variations carry those with the
+        "flag" weights as `flag_helper`, for a comparison of the two in one output
+        (add_pixel_multiplicity_uncertainty books them as nominal_pixelMultiplicity*Flag).
+    The helpers carry `response` (bool), which selects their input columns
+    (define_pixel_multiplicity_cols, define_pixel_multiplicity_cols_dimuon), and those
+    of the variations `flag_helper` (None unless weights is "both").
+    """
+    if filename is None:
+        filename = f"{common.data_dir}/calibration/pixelcorr.pkl.lz4"
     with lz4.frame.open(filename, "rb") as fin:
         res = pickle.load(fin)
+
+    if weights not in ["auto", "response", "flag", "both"]:
+        raise ValueError(f"Unknown pixel multiplicity weights '{weights}'")
+    has_prob = "hZeroPixelProb" in res
+    if weights in ["response", "both"] and not has_prob:
+        raise ValueError(
+            f"Response-based pixel multiplicity weights need 'hZeroPixelProb' in {filename}; "
+            "make it with scripts/corrections/make_pixel_corrections.py"
+        )
+    response = has_prob and weights != "flag"
+    if weights == "auto" and not has_prob:
+        logger.warning(
+            f"{filename} has no 'hZeroPixelProb': the pixel multiplicity weights are "
+            "given by the pixel-hit flag of the muons (statistically noisy variations)"
+        )
 
     hNValidPixelHitsTrig_data = res["hNValidPixelHitsTrig_data"]
     hNValidPixelHitsNonTrig_data = res["hNValidPixelHitsNonTrig_data"]
@@ -2204,40 +2241,179 @@ def make_pixel_multiplicity_helpers(
     hvar_cpp = narf.hist_to_pyroot_boost(hvar, tensor_rank=1)
     hvarstat_cpp = narf.hist_to_pyroot_boost(hvarstat, tensor_rank=1)
 
-    helper = ROOT.wrem.PixelMultiplicityHelper[type(hnom_cpp)](ROOT.std.move(hnom_cpp))
-    helper_var = ROOT.wrem.PixelMultiplicityUncertaintyHelper[nvar, type(hvar_cpp)](
-        ROOT.std.move(hvar_cpp)
-    )
-    helper_varstat = ROOT.wrem.PixelMultiplicityUncertaintyHelper[
-        nvarstat, type(hvarstat_cpp)
-    ](ROOT.std.move(hvarstat_cpp))
+    if response:
+        # probability of no valid pixel hit against (trigger category, eta, charge,
+        # generated pt, qopr), and its average for muons without a generated match:
+        # the MC fraction, for which the nominal weight is one
+        hprob = res["hZeroPixelProb"]
+        hprob0 = hist.Hist(*hp0[{"data_mc": "mc"}].axes, name="hprob0")
+        hprob0.values(flow=True)[...] = hp0[{"data_mc": "mc"}].values(flow=True)
+        hprob_cpp = narf.hist_to_pyroot_boost(hprob)
+        hprob0_cpp = narf.hist_to_pyroot_boost(hprob0)
+        prob = ROOT.wrem.PixelMultiplicityProbability[
+            type(hprob_cpp), type(hprob0_cpp)
+        ](ROOT.std.move(hprob_cpp), ROOT.std.move(hprob0_cpp))
+
+        helper = ROOT.wrem.PixelMultiplicityResponseHelper[type(hnom_cpp), type(prob)](
+            ROOT.std.move(hnom_cpp), prob
+        )
+        helper_var = ROOT.wrem.PixelMultiplicityResponseUncertaintyHelper[
+            nvar, type(hvar_cpp), type(prob)
+        ](ROOT.std.move(hvar_cpp), prob)
+        helper_varstat = ROOT.wrem.PixelMultiplicityResponseUncertaintyHelper[
+            nvarstat, type(hvarstat_cpp), type(prob)
+        ](ROOT.std.move(hvarstat_cpp), prob)
+    else:
+        helper = ROOT.wrem.PixelMultiplicityHelper[type(hnom_cpp)](
+            ROOT.std.move(hnom_cpp)
+        )
+        helper_var = ROOT.wrem.PixelMultiplicityUncertaintyHelper[nvar, type(hvar_cpp)](
+            ROOT.std.move(hvar_cpp)
+        )
+        helper_varstat = ROOT.wrem.PixelMultiplicityUncertaintyHelper[
+            nvarstat, type(hvarstat_cpp)
+        ](ROOT.std.move(hvarstat_cpp))
 
     helper_var.tensor_axes = [axis_var]
     helper_varstat.tensor_axes = [axis_varstat]
+    for h in (helper, helper_var, helper_varstat):
+        h.response = response
+
+    # the same variations with the weights by the pixel-hit flag, to book both
+    helper_var.flag_helper = None
+    helper_varstat.flag_helper = None
+    if response and weights == "both":
+        hvar_flag_cpp = narf.hist_to_pyroot_boost(hvar, tensor_rank=1)
+        hvarstat_flag_cpp = narf.hist_to_pyroot_boost(hvarstat, tensor_rank=1)
+        helper_var.flag_helper = ROOT.wrem.PixelMultiplicityUncertaintyHelper[
+            nvar, type(hvar_flag_cpp)
+        ](ROOT.std.move(hvar_flag_cpp))
+        helper_varstat.flag_helper = ROOT.wrem.PixelMultiplicityUncertaintyHelper[
+            nvarstat, type(hvarstat_flag_cpp)
+        ](ROOT.std.move(hvarstat_flag_cpp))
+        helper_var.flag_helper.tensor_axes = [axis_var]
+        helper_varstat.flag_helper.tensor_axes = [axis_varstat]
+        for h in (helper_var.flag_helper, helper_varstat.flag_helper):
+            h.response = False
 
     return helper, helper_var, helper_varstat
 
 
-def define_pixel_multiplicity_cols_dimuon(df, cvh_name="cvhideal"):
-    """Inputs of the pixel multiplicity helpers for the non-triggering and the triggering
-    muon of the Z histmakers, from {nonTrig,trig}Muons_{eta,pt,charge}0 and
-    {nonTrig,trig}Muons_<cvh_name>NValidPixelHits0."""
+class PixelMultiplicityColumns:
+    """Input columns of the pixel multiplicity helpers: `flag` for the helpers that weight
+    a muon by its pixel-hit flag, `response` for the response-based ones (None if the
+    generated pt and qopr of the muons are not defined)."""
+
+    def __init__(self, flag, response=None):
+        self.flag = flag
+        self.response = response
+
+    def of(self, helper):
+        """Columns that a helper of make_pixel_multiplicity_helpers takes"""
+        if not helper.response:
+            return self.flag
+        if self.response is None:
+            raise ValueError(
+                "The response-based pixel multiplicity helpers need the generated pt and qopr of the muons"
+            )
+        return self.response
+
+
+def define_matched_gen_muon_response_dimuon(df):
+    """Generated pt and qopr = (q/p)_reco / (q/p)_gen of the non-triggering and the
+    triggering muon of the Z histmakers against their matched generated muon
+    ({nonTrig,trig}Muons_{genPt,qopr}0; genPt -1 and qopr 1 without one), for the
+    response-based pixel multiplicity weights and the histograms they are derived from.
+    """
+    for name in ["nonTrigMuons", "trigMuons"]:
+        df = df.Define(f"{name}_genPartIdx0", f"Muon_genPartIdx[{name}][0]")
+        df = df.Define(
+            f"{name}_genPt0",
+            f"wrem::matchedGenMuonPt({name}_genPartIdx0, GenPart_pt, GenPart_pdgId)",
+        )
+        df = df.Define(
+            f"{name}_qopr0",
+            f"wrem::qopRatioRecoGen({name}_pt0, {name}_eta0, {name}_charge0, "
+            f"{name}_genPartIdx0, GenPart_pt, GenPart_eta, GenPart_pdgId)",
+        )
+    return df
+
+
+def define_pixel_multiplicity_cols_dimuon(df, cvh_name="cvhideal", response=False):
+    """Inputs of the pixel multiplicity helpers (PixelMultiplicityColumns) for the
+    non-triggering and the triggering muon of the Z histmakers, from
+    {nonTrig,trig}Muons_{eta,pt,charge}0 and {nonTrig,trig}Muons_<cvh_name>NValidPixelHits0
+    and, for the response-based helpers (`response` of the helpers),
+    {nonTrig,trig}Muons_{genPt,qopr}0 of define_matched_gen_muon_response_dimuon."""
     df = df.DefinePerSample(
         "MuonNonTrigTrig_triggerCat",
         "ROOT::VecOps::RVec<wrem::TriggerCat>{wrem::TriggerCat::nonTriggering, wrem::TriggerCat::triggering}",
     )
-    cols = ["MuonNonTrigTrig_triggerCat"]
-    for var, cpp_type in [
+    variables = [
         ("eta", "float"),
         ("pt", "float"),
         ("charge", "int"),
         (f"{cvh_name}NValidPixelHits", "int"),
-    ]:
+    ]
+    if response:
+        variables += [("genPt", "float"), ("qopr", "float")]
+    for var, cpp_type in variables:
         df = df.Define(
             f"MuonNonTrigTrig_{var}",
             f"ROOT::VecOps::RVec<{cpp_type}>{{nonTrigMuons_{var}0, trigMuons_{var}0}}",
         )
-        cols.append(f"MuonNonTrigTrig_{var}")
+
+    def columns(*names):
+        return ["MuonNonTrigTrig_triggerCat", *(f"MuonNonTrigTrig_{n}" for n in names)]
+
+    cols = PixelMultiplicityColumns(
+        flag=columns("eta", "pt", "charge", f"{cvh_name}NValidPixelHits"),
+        response=columns("eta", "charge", "genPt", "qopr") if response else None,
+    )
+    return df, cols
+
+
+def define_pixel_multiplicity_cols(
+    df, reco_sel="goodMuons", cvh_name="cvhideal", response=False
+):
+    """Inputs of the pixel multiplicity helpers (PixelMultiplicityColumns) for the muons
+    of a collection, all taken as triggering muons (W histmaker), from
+    {reco_sel}_{eta,pt,charge} and the pixel-hit count of the muons. With `response`
+    (response-based helpers) also from the generated pt and qopr of the muons."""
+    df = df.Define(
+        f"{reco_sel}_triggerCat",
+        f"ROOT::VecOps::RVec<wrem::TriggerCat>({reco_sel}_eta.size(), wrem::TriggerCat::triggering)",
+    )
+    df = df.Define(
+        f"{reco_sel}_{cvh_name}NValidPixelHits",
+        f"Muon_{cvh_name}NValidPixelHits[{reco_sel}]",
+    )
+    cols = PixelMultiplicityColumns(
+        flag=[
+            f"{reco_sel}_triggerCat",
+            f"{reco_sel}_eta",
+            f"{reco_sel}_pt",
+            f"{reco_sel}_charge",
+            f"{reco_sel}_{cvh_name}NValidPixelHits",
+        ]
+    )
+    if response:
+        df = df.Define(
+            f"{reco_sel}_pixelGenPt",
+            f"wrem::matchedGenMuonPt(Muon_genPartIdx[{reco_sel}], GenPart_pt, GenPart_pdgId)",
+        )
+        df = df.Define(
+            f"{reco_sel}_pixelQopr",
+            f"wrem::qopRatioRecoGen({reco_sel}_pt, {reco_sel}_eta, {reco_sel}_charge, "
+            f"Muon_genPartIdx[{reco_sel}], GenPart_pt, GenPart_eta, GenPart_pdgId)",
+        )
+        cols.response = [
+            f"{reco_sel}_triggerCat",
+            f"{reco_sel}_eta",
+            f"{reco_sel}_charge",
+            f"{reco_sel}_pixelGenPt",
+            f"{reco_sel}_pixelQopr",
+        ]
     return df, cols
 
 
@@ -2252,23 +2428,29 @@ def add_pixel_multiplicity_uncertainty(
     storage_type=hist.storage.Double(),
 ):
     """Variations of the pixel multiplicity correction, with the helpers of
-    make_pixel_multiplicity_helpers: systematic, and statistical if helper_stat is given.
+    make_pixel_multiplicity_helpers and the columns (PixelMultiplicityColumns) of
+    define_pixel_multiplicity_cols[_dimuon]: systematic, and statistical if helper_stat is
+    given. Helpers that carry a `flag_helper` (weights "both") book the variations with
+    the weights by the pixel-hit flag in addition, as nominal_pixelMultiplicity{Syst,Stat}Flag.
     """
     for name, helper in [("Syst", helper_syst), ("Stat", helper_stat)]:
         if helper is None:
             continue
-        df = df.Define(
-            f"nominal_pixelMultiplicity{name}_tensor",
-            helper,
-            [*pixel_multiplicity_cols, "nominal_weight"],
-        )
-        results.append(
-            df.HistoBoost(
-                f"nominal_pixelMultiplicity{name}",
-                axes,
-                [*nominal_cols, f"nominal_pixelMultiplicity{name}_tensor"],
-                tensor_axes=helper.tensor_axes,
-                storage=storage_type,
+        for suffix, h in [("", helper), ("Flag", getattr(helper, "flag_helper", None))]:
+            if h is None:
+                continue
+            df = df.Define(
+                f"nominal_pixelMultiplicity{name}{suffix}_tensor",
+                h,
+                [*pixel_multiplicity_cols.of(h), "nominal_weight"],
             )
-        )
+            results.append(
+                df.HistoBoost(
+                    f"nominal_pixelMultiplicity{name}{suffix}",
+                    axes,
+                    [*nominal_cols, f"nominal_pixelMultiplicity{name}{suffix}_tensor"],
+                    tensor_axes=h.tensor_axes,
+                    storage=storage_type,
+                )
+            )
     return df

@@ -1719,9 +1719,10 @@ public:
 
       const double qop = charge / pt / std::cosh(eta);
 
-      // ``sigmarel_ * qop`` is signed (qop is negative for q<0); std::normal_distribution
-      // requires stddev > 0. Sigmarel == 0 (legitimate "no smearing") collapses
-      // to a δ-function -- pass pt through unchanged in that case.
+      // ``sigmarel_ * qop`` is signed (qop is negative for q<0);
+      // std::normal_distribution requires stddev > 0. Sigmarel == 0 (legitimate
+      // "no smearing") collapses to a δ-function -- pass pt through unchanged
+      // in that case.
       const double dsigma = std::abs(sigmarel_ * qop);
 
       if (dsigma > 0.) {
@@ -1895,6 +1896,179 @@ public:
 
 private:
   std::shared_ptr<const HIST> hist_;
+};
+
+// Generated muon matched to a reconstructed muon, for the response-based pixel
+// multiplicity weights: its pt, or -1 if the reconstructed muon has no matched
+// generated muon.
+template <typename PT, typename PDG>
+float matchedGenMuonPt(const int genPartIdx, const RVec<PT> &genPts,
+                       const RVec<PDG> &genPdgIds) {
+  if (genPartIdx < 0 || genPartIdx >= static_cast<int>(genPts.size()) ||
+      std::abs(genPdgIds[genPartIdx]) != 13) {
+    return -1.f;
+  }
+  return genPts[genPartIdx];
+}
+
+template <typename IDX, typename PT, typename PDG>
+RVec<float> matchedGenMuonPt(const RVec<IDX> &genPartIdxs,
+                             const RVec<PT> &genPts,
+                             const RVec<PDG> &genPdgIds) {
+  RVec<float> res(genPartIdxs.size());
+  for (std::size_t i = 0; i < res.size(); ++i) {
+    res[i] =
+        matchedGenMuonPt(static_cast<int>(genPartIdxs[i]), genPts, genPdgIds);
+  }
+  return res;
+}
+
+// (q/p)_reco / (q/p)_gen of a reconstructed muon and its matched generated
+// muon, 1 without one. Negative for a charge mismatch.
+template <typename PT, typename ETA, typename PDG>
+float qopRatioRecoGen(const double recoPt, const double recoEta,
+                      const int recoCharge, const int genPartIdx,
+                      const RVec<PT> &genPts, const RVec<ETA> &genEtas,
+                      const RVec<PDG> &genPdgIds) {
+  if (matchedGenMuonPt(genPartIdx, genPts, genPdgIds) <= 0.f) {
+    return 1.f;
+  }
+  const double genCharge = genPdgIds[genPartIdx] > 0 ? -1. : 1.;
+  const double qopReco = recoCharge / (recoPt * std::cosh(recoEta));
+  const double qopGen =
+      genCharge / (genPts[genPartIdx] * std::cosh(genEtas[genPartIdx]));
+  return qopReco / qopGen;
+}
+
+template <typename RPT, typename RETA, typename RQ, typename IDX, typename PT,
+          typename ETA, typename PDG>
+RVec<float>
+qopRatioRecoGen(const RVec<RPT> &recoPts, const RVec<RETA> &recoEtas,
+                const RVec<RQ> &recoCharges, const RVec<IDX> &genPartIdxs,
+                const RVec<PT> &genPts, const RVec<ETA> &genEtas,
+                const RVec<PDG> &genPdgIds) {
+  RVec<float> res(recoPts.size());
+  for (std::size_t i = 0; i < res.size(); ++i) {
+    res[i] = qopRatioRecoGen(
+        recoPts[i], recoEtas[i], static_cast<int>(recoCharges[i]),
+        static_cast<int>(genPartIdxs[i]), genPts, genEtas, genPdgIds);
+  }
+  return res;
+}
+
+// Probability that the track of a muon has no valid pixel hit, given its
+// trigger category, eta, charge, generated pt and qopr = (q/p)_reco /
+// (q/p)_gen (HPROB, looked up with generated pt and qopr clamped to its
+// range). A muon without a matched generated muon (genPt <= 0) gets the
+// probability integrated over pt and qopr (HPROB0).
+template <typename HPROB, typename HPROB0> class PixelMultiplicityProbability {
+public:
+  PixelMultiplicityProbability(HPROB &&hprob, HPROB0 &&hprob0)
+      : hprob_(std::make_shared<const HPROB>(std::move(hprob))),
+        hprob0_(std::make_shared<const HPROB0>(std::move(hprob0))) {}
+
+  double operator()(const int trigcat, const double eta, const int charge,
+                    const double genPt, const double qopr) const {
+    if (genPt <= 0.) {
+      return narf::get_value(*hprob0_, trigcat, eta, charge);
+    }
+    const auto &h = *hprob_;
+    const int itrig = clampedIndex(h.template axis<0>(), trigcat);
+    const int ieta = clampedIndex(h.template axis<1>(), eta);
+    const int icharge = clampedIndex(h.template axis<2>(), charge);
+    const int ipt = clampedIndex(h.template axis<3>(), genPt);
+    const int iqopr = clampedIndex(h.template axis<4>(), qopr);
+    return h.at(itrig, ieta, icharge, ipt, iqopr);
+  }
+
+private:
+  template <typename AXIS, typename T>
+  static int clampedIndex(const AXIS &axis, const T &x) {
+    return std::clamp(static_cast<int>(axis.index(x)), 0,
+                      static_cast<int>(axis.size()) - 1);
+  }
+
+  std::shared_ptr<const HPROB> hprob_;
+  std::shared_ptr<const HPROB0> hprob0_;
+};
+
+// Pixel multiplicity weights from the muon response. PixelMultiplicityHelper
+// gives a muon one of two weights by its own pixel-hit flag, so that the few
+// percent of muons without a valid pixel hit carry a weight far from one and
+// the variation templates are dominated by their binomial fluctuation. Here a
+// muon gets the expectation of that weight for its generated pt and reco/gen
+// curvature ratio,
+//   w = (1 - f0) w(valid pixel hits) + f0 w(no valid pixel hit),
+// with f0 from PixelMultiplicityProbability: the same weight on average for
+// any process and selection, since the pixel-less muons differ from the others
+// by their resolution only.
+template <typename HIST, typename PROB> class PixelMultiplicityResponseHelper {
+public:
+  PixelMultiplicityResponseHelper(HIST &&hist, const PROB &prob)
+      : hist_(std::make_shared<const HIST>(std::move(hist))), prob_(prob) {}
+
+  double operator()(const ROOT::VecOps::RVec<TriggerCat> &trigcats,
+                    const ROOT::VecOps::RVec<float> &etas,
+                    const ROOT::VecOps::RVec<int> &charges,
+                    const ROOT::VecOps::RVec<float> &genPts,
+                    const ROOT::VecOps::RVec<float> &qoprs) const {
+    double w = 1.;
+
+    using enum_t = std::underlying_type_t<TriggerCat>;
+
+    for (unsigned int i = 0; i < trigcats.size(); ++i) {
+      const auto trigcat = static_cast<enum_t>(trigcats[i]);
+      const double f0 =
+          prob_(trigcat, etas[i], charges[i], genPts[i], qoprs[i]);
+      w *=
+          (1. - f0) * narf::get_value(*hist_, trigcat, etas[i], charges[i], 1) +
+          f0 * narf::get_value(*hist_, trigcat, etas[i], charges[i], 0);
+    }
+
+    return w;
+  }
+
+private:
+  std::shared_ptr<const HIST> hist_;
+  PROB prob_;
+};
+
+template <std::size_t N, typename HIST, typename PROB>
+class PixelMultiplicityResponseUncertaintyHelper {
+public:
+  using tensor_t = Eigen::TensorFixedSize<double, Eigen::Sizes<N>>;
+
+  PixelMultiplicityResponseUncertaintyHelper(HIST &&hist, const PROB &prob)
+      : hist_(std::make_shared<const HIST>(std::move(hist))), prob_(prob) {}
+
+  tensor_t operator()(const ROOT::VecOps::RVec<TriggerCat> &trigcats,
+                      const ROOT::VecOps::RVec<float> &etas,
+                      const ROOT::VecOps::RVec<int> &charges,
+                      const ROOT::VecOps::RVec<float> &genPts,
+                      const ROOT::VecOps::RVec<float> &qoprs,
+                      const double nominal_weight = 1.) const {
+    tensor_t res;
+    res.setConstant(nominal_weight);
+
+    using enum_t = std::underlying_type_t<TriggerCat>;
+
+    for (unsigned int i = 0; i < trigcats.size(); ++i) {
+      const auto trigcat = static_cast<enum_t>(trigcats[i]);
+      const double f0 =
+          prob_(trigcat, etas[i], charges[i], genPts[i], qoprs[i]);
+      const tensor_t w =
+          (1. - f0) *
+              narf::get_value(*hist_, trigcat, etas[i], charges[i], 1).data() +
+          f0 * narf::get_value(*hist_, trigcat, etas[i], charges[i], 0).data();
+      res *= w;
+    }
+
+    return res;
+  }
+
+private:
+  std::shared_ptr<const HIST> hist_;
+  PROB prob_;
 };
 
 Eigen::Matrix<double, 1, 6>

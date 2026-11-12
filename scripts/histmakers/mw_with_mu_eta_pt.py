@@ -676,7 +676,9 @@ bias_helper = (
     pixel_multiplicity_uncertainty_helper,
     pixel_multiplicity_uncertainty_helper_stat,
 ) = muon_calibration.make_pixel_multiplicity_helpers(
-    reverse_variations=args.reweightPixelMultiplicity
+    filename=args.pixelMultiplicityFile,
+    reverse_variations=args.reweightPixelMultiplicity,
+    weights=args.pixelMultiplicityWeights,
 )
 
 
@@ -1416,28 +1418,15 @@ def build_graph(df, dataset):
         df = df.Define("goodMuons_eta", "Muon_correctedEta[goodMuons]")
         df = df.Define("goodMuons_pt", "Muon_correctedPt[goodMuons]")
         df = df.Define("goodMuons_charge", "Muon_correctedCharge[goodMuons]")
-        df = df.Define(
-            f"goodMuons_{cvhName}NValidPixelHits",
-            f"Muon_{cvhName}NValidPixelHits[goodMuons]",
+        df, pixel_multiplicity_cols = muon_calibration.define_pixel_multiplicity_cols(
+            df, "goodMuons", cvhName, response=pixel_multiplicity_helper.response
         )
-        df = df.Define(
-            "goodMuons_triggerCat",
-            "ROOT::VecOps::RVec<wrem::TriggerCat>(goodMuons_eta.size(), wrem::TriggerCat::triggering)",
-        )
-
-        pixel_multiplicity_cols = [
-            "goodMuons_triggerCat",
-            "goodMuons_eta",
-            "goodMuons_pt",
-            "goodMuons_charge",
-            f"goodMuons_{cvhName}NValidPixelHits",
-        ]
 
         if args.reweightPixelMultiplicity:
             df = df.Define(
                 "weight_pixel_multiplicity",
                 pixel_multiplicity_helper,
-                pixel_multiplicity_cols,
+                pixel_multiplicity_cols.of(pixel_multiplicity_helper),
             )
             weight_expr += "*weight_pixel_multiplicity"
 
