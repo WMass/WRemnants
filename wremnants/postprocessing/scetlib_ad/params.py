@@ -385,6 +385,19 @@ def qed_steps_from_config(qed_section):
     return tuple(steps)
 
 
+def qed_rule_kind(rule):
+    """``top2``, ``all``, ``none`` or ``list``: what a ``qed_nuisances`` value asks
+    for. The one place its spellings are parsed (None and "" mean ``top2``)."""
+    low = "" if rule is None else str(rule).strip().lower()
+    if low in ("top2", "default", ""):
+        return "top2"
+    if low == "all":
+        return "all"
+    if low in ("none", "off", "0", "no", "false"):
+        return "none"
+    return "list"
+
+
 def qed_select_steps(present, rule):
     """Which of the *present* order steps float under ``qed_nuisances=rule``.
 
@@ -398,12 +411,12 @@ def qed_select_steps(present, rule):
     """
     present = tuple(present)
     rule = "top2" if rule is None else str(rule).strip()
-    low = rule.lower()
-    if low in ("top2", "default", ""):
+    kind = qed_rule_kind(rule)
+    if kind == "top2":
         return present[-2:]
-    if low == "all":
+    if kind == "all":
         return present
-    if low in ("none", "off", "0", "no", "false"):
+    if kind == "none":
         return ()
     asked = []
     for tok in rule.split(","):

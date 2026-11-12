@@ -92,6 +92,7 @@ DTYPE = tf.float64
 # parameter that makes a card syst a double count. Only entries whose model
 # parameter is fitted are enforced. A regex, so that the PDF eigenvector
 # templates (pdf<N><SET>...) are told apart from pdfAlphaS.
+_EW_ISR_PATTERN = r"ew.*_isr"
 _CONFLICTS = (
     (
         r"scetlibnp",
@@ -126,8 +127,9 @@ _CONFLICTS = (
     ),
     (
         # the EW ISR templates (pythiaew_ISR, setupRabbit --isrUnc) are the QED
-        # ISR effect that the floated order steps already carry
-        r"ew.*_isr",
+        # ISR effect that the floated order steps already carry (matched
+        # case-insensitively, like every pattern here)
+        _EW_ISR_PATTERN,
         "a QED ISR order step",
         lambda names: any(n.startswith(adp.QED_KAPPA_PREFIX_OUT) for n in names),
     ),
@@ -334,9 +336,14 @@ class SCETlibADParamModel(ParamModel):
             (qed-isr study, 261104-qed-nll-central); it is for checks and
             bounds only. Governed by this token alone, like the scale envelope
             -- ``fit_params`` naming a step this rule does not select is
-            refused. Inactive (a note) on a cache without the multipliers.
+            refused. ``none`` also reads ``off``, ``0``, ``no``, ``false``. On a
+            cache without the multipliers the default and ``none`` are inactive
+            (a note), while ``all`` or a list is refused.
             Refused together with ``qed_knob`` (the same uncertainty twice):
             pass ``qed_nuisances=none`` to use frozen templates on a kappa cache.
+            A card that carries EW ISR templates (``pythiaew_ISR``) is refused
+            when a step floats; next to ``qed_knob`` it only warns, since knob
+            fits on such cards freeze those systs (``--freezeParameters``).
         qed_check
             ``refuse`` (DEFAULT) or ``warn``: what a ``[QED]`` mismatch between
             the cache and the card's theory correction does (see
@@ -389,7 +396,8 @@ class SCETlibADParamModel(ParamModel):
         self._response_group = str(response_group)
         self.gen_level = bool(gen_level)
         # Needed by the [QED] config check in _resolve_anchor (the legacy
-        # fixed_ratio escape), which runs before the factor itself is loaded.
+        # fixed_ratio escape), which runs before the factor itself is loaded
+        # below.
         self._fixed_ratio_path = fixed_ratio
         self._qed_check = str(qed_check).strip().lower()
         if self._qed_check not in ("refuse", "warn"):
@@ -411,11 +419,9 @@ class SCETlibADParamModel(ParamModel):
         self._setup_binning(indata, Q_lo, Q_hi)
 
         # ---- Optional fixed per-cache-bin factor (off by default).
-        self._fixed_ratio_path = fixed_ratio
         self._fixed_ratio = self._load_fixed_ratio(fixed_ratio)
         self._qed_knob_path = qed_knob
         self._qed_knob_name = "qedTheta"
-        self._qed_knob_logT = None
         # One (name, log T) per template; a single path keeps the historical
         # name ``qedTheta``, further paths get ``qedTheta2``, ``qedTheta3``, ...
         self._qed_knobs = []
@@ -435,7 +441,6 @@ class SCETlibADParamModel(ParamModel):
                     self._qed_knob_name if k == 0 else f"{self._qed_knob_name}{k + 1}"
                 )
                 self._qed_knobs.append((name, logT))
-            self._qed_knob_logT = self._qed_knobs[0][1]
 
         # ---- PDF confidence-level convention (see params.pdf_coeff_scale).
         self._conf_path = conf
@@ -591,12 +596,14 @@ class SCETlibADParamModel(ParamModel):
         qed_conf = self._cache_config().get(adp.QED_SECTION)
         rule = "top2" if qed_nuisances is None else str(qed_nuisances).strip()
         if not present:
-            explicit = rule.lower() not in ("top2", "default", "", "all", "none", "off")
-            if explicit:
+            # The default (top2) and "none" are fine on any cache; "all" and an
+            # explicit list ask for steps this cache cannot vary.
+            if adp.qed_rule_kind(rule) in ("all", "list"):
                 raise ValueError(
-                    f"SCETlibADParamModel: qed_nuisances={qed_nuisances!r} names "
-                    f"QED order steps, but this cache registers no qed_kappa_* "
-                    f"parameters (it was not built with [QED] qed_kappa = yes)."
+                    f"SCETlibADParamModel: qed_nuisances={qed_nuisances!r} asks "
+                    f"for QED order steps, but this cache registers no "
+                    f"qed_kappa_* parameters (it was not built with [QED] "
+                    f"qed_kappa = yes)."
                 )
             if adp.qed_is_on(qed_conf):
                 print(
@@ -1532,6 +1539,24 @@ class SCETlibADParamModel(ParamModel):
                     f"with setupRabbit --excludeNuisances '{pattern}' "
                     f"(case as in the card). Conflicting systs:\n"
                     + "\n".join(f"    {s}" for s in clash[:20])
+                )
+        # The frozen QED templates (qed_knob) carry the same physics as the EW
+        # ISR templates too, but past knob fits ran on cards that keep those
+        # systs and freeze them (--freezeParameters), which the model cannot
+        # see: warn instead of refusing.
+        if self._knob_names:
+            rx = re.compile(_EW_ISR_PATTERN)
+            clash = [s for s, low in lowered if rx.search(low)]
+            if clash:
+                print(
+                    f"[SCETlibADParamModel] WARNING: the card carries "
+                    f"{len(clash)} EW ISR syst(s) matching {_EW_ISR_PATTERN!r} "
+                    f"({', '.join(clash[:5])}) next to the frozen QED "
+                    f"template(s) {list(self._knob_names)}; unless they are "
+                    f"frozen (--freezeParameters) or removed (setupRabbit "
+                    f"--excludeNuisances), the QED ISR uncertainty is counted "
+                    f"twice.",
+                    flush=True,
                 )
 
     # =========================================================================
