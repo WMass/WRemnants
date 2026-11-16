@@ -49,8 +49,12 @@ PDF_PREFIX_OUT = "pdfEig"
 # QED ISR order-step multipliers, registered by a cache built with
 # ``[QED] qed_kappa = yes`` (scetlib-cms ``qed-order-kappa``; doc/qed-isr.md,
 # "Order-step multipliers"). SCETlib's kappa_k multiplies the increment of ONE
-# QED order step, central 1, so kappa_k = 0 drops the step and kappa_k = 2
-# doubles it; ``qed_kappa_ll`` -> ``qedStep_ll``. The fitted parameter is the
+# QED order step, central 1, so kappa_k = 0 drops that step's increment and
+# kappa_k = 2 doubles it; the other steps are untouched (the increments vary
+# independently). Only dropping the HIGHEST active step gives the next-lower
+# order exactly: at an NLL' central, kappa_nll = 0 alone still keeps the NLL'
+# constants and fixed order, and LL needs kappa_nll = kappa_nllp = 0.
+# ``qed_kappa_ll`` -> ``qedStep_ll``. The fitted parameter is the
 # unit nuisance theta_k = kappa_k - 1 (REPARAM below), N(0, 1). In step order:
 #   ll    off  -> LL    (whole LL effect: degenerate with alpha_s, see
 #                        QED_LEADING_STEP)
@@ -249,8 +253,10 @@ REPARAM = {
     "lambda6_nu": ("unit", (0.10,)),
     "lambda4_nu": ("unit", (0.50,)),
     # The QED order-step multipliers: theta_k = kappa_k - 1, so theta = -1 drops
-    # the step (the next-lower order, exactly: SCETlib nests the orders on the
-    # tape) and theta = +1 doubles it. c0 is the anchor, i.e. kappa = 1 from
+    # that step's increment and theta = +1 doubles it, the other steps held.
+    # For the highest active step theta = -1 is the next-lower order exactly
+    # (SCETlib nests the orders on the tape); reaching a lower order needs every
+    # step above it at -1. c0 is the anchor, i.e. kappa = 1 from
     # STRUCTURAL_CENTRAL; width 1 is the agreed N(0, 1) "two-point" variation
     # (qed-isr study, qed_tape_nuisance_spec.md).
     **{QED_KAPPA_PREFIX_OUT + s: ("unit", (1.0,)) for s in QED_STEPS},
@@ -520,12 +526,15 @@ _QED_KEY_ORDERS = {
     "mz": ("ll", "nll", "nllp"),
 }
 _QED_OFF = ("off", "no", "none", "false", "0", "")
+# The spellings SCETlib accepts for a boolean (ConfigParser.getboolean).
 _QED_BOOL = {
     "yes": "yes",
     "true": "yes",
+    "on": "yes",
     "1": "yes",
     "no": "no",
     "false": "no",
+    "off": "no",
     "0": "no",
 }
 

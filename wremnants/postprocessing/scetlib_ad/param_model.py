@@ -316,9 +316,14 @@ class SCETlibADParamModel(ParamModel):
             ``[QED] qed_kappa = yes`` (SCETlib registers one multiplier
             ``qed_kappa_<step>`` per order step present, central 1). Each
             floated step is the unit nuisance ``qedStep_<step>`` = theta_k =
-            kappa_k - 1 with an N(0, 1) prior (theta = -1 drops the step, i.e.
-            the next-lower order exactly; +1 doubles it), all in the
-            ``qedOrder`` impact group; the others stay at kappa = 1. Unlike the
+            kappa_k - 1 with an N(0, 1) prior (theta = -1 drops that step's
+            increment, +1 doubles it, each independently of the others), all
+            in the ``qedOrder`` impact group; the unselected steps stay at
+            kappa = 1. theta = -1 on the HIGHEST active step is the next-lower
+            order exactly; a lower one needs every step above it at -1 (at an
+            NLL' central, LL = ``qedStep_nll`` = ``qedStep_nllp`` = -1, while
+            ``qedStep_nll`` = -1 alone keeps the NLL' constants and fixed
+            order). Unlike the
             frozen ``qed_knob`` templates the response is the calculation's own,
             cross terms with the NP lambdas, alpha_s, TNPs and PDFs included.
 
