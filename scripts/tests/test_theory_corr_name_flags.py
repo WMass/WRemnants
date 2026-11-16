@@ -96,6 +96,22 @@ def test_quark_mass_from_flags():
     assert dg.calls == [f"{MB}_CorrByHelicity", f"{MC}_CorrByHelicity"]
 
 
+def test_separator_always_underscore():
+    # a suffixed nominal and a single-entry theoryCorr list: the histmaker writes
+    # f"{generator}_Corr", so both resolve to <name>_Corr
+    suffixed = "scetlib_dyturbo_LatticeMAP22_CT18Z_N4p0LL_N2LO_adcorrY35"
+    th, _ = make_helper([suffixed, PDFVARS, PDFAS, MC, MB])
+    assert th.corr_hist_name == f"{suffixed}_Corr"
+    th, _ = make_helper([suffixed])
+    assert th.corr_hist_name == f"{suffixed}_Corr"
+    # --pdfCorr/--asCorr NAME resolve to NAME_Corr next to a suffixed nominal
+    th, dg = make_helper([suffixed, PDFVARS, PDFAS], pdfCorr=PDFVARS, asCorr=PDFAS)
+    th.set_from_hels([])
+    th.add_pdf_uncertainty()
+    th.add_pdf_alphas_variation(noi=True)
+    assert dg.calls == [f"{PDFVARS}_Corr", f"{PDFAS}_Corr"]
+
+
 if __name__ == "__main__":
     failed = 0
     tests = [(k, v) for k, v in dict(globals()).items() if k.startswith("test_")]

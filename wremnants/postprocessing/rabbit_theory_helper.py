@@ -1186,10 +1186,7 @@ class TheoryHelper(object):
             if asname.replace(
                 self._corr_sep + "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
-                if self._corr_sep == "_":
-                    asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                else:
-                    asname = "scetlib_dyturboCT18Z_pdfasCorr"
+                asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
                 if asname.replace(
                     self._corr_sep + "Corr", ""
                 ) in self.datagroups.args_from_metadata("theoryCorr"):
