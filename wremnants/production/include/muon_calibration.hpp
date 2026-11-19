@@ -424,11 +424,12 @@ RVec<bool> filterRecoMuonsByGenTruth(RVec<bool> muonSelection,
                                      bool requirePrompt = true) {
   ROOT::VecOps::RVec<bool> res(muonSelection.size());
   for (int i = 0; i < muonSelection.size(); i++) {
+    // unmatched muons have Muon_genPartIdx == -1; check before indexing
+    const int idx = Muon_genPartIdx[i];
     res[i] =
-        (muonSelection[i] &&
-         (!(requirePrompt) || GenPart_statusFlags[Muon_genPartIdx[i]] & 0x01) &&
-         (abs(GenPart_pdgId[Muon_genPartIdx[i]]) == MUON_PDGID) &&
-         (GenPart_status[Muon_genPartIdx[i]] == 1));
+        (muonSelection[i] && idx >= 0 && idx < (int)GenPart_pdgId.size() &&
+         (!(requirePrompt) || GenPart_statusFlags[idx] & 0x01) &&
+         (abs(GenPart_pdgId[idx]) == MUON_PDGID) && (GenPart_status[idx] == 1));
   }
   return res;
 }
