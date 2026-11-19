@@ -306,6 +306,7 @@ common_groups = [
     "Total",
     "stat",
     "binByBinStat",
+    "mcStatDebias",
     "luminosity",
     "recoil",
     "CMS_background",
