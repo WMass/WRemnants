@@ -616,7 +616,9 @@ def make_jpsi_crctn_helper(filepath):
 
 def _define_muon_source_for_onnx_helper(df, reco_sel_GF):
     """Define ``{reco_sel_GF}_muon_source`` — an ``RVec<int>`` of
-    ``Muon_genPartFlav`` values for the gen-matched reco muons,
+    genPartFlav-like values for the gen-matched reco muons (``Muon_cvhGenPartFlav``,
+    from the same CVH-track generator match as the selection, see
+    ``define_cvh_gen_matching``),
     needed by the ONNX-reweight helpers (Jpsi scale and resolution
     uncertainty) as the per-muon class tag. The C++ helper applies
     the post-mapping rule (``genPartFlav == 15 -> 15, else 1``) and
@@ -630,10 +632,8 @@ def _define_muon_source_for_onnx_helper(df, reco_sel_GF):
     col = f"{reco_sel_GF}_muon_source"
     if col in df.GetColumnNames():
         return df
-    return df.Define(
-        col,
-        f"ROOT::VecOps::RVec<int>(Muon_genPartFlav[{reco_sel_GF}])",
-    )
+    df = define_cvh_gen_matching(df)
+    return df.Define(col, f"{GEN_MATCH_FLAV}[{reco_sel_GF}]")
 
 
 _ONNX_REWEIGHT_HELPER_PREFIXES = (
@@ -1385,6 +1385,33 @@ def define_corrected_muons(
     return df
 
 
+GEN_MATCH_IDX = "Muon_cvhGenPartIdx"
+GEN_MATCH_FLAV = "Muon_cvhGenPartFlav"
+
+
+def define_cvh_gen_matching(df, max_dr=0.1):
+    """Generator match of the reco muons by their CVH track, as in the NTuples: the
+    nearest stable generator muon within deltaR < max_dr, without the relative-pt
+    requirement of Muon_genPartIdx (NanoAOD MCMatcher, |dpt|/pt_gen < 0.5, which
+    truncates the response at 2/3 < R < 2), without charge requirement and without
+    one-to-one arbitration (WMass/cmssw#55). Defines Muon_cvhGenPartIdx (-1 if none) and
+    Muon_cvhGenPartFlav (1 prompt, 15 from a prompt tau decay, 3 other, 0 unmatched).
+    No-op if already defined."""
+    columns = set(df.GetColumnNames())
+    if GEN_MATCH_IDX in columns:
+        return df
+    df = df.Define(
+        GEN_MATCH_IDX,
+        "wrem::cvhGenPartIdx(Muon_cvhEta, Muon_cvhPhi, GenPart_eta, GenPart_phi, "
+        f"GenPart_pdgId, GenPart_status, {max_dr})",
+    )
+    df = df.Define(
+        GEN_MATCH_FLAV,
+        f"wrem::genPartFlavFromIdx({GEN_MATCH_IDX}, GenPart_statusFlags)",
+    )
+    return df
+
+
 def getColName_genFiltered_recoMuonSel(reco_sel="goodMuons", require_prompt=True):
     genMatch_condition = "Prompt" if require_prompt else "FSonly"
     return f"{reco_sel}_genTruth_{genMatch_condition}"
@@ -1393,12 +1420,13 @@ def getColName_genFiltered_recoMuonSel(reco_sel="goodMuons", require_prompt=True
 def define_genFiltered_recoMuonSel(df, reco_sel="goodMuons", require_prompt=True):
     col_name = getColName_genFiltered_recoMuonSel(reco_sel, require_prompt)
     require_prompt = "true" if require_prompt else "false"
+    df = define_cvh_gen_matching(df)
     df = df.Define(
         col_name,
         (
             f"wrem::filterRecoMuonsByGenTruth("
             f"    {reco_sel},"
-            "    Muon_genPartIdx,"
+            f"    {GEN_MATCH_IDX},"
             "    GenPart_pdgId,"
             "    GenPart_statusFlags,"
             "    GenPart_status,"
@@ -1443,12 +1471,13 @@ def define_matched_gen_muons_covMat(df, reco_sel="goodMuons"):
 def define_matched_gen_muons_kinematics(
     df, reco_sel="goodMuons", kinematic_vars=["pt", "eta", "phi", "charge"]
 ):
+    df = define_cvh_gen_matching(df)
     for var in kinematic_vars:
         if var == "charge":
             var = "pdgId"
         df = df.Define(
             f"{reco_sel}_gen{var.capitalize()}",
-            f"ROOT::VecOps::Take(GenPart_{var}, Muon_genPartIdx[{reco_sel}]);",
+            f"ROOT::VecOps::Take(GenPart_{var}, {GEN_MATCH_IDX}[{reco_sel}]);",
         )
         if var == "pdgId":
             df = df.Define(
@@ -2325,8 +2354,9 @@ def define_matched_gen_muon_response_dimuon(df):
     ({nonTrig,trig}Muons_{genPt,qopr}0; genPt -1 and qopr 1 without one), for the
     response-based pixel multiplicity weights and the histograms they are derived from.
     """
+    df = define_cvh_gen_matching(df)
     for name in ["nonTrigMuons", "trigMuons"]:
-        df = df.Define(f"{name}_genPartIdx0", f"Muon_genPartIdx[{name}][0]")
+        df = df.Define(f"{name}_genPartIdx0", f"{GEN_MATCH_IDX}[{name}][0]")
         df = df.Define(
             f"{name}_genPt0",
             f"wrem::matchedGenMuonPt({name}_genPartIdx0, GenPart_pt, GenPart_pdgId)",
@@ -2398,14 +2428,15 @@ def define_pixel_multiplicity_cols(
         ]
     )
     if response:
+        df = define_cvh_gen_matching(df)
         df = df.Define(
             f"{reco_sel}_pixelGenPt",
-            f"wrem::matchedGenMuonPt(Muon_genPartIdx[{reco_sel}], GenPart_pt, GenPart_pdgId)",
+            f"wrem::matchedGenMuonPt({GEN_MATCH_IDX}[{reco_sel}], GenPart_pt, GenPart_pdgId)",
         )
         df = df.Define(
             f"{reco_sel}_pixelQopr",
             f"wrem::qopRatioRecoGen({reco_sel}_pt, {reco_sel}_eta, {reco_sel}_charge, "
-            f"Muon_genPartIdx[{reco_sel}], GenPart_pt, GenPart_eta, GenPart_pdgId)",
+            f"{GEN_MATCH_IDX}[{reco_sel}], GenPart_pt, GenPart_eta, GenPart_pdgId)",
         )
         cols.response = [
             f"{reco_sel}_triggerCat",

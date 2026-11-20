@@ -434,6 +434,55 @@ RVec<bool> filterRecoMuonsByGenTruth(RVec<bool> muonSelection,
   return res;
 }
 
+// Generator match of the reco muons by the direction of their CVH track, as in
+// the NTuples: the nearest stable (status 1) generator muon within deltaR <
+// maxDR. Unlike Muon_genPartIdx (NanoAOD MCMatcher), there is no requirement on
+// the relative pt difference (which implies 2/3 < R < 2 for the response R =
+// (q/pt)_reco / (q/pt)_gen), no charge requirement and no one-to-one
+// arbitration between reco muons. -1 if none.
+template <typename TPdgId, typename TStatus>
+RVec<int>
+cvhGenPartIdx(const RVec<float> &Muon_eta, const RVec<float> &Muon_phi,
+              const RVec<float> &GenPart_eta, const RVec<float> &GenPart_phi,
+              const RVec<TPdgId> &GenPart_pdgId,
+              const RVec<TStatus> &GenPart_status, double maxDR = 0.1) {
+  RVec<int> res(Muon_eta.size(), -1);
+  const double maxDR2 = maxDR * maxDR;
+  for (std::size_t i = 0; i < Muon_eta.size(); ++i) {
+    double best = maxDR2;
+    for (std::size_t j = 0; j < GenPart_eta.size(); ++j) {
+      if (GenPart_status[j] != 1 ||
+          std::abs(GenPart_pdgId[j]) != (int)MUON_PDGID) {
+        continue;
+      }
+      const double dR2 =
+          deltaR2(Muon_eta[i], Muon_phi[i], GenPart_eta[j], GenPart_phi[j]);
+      if (dR2 < best) {
+        best = dR2;
+        res[i] = j;
+      }
+    }
+  }
+  return res;
+}
+
+// Muon_genPartFlav-like flavour of the generator match idx (for a stable muon):
+// 1 prompt, 15 from a prompt tau decay, 3 other, 0 unmatched. The b/c (5/4)
+// categories of the NanoAOD flavour are not distinguished.
+template <typename TFlags>
+RVec<int> genPartFlavFromIdx(const RVec<int> &idx,
+                             const RVec<TFlags> &GenPart_statusFlags) {
+  RVec<int> res(idx.size(), 0);
+  for (std::size_t i = 0; i < idx.size(); ++i) {
+    if (idx[i] < 0 || idx[i] >= (int)GenPart_statusFlags.size()) {
+      continue;
+    }
+    const int flags = GenPart_statusFlags[idx[i]];
+    res[i] = (flags & 1) ? 1 : ((flags & (1 << 5)) ? 15 : 3);
+  }
+  return res;
+}
+
 RVec<bool> filterRecoMuonsByCovMat(RVec<bool> muonSelection, RVec<float> covMat,
                                    RVec<int> covMatCounts) {
   ROOT::VecOps::RVec<bool> res(muonSelection.size());
