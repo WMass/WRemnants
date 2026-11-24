@@ -200,7 +200,7 @@ def make_zero_pixel_probability(
     hresponse,
     pt_range,
     genpt_fit_range=(34.0, 50.0),
-    genpt_map_edges=np.linspace(20.0, 70.0, 26),
+    genpt_map_edges=np.linspace(20.0, 100.0, 41),
     qopr_map_core=(0.9, 1.1),
     qopr_map_merge=4,
 ):

@@ -49,6 +49,14 @@ parser.add_argument(
     default=[34.0, 50.0],
     help="Generated-pt range in which the response of the two classes of muons is fitted",
 )
+parser.add_argument(
+    "--genPtMapRange",
+    type=float,
+    nargs=2,
+    default=[20.0, 100.0],
+    help="""Generated-pt range of the probability map, in bins of 2 GeV; muons outside it get
+    the probability of the first or last bin""",
+)
 parser.add_argument("--debug", action="store_true", help="Print debug output")
 args = parser.parse_args()
 
@@ -68,8 +76,11 @@ def load_hists(filename, histnames, procs):
 mc_procs = ["Zmumu", "Ztautau"]
 histnames_hits = ["hNValidPixelHitsTrig", "hNValidPixelHitsNonTrig"]
 # the response is that of the generated muons: MC only
+# with the pixel hit histogram of the triggering muons for the pt range of the selection
 histnames_response = (
-    [] if args.noResponse else ["hPixelResponseTrig", "hPixelResponseNonTrig"]
+    []
+    if args.noResponse
+    else ["hPixelResponseTrig", "hPixelResponseNonTrig", "hNValidPixelHitsTrig"]
 )
 
 if args.inputFilePixelHits is None:
@@ -112,11 +123,22 @@ if not args.noResponse:
     for i, h in enumerate(hresp):
         hresponse.view(flow=True)[i] = h.view(flow=True)
 
-    pt_edges = res["hNValidPixelHitsTrig_mc"].axes["pt"].edges
+    # pt range of the selection of the response histograms (may differ from that of the
+    # pixel hit multiplicities, --inputFilePixelHits)
+    pt_edges = mc_hist(hists_response, "hNValidPixelHitsTrig").axes["pt"].edges
+    response_pt_range = (float(pt_edges[0]), float(pt_edges[-1]))
+    logger.info(
+        f"Reconstructed pt range of the response histograms: {response_pt_range}"
+    )
     hprob, info = pixel_multiplicity_utils.make_zero_pixel_probability(
         hresponse,
-        pt_range=(pt_edges[0], pt_edges[-1]),
+        pt_range=response_pt_range,
         genpt_fit_range=args.genPtFitRange,
+        genpt_map_edges=np.linspace(
+            args.genPtMapRange[0],
+            args.genPtMapRange[1],
+            int(round((args.genPtMapRange[1] - args.genPtMapRange[0]) / 2.0)) + 1,
+        ),
     )
     res["hZeroPixelProb"] = hprob
     res["zeroPixelProbModel"] = info
@@ -166,7 +188,10 @@ res["meta"] = {
     "inputFile": args.inputFile,
     "inputFilePixelHits": args.inputFilePixelHits,
     "genPtFitRange": args.genPtFitRange,
+    "genPtMapRange": args.genPtMapRange,
 }
+if not args.noResponse:
+    res["meta"]["responsePtRange"] = response_pt_range
 
 with lz4.frame.open(args.outfile, "wb") as fout:
     pickle.dump(res, fout, protocol=pickle.HIGHEST_PROTOCOL)
