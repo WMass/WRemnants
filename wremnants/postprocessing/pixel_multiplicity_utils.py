@@ -66,6 +66,22 @@ def _poisson_deviance_residuals(n, e, floor=1e-2):
     return np.sign(n - e) * np.sqrt(np.clip(dev, 0.0, None))
 
 
+def _zero_pixel_fraction(p0, p1, frac0, floor=1e-13):
+    """Probability of no valid pixel hit, frac0 p0 / ((1 - frac0) p1 + frac0 p0), for the
+    probabilities p0, p1 of a qopr bin in the two classes. Far in the tails both are
+    differences of cumulative distributions close to 0 or 1 and known only to ~1e-16, so
+    they can come out slightly negative and their ratio be anything (values of several
+    hundred appeared at qopr ~ 1.45 in the barrel). They are clipped at zero, and where
+    the expected probability of the bin is below `floor` for both classes the wider class,
+    the one without a valid pixel hit, is taken to dominate: 1."""
+    p0 = np.clip(p0, 0.0, None)
+    p1 = np.clip(p1, 0.0, None)
+    num = frac0 * p0
+    den = (1.0 - frac0) * p1 + num
+    ok = den > floor
+    return np.where(ok, num / np.where(ok, den, 1.0), 1.0)
+
+
 def _fit_quadrature_sum(pt, var, err):
     """var = a^2 + b^2 pt^2 with a^2, b^2 >= 0, weighted least squares; returns (a^2, b^2)"""
     design = np.stack([np.ones_like(pt), pt**2], axis=1) / err[:, None]
@@ -186,8 +202,7 @@ class ResponseModel:
         of muons without one"""
         p1 = self._prob(pt, 1, edges=edges)
         p0 = self._prob(pt, 0, edges=edges)
-        den = (1.0 - frac0) * p1 + frac0 * p0
-        return np.where(den > 0.0, frac0 * p0 / np.where(den > 0.0, den, 1.0), 1.0)
+        return _zero_pixel_fraction(p0, p1, frac0)
 
 
 def untruncated_qopr_range(genpt_lo, genpt_hi, pt_min, pt_max):
@@ -334,9 +349,7 @@ def make_zero_pixel_probability(
         p1_map = np.array([model._prob(pt, 1, edges=map_edges) for pt in map_centers])
         p0_map = np.array([model._prob(pt, 0, edges=map_edges) for pt in map_centers])
 
-        def prob(p0, p1, frac0):
-            den = (1.0 - frac0) * p1 + frac0 * p0
-            return np.where(den > 0.0, frac0 * p0 / np.where(den > 0.0, den, 1.0), 1.0)
+        prob = _zero_pixel_fraction
 
         chi2 = ndf = 0.0
         for it in range(ax_trig.size):
