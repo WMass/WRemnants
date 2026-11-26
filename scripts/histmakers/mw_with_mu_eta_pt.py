@@ -1169,7 +1169,10 @@ def build_graph(df, dataset):
     ########################################################################
     # gen match to bare muons to select only prompt muons from MC processes, but also including tau decays (defined here because needed for veto SF)
     if not dataset.is_data and not isQCDMC and not args.noGenMatchMC:
-        df = generator_level_definitions.define_postfsr_vars(df)
+        # onia samples: the muons of the onium decay are not flagged prompt, match to them as well
+        df = generator_level_definitions.define_postfsr_vars(
+            df, onia_as_prompt=dataset.group == "Quarkonia"
+        )
         df = df.Filter(
             "wrem::hasMatchDR2(goodMuons_eta0,goodMuons_phi0,GenPart_eta[postfsrMuons],GenPart_phi[postfsrMuons],0.09)"
         )

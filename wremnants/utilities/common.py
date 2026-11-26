@@ -21,6 +21,17 @@ xsec_DYJetsToLL = 2001.9
 xsec_WplusJetsToLNu = 11765.9
 xsec_WminusJetsToLNu = 8703.87
 xsec_DYJetsToLLMass10to50 = 6997.0
+# private UL16 Pythia8 onia -> mu mu productions (2026-11, WMassNanoProduction#45) with a filter
+# >= 1 muon pT > 20 GeV |eta| < 2.5: sigma x B(mumu) after the filter, as generated (no correction
+# to data). sigma and the filter efficiency are from the GenXSecAnalyzer of all production jobs.
+# The onia are not Pythia resonances, so sigma does not include the forced mu mu decay; B(mumu)
+# (PDG: 2.48%, 1.93%, 2.18%, 5.961%, 0.80%) is applied here. Y(1S) and J/psi include feed-down
+# (chi and higher 3S1 states), Y(2S) the Y(3S) feed-down, Y(3S) and psi(2S) are direct only.
+xsec_Upsilon1SToMuMuFilterPt20 = 183.7  # 576.9 nb x 1.284% x 2.48%
+xsec_Upsilon2SToMuMuFilterPt20 = 31.41  # 75.27 nb x 2.162% x 1.93%
+xsec_Upsilon3SToMuMuFilterPt20 = 42.96  # 43.33 nb x 4.547% x 2.18%
+xsec_JPsiToMuMuFilterPt20 = 539.9  # 1223 nb x 0.7404% x 5.961%
+xsec_Psi2SToMuMuFilterPt20 = 14.75  # 102.1 nb x 1.806% x 0.80%
 
 xsec_WW = 118.7
 xsec_WZ = 47.13  # from https://twiki.cern.ch/twiki/bin/view/CMS/SummaryTable1G25ns
