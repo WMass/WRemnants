@@ -22,8 +22,15 @@ merged_groups = {
     },
     # gamma q -> V q' and gamma gamma -> l l, with separate normalization uncertainties
     "PhotonInduced": {"PhotonInducedQG": ["QG"], "PhotonInducedGG": ["GG"]},
-    # prompt onia -> mu mu (Y(1S,2S,3S), J/psi, psi(2S)), part of what the fakes absorb otherwise
-    "Quarkonia": {"Upsilon": ["Upsilon"], "Charmonium": ["JPsi", "Psi2S"]},
+    # prompt onia -> mu mu, part of what the fakes absorb otherwise: one component per
+    # resonance, each with its own normalization uncertainty
+    "Quarkonia": {
+        "Upsilon1S": ["Upsilon1S"],
+        "Upsilon2S": ["Upsilon2S"],
+        "Upsilon3S": ["Upsilon3S"],
+        "JPsi": ["JPsi"],
+        "Psi2S": ["Psi2S"],
+    },
 }
 
 
