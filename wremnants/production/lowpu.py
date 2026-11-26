@@ -1,14 +1,5 @@
 import narf
 
-# load lowPU specific libs
-
-# this is needed (at least) by lowpu_efficiencies.h
-narf.clingutils.Load("libPhysics")
-narf.clingutils.Load("libROOTVecOps")
-
-# this is needed by lowpu_rochester.h
-narf.clingutils.Load("libROOTDataFrame")
-
 narf.clingutils.Declare('#include "lowpu_utils.hpp"')
 narf.clingutils.Declare('#include "lowpu_efficiencies.hpp"')
 narf.clingutils.Declare('#include "lowpu_prefire.hpp"')
