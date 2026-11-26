@@ -40,6 +40,11 @@ def add_merged_group(dg, name, split=False):
         c: dg.get_members_from_results(startswith=prefixes)
         for c, prefixes in merged_groups[name].items()
     }
+    if not any(components.values()):
+        # e.g. auxiliary samples that were not loaded: an empty group has no
+        # histograms and would break the fit setup
+        logger.debug(f"No members for the merged group {name}, it is not added")
+        return
     if split:
         for c, members in components.items():
             dg.addGroup(c, members=members)
