@@ -838,6 +838,18 @@ def make_parser(parser=None, argv=None):
         action="store_true",
         help="Take alpha_S uncertainty from the MiNNLO event weights (by default it reads it from the theory-correction/helicity-smoothed hist, but requires having run that correction)",
     )
+    for flag, what in [
+        ("pdfCorr", "PDF uncertainty (replaces '<nominal>_pdfvars')"),
+        ("asCorr", "alpha_S variation (replaces '<nominal>_pdfas')"),
+        ("mbCorr", "mb variation (replaces the hard-coded MSHT20mbrange correction)"),
+        ("mcCorr", "mc variation (replaces the hard-coded MSHT20mcrange correction)"),
+    ]:
+        parser.add_argument(
+            f"--{flag}",
+            type=str,
+            default=None,
+            help=f"Theory correction (--theoryCorr entry, without '_Corr') for the {what}",
+        )
     parser.add_argument(
         "--scaleMinnloScale",
         default=1.0,

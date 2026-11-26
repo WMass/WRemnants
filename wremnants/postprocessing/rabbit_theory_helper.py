@@ -78,10 +78,17 @@ class TheoryHelper(object):
 
         self.datagroups = datagroups
         corr_hists = self.datagroups.args_from_metadata("theoryCorr")
-        if len(corr_hists) > 1 and corr_hists[1].startswith(corr_hists[0] + "_"):
-            self._corr_sep = "_"
-        else:
-            self._corr_sep = ""
+        # The histmaker writes the correction hist as `f"{generator}_Corr"`
+        # UNCONDITIONALLY (production/systematics.py:706), so the separator is
+        # always "_". The heuristic this replaces inferred it from whether the
+        # SECOND --theoryCorr entry was a prefix-extension of the first, which
+        # breaks in two cases we need:
+        #   * a single-entry --theoryCorr list (len < 2), i.e. passing only the
+        #     central cache-derived correction with no pdfvars/pdfas siblings;
+        #   * a nominal whose name carries its own suffix, e.g.
+        #     `..._N2LO_adcorrY4` alongside `..._N2LO_pdfvars`.
+        # Both then resolve to `..._adcorrY4Corr`, which no histmaker emits.
+        self._corr_sep = "_"
         self.corr_hist_name = (
             (corr_hists[0] + self._corr_sep + "Corr") if corr_hists else None
         )
@@ -1068,7 +1075,10 @@ class TheoryHelper(object):
         pdf_hist_ext = None
 
         if self.pdf_from_corr:
-            pdf_corr_hist = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfvars' + self._corr_sep + 'Corr')}"
+            if self.args.pdfCorr is not None:
+                pdf_corr_hist = self.args.pdfCorr + self._corr_sep + "Corr"
+            else:
+                pdf_corr_hist = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfvars' + self._corr_sep + 'Corr')}"
             if pdf_corr_hist.replace(
                 self._corr_sep + "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
@@ -1167,16 +1177,16 @@ class TheoryHelper(object):
         as_range = pdfInfo["alphasRange"]
 
         if self.as_from_corr:
-            asname = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfas' + self._corr_sep + 'Corr')}"
+            if self.args.asCorr is not None:
+                asname = self.args.asCorr + self._corr_sep + "Corr"
+            else:
+                asname = f"{self.corr_hist_name.replace(self._corr_sep + 'Corr', self._corr_sep + 'pdfas' + self._corr_sep + 'Corr')}"
             # alphaS from correction histograms only available for some pdf sets,
             # so fall back to CT18Z for other sets
             if asname.replace(
                 self._corr_sep + "Corr", ""
             ) not in self.datagroups.args_from_metadata("theoryCorr"):
-                if self._corr_sep == "_":
-                    asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
-                else:
-                    asname = "scetlib_dyturboCT18Z_pdfasCorr"
+                asname = "scetlib_dyturbo_CT18Z_N3p0LL_N2LO_pdfas_Corr"
                 if asname.replace(
                     self._corr_sep + "Corr", ""
                 ) in self.datagroups.args_from_metadata("theoryCorr"):
@@ -1330,8 +1340,10 @@ class TheoryHelper(object):
 
         corrs_oldnp = ["scetlib_dyturboMSHT20mcrange", "scetlib_dyturboMSHT20mcrange"]
         corrs_newnp = [
-            "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars",
-            "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars",
+            self.args.mbCorr
+            or "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars",
+            self.args.mcCorr
+            or "scetlib_dyturbo_LatticeNP_MSHT20mcrange_N3p0LL_N2LO_pdfvars",
         ]
         has_old_corrs = all(corr in theory_corrs for corr in corrs_oldnp)
         has_new_corrs = all(corr in theory_corrs for corr in corrs_newnp)
@@ -1365,7 +1377,8 @@ class TheoryHelper(object):
                 bhist = "pdfMSHT20mbrange"
         elif has_new_corrs:
             if self.use_hels("PDFquarkMass"):
-                bhist = "scetlib_dyturbo_LatticeNP_MSHT20mbrange_N3p0LL_N2LO_pdfvars_CorrByHelicity"
+                bhist = f"{corrs_newnp[0]}_CorrByHelicity"
+                chist = f"{corrs_newnp[1]}_CorrByHelicity"
             else:
                 raise ValueError(
                     "Taking the mb variations from a new-NP theory correction is only supported when done via helicities."
@@ -1385,7 +1398,7 @@ class TheoryHelper(object):
         )
 
         self.datagroups.addSystematic(
-            bhist.replace("brange", "crange"),
+            chist if has_new_corrs else bhist.replace("brange", "crange"),
             processes=self.samples,
             systAxes=[syst_ax],
             symmetrize=self.pdf_symmetrize,
