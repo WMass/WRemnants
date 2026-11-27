@@ -43,6 +43,8 @@ class Datagroup(object):
         self.components = components
 
         self.hists = {}  # list of histograms processed from narf datasets
+        # the same histograms keeping their MC-stat fold axis (Datagroups.mcStatFolds)
+        self.hists_folds = {}
 
     def copy(self, new_name, member_filter=None):
         x = deepcopy(self)
