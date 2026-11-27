@@ -135,6 +135,27 @@ def parse_args():
         default=["13TeVGen"],
     )
     parser.add_argument(
+        "--minnloProcs",
+        type=str,
+        nargs="+",
+        default=None,
+        help="MiNNLO samples of the reference, read as <name>_<era> (default: Zmumu Zmumu10to50 for z, "
+        "Wplusmunu Wminusmunu for w), e.g. Ztautau Ztautau10to50 with --noCombineTau --outLabel Ztautau for a "
+        "correction made of the tau samples",
+    )
+    parser.add_argument(
+        "--noCombineTau",
+        action="store_true",
+        help="Do not add the tau samples to the MiNNLO reference",
+    )
+    parser.add_argument(
+        "--outLabel",
+        type=str,
+        default=None,
+        help="Label of the output file and of its content (default: the process, Z or W). The tau samples use a "
+        "correction labelled Ztautau or Wtaunu, if it exists, instead of the boson correction",
+    )
+    parser.add_argument(
         "--nnlojetMassEdges",
         nargs=2,
         type=float,
@@ -290,13 +311,18 @@ def main():
                 "WtoNMuMN50V0p001",
             ]
 
+    if args.minnloProcs:
+        eventgen_procs = args.minnloProcs
+
+    combine_with_tau = args.proc != "bsm" and not args.noCombineTau
+    input_tools.check_minnlo_procs(eventgen_procs, combine_with_tau)
     minnlohists = [
         input_tools.read_mu_hist_combine_tau(
             args.minnloFile,
             proc,
             args.minnloh,
             eras=args.eras,
-            combine_with_tau=args.proc != "bsm",
+            combine_with_tau=combine_with_tau,
         )
         for proc in eventgen_procs
     ]
@@ -409,7 +435,8 @@ def main():
     generator = args.generator
     if args.postfix:
         generator += f"_{args.postfix}"
-    outfile = f"{args.outpath}/{generator}_Corr{args.proc.upper()}.pkl.lz4"
+    out_label = args.outLabel if args.outLabel else args.proc.upper()
+    outfile = f"{args.outpath}/{generator}_Corr{out_label}.pkl.lz4"
 
     meta_dict = {}
     for f in [args.minnloFile] + args.corrFiles:
@@ -429,7 +456,7 @@ def main():
     }
 
     output_tools.write_lz4_pkl_output(
-        outfile, args.proc.upper(), output_dict, common.base_dir, args, meta_dict
+        outfile, out_label, output_dict, common.base_dir, args, meta_dict
     )
 
     corrh = hh.disableFlow(corrh)
