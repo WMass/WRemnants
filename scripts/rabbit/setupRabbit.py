@@ -1078,6 +1078,14 @@ def make_parser(parser=None, argv=None):
         "processes, uncorrelated with the gamma q ones (no QCD at leading order, "
         "photon-photon luminosity known to a few percent). If 0 nothing is added",
     )
+    parser.add_argument(
+        "--logNormalQuarkonia",
+        default=1.1,
+        type=float,
+        help="Normalization uncertainty of each of the quarkonia -> mu mu processes "
+        "(Y(1S), Y(2S), Y(3S), J/psi, psi(2S)), uncorrelated between them. The samples "
+        "are normalised to the Pythia cross section. If 0 nothing is added",
+    )
     # pseudodata
     parser.add_argument(
         "--pseudoData", type=str, nargs="+", help="Histograms to use as pseudodata"
@@ -2305,6 +2313,22 @@ def setup(
                 groups=[f"CMS_background", "experiment", "expNoLumi", "expNoCalib"],
                 passToFakes=passSystToFakes,
                 norm=norm,
+            )
+    # the components of the merged group Quarkonia (or the groups, if it is split)
+    for proc in ("Upsilon1S", "Upsilon2S", "Upsilon3S", "JPsi", "Psi2S"):
+        if not lowPU and args.logNormalQuarkonia != 0 and datagroups.hasProcess(proc):
+            datagroups.addNormSystematic(
+                name=f"CMS_{proc}",
+                processes=[proc],
+                groups=[
+                    "CMS_background",
+                    "CMS_Quarkonia",
+                    "experiment",
+                    "expNoLumi",
+                    "expNoCalib",
+                ],
+                passToFakes=passSystToFakes,
+                norm=args.logNormalQuarkonia,
             )
     if wmass:
         if args.logNormalWmunu != 0:

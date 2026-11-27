@@ -22,6 +22,15 @@ merged_groups = {
     },
     # gamma q -> V q' and gamma gamma -> l l, with separate normalization uncertainties
     "PhotonInduced": {"PhotonInducedQG": ["QG"], "PhotonInducedGG": ["GG"]},
+    # prompt onia -> mu mu, part of what the fakes absorb otherwise: one component per
+    # resonance, each with its own normalization uncertainty
+    "Quarkonia": {
+        "Upsilon1S": ["Upsilon1S"],
+        "Upsilon2S": ["Upsilon2S"],
+        "Upsilon3S": ["Upsilon3S"],
+        "JPsi": ["JPsi"],
+        "Psi2S": ["Psi2S"],
+    },
 }
 
 
@@ -31,6 +40,11 @@ def add_merged_group(dg, name, split=False):
         c: dg.get_members_from_results(startswith=prefixes)
         for c, prefixes in merged_groups[name].items()
     }
+    if not any(components.values()):
+        # e.g. auxiliary samples that were not loaded: an empty group has no
+        # histograms and would break the fit setup
+        logger.debug(f"No members for the merged group {name}, it is not added")
+        return
     if split:
         for c, members in components.items():
             dg.addGroup(c, members=members)
@@ -67,6 +81,7 @@ def make_datagroups_2016(
     )
     add_merged_group(dg, "Z", split=split("Z"))
     add_merged_group(dg, "PhotonInduced", split=split("PhotonInduced"))
+    add_merged_group(dg, "Quarkonia", split=split("Quarkonia"))
 
     if pseudodata_pdfset:
         dg.addGroup(
@@ -85,7 +100,16 @@ def make_datagroups_2016(
         dg.addGroup(
             "Other",
             members=dg.get_members_from_results(
-                not_startswith=["Zmumu", "Ztautau", "QCD", "GG", "QG"]
+                not_startswith=[
+                    "Zmumu",
+                    "Ztautau",
+                    "QCD",
+                    "GG",
+                    "QG",
+                    "Upsilon",
+                    "JPsi",
+                    "Psi2S",
+                ]
             ),
         )
 

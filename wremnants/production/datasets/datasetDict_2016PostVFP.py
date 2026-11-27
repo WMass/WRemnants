@@ -356,6 +356,49 @@ dataDict = {
         "group": "JPsi",
         "auxiliary": True,
     },
+    # private Pythia8 onia -> mu mu productions with a single-muon filter (pT > 20 GeV, |eta| < 2.5),
+    # WMassNanoProduction#45: auxiliary until validated on data. Decays are unpolarised; GenPart
+    # keeps the onium and chi states, so direct and feed-down production can be told apart.
+    "Upsilon1SToMuMu_2016PostVFP": {  # Bottomonium:all = on, incl. chi_b and Y(2S, 3S) feed-down
+        "filepaths": [
+            "{BASE_PATH}/Upsilon1SToMuMu_MuFilterPt20_TuneCP5_13TeV-pythia8-photos/Nano{NANO_VERSION}MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": common.xsec_Upsilon1SToMuMuFilterPt20,
+        "group": "Quarkonia",
+        "auxiliary": True,
+    },
+    "Upsilon2SToMuMu_2016PostVFP": {  # incl. Y(3S) feed-down
+        "filepaths": [
+            "{BASE_PATH}/Upsilon2SToMuMu_MuFilterPt20_TuneCP5_13TeV-pythia8-photos/Nano{NANO_VERSION}MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": common.xsec_Upsilon2SToMuMuFilterPt20,
+        "group": "Quarkonia",
+        "auxiliary": True,
+    },
+    "Upsilon3SToMuMu_2016PostVFP": {  # direct only (no feed-down in Pythia)
+        "filepaths": [
+            "{BASE_PATH}/Upsilon3SToMuMu_MuFilterPt20_TuneCP5_13TeV-pythia8-photos/Nano{NANO_VERSION}MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": common.xsec_Upsilon3SToMuMuFilterPt20,
+        "group": "Quarkonia",
+        "auxiliary": True,
+    },
+    "JPsiToMuMu_2016PostVFP": {  # Charmonium:all = on, incl. chi_c and psi(2S) feed-down
+        "filepaths": [
+            "{BASE_PATH}/JPsiToMuMu_MuFilterPt20_TuneCP5_13TeV-pythia8-photos/Nano{NANO_VERSION}MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": common.xsec_JPsiToMuMuFilterPt20,
+        "group": "Quarkonia",
+        "auxiliary": True,
+    },
+    "Psi2SToMuMu_2016PostVFP": {  # direct only (no feed-down in Pythia)
+        "filepaths": [
+            "{BASE_PATH}/Psi2SToMuMu_MuFilterPt20_TuneCP5_13TeV-pythia8-photos/Nano{NANO_VERSION}MCPostVFP_{NANO_PROD_TAG}",
+        ],
+        "xsec": common.xsec_Psi2SToMuMuFilterPt20,
+        "group": "Quarkonia",
+        "auxiliary": True,
+    },
 }
 
 # extended version with additional samples (but missing some pdf sets)

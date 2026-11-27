@@ -277,7 +277,12 @@ def define_intermediate_gen_vars(df, label, statusMin, statusMax):
     return df
 
 
-def define_postfsr_vars(df, mode=None):
+# 3S1 onia whose leptons count as prompt in the onia samples (onia_as_prompt): J/psi, psi(2S),
+# Y(1S), Y(2S), Y(3S)
+onia_3S1_pdgIds = (443, 100443, 553, 100553, 200553)
+
+
+def define_postfsr_vars(df, mode=None, onia_as_prompt=False):
     if "postfsrLeptons" in df.GetColumnNames():
         logger.debug("PostFSR leptons are already defined, do nothing here.")
         return df
@@ -286,9 +291,22 @@ def define_postfsr_vars(df, mode=None):
 
     # status flags in NanoAOD: https://cms-nanoaod-integration.web.cern.ch/autoDoc/NanoAODv9/2016ULpostVFP/doc_TTToSemiLeptonic_TuneCP5_13TeV-powheg-pythia8_RunIISummer20UL16NanoAODv9-106X_mcRun2_asymptotic_v17-v1.html
     # post fsr definition: is stable && (isPrompt or isDirectPromptTauDecayProduct) && is lepton
+    prompt = "(GenPart_statusFlags & 1 || GenPart_statusFlags & (1 << 5))"
+    if onia_as_prompt:
+        # leptons from a 3S1 onium decay are not flagged prompt (a hadron decay), but they are
+        # the leptons of these samples: count the direct daughters of the onium (also with
+        # Photos FSR, whose photons are added to the same decay vertex) as prompt
+        df = df.Define(
+            "GenPart_motherPdgId",
+            "ROOT::VecOps::RVec<int> r(GenPart_pdgId.size()); for (size_t i = 0; i < r.size(); i++) r[i] = GenPart_genPartIdxMother[i] >= 0 ? GenPart_pdgId[GenPart_genPartIdxMother[i]] : 0; return r;",
+        )
+        fromOnium = " || ".join(
+            f"abs(GenPart_motherPdgId) == {i}" for i in onia_3S1_pdgIds
+        )
+        prompt = f"({prompt} || {fromOnium})"
     df = df.Define(
         "postfsrLeptons",
-        "GenPart_status == 1 && (GenPart_statusFlags & 1 || GenPart_statusFlags & (1 << 5)) && abs(GenPart_pdgId) >= 11 && abs(GenPart_pdgId) <= 16",
+        f"GenPart_status == 1 && {prompt} && abs(GenPart_pdgId) >= 11 && abs(GenPart_pdgId) <= 16",
     )
     df = df.Define("postfsrElectrons", "postfsrLeptons && abs(GenPart_pdgId) == 11")
     df = df.Define("postfsrMuons", "postfsrLeptons && abs(GenPart_pdgId) == 13")
