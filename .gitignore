@@ -159,3 +159,5 @@ cython_debug/
 *.png
 *.hdf5
 *.root
+# Claude Code personal files
+.claude/

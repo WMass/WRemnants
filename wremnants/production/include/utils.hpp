@@ -210,6 +210,33 @@ bool hasTriggerMatch(const float &eta, const float &phi,
   return false;
 }
 
+// Mask selecting only the rank-th entry (0-based, pt-descending) of `sel`.
+//
+// Needed for the same-sign dilepton control regions. The opposite-sign
+// selection separates the two muons by charge -- one collection is
+// Muon_correctedCharge == -1, the other == +1 -- which cannot work when both
+// muons carry the same charge: both collections would contain the same muons
+// and select_z_candidate's "exactly one of each" requirement could never be
+// met. Ordering by pt gives an unambiguous split instead. Downstream the
+// tag/probe assignment keys off the _tag0 flags and the event parity rather
+// than charge, so it is indifferent to which muon is called first.
+RVec<bool> nth_by_pt(const RVec<bool> &sel, const RVec<float> &pt,
+                     unsigned int rank) {
+  RVec<bool> res(sel.size(), false);
+  std::vector<std::size_t> idx;
+  for (std::size_t i = 0; i < sel.size(); ++i) {
+    if (sel[i])
+      idx.push_back(i);
+  }
+  if (idx.size() <= rank)
+    return res;
+  std::partial_sort(
+      idx.begin(), idx.begin() + rank + 1, idx.end(),
+      [&pt](std::size_t a, std::size_t b) { return pt[a] > pt[b]; });
+  res[idx[rank]] = true;
+  return res;
+}
+
 bool hasMatchDR2(const float &eta, const float &phi, const Vec_f &vec_eta,
                  const Vec_f &vec_phi, const float dr2 = 0.09) {
 

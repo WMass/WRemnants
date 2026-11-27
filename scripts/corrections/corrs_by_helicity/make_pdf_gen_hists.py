@@ -67,6 +67,7 @@ def main():
         command = f"""
         python {os.environ['WREM_BASE']}/scripts/histmakers/w_z_gen_dists.py --pdf {pdf} -o {args.outdir} --maxFiles '-1' -j {args.njobs} \
         --filterProcs 'Zmumu_13TeVGen' 'Zmumu10to50_13TeVGen' 'Wplusmunu_13TeVGen' 'Wminusmunu_13TeVGen' --aggregateGroups Zmumu Wmunu \
+        --dataPath 'root://eoscms.cern.ch//store/cmst3/group/wmass/w-mass-13TeV/NanoAOD/' \
         --addHelicityAxis --postfix pdfByHelicity
         """
         print(f"Running command: {command}")

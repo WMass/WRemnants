@@ -1500,6 +1500,258 @@ public:
   }
 };
 
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+// RECO+TRACKING-ONLY HELPERS
+//
+// Reduced variant of the smooth helpers above that only reads the "reco" and
+// "tracking" efficiency steps from a 2-type SF histogram. Used by the in-situ
+// efficiency path (mz_dilepton.py / mw_with_mu_eta_pt.py with
+// --insituEffMCFile), where ID/HLT/Iso are floated in-situ and must NOT be
+// taken from the external tag-and-probe SFs. The full
+// muon_efficiency_smooth_helper* classes above require the 5-type
+// (reco/tracking/idip/trigger/iso) histogram and so cannot be reused here;
+// these classes are otherwise structurally identical but skip the
+// idip/trigger/iso steps and carry a Sizes<2> systematic tensor.
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+
+template <int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper_base {
+public:
+  muon_efficiency_recotrack_helper_base(HIST_SF &&sf_all)
+      : sf_all_(std::make_shared<const HIST_SF>(std::move(sf_all))) {}
+
+  std::array<double, 2> scale_factor_array(int pt_idx, int eta_idx,
+                                           int sapt_idx, int saeta_idx,
+                                           int charge_idx,
+                                           int idx_nom_alt) const {
+
+    auto const eff_type_idx_reco = idx_reco_;
+    auto const eff_type_idx_tracking = idx_tracking_;
+
+    const double reco =
+        sf_all_->at(eta_idx, pt_idx, charge_idx, eff_type_idx_reco, idx_nom_alt)
+            .value();
+    const double tracking = sf_all_
+                                ->at(saeta_idx, sapt_idx, charge_idx,
+                                     eff_type_idx_tracking, idx_nom_alt)
+                                .value();
+
+    std::array<double, 2> ret = {reco, tracking};
+
+    return ret;
+  }
+
+  double scale_factor_product(float pt, float eta, float sapt, float saeta,
+                              int charge, int idx_nom_alt) const {
+
+    auto const eta_idx = sf_all_->template axis<0>().index(eta);
+    auto const pt_idx = sf_all_->template axis<1>().index(pt);
+    auto const charge_idx = sf_all_->template axis<2>().index(charge);
+    auto const saeta_idx = sf_all_->template axis<0>().index(saeta);
+    auto const sapt_idx = sf_all_->template axis<1>().index(sapt);
+
+    std::array<double, 2> allSF = scale_factor_array(
+        pt_idx, eta_idx, sapt_idx, saeta_idx, charge_idx, idx_nom_alt);
+    double sf = 1.0;
+    for (size_t i = 0; i < allSF.size(); i++) {
+      sf *= allSF[i];
+    }
+    return sf;
+  }
+
+  using syst_tensor_t =
+      Eigen::TensorFixedSize<double, Eigen::Sizes<2, NSysts>>; // 2 bins for
+                                                               // reco, tracking
+
+  syst_tensor_t sf_syst_var(float pt, float eta, float sapt, float saeta,
+                            int charge) const {
+
+    syst_tensor_t res;
+
+    auto const eta_idx = sf_all_->template axis<0>().index(eta);
+    auto const pt_idx = sf_all_->template axis<1>().index(pt);
+    auto const saeta_idx = sf_all_->template axis<0>().index(saeta);
+    auto const sapt_idx = sf_all_->template axis<1>().index(sapt);
+    auto const charge_idx = sf_all_->template axis<2>().index(charge);
+
+    std::array<double, 2> allSF_nomi = scale_factor_array(
+        pt_idx, eta_idx, sapt_idx, saeta_idx, charge_idx, idx_nom_);
+
+    for (int ns = 0; ns < NSysts; ns++) {
+
+      std::array<double, 2> allSF_alt = scale_factor_array(
+          pt_idx, eta_idx, sapt_idx, saeta_idx, charge_idx,
+          sf_all_->template axis<4>().index(
+              ns + 1)); // 0 is the nominal, systs starts from 1
+
+      // order is reco-tracking
+      for (size_t i = 0; i < allSF_nomi.size(); i++) {
+        res(i, ns) = allSF_alt[i] / allSF_nomi[i];
+      }
+    }
+
+    return res;
+  }
+
+protected:
+  std::shared_ptr<const HIST_SF> sf_all_;
+  // cache the bin indices since the string category lookup is slow
+  int idx_reco_ = sf_all_->template axis<3>().index("reco");
+  int idx_tracking_ = sf_all_->template axis<3>().index("tracking");
+
+  int idx_nom_ = sf_all_->template axis<4>().index(0);
+};
+
+// base template for one-lepton case
+template <AnalysisType analysisType, int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper(const base_t &other) : base_t(other) {}
+
+  double operator()(float pt, float eta, float sapt, float saeta, int charge) {
+    return base_t::scale_factor_product(pt, eta, sapt, saeta, charge,
+                                        base_t::idx_nom_);
+  }
+};
+
+// specialization for two-lepton case Wlike
+template <int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper<AnalysisType::Wlike, NSysts, HIST_SF>
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper(const base_t &other) : base_t(other) {}
+
+  double operator()(float trig_pt, float trig_eta, float trig_sapt,
+                    float trig_saeta, int trig_charge, float nontrig_pt,
+                    float nontrig_eta, float nontrig_sapt, float nontrig_saeta,
+                    int nontrig_charge) {
+    const double sftrig =
+        base_t::scale_factor_product(trig_pt, trig_eta, trig_sapt, trig_saeta,
+                                     trig_charge, base_t::idx_nom_);
+    const double sfnontrig = base_t::scale_factor_product(
+        nontrig_pt, nontrig_eta, nontrig_sapt, nontrig_saeta, nontrig_charge,
+        base_t::idx_nom_);
+    return sftrig * sfnontrig;
+  }
+};
+
+// specialization for two-lepton case Dilepton
+template <int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper<AnalysisType::Dilepton, NSysts, HIST_SF>
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper(const base_t &other) : base_t(other) {}
+
+  double operator()(float first_pt, float first_eta, float first_sapt,
+                    float first_saeta, int first_charge, float second_pt,
+                    float second_eta, float second_sapt, float second_saeta,
+                    int second_charge) {
+
+    const double sftrig = base_t::scale_factor_product(
+        first_pt, first_eta, first_sapt, first_saeta, first_charge,
+        base_t::idx_nom_);
+    const double sfnontrig = base_t::scale_factor_product(
+        second_pt, second_eta, second_sapt, second_saeta, second_charge,
+        base_t::idx_nom_);
+    return sftrig * sfnontrig;
+  }
+};
+
+// Now the syst, which is similar to the nominal
+//
+// base template for one lepton case
+template <AnalysisType analysisType, int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper_syst
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  using tensor_t = typename base_t::syst_tensor_t;
+
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper_syst(const base_t &other) : base_t(other) {}
+
+  tensor_t operator()(float pt, float eta, float sapt, float saeta, int charge,
+                      double nominal_weight = 1.0) {
+    return nominal_weight * base_t::sf_syst_var(pt, eta, sapt, saeta, charge);
+  }
+};
+
+// specialization for two-lepton case Wlike
+template <int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper_syst<AnalysisType::Wlike, NSysts,
+                                            HIST_SF>
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  using tensor_t = typename base_t::syst_tensor_t;
+
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper_syst(const base_t &other) : base_t(other) {}
+
+  tensor_t operator()(float trig_pt, float trig_eta, float trig_sapt,
+                      float trig_saeta, int trig_charge, float nontrig_pt,
+                      float nontrig_eta, float nontrig_sapt,
+                      float nontrig_saeta, int nontrig_charge,
+                      double nominal_weight = 1.0) {
+    const tensor_t variation_trig = base_t::sf_syst_var(
+        trig_pt, trig_eta, trig_sapt, trig_saeta, trig_charge);
+    const tensor_t variation_nontrig = base_t::sf_syst_var(
+        nontrig_pt, nontrig_eta, nontrig_sapt, nontrig_saeta, nontrig_charge);
+    return nominal_weight * variation_trig * variation_nontrig;
+  }
+};
+
+// specialization for two-lepton case Dilepton
+template <int NSysts, typename HIST_SF>
+class muon_efficiency_recotrack_helper_syst<AnalysisType::Dilepton, NSysts,
+                                            HIST_SF>
+    : public muon_efficiency_recotrack_helper_base<NSysts, HIST_SF> {
+
+public:
+  using base_t = muon_efficiency_recotrack_helper_base<NSysts, HIST_SF>;
+  using tensor_t = typename base_t::syst_tensor_t;
+
+  // inherit constructor
+  using base_t::base_t;
+
+  muon_efficiency_recotrack_helper_syst(const base_t &other) : base_t(other) {}
+
+  tensor_t operator()(float first_pt, float first_eta, float first_sapt,
+                      float first_saeta, int first_charge, float second_pt,
+                      float second_eta, float second_sapt, float second_saeta,
+                      int second_charge, double nominal_weight = 1.0) {
+    const tensor_t variation_trig = base_t::sf_syst_var(
+        first_pt, first_eta, first_sapt, first_saeta, first_charge);
+    const tensor_t variation_nontrig = base_t::sf_syst_var(
+        second_pt, second_eta, second_sapt, second_saeta, second_charge);
+    return nominal_weight * variation_trig * variation_nontrig;
+  }
+};
+
 } // namespace wrem
 
 #endif

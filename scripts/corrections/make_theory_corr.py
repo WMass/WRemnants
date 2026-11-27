@@ -323,7 +323,6 @@ def main():
         )
         for procName, corr_file in filesByProc.items()
     ]
-
     numh = hh.sumHists(numhists)
 
     if args.selectVars:
