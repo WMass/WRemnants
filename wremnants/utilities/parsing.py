@@ -539,6 +539,27 @@ def common_parser(analysis_label=""):
             help="Include (very small) statistical uncertainties for pixel multiplicity variation",
         )
         parser.add_argument(
+            "--pixelMultiplicityWeights",
+            type=str,
+            default="auto",
+            choices=["auto", "response", "flag", "both"],
+            help="""Per-muon weights of the pixel multiplicity correction and its variations.
+            'flag': by the pixel-hit flag of the muon (two values, statistically noisy
+            variations). 'response': the expectation of that weight for the generated pt
+            and the reco/gen curvature ratio of the muon, from the probability map of the
+            correction file. 'auto': 'response' if the correction file has the map, else 'flag'.
+            'both': 'response', and the variations with the 'flag' weights are booked in
+            addition as nominal_pixelMultiplicity{Syst,Stat}Flag (setupRabbit:
+            '--pixelMultiplicityWeights flag')""",
+        )
+        parser.add_argument(
+            "--pixelMultiplicityFile",
+            type=str,
+            default=None,
+            help="""Pixel multiplicity correction file from scripts/corrections/make_pixel_corrections.py
+            (default: calibration/pixelcorr.pkl.lz4 in wremnants-data)""",
+        )
+        parser.add_argument(
             "--cvhBadModules",
             choices=["veto", "sf", "none"],
             default="sf",

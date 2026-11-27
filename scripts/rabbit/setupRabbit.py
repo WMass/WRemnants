@@ -996,6 +996,16 @@ def make_parser(parser=None, argv=None):
         help="scaling of resolution statistical uncertainty",
     )
     parser.add_argument(
+        "--pixelMultiplicityWeights",
+        type=str,
+        default="default",
+        choices=["default", "flag"],
+        help="""Pixel multiplicity variations to use. 'default': those of the weights the
+        histmaker ran with (nominal_pixelMultiplicitySyst). 'flag': those with the weights by
+        the pixel-hit flag of the muons, which the histmaker books in addition with
+        '--pixelMultiplicityWeights both' (nominal_pixelMultiplicitySystFlag)""",
+    )
+    parser.add_argument(
         "--correlatedAdHocA",
         type=float,
         default=0.0,
@@ -3484,8 +3494,11 @@ def setup(
     # the pixel multiplicity uncertainties are only booked for the v9 CVH refit, the v15
     # track fit fixes the pixel hit multiplicity (outputs without nanoVersion are v9)
     if datagroups.getMetaInfo()["args"].get("nanoVersion", "v9") == "v9":
+        # histograms of the flag-based variations, if those are asked for
+        pixel_hist_suffix = "Flag" if args.pixelMultiplicityWeights == "flag" else ""
         datagroups.addSystematic(
-            "pixelMultiplicitySyst",
+            f"pixelMultiplicitySyst{pixel_hist_suffix}",
+            name="pixelMultiplicitySyst",
             mirror=True,
             processes=["single_v_samples"],
             groups=[
@@ -3501,7 +3514,8 @@ def setup(
 
         if datagroups.args_from_metadata("pixelMultiplicityStat"):
             datagroups.addSystematic(
-                "pixelMultiplicityStat",
+                f"pixelMultiplicityStat{pixel_hist_suffix}",
+                name="pixelMultiplicityStat",
                 mirror=True,
                 processes=["single_v_samples"],
                 groups=[

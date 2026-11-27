@@ -447,7 +447,9 @@ bias_helper = (
     pixel_multiplicity_uncertainty_helper,
     pixel_multiplicity_uncertainty_helper_stat,
 ) = muon_calibration.make_pixel_multiplicity_helpers(
-    reverse_variations=args.reweightPixelMultiplicity
+    filename=args.pixelMultiplicityFile,
+    reverse_variations=args.reweightPixelMultiplicity,
+    weights=args.pixelMultiplicityWeights,
 )
 
 theory_corrs = [*args.theoryCorr, *args.ewTheoryCorr]
@@ -945,15 +947,19 @@ def build_graph(df, dataset):
             f"Muon_{cvhName}NValidPixelHits[nonTrigMuons][0]",
         )
 
+        if pixel_multiplicity_helper.response:
+            df = muon_calibration.define_matched_gen_muon_response_dimuon(df)
         df, pixel_multiplicity_cols = (
-            muon_calibration.define_pixel_multiplicity_cols_dimuon(df, cvhName)
+            muon_calibration.define_pixel_multiplicity_cols_dimuon(
+                df, cvhName, response=pixel_multiplicity_helper.response
+            )
         )
 
         if args.reweightPixelMultiplicity:
             df = df.Define(
                 "weight_pixel_multiplicity",
                 pixel_multiplicity_helper,
-                pixel_multiplicity_cols,
+                pixel_multiplicity_cols.of(pixel_multiplicity_helper),
             )
             weight_expr += "*weight_pixel_multiplicity"
 

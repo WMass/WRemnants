@@ -580,7 +580,9 @@ bias_helper = muon_calibration.make_muon_bias_helpers(args)
     pixel_multiplicity_uncertainty_helper,
     pixel_multiplicity_uncertainty_helper_stat,
 ) = muon_calibration.make_pixel_multiplicity_helpers(
-    reverse_variations=args.reweightPixelMultiplicity
+    filename=args.pixelMultiplicityFile,
+    reverse_variations=args.reweightPixelMultiplicity,
+    weights=args.pixelMultiplicityWeights,
 )
 
 if args.nToysMC > 0:
@@ -939,6 +941,10 @@ def build_graph(df, dataset):
         f"nonTrigMuons_{cvhName}NValidPixelHits0",
         f"Muon_{cvhName}NValidPixelHits[nonTrigMuons][0]",
     )
+    if not dataset.is_data:
+        # generated pt and reco/gen curvature ratio of the two muons, for the
+        # response-based pixel multiplicity weights and their input histograms
+        df = muon_calibration.define_matched_gen_muon_response_dimuon(df)
 
     logger.debug(f"Define weights and store nominal histograms")
 
@@ -1048,14 +1054,16 @@ def build_graph(df, dataset):
 
         # prepare inputs for pixel multiplicity helpers
         df, pixel_multiplicity_cols = (
-            muon_calibration.define_pixel_multiplicity_cols_dimuon(df, cvhName)
+            muon_calibration.define_pixel_multiplicity_cols_dimuon(
+                df, cvhName, response=pixel_multiplicity_helper.response
+            )
         )
 
         if args.reweightPixelMultiplicity:
             df = df.Define(
                 "weight_pixel_multiplicity",
                 pixel_multiplicity_helper,
-                pixel_multiplicity_cols,
+                pixel_multiplicity_cols.of(pixel_multiplicity_helper),
             )
             weight_expr += "*weight_pixel_multiplicity"
 
@@ -1173,6 +1181,41 @@ def build_graph(df, dataset):
         ],
     )
     results.append(hNValidPixelHitsNonTrig)
+
+    if not dataset.is_data:
+        # response of the two muons, qopr = (q/p)_reco / (q/p)_gen against the generated
+        # pt, with and without a valid pixel hit: muons without one differ from the
+        # others by their resolution only, which gives the probability of no valid pixel
+        # hit for any muon (scripts/corrections/make_pixel_corrections.py). Muons without
+        # a matched generated muon are in the underflow of the generated pt.
+        axis_genPt_response = hist.axis.Variable(
+            [20, 26, 30, 34, 38, 42, 46, 50, 55, 62, 75, 100], name="genPt"
+        )
+        axis_qopr = hist.axis.Regular(400, 0.5, 1.5, name="qopr")
+        axis_haspixel = hist.axis.Variable(
+            [0, 1, 100], name="nvalidpixel", underflow=False, overflow=False
+        )
+        for muon, name in [("trigMuons", "Trig"), ("nonTrigMuons", "NonTrig")]:
+            results.append(
+                df.HistoBoost(
+                    f"hPixelResponse{name}",
+                    [
+                        axis_eta,
+                        axis_genPt_response,
+                        axis_charge,
+                        axis_qopr,
+                        axis_haspixel,
+                    ],
+                    [
+                        f"{muon}_eta0",
+                        f"{muon}_genPt0",
+                        f"{muon}_charge0",
+                        f"{muon}_qopr0",
+                        f"{muon}_{cvhName}NValidPixelHits0",
+                        "nominal_weight",
+                    ],
+                )
+            )
 
     if args.cvhEfficiencyHists:
         # Single-muon CVH refit efficiency: kinematics vs refit pass/fail, for data
